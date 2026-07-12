@@ -458,8 +458,6 @@ def test_parse_runtime_steps_includes_publish_assistant_snapshot():
     assistant_snapshot = {
         "schema_version": 1,
         "instructions": "Pinned at publish time.",
-        "mcp_tools": [],
-        "tool_surface_hash": "abc",
         "execution_surface_hash": "def",
     }
 

@@ -38,30 +38,8 @@ def _assistant(
     )
 
 
-def _mcp_server(*, schema_type: str = "string") -> SimpleNamespace:
-    return SimpleNamespace(
-        id="server-1",
-        name="Weather",
-        tools=[
-            SimpleNamespace(
-                id="tool-1",
-                name="forecast",
-                description="Fetches a forecast.",
-                input_schema={
-                    "type": "object",
-                    "properties": {"city": {"type": schema_type}},
-                },
-                is_enabled=True,
-            )
-        ],
-    )
-
-
-def _execution_hash(assistant: SimpleNamespace, mcp_servers: list[SimpleNamespace]):
-    snapshot = build_assistant_execution_snapshot(
-        assistant=assistant,
-        mcp_server_entities=mcp_servers,
-    )
+def _execution_hash(assistant: SimpleNamespace):
+    snapshot = build_assistant_execution_snapshot(assistant=assistant)
     assert snapshot is not None
     return snapshot["execution_surface_hash"]
 
@@ -72,7 +50,7 @@ def test_assistant_execution_hash_changes_when_prompt_changes():
     second.id = first.id
     second.completion_model.id = first.completion_model.id
 
-    assert _execution_hash(first, []) != _execution_hash(second, [])
+    assert _execution_hash(first) != _execution_hash(second)
 
 
 def test_assistant_execution_hash_ignores_model_and_knowledge_display_names():
@@ -81,7 +59,7 @@ def test_assistant_execution_hash_ignores_model_and_knowledge_display_names():
     second.id = first.id
     second.completion_model.id = first.completion_model.id
 
-    assert _execution_hash(first, []) == _execution_hash(second, [])
+    assert _execution_hash(first) == _execution_hash(second)
 
 
 def test_assistant_execution_hash_ignores_none_model_kwargs():
@@ -92,24 +70,4 @@ def test_assistant_execution_hash_ignores_none_model_kwargs():
     first.completion_model_kwargs = {"temperature": 0.2, "top_p": None}
     second.completion_model_kwargs = {"temperature": 0.2}
 
-    assert _execution_hash(first, []) == _execution_hash(second, [])
-
-
-def test_assistant_execution_hash_changes_when_mcp_tool_schema_changes():
-    assistant = _assistant()
-
-    assert _execution_hash(assistant, [_mcp_server(schema_type="string")]) != (
-        _execution_hash(assistant, [_mcp_server(schema_type="number")])
-    )
-
-
-def test_assistant_snapshot_omits_mcp_tools_when_knowledge_suppresses_mcp():
-    snapshot = build_assistant_execution_snapshot(
-        assistant=_assistant(knowledge_name="Policy handbook"),
-        mcp_server_entities=[_mcp_server()],
-    )
-
-    assert snapshot is not None
-    assert snapshot["knowledge_refs"] != []
-    assert snapshot["mcp_servers"] != []
-    assert snapshot["mcp_tools"] == []
+    assert _execution_hash(first) == _execution_hash(second)

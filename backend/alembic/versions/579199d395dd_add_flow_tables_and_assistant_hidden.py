@@ -180,12 +180,6 @@ def upgrade() -> None:
         sa.Column("output_contract", postgresql.JSONB(), nullable=True),
         sa.Column("input_bindings", postgresql.JSONB(), nullable=True),
         sa.Column("output_classification_override", sa.Integer(), nullable=True),
-        sa.Column(
-            "mcp_policy",
-            sa.String(length=32),
-            nullable=False,
-            server_default="inherit",
-        ),
         sa.Column("input_config", postgresql.JSONB(), nullable=True),
         sa.Column("output_config", postgresql.JSONB(), nullable=True),
         sa.CheckConstraint(
@@ -203,10 +197,6 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "output_type IN ('text','json','pdf','docx')",
             name="ck_flow_steps_output_type",
-        ),
-        sa.CheckConstraint(
-            "mcp_policy IN ('inherit','restricted')",
-            name="ck_flow_steps_mcp_policy",
         ),
         sa.ForeignKeyConstraint(
             ["flow_id", "tenant_id"],

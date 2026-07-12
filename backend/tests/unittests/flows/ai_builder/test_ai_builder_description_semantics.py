@@ -168,5 +168,4 @@ def _flow_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy="inherit",
     )

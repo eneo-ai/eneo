@@ -9,7 +9,6 @@ from typing import Any, cast
 from eneo.database.tables.flow_tables import (
     FLOW_STEP_INPUT_SOURCE_VALUES,
     FLOW_STEP_INPUT_TYPE_VALUES,
-    FLOW_STEP_MCP_POLICY_VALUES,
     FLOW_STEP_OUTPUT_MODE_VALUES,
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
@@ -88,7 +87,6 @@ _ALLOWED_FLOW_INPUT_SOURCES = set(FLOW_STEP_INPUT_SOURCE_VALUES)
 _ALLOWED_FLOW_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 _ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
 _ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
-_ALLOWED_FLOW_MCP_POLICIES = set(FLOW_STEP_MCP_POLICY_VALUES)
 FLOW_AUDIO_TRANSCRIPTION_REQUIRED = (
     FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_REQUIRED.value
 )
@@ -588,11 +586,6 @@ def _validate_step_enum_values(step: FlowStepValidationView) -> None:
     if step.output_type not in _ALLOWED_FLOW_OUTPUT_TYPES:
         raise FlowStepValidationError(
             f"Step {step.step_order}: unsupported output_type '{_enum_value(step.output_type)}'.",
-            step_order=step.step_order,
-        )
-    if step.mcp_policy not in _ALLOWED_FLOW_MCP_POLICIES:
-        raise FlowStepValidationError(
-            f"Step {step.step_order}: unsupported mcp_policy '{_enum_value(step.mcp_policy)}'.",
             step_order=step.step_order,
         )
 

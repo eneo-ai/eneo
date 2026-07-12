@@ -27,7 +27,6 @@ from eneo.flows.enums import (
 from eneo.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
 from eneo.flows.flow_capability_manifest import (
     _TEMPORARY_REASON_MARKER,
-    ALLOWED_MCP_POLICIES,
     CAPABILITY_REGISTRY,
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
@@ -59,8 +58,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_five() -> None:
-    assert FCM_VERSION == 6
+def test_fcm_version_is_seven() -> None:
+    assert FCM_VERSION == 7
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -840,72 +839,6 @@ def test_output_mode_and_citation_capabilities_are_non_input() -> None:
         )
 
 
-# mcp_policy capability registry entry ---------------------------------
-#
-# Legacy rule (flow_validators.py:183): `step.mcp_policy not in {INHERIT,
-# RESTRICTED}` raises. A single `mcp_policy` capability captures this
-# whitelist invariant. Per-value capabilities (`mcp_policy_inherit` /
-# `mcp_policy_restricted`) are deferred until a future rule actually
-# branches per value — today there is none, so the minimum-viable shape
-# is a single capability with an enum-membership invariant and an
-# engine-side `ALLOWED_MCP_POLICIES` constant for consumers.
-
-
-def test_registry_has_mcp_policy_capability() -> None:
-    """`mcp_policy` capability must exist, be builder-exposed, and carry a
-    single invariant `forbids_unsupported_mcp_policy` (grep-anchored to the
-    legacy error phrase at `flow_validators.py:183`). Per-value
-    capabilities aren't created — the legacy rule is an enum-set whitelist
-    without per-value semantics, so a singleton capability is enough."""
-    capability = CAPABILITY_REGISTRY.get("mcp_policy")
-    assert capability is not None, "CAPABILITY_REGISTRY missing `mcp_policy`"
-    assert capability.exposure == "builder", (
-        "mcp_policy is user-addressable via the flow publish API"
-    )
-    invariant_ids = frozenset(inv.id for inv in capability.invariants)
-    assert invariant_ids == frozenset({"forbids_unsupported_mcp_policy"}), (
-        f"mcp_policy invariant drift: expected "
-        f"{{'forbids_unsupported_mcp_policy'}}, got {invariant_ids}"
-    )
-
-
-def test_mcp_policy_allowed_values_parity_with_legacy() -> None:
-    """FCM's `ALLOWED_MCP_POLICIES` constant must be kept in lockstep with
-    the legacy `FLOW_STEP_MCP_POLICY_VALUES` used by
-    `flow_validators.py:183`'s `_ALLOWED_FLOW_MCP_POLICIES` set. Drift in
-    either direction is a bug — the FCM is the typed mirror; legacy stays
-    the editable source. Covers both directions of drift: (1) legacy
-    narrowing to a subset, and (2) FCM ever moving off the tautological
-    `frozenset(FlowMcpPolicy)` to an explicit enumeration that misses a
-    member."""
-    from eneo.database.tables.flow_tables import FLOW_STEP_MCP_POLICY_VALUES
-    from eneo.flows.enums import FlowMcpPolicy
-    from eneo.flows.flow_capability_manifest import ALLOWED_MCP_POLICIES
-
-    assert isinstance(ALLOWED_MCP_POLICIES, frozenset)
-    for member in ALLOWED_MCP_POLICIES:
-        assert isinstance(member, FlowMcpPolicy), (
-            f"ALLOWED_MCP_POLICIES member {member!r} must be a FlowMcpPolicy, "
-            "not a bare string"
-        )
-    fcm_as_strings = {member.value for member in ALLOWED_MCP_POLICIES}
-    legacy_as_strings = set(FLOW_STEP_MCP_POLICY_VALUES)
-    assert fcm_as_strings == legacy_as_strings, (
-        "ALLOWED_MCP_POLICIES has drifted from FLOW_STEP_MCP_POLICY_VALUES.\n"
-        f"Missing from FCM: {legacy_as_strings - fcm_as_strings}\n"
-        f"Extra in FCM:    {fcm_as_strings - legacy_as_strings}"
-    )
-
-
-def test_mcp_policy_capability_is_non_input() -> None:
-    """`mcp_policy` isn't an input capability, so it must carry
-    `channel=None` and `runtime_input_mode=None` — the `input_*` post_init
-    guard does not apply to it."""
-    capability = CAPABILITY_REGISTRY["mcp_policy"]
-    assert capability.channel is None
-    assert capability.runtime_input_mode is None
-
-
 def test_fcm_module_has_no_ai_builder_imports() -> None:
     """Redundant with the `importlinter` contract but keeps the invariant
     obvious in this test module: engine capability truth must not depend
@@ -1073,11 +1006,10 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
                 for ot, artifact in FINAL_OUTPUT_ARTIFACT_BY_TYPE.items()
             )
         ),
-        tuple(sorted(policy.value for policy in ALLOWED_MCP_POLICIES)),
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V6: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V7: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1101,7 +1033,6 @@ _FCM_SURFACE_FINGERPRINT_V6: tuple[object, ...] = (
         "input_image",
         "input_json",
         "input_text",
-        "mcp_policy",
         "output_mode_compose_text",
         "output_mode_http_post",
         "output_mode_pass_through",
@@ -1242,22 +1173,6 @@ _FCM_SURFACE_FINGERPRINT_V6: tuple[object, ...] = (
         ),
         ("builder", "text_only", "text", (), (), ()),
         ("builder", "text_only", "text", (), (), ()),
-        (
-            "builder",
-            None,
-            None,
-            (),
-            (
-                (
-                    "forbids_unsupported_mcp_policy",
-                    "Steps must declare `mcp_policy` as one of the values in "
-                    "`ALLOWED_MCP_POLICIES` (i.e. every `FlowMcpPolicy` member). "
-                    '`flow_validators.py:183` raises `"Step {order}: unsupported '
-                    "mcp_policy '{value}'.\"` when the policy falls outside this set.",
-                ),
-            ),
-            (),
-        ),
         (
             "builder",
             None,
@@ -1419,7 +1334,6 @@ _FCM_SURFACE_FINGERPRINT_V6: tuple[object, ...] = (
         ("pdf", "pdf_document"),
         ("text", "structured_text"),
     ),
-    ("inherit", "restricted"),
 )
 
 
@@ -1431,8 +1345,8 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     adding/removing a field on any of those shows up), capability keys,
     exposure, channel, runtime_input_mode, applies_to_tuples,
     `(invariant_id, invariant_description)` pairs, required_config keys,
-    CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
-    ALLOWED_MCP_POLICIES. It intentionally excludes `FlowCapability.label`,
+    CHAIN_COMPATIBILITY and FINAL_OUTPUT_ARTIFACT_BY_TYPE. It intentionally
+    excludes `FlowCapability.label`,
     `FlowCapability.description`, and `not_exposed_reason` bodies so
     rewording UI copy does not force a bump.
 
@@ -1442,11 +1356,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V6, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V7, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V6}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V7}\n\n"
         f"Actual:   {actual}"
     )
 

@@ -1,32 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
-    BackendQuestionPersistenceResult,
-    persist_backend_question,
-)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import RuntimeToolCall
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_intent_quality_feedback,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import build_plan_event
-from eneo.flows.ai_builder.ai_builder_framework_policy import (
-    aggregate_freeform_user_text,
-)
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    build_mcp_resource_selection_question,
-    mcp_clarification_issue_if_needed,
-    mcp_selection_policy_feedback,
-)
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
@@ -35,7 +21,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     format_contextual_quality_feedback,
     format_quality_feedback,
     format_validation_feedback,
-    resolve_ui_language,
     warnings_for_quality_retry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -52,7 +37,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -124,28 +108,11 @@ class CompiledProposalFinalizer:
             metadata_built = True
             return assistant_metadata
 
-        mcp_clarification_events = await self._mcp_clarification_events_if_needed(
-            request=request,
-            assistant_metadata_builder=_accepted_proposal_metadata,
-        )
-        if mcp_clarification_events:
-            return ToolProcessingResult(
-                events=mcp_clarification_events.events,
-                new_planning_state_version=(
-                    mcp_clarification_events.new_planning_state_version
-                ),
-            )
-
-        mcp_policy_feedback = self._mcp_policy_feedback(
-            request=request,
-            spec=request.compiled.content.spec,
-        )
         compiled = request.compiled
         if request.target_kind == TargetKind.CREATE:
             create_result = self._create_quality_result(
                 request=request,
                 compiled=compiled,
-                mcp_policy_feedback=mcp_policy_feedback,
             )
             if create_result is not None:
                 return create_result
@@ -153,7 +120,6 @@ class CompiledProposalFinalizer:
             edit_result = self._edit_quality_result(
                 request=request,
                 compiled=compiled,
-                mcp_policy_feedback=mcp_policy_feedback,
             )
             if edit_result is not None:
                 return edit_result
@@ -182,83 +148,11 @@ class CompiledProposalFinalizer:
             new_planning_state_version=stored_plan.new_planning_state_version,
         )
 
-    async def _mcp_clarification_events_if_needed(
-        self,
-        *,
-        request: CompiledProposalFinalizationRequest,
-        assistant_metadata_builder: Callable[[], dict[str, Any] | None],
-    ) -> BackendQuestionPersistenceResult | None:
-        issue = mcp_clarification_issue_if_needed(
-            conversation=request.conversation,
-            spec=request.compiled.content.spec,
-            catalog=request.resource_catalog,
-            signal_text=aggregate_freeform_user_text(request.conversation),
-        )
-        if issue is None:
-            return None
-        assert request.resource_catalog is not None
-
-        question_data, assistant_text = build_mcp_resource_selection_question(
-            issue=issue,
-            catalog=request.resource_catalog,
-            language=resolve_ui_language(request.conversation) or "sv",
-        )
-        logger.info(
-            "ai_builder_mcp_selection_requires_clarification "
-            "session_id=%s step_ref=%s requested_mcp=%s reason=%s selected_server_refs=%s",
-            request.session_id,
-            issue.step_ref,
-            issue.requested_name,
-            issue.reason,
-            sorted(issue.selected_server_refs),
-        )
-        return await persist_backend_question(
-            repo=self.repo,
-            turn=request.turn,
-            conversation=request.conversation,
-            new_messages_start=request.new_messages_start,
-            question=BackendQuestion(
-                question_data=question_data,
-                assistant_text=assistant_text,
-            ),
-            assistant_metadata=assistant_metadata_builder(),
-            tool_content=(
-                "MCP selection question presented because MCP usage requires explicit "
-                "user selection from enabled space resources."
-            ),
-            flow=request.flow,
-            planning_state_overlay=request.planning_state,
-        )
-
-    def _mcp_policy_feedback(
-        self,
-        *,
-        request: CompiledProposalFinalizationRequest,
-        spec: FlowDraftSpecCore,
-    ) -> str | None:
-        if request.resource_catalog is None:
-            return None
-        feedback = mcp_selection_policy_feedback(
-            conversation=request.conversation,
-            spec=spec,
-            catalog=request.resource_catalog,
-        )
-        if feedback is not None:
-            logger.info(
-                "ai_builder_mcp_selection_policy_violation "
-                "session_id=%s tool_name=%s tool_call_id=%s",
-                request.session_id,
-                request.tool_name,
-                request.tool_call_id,
-            )
-        return feedback
-
     def _create_quality_result(
         self,
         *,
         request: CompiledProposalFinalizationRequest,
         compiled: CompiledProposal,
-        mcp_policy_feedback: str | None,
     ) -> ToolProcessingResult | None:
         if not compiled.validation.valid:
             logger.info(
@@ -284,7 +178,6 @@ class CompiledProposalFinalizer:
                 feedback
                 for feedback in (
                     hard_feedback,
-                    mcp_policy_feedback,
                     quality_hint,
                     contextual_quality.feedback,
                 )
@@ -321,7 +214,6 @@ class CompiledProposalFinalizer:
             "\n\n".join(
                 feedback
                 for feedback in (
-                    mcp_policy_feedback,
                     quality_feedback,
                     contextual_quality.feedback,
                 )
@@ -353,7 +245,6 @@ class CompiledProposalFinalizer:
         *,
         request: CompiledProposalFinalizationRequest,
         compiled: CompiledProposal,
-        mcp_policy_feedback: str | None,
     ) -> ToolProcessingResult | None:
         quality_feedback = format_quality_feedback(
             compiled.validation,
@@ -376,7 +267,6 @@ class CompiledProposalFinalizer:
         combined_quality_feedback = "\n\n".join(
             feedback
             for feedback in (
-                mcp_policy_feedback,
                 quality_feedback,
                 contextual_quality_feedback,
             )

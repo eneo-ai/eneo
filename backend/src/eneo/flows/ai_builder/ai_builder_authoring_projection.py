@@ -130,8 +130,6 @@ def _new_step_draft_from_semantic_intent(
         runtime_required=primary_runtime_required if is_primary_runtime_step else False,
         model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
-        mcp_server_refs=list(step.mcp_server_refs),
-        mcp_tool_refs=list(step.mcp_tool_refs),
         uses_form_fields=list(step.uses_form_fields),
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
@@ -213,7 +211,6 @@ def apply_existing_step_patch(
         "input_source",
         "input_type",
         "output_type",
-        "mcp_policy",
         "output_contract",
     ):
         if field_name in fields:
@@ -341,32 +338,10 @@ def merge_assistant_spec_patch(
     if "knowledge_refs" in patched_fields:
         knowledge_refs = patch.knowledge_refs
 
-    mcp_server_refs = existing.mcp_server_refs
-    if "mcp_server_refs" in patched_fields:
-        mcp_server_refs = patch.mcp_server_refs
-
-    mcp_tool_refs = existing.mcp_tool_refs
-    if "mcp_tool_refs" in patched_fields:
-        mcp_tool_refs = patch.mcp_tool_refs
-
-    patch_selects_knowledge = "knowledge_refs" in patched_fields and bool(
-        patch.knowledge_refs
-    )
-    patch_selects_mcp = (
-        "mcp_server_refs" in patched_fields and bool(patch.mcp_server_refs)
-    ) or ("mcp_tool_refs" in patched_fields and bool(patch.mcp_tool_refs))
-    if patch_selects_knowledge:
-        mcp_server_refs = []
-        mcp_tool_refs = []
-    elif patch_selects_mcp:
-        knowledge_refs = []
-
     return AssistantSpec(
         instructions=instructions,
         model_ref=model_ref,
         knowledge_refs=knowledge_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
     )
 
 

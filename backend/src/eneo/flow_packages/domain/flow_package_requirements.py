@@ -20,7 +20,6 @@ from eneo.json_types import JsonObject
 class FlowPackageRequirementKind(StrEnum):
     MODEL = "model"
     KNOWLEDGE = "knowledge"
-    MCP_TOOL = "mcp_tool"
     TEMPLATE_ASSET = "template_asset"
 
 
@@ -148,20 +147,6 @@ class FlowPackageKnowledgeGuidance(BaseModel):
         return _normalize_text_list(value)
 
 
-class FlowPackageMcpToolGuidance(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    summary: str | None = None
-    expected_behavior: str | None = None
-    auth_notes: str | None = None
-    risk_notes: str | None = None
-
-    @field_validator("summary", "expected_behavior", "auth_notes", "risk_notes")
-    @classmethod
-    def normalize_optional_text(cls, value: str | None) -> str | None:
-        return _normalize_optional_text(value)
-
-
 class FlowPackageTemplateAssetGuidance(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -233,29 +218,6 @@ class FlowPackageKnowledgeRequirement(FlowPackageRequirementBase):
         return self
 
 
-class FlowPackageMcpToolRequirement(FlowPackageRequirementBase):
-    kind: Literal[FlowPackageRequirementKind.MCP_TOOL] = (
-        FlowPackageRequirementKind.MCP_TOOL
-    )
-    guidance: FlowPackageMcpToolGuidance | None = None
-    server_slot_ref: ResourceSlotRef | None = None
-
-    @field_serializer("server_slot_ref")
-    def serialize_server_slot_ref(
-        self, slot_ref: ResourceSlotRef | None
-    ) -> dict[str, str] | None:
-        if slot_ref is None:
-            return None
-        return _serialize_slot_ref(slot_ref)
-
-    @model_validator(mode="after")
-    def validate_mcp_tool_slots(self) -> "FlowPackageMcpToolRequirement":
-        _require_slot_kind(self.slot_ref, ResourceSlotKind.MCP_TOOL)
-        if self.server_slot_ref is not None:
-            _require_slot_kind(self.server_slot_ref, ResourceSlotKind.MCP_SERVER)
-        return self
-
-
 class FlowPackageTemplateAssetRequirement(FlowPackageRequirementBase):
     kind: Literal[FlowPackageRequirementKind.TEMPLATE_ASSET] = (
         FlowPackageRequirementKind.TEMPLATE_ASSET
@@ -271,7 +233,6 @@ class FlowPackageTemplateAssetRequirement(FlowPackageRequirementBase):
 FlowPackageRequirementEntry: TypeAlias = Annotated[
     FlowPackageModelRequirement
     | FlowPackageKnowledgeRequirement
-    | FlowPackageMcpToolRequirement
     | FlowPackageTemplateAssetRequirement,
     Field(discriminator="kind"),
 ]

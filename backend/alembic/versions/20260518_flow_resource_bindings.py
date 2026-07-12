@@ -20,8 +20,6 @@ depends_on = None
 SLOT_KIND_VALUES = (
     "model",
     "knowledge",
-    "mcp_server",
-    "mcp_tool",
     "template_asset",
 )
 LOCAL_RESOURCE_KIND_VALUES = (
@@ -30,8 +28,6 @@ LOCAL_RESOURCE_KIND_VALUES = (
     "collection",
     "website",
     "integration_knowledge",
-    "mcp_server",
-    "mcp_tool",
     "template_asset",
 )
 SLOT_LOCAL_KIND_PAIR_VALUES = (
@@ -40,8 +36,6 @@ SLOT_LOCAL_KIND_PAIR_VALUES = (
     ("knowledge", "collection"),
     ("knowledge", "integration_knowledge"),
     ("knowledge", "website"),
-    ("mcp_server", "mcp_server"),
-    ("mcp_tool", "mcp_tool"),
     ("template_asset", "template_asset"),
 )
 SOURCE_VALUES = (

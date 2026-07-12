@@ -40,9 +40,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     has_real_audio_transcription_step,
     uses_pseudo_transcription_without_audio_step,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    find_named_mcp_reference_issue,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -293,20 +290,6 @@ def _spec_uses_compare_fan_in(spec: FlowDraftSpecCore) -> bool:
     if _spec_uses_all_previous_steps(spec):
         return True
     return _spec_uses_explicit_prior_source_ref_fan_in(spec)
-
-
-def _mcp_selection_lacks_semantic_support(context: CriticContext) -> bool:
-    catalog = context.resource_catalog
-    if catalog is None:
-        return False
-    return (
-        find_named_mcp_reference_issue(
-            spec=context.spec,
-            catalog=catalog,
-            signal_text=context.signal_text,
-        )
-        is not None
-    )
 
 
 def _is_output_only_edit(context: CriticContext) -> bool:
@@ -866,27 +849,6 @@ _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP = CriticInvariant(
     remediation=(
         "Användaren ber om en direkt textomvandling utan filer, extra fält, JSON eller granskning. "
         "Planen ska därför vara ett enda text-till-text-steg om användaren inte uttryckligen ber om fler steg."
-    ),
-)
-
-
-# ── MCP resource alignment ───────────────────────────────────────────────
-
-
-_MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT = CriticInvariant(
-    id="mcp_selection_requires_semantic_support",
-    kind="semantic",
-    description=(
-        "A step must not attach unrelated MCP resources just because the user "
-        "mentioned MCP. Selected server/tool metadata must match the step "
-        "intent; otherwise the planner should ask for clarification."
-    ),
-    evidence=_mcp_selection_lacks_semantic_support,
-    remediation=(
-        "Planen hänvisar till MCP på ett sätt som inte matchar tillgänglig metadata. "
-        "Välj bara MCP-server eller MCP-verktyg när användarens namngivna MCP finns "
-        "aktiverat i ytan och matchar samma server. Om MCP-valet är oklart eller saknas, "
-        "fråga om förtydligande i stället för att ersätta det med ett annat MCP."
     ),
 )
 
@@ -1612,7 +1574,6 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
-    _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
     _SECTION_TEXT_STEPS_MUST_REFERENCE_SOURCE_JSON_FIELDS,

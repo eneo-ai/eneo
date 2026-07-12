@@ -161,7 +161,6 @@ async def _create_published_flow(
         "input_type": "text",
         "output_mode": "pass_through",
         "output_type": "json",
-        "mcp_policy": "inherit",
     }
     if review_output_contract is not None:
         step_payload["review_policy"] = {"mode": "view"}
@@ -236,7 +235,6 @@ async def _create_published_required_runtime_input_flow(
                     },
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },

@@ -32,8 +32,6 @@ class AssistantAuthoringSnapshot:
     instructions: str
     model: AssistantAuthoringResourceRef | None = None
     knowledge_refs: tuple[AssistantAuthoringResourceRef, ...] = ()
-    mcp_server_refs: tuple[AssistantAuthoringResourceRef, ...] = ()
-    mcp_tool_refs: tuple[AssistantAuthoringResourceRef, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "instructions", self.instructions.strip())

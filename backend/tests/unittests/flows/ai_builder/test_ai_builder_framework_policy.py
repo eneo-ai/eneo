@@ -81,7 +81,6 @@ def _make_flow_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy="inherit",
     )
 
 
@@ -2168,7 +2167,6 @@ def test_question_resolution_ignores_prior_answer_labels_when_output_not_changed
                 input_type="text",
                 output_mode="pass_through",
                 output_type="text",
-                mcp_policy="inherit",
             )
         ],
         published_version=None,

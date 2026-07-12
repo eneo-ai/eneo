@@ -631,12 +631,6 @@ def _describe_step_change(previous: StepSpec | None, current: StepSpec) -> str |
         details.append("model updated")
     if previous.assistant_spec.knowledge_refs != current.assistant_spec.knowledge_refs:
         details.append("knowledge updated")
-    if (
-        previous.assistant_spec.mcp_server_refs
-        != current.assistant_spec.mcp_server_refs
-        or previous.assistant_spec.mcp_tool_refs != current.assistant_spec.mcp_tool_refs
-    ):
-        details.append("MCP tools updated")
     return ", ".join(details) if details else None
 
 

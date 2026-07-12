@@ -13,10 +13,6 @@ from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPay
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     top_level_schema_property_names,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    MCP_SELECTION_WITHOUT,
-    mcp_selected_server_refs_from_values,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -48,18 +44,13 @@ def build_plan_proposal_system_prompt(
     attachment_context: str | None,
     flow_context: str | None,
     is_edit_mode: bool,
-    mcp_selection_values: set[str] | frozenset[str] | None = None,
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
 ) -> str:
     submission_tool = PROPOSE_FLOW_TOOL_NAME
-    selected_mcp_server_refs = mcp_selected_server_refs_from_values(
-        set(mcp_selection_values or ())
-    )
     resource_material = build_ai_builder_resource_reference_material(
         catalog=resource_catalog,
-        selected_mcp_server_refs=selected_mcp_server_refs,
     )
     create_mode_rules = (
         [
@@ -99,7 +90,7 @@ def build_plan_proposal_system_prompt(
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",
         "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, step refs, or backend mechanics.",
-        "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`, `mcp_server_refs`, `mcp_tool_refs`).",
+        "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
         "",
@@ -128,12 +119,6 @@ def build_plan_proposal_system_prompt(
     resource_context = _resource_context_block(resource_material)
     if resource_context:
         lines.extend(["", "Available resources:", resource_context])
-    mcp_decision_context = _mcp_selection_context_block(
-        mcp_selection_values,
-        resource_material=resource_material,
-    )
-    if mcp_decision_context:
-        lines.extend(["", "MCP selection decision:", mcp_decision_context])
     if plan_revision_context:
         lines.extend(["", plan_revision_context])
     if attachment_context:
@@ -285,60 +270,7 @@ def _resource_context_block(
     if rendered.knowledge_bases:
         sections.append("Knowledge bases:")
         sections.append(rendered.knowledge_bases)
-    if rendered.mcp:
-        sections.append("MCP metadata:")
-        sections.append(
-            "- Planning may read this metadata but must not execute MCP tools. "
-            "Use MCP refs only when a step needs external tools or live data."
-        )
-        sections.append(rendered.mcp)
     return "\n".join(sections)
-
-
-def _mcp_selection_context_block(
-    mcp_selection_values: set[str] | frozenset[str] | None,
-    *,
-    resource_material: AIBuilderResourceReferenceMaterial,
-) -> str | None:
-    values = set(mcp_selection_values or set())
-    if not values:
-        return None
-    if MCP_SELECTION_WITHOUT in values:
-        return (
-            "- The user chose to continue without MCP tools. Do not attach "
-            "`mcp_server_refs` or `mcp_tool_refs`, even if earlier text mentioned MCP.\n"
-            "- Without MCP tools, do not claim that the flow fetches live or external "
-            "data by itself. If the task needs live data, collect it as runtime input "
-            "or make the limitation explicit in the step instructions."
-        )
-    selected_server_refs = sorted(
-        entry.ref for entry in resource_material.selected_mcp_servers
-    )
-    if not selected_server_refs:
-        return None
-    refs = ", ".join(f"`{ref}`" for ref in selected_server_refs)
-    lines = [
-        f"- The user allowed these MCP server refs: {refs}.",
-        "- Use MCP refs only on steps that need external tools or live data.",
-        "- Prefer specific `mcp_tool_refs` over attaching a whole server; do not attach MCP refs to unrelated analysis or formatting steps.",
-    ]
-    selected_tool_lines = _selected_mcp_tool_lines(
-        resource_material=resource_material,
-    )
-    if selected_tool_lines:
-        lines.append("- Selected MCP tools available for step-level use:")
-        lines.extend(selected_tool_lines)
-    return "\n".join(lines)
-
-
-def _selected_mcp_tool_lines(
-    *,
-    resource_material: AIBuilderResourceReferenceMaterial,
-) -> list[str]:
-    return [
-        f"  - {tool.prompt_fields(ref_label='tool_ref', include_parent_ref=True)}"
-        for tool in resource_material.selected_mcp_tools
-    ]
 
 
 __all__ = ["build_plan_proposal_system_prompt"]

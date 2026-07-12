@@ -4,7 +4,7 @@ import json
 import stat
 import warnings
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import cast
@@ -113,6 +113,54 @@ def test_legacy_http_post_input_is_rejected_before_package_install() -> None:
         reader.read_flow_package(_zip_docs(docs))
 
     assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+
+
+@pytest.mark.parametrize(
+    ("document_path", "mutate"),
+    [
+        (
+            reader.FLOW_DRAFT_PATH,
+            lambda document: cast(
+                list[JsonObject], cast(JsonObject, document["spec"])["steps"]
+            )[0].update({"mcp_policy": "inherit"}),
+        ),
+        (
+            reader.FLOW_DRAFT_PATH,
+            lambda document: cast(
+                JsonObject,
+                cast(list[JsonObject], cast(JsonObject, document["spec"])["steps"])[0][
+                    "assistant_spec"
+                ],
+            ).update({"mcp_tool_refs": ["mcp_tool.legacy"]}),
+        ),
+        (
+            reader.REQUIREMENTS_PATH,
+            lambda document: cast(list[JsonObject], document["requirements"]).append(
+                {
+                    "kind": "mcp_tool",
+                    "slot_ref": {
+                        "kind": "mcp_tool",
+                        "slot": "legacy",
+                        "label": "Legacy MCP tool",
+                    },
+                    "required": True,
+                    "used_by_steps": ["extract"],
+                }
+            ),
+        ),
+    ],
+)
+def test_legacy_flow_mcp_package_is_rejected_explicitly(
+    document_path: str,
+    mutate: Callable[[JsonObject], None],
+) -> None:
+    docs = _package_docs()
+    mutate(cast(JsonObject, docs[document_path]))
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED
 
 
 @pytest.mark.parametrize(

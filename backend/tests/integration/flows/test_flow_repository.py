@@ -7,13 +7,18 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+    Assistants,
+)
 from eneo.database.tables.flow_tables import (
     FlowResourceBindings,
     FlowRuns,
     Flows,
     FlowSteps,
 )
+from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.flows import (
     FlowFactory,
     FlowRepository,
@@ -86,7 +91,6 @@ def _build_step(
         output_contract={"type": "object"},
         input_bindings={"question": "{{flow.input.question}}"},
         output_classification_override=None,
-        mcp_policy="inherit",
         input_config=None,
         output_config=None,
     )
@@ -106,6 +110,89 @@ def _resource_binding(
         local_kind=LocalResourceKind.COMPLETION_MODEL,
         local_id=local_id or uuid4(),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_detects_assistant_mcp_configuration_in_one_batch(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow MCP presence", [model.id])
+        clean_assistant = await assistant_factory(
+            session,
+            "Clean Flow Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        server_assistant = await assistant_factory(
+            session,
+            "Server Flow Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        tool_assistant = await assistant_factory(
+            session,
+            "Tool Flow Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Flow MCP presence server",
+            http_url="https://example.test/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+        )
+        session.add(server)
+        await session.flush()
+        tool = MCPServerTools(
+            mcp_server_id=server.id,
+            name="lookup",
+            input_schema={},
+            is_enabled_by_default=True,
+            requires_approval=False,
+            removed_from_remote=False,
+        )
+        session.add(tool)
+        await session.flush()
+        session.add_all(
+            [
+                AssistantMCPServers(
+                    assistant_id=server_assistant.id,
+                    mcp_server_id=server.id,
+                ),
+                AssistantMCPServerTools(
+                    assistant_id=tool_assistant.id,
+                    mcp_server_tool_id=tool.id,
+                    is_enabled=True,
+                ),
+            ]
+        )
+        await session.flush()
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+
+        assert (
+            await repo.has_assistant_mcp_configuration(
+                assistant_ids=[clean_assistant.id],
+                tenant_id=admin_user.tenant_id,
+            )
+            is False
+        )
+        assert (
+            await repo.has_assistant_mcp_configuration(
+                assistant_ids=[server_assistant.id, tool_assistant.id],
+                tenant_id=admin_user.tenant_id,
+            )
+            is True
+        )
 
 
 async def _resource_binding_rows(
@@ -925,7 +1012,6 @@ async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_oth
                             output_contract={"type": "object"},
                             input_bindings={"question": "{{flow.input.question}}"},
                             output_classification_override=None,
-                            mcp_policy="inherit",
                             input_config=None,
                             output_config=None,
                         )

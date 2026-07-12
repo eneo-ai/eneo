@@ -39,7 +39,6 @@ def _step(
         output_type=output_type,
         output_contract=output_contract,
         output_config=output_config,
-        mcp_policy="inherit",
     )
 
 

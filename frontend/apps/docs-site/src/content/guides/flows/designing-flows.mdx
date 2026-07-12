@@ -12,6 +12,8 @@ The reference guide keeps the full field catalog: [Flows API Guide](/guides/flow
 
 A Flow is a published graph of steps. Each step declares `input_source`, `input_type`, `output_type`, and `output_mode`.
 
+Flow input can use HTTP GET, but Flow does not support HTTP POST input or MCP servers and tools. Terminal HTTP POST output remains available through the durable webhook outbox.
+
 | Input mode | Output artifact | Output types | Output modes                | Use it when                                                                       |
 | ---------- | --------------- | ------------ | --------------------------- | --------------------------------------------------------------------------------- |
 | text       | structured_text | text         | pass_through                | Use for form fields, pasted text, and final text answers.                         |

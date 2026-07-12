@@ -78,8 +78,6 @@ class PlannedStep:
     output_fields: tuple[StructuredFieldDraft, ...] = ()
     model_ref: str | None = None
     knowledge_refs: tuple[str, ...] = ()
-    mcp_server_refs: tuple[str, ...] = ()
-    mcp_tool_refs: tuple[str, ...] = ()
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
 

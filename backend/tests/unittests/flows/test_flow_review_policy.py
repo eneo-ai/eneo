@@ -181,7 +181,6 @@ def test_flow_step_uses_review_policy_contract() -> None:
         input_type="text",
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
         review_policy={"mode": "view"},
     )
 
@@ -196,7 +195,6 @@ def test_flow_step_create_request_preserves_review_policy_for_domain_step() -> N
         input_type="text",
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
         review_policy={"mode": "edit"},
     )
 
@@ -217,7 +215,6 @@ def test_flow_step_update_request_preserves_id_and_review_policy_for_domain_step
         input_type="text",
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
         review_policy={"mode": "edit"},
     )
 

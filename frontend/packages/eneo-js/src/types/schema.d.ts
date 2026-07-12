@@ -4281,7 +4281,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow Assistant
-     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `AssistantUpdatePublic` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants.
+     * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantUpdateRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants.
      */
     patch: operations["update_flow_assistant"];
     trace?: never;
@@ -10551,10 +10551,6 @@ export interface components {
       model_ref?: string | null;
       /** Knowledge Refs */
       knowledge_refs?: string[];
-      /** Mcp Server Refs */
-      mcp_server_refs?: string[];
-      /** Mcp Tool Refs */
-      mcp_tool_refs?: string[];
     };
     /**
      * AssistantTemplateAdminCreate
@@ -13720,6 +13716,111 @@ export interface components {
       /** Name */
       name: string;
     };
+    /**
+     * FlowAssistantPublic
+     * @description Public Flow-managed assistant projection without MCP configuration.
+     */
+    FlowAssistantPublic: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      prompt?: components["schemas"]["PromptPublic"] | null;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      completion_model_kwargs: components["schemas"]["ModelKwargs"];
+      /** Logging Enabled */
+      logging_enabled: boolean | null;
+      /** Attachments */
+      attachments: components["schemas"]["FilePublic"][];
+      allowed_attachments: components["schemas"]["FileRestrictions"];
+      /** Groups */
+      groups: components["schemas"]["CollectionPublic"][];
+      /** Websites */
+      websites: components["schemas"]["WebsitePublic"][];
+      /** Integration Knowledge List */
+      integration_knowledge_list: components["schemas"]["IntegrationKnowledgePublic"][];
+      completion_model?: components["schemas"]["CompletionModelSparse"] | null;
+      /**
+       * Published
+       * @default false
+       */
+      published?: boolean;
+      user: components["schemas"]["UserSparse"];
+      tools: components["schemas"]["UseTools"];
+      type: components["schemas"]["AssistantType"];
+      model_info?: components["schemas"]["ModelInfo"] | null;
+      /** Description */
+      description?: string | null;
+      /** Icon Id */
+      icon_id?: string | null;
+      /** Insight Enabled */
+      insight_enabled: boolean;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Help Assistant
+       * @default false
+       */
+      is_help_assistant?: boolean;
+    };
+    /**
+     * FlowAssistantUpdateRequest
+     * @example {
+     *       "name": "Flow Step Assistant",
+     *       "prompt": {
+     *         "text": "Summarize the extracted contract fields."
+     *       }
+     *     }
+     */
+    FlowAssistantUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      prompt?: components["schemas"]["PromptCreate"] | null;
+      /** Attachments */
+      attachments?: components["schemas"]["ModelId"][] | null;
+      /** Groups */
+      groups?: components["schemas"]["ModelId"][] | null;
+      /** Websites */
+      websites?: components["schemas"]["ModelId"][] | null;
+      /** Integration Knowledge List */
+      integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
+      completion_model?: components["schemas"]["ModelId"] | null;
+      completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      /** Logging Enabled */
+      logging_enabled?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Insight Enabled */
+      insight_enabled?: boolean | null;
+      /** Data Retention Days */
+      data_retention_days?: number | null;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Icon Id */
+      icon_id?: string | null;
+    };
     /** FlowBuilderEditApproval */
     FlowBuilderEditApproval: {
       /** Base Flow Revision */
@@ -13819,7 +13920,6 @@ export interface components {
      *           "assistant_id": "00000000-0000-0000-0000-000000000002",
      *           "input_source": "flow_input",
      *           "input_type": "audio",
-     *           "mcp_policy": "inherit",
      *           "output_mode": "transcribe_only",
      *           "output_type": "text",
      *           "step_order": 1
@@ -14103,18 +14203,12 @@ export interface components {
      * FlowInputSource
      * @enum {string}
      */
-    FlowInputSource:
-      "flow_input" | "previous_step" | "all_previous_steps" | "http_get" | "http_post";
+    FlowInputSource: "flow_input" | "previous_step" | "all_previous_steps" | "http_get";
     /**
      * FlowInputType
      * @enum {string}
      */
     FlowInputType: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
-    /**
-     * FlowMcpPolicy
-     * @enum {string}
-     */
-    FlowMcpPolicy: "inherit" | "restricted";
     /**
      * FlowOutputDelivery
      * @enum {string}
@@ -14204,7 +14298,6 @@ export interface components {
       dependency_resolutions?: (
         | components["schemas"]["FlowPackageModelDependencyResolution"]
         | components["schemas"]["FlowPackageKnowledgeDependencyResolution"]
-        | components["schemas"]["FlowPackageMcpToolDependencyResolution"]
         | components["schemas"]["FlowPackageTemplateAssetDependencyResolution"]
       )[];
       /** Can Install As Draft */
@@ -14406,50 +14499,6 @@ export interface components {
       /** Label */
       label: string;
     };
-    /** FlowPackageMcpToolDependencyResolution */
-    FlowPackageMcpToolDependencyResolution: {
-      slot_ref: {
-        [key: string]: string;
-      };
-      /** Required */
-      required: boolean;
-      /** Used By Steps */
-      used_by_steps?: string[];
-      data_sensitivity?: components["schemas"]["FlowPackageRequirementDataSensitivity"] | null;
-      status: components["schemas"]["FlowPackageImportPlanStatus"];
-      /** Install Blocks */
-      install_blocks: boolean;
-      /** Publish Blocks */
-      publish_blocks: boolean;
-      /** Selection Required For Install */
-      selection_required_for_install: boolean;
-      /** Auto Select Allowed */
-      auto_select_allowed: boolean;
-      /** Suggestions */
-      suggestions: components["schemas"]["FlowPackageLocalCandidate"][];
-      /** Total Candidate Count */
-      total_candidate_count: number;
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "mcp_tool";
-      guidance?: components["schemas"]["FlowPackageMcpToolGuidance"] | null;
-      server_slot_ref?: {
-        [key: string]: string;
-      } | null;
-    };
-    /** FlowPackageMcpToolGuidance */
-    FlowPackageMcpToolGuidance: {
-      /** Summary */
-      summary?: string | null;
-      /** Expected Behavior */
-      expected_behavior?: string | null;
-      /** Auth Notes */
-      auth_notes?: string | null;
-      /** Risk Notes */
-      risk_notes?: string | null;
-    };
     /** FlowPackageModelCandidate */
     FlowPackageModelCandidate: {
       local_kind: components["schemas"]["LocalResourceKind"];
@@ -14596,7 +14645,7 @@ export interface components {
      * FlowPackageRequirementKind
      * @enum {string}
      */
-    FlowPackageRequirementKind: "model" | "knowledge" | "mcp_tool" | "template_asset";
+    FlowPackageRequirementKind: "model" | "knowledge" | "template_asset";
     /** FlowPackageTemplateAssetDependencyResolution */
     FlowPackageTemplateAssetDependencyResolution: {
       slot_ref: {
@@ -14738,7 +14787,6 @@ export interface components {
      *           "id": "00000000-0000-0000-0000-000000000101",
      *           "input_source": "flow_input",
      *           "input_type": "audio",
-     *           "mcp_policy": "inherit",
      *           "output_mode": "transcribe_only",
      *           "output_type": "text",
      *           "step_order": 1,
@@ -14751,7 +14799,6 @@ export interface components {
      *           "id": "00000000-0000-0000-0000-000000000102",
      *           "input_source": "previous_step",
      *           "input_type": "text",
-     *           "mcp_policy": "inherit",
      *           "output_mode": "pass_through",
      *           "output_type": "pdf",
      *           "step_order": 2,
@@ -15150,7 +15197,6 @@ export interface components {
      *       "security": {
      *         "classification_field": "output_classification_override",
      *         "masked_fields_count": 2,
-     *         "mcp_policy_field": "mcp_policy",
      *         "redaction_applied": true
      *       },
      *       "steps": []
@@ -15199,31 +15245,6 @@ export interface components {
       input?: string | null;
       /** Output */
       output?: string | null;
-    };
-    /** FlowRunDebugMcp */
-    FlowRunDebugMcp: {
-      /** Policy */
-      policy?: string | null;
-      /** Servers */
-      servers?: components["schemas"]["FlowRunDebugMcpServer"][];
-      /** Tools Enabled */
-      tools_enabled?: components["schemas"]["FlowRunDebugMcpTool"][];
-    };
-    /** FlowRunDebugMcpServer */
-    FlowRunDebugMcpServer: {
-      /** Id */
-      id: string;
-      /** Name */
-      name: string;
-    };
-    /** FlowRunDebugMcpTool */
-    FlowRunDebugMcpTool: {
-      /** Tool Id */
-      tool_id: string;
-      /** Server Id */
-      server_id: string;
-      /** Name */
-      name: string;
     };
     /** FlowRunDebugOutput */
     FlowRunDebugOutput: {
@@ -15480,8 +15501,6 @@ export interface components {
       redaction_applied: boolean;
       /** Classification Field */
       classification_field: string;
-      /** Mcp Policy Field */
-      mcp_policy_field: string;
       /** Masked Fields Count */
       masked_fields_count?: number | null;
     };
@@ -15496,7 +15515,6 @@ export interface components {
       io_types: components["schemas"]["FlowRunDebugIoTypes"];
       input: components["schemas"]["FlowRunDebugInput"];
       output: components["schemas"]["FlowRunDebugOutput"];
-      mcp: components["schemas"]["FlowRunDebugMcp"];
       rag?: components["schemas"]["FlowRunDebugRag"] | null;
       /** Attempts */
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
@@ -15658,7 +15676,7 @@ export interface components {
      *       "bundle": {
      *         "debug_export": {
      *           "definition": {
-     *             "checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *             "checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
      *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "steps_count": 1,
      *             "version": 3
@@ -15673,7 +15691,6 @@ export interface components {
      *                 "assistant_id": "00000000-0000-0000-0000-000000000201",
      *                 "input_source": "flow_input",
      *                 "input_type": "audio",
-     *                 "mcp_policy": "inherit",
      *                 "output_mode": "transcribe_only",
      *                 "output_type": "text",
      *                 "step_id": "00000000-0000-0000-0000-000000000101",
@@ -15704,7 +15721,6 @@ export interface components {
      *           "security": {
      *             "classification_field": "output_classification_override",
      *             "masked_fields_count": 2,
-     *             "mcp_policy_field": "mcp_policy",
      *             "redaction_applied": true
      *           },
      *           "steps": [
@@ -15724,11 +15740,6 @@ export interface components {
      *                 "input": "audio",
      *                 "output": "text"
      *               },
-     *               "mcp": {
-     *                 "policy": "inherit",
-     *                 "servers": [],
-     *                 "tools_enabled": []
-     *               },
      *               "output": {
      *                 "mode": "transcribe_only",
      *                 "type": "text"
@@ -15739,8 +15750,8 @@ export interface components {
      *           ]
      *         },
      *         "definition_integrity": {
-     *           "current_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
-     *           "expected_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *           "current_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *           "expected_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
      *           "status": "verified"
      *         },
      *         "definition_snapshot": {
@@ -15753,7 +15764,6 @@ export interface components {
      *               "assistant_id": "00000000-0000-0000-0000-000000000201",
      *               "input_source": "flow_input",
      *               "input_type": "audio",
-     *               "mcp_policy": "inherit",
      *               "output_mode": "transcribe_only",
      *               "output_type": "text",
      *               "step_id": "00000000-0000-0000-0000-000000000101",
@@ -16323,7 +16333,7 @@ export interface components {
      * @example {
      *       "debug_export": {
      *         "definition": {
-     *           "checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *           "checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "steps_count": 1,
      *           "version": 3
@@ -16338,7 +16348,6 @@ export interface components {
      *               "assistant_id": "00000000-0000-0000-0000-000000000201",
      *               "input_source": "flow_input",
      *               "input_type": "audio",
-     *               "mcp_policy": "inherit",
      *               "output_mode": "transcribe_only",
      *               "output_type": "text",
      *               "step_id": "00000000-0000-0000-0000-000000000101",
@@ -16369,7 +16378,6 @@ export interface components {
      *         "security": {
      *           "classification_field": "output_classification_override",
      *           "masked_fields_count": 2,
-     *           "mcp_policy_field": "mcp_policy",
      *           "redaction_applied": true
      *         },
      *         "steps": [
@@ -16389,11 +16397,6 @@ export interface components {
      *               "input": "audio",
      *               "output": "text"
      *             },
-     *             "mcp": {
-     *               "policy": "inherit",
-     *               "servers": [],
-     *               "tools_enabled": []
-     *             },
      *             "output": {
      *               "mode": "transcribe_only",
      *               "type": "text"
@@ -16404,8 +16407,8 @@ export interface components {
      *         ]
      *       },
      *       "definition_integrity": {
-     *         "current_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
-     *         "expected_checksum": "025912abd9740552b05217b97d4ec8eea2e08337a6dd53affb5251cf627b6e25",
+     *         "current_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *         "expected_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
      *         "status": "verified"
      *       },
      *       "definition_snapshot": {
@@ -16418,7 +16421,6 @@ export interface components {
      *             "assistant_id": "00000000-0000-0000-0000-000000000201",
      *             "input_source": "flow_input",
      *             "input_type": "audio",
-     *             "mcp_policy": "inherit",
      *             "output_mode": "transcribe_only",
      *             "output_type": "text",
      *             "step_id": "00000000-0000-0000-0000-000000000101",
@@ -18570,7 +18572,6 @@ export interface components {
      *       "assistant_id": "00000000-0000-0000-0000-000000000001",
      *       "input_source": "flow_input",
      *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
      *       "output_mode": "transcribe_only",
      *       "output_type": "text",
      *       "step_order": 1,
@@ -18610,7 +18611,6 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      mcp_policy: components["schemas"]["FlowMcpPolicy"];
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -18657,7 +18657,6 @@ export interface components {
      *       "id": "00000000-0000-0000-0000-000000000101",
      *       "input_source": "flow_input",
      *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
      *       "output_mode": "transcribe_only",
      *       "output_type": "text",
      *       "step_order": 1,
@@ -18697,7 +18696,6 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      mcp_policy: components["schemas"]["FlowMcpPolicy"];
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -18739,7 +18737,6 @@ export interface components {
      *       "assistant_id": "00000000-0000-0000-0000-000000000001",
      *       "input_source": "flow_input",
      *       "input_type": "audio",
-     *       "mcp_policy": "inherit",
      *       "output_mode": "transcribe_only",
      *       "output_type": "text",
      *       "step_order": 1,
@@ -18779,7 +18776,6 @@ export interface components {
       } | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
-      mcp_policy: components["schemas"]["FlowMcpPolicy"];
       /** Input Config */
       input_config?: {
         [key: string]: unknown;
@@ -19116,8 +19112,6 @@ export interface components {
       output_type?: string | null;
       /** Output Mode */
       output_mode?: string | null;
-      /** Mcp Policy */
-      mcp_policy?: string | null;
       /** Output Classification Override */
       output_classification_override?: number | null;
       /** Run Status */
@@ -20084,8 +20078,6 @@ export interface components {
       | "collection"
       | "website"
       | "integration_knowledge"
-      | "mcp_server"
-      | "mcp_tool"
       | "template_asset";
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -22097,7 +22089,6 @@ export interface components {
      *           "id": "00000000-0000-0000-0000-000000000101",
      *           "input_source": "flow_input",
      *           "input_type": "audio",
-     *           "mcp_policy": "inherit",
      *           "output_mode": "transcribe_only",
      *           "output_type": "text",
      *           "step_order": 1,
@@ -22337,9 +22328,7 @@ export interface components {
      *             {
      *               "assistant_spec": {
      *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
-     *                 "knowledge_refs": [],
-     *                 "mcp_server_refs": [],
-     *                 "mcp_tool_refs": []
+     *                 "knowledge_refs": []
      *               },
      *               "input_source": "flow_input",
      *               "input_type": "audio",
@@ -22352,8 +22341,6 @@ export interface components {
      *               "assistant_spec": {
      *                 "instructions": "Summarize the transcription into a professional PDF.",
      *                 "knowledge_refs": [],
-     *                 "mcp_server_refs": [],
-     *                 "mcp_tool_refs": [],
      *                 "model_ref": "model.gpt-5-4"
      *               },
      *               "input_bindings": {
@@ -22879,7 +22866,7 @@ export interface components {
      * ResourceSlotKind
      * @enum {string}
      */
-    ResourceSlotKind: "model" | "knowledge" | "mcp_server" | "mcp_tool" | "template_asset";
+    ResourceSlotKind: "model" | "knowledge" | "template_asset";
     /** ResourceSlotRef */
     ResourceSlotRef: {
       kind: components["schemas"]["ResourceSlotKind"];
@@ -23631,9 +23618,7 @@ export interface components {
      *                 {
      *                   "assistant_spec": {
      *                     "instructions": "Transcribe the uploaded audio into Swedish text.",
-     *                     "knowledge_refs": [],
-     *                     "mcp_server_refs": [],
-     *                     "mcp_tool_refs": []
+     *                     "knowledge_refs": []
      *                   },
      *                   "input_source": "flow_input",
      *                   "input_type": "audio",
@@ -23646,8 +23631,6 @@ export interface components {
      *                   "assistant_spec": {
      *                     "instructions": "Summarize the transcription into a professional PDF.",
      *                     "knowledge_refs": [],
-     *                     "mcp_server_refs": [],
-     *                     "mcp_tool_refs": [],
      *                     "model_ref": "model.gpt-5-4"
      *                   },
      *                   "input_bindings": {
@@ -24363,8 +24346,6 @@ export interface components {
        */
       name: string;
       assistant_spec: components["schemas"]["AssistantSpec"];
-      /** @default inherit */
-      mcp_policy?: components["schemas"]["FlowMcpPolicy"];
       input_source: components["schemas"]["AIBuilderInputSource"];
       /** @default text */
       input_type?: components["schemas"]["AIBuilderInputType"];
@@ -42989,8 +42970,6 @@ export interface operations {
            *       "groups": [],
            *       "websites": [],
            *       "integration_knowledge_list": [],
-           *       "mcp_servers": [],
-           *       "mcp_tools": [],
            *       "published": false,
            *       "user": {
            *         "id": "00000000-0000-0000-0000-000000000030",
@@ -43008,7 +42987,7 @@ export interface operations {
            *       }
            *     }
            */
-          "application/json": components["schemas"]["AssistantPublic"];
+          "application/json": components["schemas"]["FlowAssistantPublic"];
         };
       };
       /** @description Caller lacks permission or API key scope to manage assistants for this flow. */
@@ -43095,8 +43074,6 @@ export interface operations {
            *       "groups": [],
            *       "websites": [],
            *       "integration_knowledge_list": [],
-           *       "mcp_servers": [],
-           *       "mcp_tools": [],
            *       "published": false,
            *       "user": {
            *         "id": "00000000-0000-0000-0000-000000000030",
@@ -43114,7 +43091,7 @@ export interface operations {
            *       }
            *     }
            */
-          "application/json": components["schemas"]["AssistantPublic"];
+          "application/json": components["schemas"]["FlowAssistantPublic"];
         };
       };
       /** @description Caller lacks permission or API key scope to access assistants for this flow. */
@@ -43244,7 +43221,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["PartialAssistantUpdatePublic"];
+        "application/json": components["schemas"]["FlowAssistantUpdateRequest"];
       };
     };
     responses: {
@@ -43272,8 +43249,6 @@ export interface operations {
            *       "groups": [],
            *       "websites": [],
            *       "integration_knowledge_list": [],
-           *       "mcp_servers": [],
-           *       "mcp_tools": [],
            *       "published": false,
            *       "user": {
            *         "id": "00000000-0000-0000-0000-000000000030",
@@ -43291,7 +43266,7 @@ export interface operations {
            *       }
            *     }
            */
-          "application/json": components["schemas"]["AssistantPublic"];
+          "application/json": components["schemas"]["FlowAssistantPublic"];
         };
       };
       /** @description Caller lacks permission or API key scope to update assistants for this flow. */

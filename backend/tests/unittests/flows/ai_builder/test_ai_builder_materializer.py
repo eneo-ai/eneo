@@ -9,16 +9,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
-from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    AddStep,
-    AssistantSpecPatch,
-    ModifyExistingStep,
     OrderedEditProposal,
-    SemanticStepIntent,
-)
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
 )
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
@@ -41,17 +33,12 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from eneo.flows.assistant_authoring_snapshot import (
-    AssistantAuthoringResourceRef,
-    AssistantAuthoringSnapshot,
-)
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -128,7 +115,6 @@ def _make_step_spec(
     input_type: InputType = InputType.TEXT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_type: OutputType = OutputType.TEXT,
-    mcp_policy: MCPPolicy = MCPPolicy.INHERIT,
     input_bindings: dict[str, Any] | None = None,
     input_contract: dict[str, Any] | None = None,
     output_contract: dict[str, Any] | None = None,
@@ -149,7 +135,6 @@ def _make_step_spec(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy=mcp_policy,
         input_bindings=input_bindings,
         input_contract=input_contract,
         output_contract=output_contract,
@@ -194,7 +179,6 @@ def _make_flow_step(
     input_type: str = "text",
     output_mode: str = "pass_through",
     output_type: str = "text",
-    mcp_policy: str = "inherit",
     input_bindings: dict | None = None,
     input_contract: dict | None = None,
     output_contract: dict | None = None,
@@ -212,7 +196,6 @@ def _make_flow_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy=mcp_policy,
         input_bindings=input_bindings,
         input_contract=input_contract,
         output_contract=output_contract,
@@ -361,7 +344,6 @@ class TestCompileCreateFlow:
                     input_type=InputType.JSON,
                     output_mode=OutputMode.PASS_THROUGH,
                     output_type=OutputType.JSON,
-                    mcp_policy=MCPPolicy.RESTRICTED,
                     input_contract=contract,
                     output_contract=contract,
                 ),
@@ -373,7 +355,6 @@ class TestCompileCreateFlow:
         assert step.input_type == "json"
         assert step.output_mode == "pass_through"
         assert step.output_type == "json"
-        assert step.mcp_policy == "restricted"
         assert step.input_bindings is None
         assert step.input_contract == contract
         assert step.output_contract == contract
@@ -1493,75 +1474,8 @@ class TestExecuteCreateFlow:
         assert update.groups == [kb_id_1, kb_id_2]
         assert update.websites == []
         assert update.integration_knowledge_ids == []
-        assert update.mcp_server_ids == []
-        assert update.mcp_tools == []
-
-    @pytest.mark.asyncio
-    async def test_assistant_configured_with_mcp_refs(self) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        assistant_id = uuid4()
-        mcp_server_id = uuid4()
-        mcp_tool_id = uuid4()
-
-        mock_flow_service = AsyncMock()
-        created_flow = _make_flow(flow_id=flow_id, space_id=space_id)
-        mock_flow_service.create_flow.return_value = created_flow
-
-        mock_assistant = MagicMock()
-        mock_assistant.id = assistant_id
-        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
-
-        changeset = FlowDraftChangeSet(
-            flow_name="Test",
-            flow_description="",
-            assistants_to_create=[
-                AssistantToCreate(
-                    plan_step_ref="step_a",
-                    assistant_spec=AssistantSpec(
-                        instructions="Fetch from the case system",
-                        mcp_server_refs=["mcp_server.case-registry"],
-                        mcp_tool_refs=["mcp_tool.case-registry-lookup"],
-                    ),
-                ),
-            ],
-            compiled_steps=[
-                _compiled_step(
-                    plan_step_ref="step_a",
-                    step_order=1,
-                    change_kind=StepChangeKind.ADDED,
-                ),
-            ],
-        )
-
-        await execute_draft_materialization(
-            changeset=changeset,
-            flow_service=mock_flow_service,
-            space_id=space_id,
-            flow_id=None,
-            resource_bindings=(
-                _resource_binding(
-                    slot="case-registry",
-                    slot_kind=ResourceSlotKind.MCP_SERVER,
-                    local_kind=LocalResourceKind.MCP_SERVER,
-                    local_id=mcp_server_id,
-                ),
-                _resource_binding(
-                    slot="case-registry-lookup",
-                    slot_kind=ResourceSlotKind.MCP_TOOL,
-                    local_kind=LocalResourceKind.MCP_TOOL,
-                    local_id=mcp_tool_id,
-                ),
-            ),
-        )
-
-        update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
-        )
-        assert update.mcp_server_ids == [mcp_server_id]
-        assert update.mcp_tools == [(mcp_tool_id, True)]
-        assert update.groups == []
+        assert not update.is_set("mcp_server_ids")
+        assert not update.is_set("mcp_tools")
 
     @pytest.mark.asyncio
     async def test_assistant_configured_with_slot_ref_bindings(self) -> None:
@@ -1618,62 +1532,6 @@ class TestExecuteCreateFlow:
         assert update.groups == [local_policy_id]
 
     @pytest.mark.asyncio
-    async def test_assistant_configured_with_mixed_mcp_slot_ref_bindings(
-        self,
-    ) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        assistant_id = uuid4()
-        case_server_id = uuid4()
-        case_tool_id = uuid4()
-
-        mock_flow_service = AsyncMock()
-        mock_flow_service.create_flow.return_value = _make_flow(
-            flow_id=flow_id,
-            space_id=space_id,
-        )
-        mock_assistant = MagicMock()
-        mock_assistant.id = assistant_id
-        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-        mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
-
-        changeset = _create_changeset_with_assistant(
-            AssistantSpec(
-                instructions="Use case registry tools.",
-                mcp_server_refs=["mcp_server.case-registry"],
-                mcp_tool_refs=["mcp_tool.case-registry-lookup"],
-            )
-        )
-        bindings = (
-            _resource_binding(
-                slot="case-registry",
-                slot_kind=ResourceSlotKind.MCP_SERVER,
-                local_kind=LocalResourceKind.MCP_SERVER,
-                local_id=case_server_id,
-            ),
-            _resource_binding(
-                slot="case-registry-lookup",
-                slot_kind=ResourceSlotKind.MCP_TOOL,
-                local_kind=LocalResourceKind.MCP_TOOL,
-                local_id=case_tool_id,
-            ),
-        )
-
-        await execute_draft_materialization(
-            changeset=changeset,
-            flow_service=mock_flow_service,
-            space_id=space_id,
-            flow_id=None,
-            resource_bindings=bindings,
-        )
-
-        update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
-        )
-        assert update.mcp_server_ids == [case_server_id]
-        assert update.mcp_tools == [(case_tool_id, True)]
-
-    @pytest.mark.asyncio
     async def test_unresolved_slot_ref_fails_with_slot_context(self) -> None:
         flow_id = uuid4()
         space_id = uuid4()
@@ -1712,49 +1570,6 @@ class TestExecuteCreateFlow:
         }
         mock_flow_service.update_flow_assistant.assert_not_called()
         mock_flow_service.delete_flow.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_wrong_slot_kind_fails_before_uuid_conversion(self) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        assistant_id = uuid4()
-        server_id = uuid4()
-
-        mock_flow_service = AsyncMock()
-        mock_flow_service.create_flow.return_value = _make_flow(
-            flow_id=flow_id,
-            space_id=space_id,
-        )
-        mock_assistant = MagicMock()
-        mock_assistant.id = assistant_id
-        mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
-
-        changeset = _create_changeset_with_assistant(
-            AssistantSpec(
-                instructions="Use wrong slot field.",
-                mcp_tool_refs=["mcp_server.case-registry"],
-            )
-        )
-        binding = _resource_binding(
-            slot="case-registry",
-            slot_kind=ResourceSlotKind.MCP_SERVER,
-            local_kind=LocalResourceKind.MCP_SERVER,
-            local_id=server_id,
-        )
-
-        with pytest.raises(BadRequestException) as error:
-            await execute_draft_materialization(
-                changeset=changeset,
-                flow_service=mock_flow_service,
-                space_id=space_id,
-                flow_id=None,
-                resource_bindings=(binding,),
-            )
-
-        assert error.value.code == "wrong_slot_kind"
-        assert error.value.context["slot_ref"] == "mcp_server.case-registry"
-        assert error.value.context["expected_kind"] == "mcp_tool"
-        assert error.value.context["actual_kind"] == "mcp_server"
 
     @pytest.mark.asyncio
     async def test_duplicate_slot_bindings_fail_before_mutation(self) -> None:
@@ -2309,212 +2124,8 @@ class TestExecuteEditFlow:
         assert update.groups == []
         assert update.websites == []
         assert update.integration_knowledge_ids == []
-        assert update.mcp_server_ids == []
-        assert update.mcp_tools == []
-
-    @pytest.mark.asyncio
-    async def test_instructions_only_edit_preserves_mcp_refs_through_apply(
-        self,
-    ) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        step_id = uuid4()
-        assistant_id = uuid4()
-        mcp_server_id = uuid4()
-        mcp_tool_id = uuid4()
-
-        existing_step = _make_flow_step(
-            step_id=step_id,
-            flow_id=flow_id,
-            assistant_id=assistant_id,
-            step_order=1,
-            user_description="Hämta kundärende",
-        )
-        current_flow = _make_flow(
-            flow_id=flow_id,
-            space_id=space_id,
-            name="Kundärende",
-            description="Hämtar ärendedata.",
-            draft_revision=4,
-            steps=[existing_step],
-        )
-        resource_catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[],
-            available_mcps=[
-                {
-                    "id": str(mcp_server_id),
-                    "name": "Case Registry",
-                    "tools": [{"id": str(mcp_tool_id), "name": "lookup"}],
-                }
-            ],
-        )
-        edit_result = compile_edit_proposal(
-            _edit_proposal(
-                steps=[
-                    ModifyExistingStep(
-                        existing_step_ref="existing_step_1",
-                        assistant_spec=AssistantSpecPatch(
-                            instructions="Hämta och sammanfatta aktuellt kundärende."
-                        ),
-                    )
-                ]
-            ),
-            [existing_step],
-            base_flow_revision=4,
-            flow_name=current_flow.name,
-            flow_description=current_flow.description,
-            assistant_snapshots={
-                assistant_id: AssistantAuthoringSnapshot(
-                    instructions="Hämta aktuellt kundärende.",
-                    mcp_server_refs=(
-                        AssistantAuthoringResourceRef(
-                            local_ref=str(mcp_server_id),
-                            label="Case Registry",
-                        ),
-                    ),
-                    mcp_tool_refs=(
-                        AssistantAuthoringResourceRef(
-                            local_ref=str(mcp_tool_id),
-                            label="lookup",
-                        ),
-                    ),
-                )
-            },
-            resource_catalog=resource_catalog,
-        )
-        changeset = compile_flow_draft_changeset(edit_result.spec, current_flow)
-
-        mock_flow_service = AsyncMock()
-        mock_flow_service.update_flow.return_value = current_flow
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
-
-        await execute_draft_materialization(
-            changeset=changeset,
-            flow_service=mock_flow_service,
-            space_id=space_id,
-            flow_id=flow_id,
-            expected_revision=4,
-            resource_bindings=(
-                _resource_binding(
-                    slot="case-registry",
-                    slot_kind=ResourceSlotKind.MCP_SERVER,
-                    local_kind=LocalResourceKind.MCP_SERVER,
-                    local_id=mcp_server_id,
-                ),
-                _resource_binding(
-                    slot="case-registry-lookup",
-                    slot_kind=ResourceSlotKind.MCP_TOOL,
-                    local_kind=LocalResourceKind.MCP_TOOL,
-                    local_id=mcp_tool_id,
-                ),
-            ),
-        )
-
-        update = _update_command_from_call(
-            mock_flow_service.update_flow_assistant.call_args
-        )
-        assert update.prompt is not None
-        assert update.prompt.text == ("Hämta och sammanfatta aktuellt kundärende.")
-        assert update.mcp_server_ids == [mcp_server_id]
-        assert update.mcp_tools == [(mcp_tool_id, True)]
-        assert update.groups == []
-        assert update.websites == []
-        assert update.integration_knowledge_ids == []
-
-    @pytest.mark.asyncio
-    async def test_edit_adds_mcp_step_with_step_scoped_tool_access(self) -> None:
-        flow_id = uuid4()
-        space_id = uuid4()
-        existing_assistant_id = uuid4()
-        created_assistant_id = uuid4()
-        mcp_server_id = uuid4()
-        mcp_tool_id = uuid4()
-
-        existing_step = _make_flow_step(
-            flow_id=flow_id,
-            assistant_id=existing_assistant_id,
-            step_order=1,
-            user_description="Analysera befintligt underlag",
-        )
-        current_flow = _make_flow(
-            flow_id=flow_id,
-            space_id=space_id,
-            name="Ärendeanalys",
-            steps=[existing_step],
-            draft_revision=2,
-        )
-        resource_catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[],
-        )
-        edit_result = compile_edit_proposal(
-            _edit_proposal(
-                steps=[
-                    ModifyExistingStep(existing_step_ref="existing_step_1"),
-                    AddStep(
-                        step=SemanticStepIntent(
-                            name="Hämta live-data",
-                            instructions="Hämta aktuell ärendedata via valt MCP-verktyg.",
-                            output_type=OutputType.JSON,
-                            mcp_server_refs=["mcp_server.case-registry"],
-                            mcp_tool_refs=["mcp_tool.case-registry-lookup"],
-                        ),
-                    ),
-                ]
-            ),
-            [existing_step],
-            base_flow_revision=2,
-            flow_name=current_flow.name,
-            flow_description=current_flow.description,
-            assistant_snapshots={
-                existing_assistant_id: AssistantAuthoringSnapshot(
-                    instructions="Analysera befintligt underlag.",
-                )
-            },
-            resource_catalog=resource_catalog,
-        )
-        changeset = compile_flow_draft_changeset(edit_result.spec, current_flow)
-
-        created_assistant = MagicMock()
-        created_assistant.id = created_assistant_id
-        mock_flow_service = AsyncMock()
-        mock_flow_service.create_flow_assistant.return_value = (created_assistant, [])
-        mock_flow_service.update_flow.return_value = current_flow
-        mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
-
-        await execute_draft_materialization(
-            changeset=changeset,
-            flow_service=mock_flow_service,
-            space_id=space_id,
-            flow_id=flow_id,
-            expected_revision=2,
-            resource_bindings=(
-                _resource_binding(
-                    slot="case-registry",
-                    slot_kind=ResourceSlotKind.MCP_SERVER,
-                    local_kind=LocalResourceKind.MCP_SERVER,
-                    local_id=mcp_server_id,
-                ),
-                _resource_binding(
-                    slot="case-registry-lookup",
-                    slot_kind=ResourceSlotKind.MCP_TOOL,
-                    local_kind=LocalResourceKind.MCP_TOOL,
-                    local_id=mcp_tool_id,
-                ),
-            ),
-        )
-
-        mcp_update = next(
-            _update_command_from_call(call)
-            for call in mock_flow_service.update_flow_assistant.await_args_list
-            if call.kwargs["assistant_id"] == created_assistant_id
-        )
-        assert mcp_update.mcp_server_ids == [mcp_server_id]
-        assert mcp_update.mcp_tools == [(mcp_tool_id, True)]
-        assert mcp_update.groups == []
-        assert mcp_update.websites == []
-        assert mcp_update.integration_knowledge_ids == []
+        assert not update.is_set("mcp_server_ids")
+        assert not update.is_set("mcp_tools")
 
     @pytest.mark.asyncio
     async def test_invalid_knowledge_ref_raises_instead_of_silently_skipping(
@@ -2679,7 +2290,6 @@ def _compiled_step(
     input_type: str = "text",
     output_mode: str = "pass_through",
     output_type: str = "text",
-    mcp_policy: str = "inherit",
     input_bindings: dict | None = None,
     review_policy: FlowStepReviewPolicy | None = None,
 ) -> Any:
@@ -2697,7 +2307,6 @@ def _compiled_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy=mcp_policy,
         input_bindings=input_bindings,
         review_policy=review_policy,
     )

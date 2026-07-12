@@ -38,7 +38,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": None,
             "output_type": None,
             "output_mode": None,
-            "mcp_policy": None,
             "output_classification_override": None,
             "run_status": None,
             "num_tokens_input": None,
@@ -54,7 +53,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": "text",
             "output_type": "text",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": 2,
             "run_status": None,
             "num_tokens_input": None,
@@ -70,7 +68,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": "text",
             "output_type": "json",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
             "run_status": None,
             "num_tokens_input": None,
@@ -86,7 +83,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": "text",
             "output_type": "text",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
             "run_status": None,
             "num_tokens_input": None,
@@ -102,7 +98,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": "text",
             "output_type": "docx",
             "output_mode": "template_fill",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
             "run_status": "completed",
             "num_tokens_input": 11,
@@ -118,7 +113,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "input_type": None,
             "output_type": None,
             "output_mode": None,
-            "mcp_policy": None,
             "output_classification_override": None,
             "run_status": None,
             "num_tokens_input": None,
@@ -223,7 +217,6 @@ def _step(
         "input_type": "text",
         "output_type": output_type,
         "output_mode": "pass_through",
-        "mcp_policy": "inherit",
         "output_classification_override": 2 if step_order == 1 else None,
     }
 
@@ -238,7 +231,6 @@ def _flow_step(step_order: int, **updates: object) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
     )
     return step.model_copy(update=updates)
 
@@ -253,7 +245,6 @@ def _golden_graph_steps() -> list[dict[str, object]]:
             "input_type": "text",
             "output_type": "text",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": 2,
         },
         {
@@ -264,7 +255,6 @@ def _golden_graph_steps() -> list[dict[str, object]]:
             "input_type": "text",
             "output_type": "json",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
         },
         {
@@ -275,7 +265,6 @@ def _golden_graph_steps() -> list[dict[str, object]]:
             "input_type": "text",
             "output_type": "text",
             "output_mode": "pass_through",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
         },
         {
@@ -286,7 +275,6 @@ def _golden_graph_steps() -> list[dict[str, object]]:
             "input_type": "text",
             "output_type": "docx",
             "output_mode": "template_fill",
-            "mcp_policy": "inherit",
             "output_classification_override": None,
             "input_bindings": {
                 "question": (
@@ -352,7 +340,6 @@ def test_graph_response_parses_typed_nodes_and_edges() -> None:
                     "input_type": "text",
                     "output_type": "json",
                     "output_mode": "pass_through",
-                    "mcp_policy": "inherit",
                     "run_status": "completed",
                 },
             ],

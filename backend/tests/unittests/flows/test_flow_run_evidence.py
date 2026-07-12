@@ -114,7 +114,6 @@ def _evidence_run_and_version() -> tuple[FlowRun, FlowVersion]:
             "input_type": "text",
             "output_mode": "pass_through",
             "output_type": "text",
-            "mcp_policy": "inherit",
         }
     ]
     definition_json = build_published_definition_json(
@@ -239,7 +238,6 @@ def test_evidence_marks_matching_checksum_invalid_runtime_step_invalid() -> None
                 "input_type": "text",
                 "output_mode": "invalid_mode",
                 "output_type": "text",
-                "mcp_policy": "inherit",
             }
         ],
     )
@@ -617,7 +615,7 @@ def test_parse_step_order_handles_strings_and_bools():
     assert parse_step_order(7.2, default=4) == 4
 
 
-def test_normalize_debug_step_uses_snapshot_mcp_fields_and_rag_metadata():
+def test_normalize_debug_step_uses_rag_metadata():
     step = normalize_debug_step(
         {
             "step_id": "step-1",
@@ -627,19 +625,10 @@ def test_normalize_debug_step_uses_snapshot_mcp_fields_and_rag_metadata():
             "input_type": "text",
             "output_mode": "pass_through",
             "output_type": "json",
-            "mcp_policy": "inherit",
-            "mcp_servers": [{"id": "server-1", "name": "Weather"}],
-            "mcp_tools_enabled": [
-                {"tool_id": "tool-1", "server_id": "server-1", "name": "forecast_tool"}
-            ],
         },
         rag_metadata={"status": "success"},
     )
 
-    assert step["mcp"]["servers"] == [{"id": "server-1", "name": "Weather"}]
-    assert step["mcp"]["tools_enabled"] == [
-        {"tool_id": "tool-1", "server_id": "server-1", "name": "forecast_tool"}
-    ]
     assert step["rag"]["status"] == "success"
     assert step["rag"]["tracking"]["retrieval_tracked"] is True
 
@@ -677,7 +666,6 @@ def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ]
         },
@@ -922,7 +910,6 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ]
         },

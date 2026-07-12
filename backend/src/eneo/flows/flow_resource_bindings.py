@@ -28,8 +28,6 @@ _UUID_SHAPED_RE = re.compile(UUID_SHAPED_RESOURCE_REF_PATTERN, re.IGNORECASE)
 class ResourceSlotKind(str, Enum):
     MODEL = "model"
     KNOWLEDGE = "knowledge"
-    MCP_SERVER = "mcp_server"
-    MCP_TOOL = "mcp_tool"
     TEMPLATE_ASSET = "template_asset"
 
 
@@ -39,8 +37,6 @@ class LocalResourceKind(str, Enum):
     COLLECTION = "collection"
     WEBSITE = "website"
     INTEGRATION_KNOWLEDGE = "integration_knowledge"
-    MCP_SERVER = "mcp_server"
-    MCP_TOOL = "mcp_tool"
     TEMPLATE_ASSET = "template_asset"
 
 
@@ -119,8 +115,6 @@ _LOCAL_KINDS_BY_SLOT_KIND: dict[ResourceSlotKind, frozenset[LocalResourceKind]] 
             LocalResourceKind.INTEGRATION_KNOWLEDGE,
         }
     ),
-    ResourceSlotKind.MCP_SERVER: frozenset({LocalResourceKind.MCP_SERVER}),
-    ResourceSlotKind.MCP_TOOL: frozenset({LocalResourceKind.MCP_TOOL}),
     ResourceSlotKind.TEMPLATE_ASSET: frozenset({LocalResourceKind.TEMPLATE_ASSET}),
 }
 RESOURCE_SLOT_LOCAL_KIND_PAIRS = tuple(

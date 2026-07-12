@@ -34,7 +34,6 @@ class GraphNode(BaseModel):
     input_type: str | None = None
     output_type: str | None = None
     output_mode: str | None = None
-    mcp_policy: str | None = None
     output_classification_override: int | None = None
     run_status: str | None = None
     num_tokens_input: int | None = None
@@ -87,7 +86,6 @@ def build_graph_from_steps(
                 input_type=step.get("input_type"),
                 output_type=step.get("output_type"),
                 output_mode=output_mode,
-                mcp_policy=step.get("mcp_policy"),
                 output_classification_override=step.get(
                     "output_classification_override"
                 ),

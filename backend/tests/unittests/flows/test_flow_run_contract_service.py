@@ -49,7 +49,6 @@ def _step(*, step_order: int, input_type: str) -> FlowStep:
         input_type=input_type,
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
     )
 
 
@@ -156,7 +155,6 @@ async def test_get_run_contract_rejects_checksum_drift_before_limits() -> None:
                 "input_type": step.input_type,
                 "output_mode": step.output_mode,
                 "output_type": step.output_type,
-                "mcp_policy": step.mcp_policy,
             }
         ],
     }
@@ -268,7 +266,6 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 },
                 {
                     "step_id": str(template_step.id),
@@ -279,7 +276,6 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": template_step.output_config,
-                    "mcp_policy": "inherit",
                 },
             ],
         },
@@ -381,7 +377,6 @@ async def test_get_run_contract_marks_template_checksum_drift_needs_action(
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": template_step.output_config,
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -440,7 +435,6 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -483,7 +477,6 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -569,7 +562,6 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -609,7 +601,6 @@ async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() 
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -668,7 +659,6 @@ async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbound
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -725,7 +715,6 @@ async def test_get_run_contract_returns_review_steps() -> None:
                     "output_type": "json",
                     "output_contract": review_step.output_contract,
                     "review_policy": review_step.review_policy,
-                    "mcp_policy": "inherit",
                 }
             ],
         },
@@ -793,7 +782,6 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
                     "output_type": "json",
                     "output_contract": review_step.output_contract,
                     "review_policy": review_step.review_policy,
-                    "mcp_policy": "inherit",
                 },
                 {
                     "step_id": str(final_step.id),
@@ -804,7 +792,6 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
                     "input_type": "json",
                     "output_mode": "pass_through",
                     "output_type": "docx",
-                    "mcp_policy": "inherit",
                 },
             ],
         },
@@ -866,7 +853,6 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
                     "output_mode": "template_fill",
                     "output_type": "docx",
                     "output_config": template_step.output_config,
-                    "mcp_policy": "inherit",
                 }
             ],
         },

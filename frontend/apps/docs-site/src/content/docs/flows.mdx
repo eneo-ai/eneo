@@ -72,15 +72,14 @@ Each published version stores the assistant execution surface used by every step
 - instructions
 - model identity and model parameters
 - knowledge-source references
-- effective MCP tool surface
 
 When a run starts, Eneo compares the published assistant surface with the current
 assistant configuration. If the assistant changed after publish, the run fails
 before any step executes. Republish the Flow after reviewing the change.
 
 This protects against silent configuration drift. It does not freeze the contents
-behind a knowledge source or the implementation behind an external MCP server. If
-those systems change, the Flow still uses their current data at run time.
+behind a knowledge source. If that source changes, the Flow still uses its current
+data at run time. Flow steps do not execute MCP servers or tools.
 
 ### Owner vs creator
 
@@ -103,11 +102,10 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 
 | Field                            | What it controls                                   | Common values                                                                                      | Default behavior  |
 | -------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------- |
-| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `http_post`                       | Explicit per step |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`                                    | Explicit per step |
 | `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `image`, `any`                                        | Explicit per step |
 | `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
 | `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                      | Explicit per step |
-| `mcp_policy`                     | How MCP tool access is handled for the step        | `inherit`, `restricted`                                                                            | Usually `inherit` |
 | `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                                          | No override       |
 
 ### Step chaining
@@ -117,7 +115,7 @@ The backend sorts steps by `step_order`. A later step can:
 - reuse the original flow input
 - consume the previous step's output
 - aggregate previous step outputs, preferably through targeted structured refs
-- fetch input from HTTP
+- fetch input with HTTP GET
 
 The flow graph endpoint and the web editor both expose this structure directly.
 
@@ -266,7 +264,6 @@ Each step uses an underlying assistant configuration. In the current UI and runt
 
 - attached files
 - knowledge sources such as collections, websites, or integration knowledge
-- MCP server access through the assistant context
 
 ### RAG in flows
 
@@ -288,7 +285,7 @@ Current validation allows that only on **LLM-backed text steps**. It is not supp
 
 The web app includes a knowledge trace viewer for flow runs. It can open the underlying source document and highlight the retrieved segments used during RAG, which makes review and explainability much easier.
 
-## Security classification and MCP policy
+## Security classification and effect boundaries
 
 ### Security classification inside a flow
 
@@ -297,26 +294,19 @@ Flows evaluate step security classification from several inputs:
 - the space baseline classification
 - the classification implied by previous outputs
 - knowledge-source classifications
-- MCP server classifications
 - any explicit output classification override
 
 Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
 
-### MCP policy
+### Supported external effects
 
-Each step has an `mcp_policy`:
+Flow input may use HTTP GET. HTTP POST input and MCP servers or tools are not
+supported in Flow authoring, AI Builder, published runtime definitions, or Flow
+packages. Standalone assistants and conversations retain their separately owned
+MCP behavior.
 
-- `inherit` uses the step's configured MCP context
-- `restricted` marks that the step should use a deliberately narrowed MCP context
-
-A common use for `restricted` is to leave most steps on a broad MCP surface while
-tightening tool access on one especially sensitive or narrowly scoped step. The
-important control is still the actual MCP server and tool selection attached to
-the step assistant.
-
-When a step needs MCP access, prefer tool-level selection over server-level selection. Tool-level access gives the assistant only the specific approved tools it needs. Server-level access gives the step every enabled tool on that server.
-
-AI Builder can read enabled MCP server and tool metadata while drafting a plan. It uses names and descriptions to decide whether a step should reference a tool, but it does not execute MCP tools during planning. Tool execution happens only when a published Flow run reaches the configured step.
+Terminal HTTP POST output remains supported through the durable webhook outbox,
+including its idempotency, retry, and dead-letter lifecycle.
 
 ## Ownership and visibility
 
@@ -465,7 +455,7 @@ AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It supp
 
 Important current rule: **AI Builder requires a user principal**. It relies on flow-edit permission checks plus creator-scoped session access, so it is not a service-key authoring surface.
 
-For the product mental model, including form fields, **"Underlag till steget"**, MCP tool selection, and token usage, see <a href="/docs/ai-builder">AI Builder</a>.
+For the product mental model, including form fields, **"Underlag till steget"**, knowledge sources, external delivery, and token usage, see <a href="/docs/ai-builder">AI Builder</a>.
 
 ## Practical takeaway
 

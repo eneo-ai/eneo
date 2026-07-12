@@ -31,10 +31,6 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
     LLMCompletionToolCallFunction,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    MCP_RESOURCE_SELECTION_QUESTION_ID,
-    MCP_SELECTION_WITHOUT,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
@@ -51,9 +47,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
-)
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
@@ -99,29 +92,6 @@ def _normalized_message(
     return LLMCompletionMessage(content=content, tool_calls=tool_calls)
 
 
-def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "ref": "server-1",
-                "tools": [{"ref": "tool-1", "name": "lookup_case"}],
-            }
-        ],
-    )
-    schemas = _make_submission()._active_submission_tool_schemas(
-        flow=None,
-        resource_catalog=catalog,
-    )
-
-    step_props = schemas[0]["function"]["parameters"]["properties"]["steps"]["items"][
-        "properties"
-    ]
-    assert "enum" not in step_props["mcp_server_refs"]["items"]
-    assert "enum" not in step_props["mcp_tool_refs"]["items"]
-
-
 @pytest.mark.parametrize(
     "message",
     [
@@ -156,87 +126,6 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
     assert response is not None
     assert response.tool_call is tool_call
     assert response.text_content == "Här är planen."
-
-
-@pytest.mark.asyncio
-async def test_create_propose_flow_quality_failure_records_failed_first_attempt() -> (
-    None
-):
-    submission = _make_submission()
-    tracker = ProposalTurnTelemetry(
-        request_id="req-outline-quality",
-        model="openai/gpt-5.4-nano",
-        target_kind=TargetKind.CREATE,
-    )
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Fortsätt utan MCP",
-            metadata={
-                "question_answer": {
-                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
-                    "selected_values": [MCP_SELECTION_WITHOUT],
-                }
-            },
-        )
-    ]
-    tool_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Time flow",
-            "plan_rationale": "Use MCP despite the user's decline.",
-            "steps": [
-                {
-                    "name": "Hämta tid",
-                    "instructions": "Hämta aktuell tid via Time MCP.",
-                    "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
-                }
-            ],
-        },
-        tool_call_id="call-outline-quality",
-    )
-    ctx = _make_context(
-        conversation=conversation,
-        resource_catalog=catalog,
-        usage_tracker=tracker,
-        request_id="req-outline-quality",
-        text_content="",
-    )
-
-    async def _repair_events(_request):
-        yield build_status_event(AIBuilderStatus.REPAIRING)
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission."
-            "run_tool_self_correction",
-            side_effect=_repair_events,
-        ),
-    ):
-        dispatched = submission.dispatch_submission_tool_call(
-            ctx=ctx, tool_call=tool_call
-        )
-        assert dispatched is not None
-        events = _wire_events([event async for event in dispatched])
-
-    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
-    telemetry = tracker.build_planner_telemetry()
-    assert telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
-    assert telemetry["proposal_first_attempt_success"] is False
-    assert telemetry["proposal_first_attempt_failure_kind"] == "quality"
-    assert telemetry["proposal_repair_invocation_count"] == 1
-    assert telemetry["proposal_repair_invocation_reasons"] == ["quality"]
 
 
 @pytest.mark.asyncio

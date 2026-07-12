@@ -18,7 +18,6 @@ from eneo.flow_packages.domain.flow_package_manifest import EneoPackageKind
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeGuidance,
-    FlowPackageMcpToolGuidance,
     FlowPackageModelGuidance,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -199,25 +198,6 @@ class FlowPackageKnowledgeDependencyResolution(
     guidance: FlowPackageKnowledgeGuidance | None = None
 
 
-class FlowPackageMcpToolDependencyResolution(
-    FlowPackageDependencyResolutionBase[FlowPackageLocalCandidate]
-):
-    kind: Literal[FlowPackageRequirementKind.MCP_TOOL] = (
-        FlowPackageRequirementKind.MCP_TOOL
-    )
-    guidance: FlowPackageMcpToolGuidance | None = None
-    server_slot_ref: ResourceSlotRef | None = None
-
-    @field_serializer("server_slot_ref")
-    def serialize_server_slot_ref(
-        self,
-        slot_ref: ResourceSlotRef | None,
-    ) -> dict[str, str] | None:
-        if slot_ref is None:
-            return None
-        return _serialize_slot_ref(slot_ref)
-
-
 class FlowPackageTemplateAssetDependencyResolution(
     FlowPackageDependencyResolutionBase[FlowPackageLocalCandidate]
 ):
@@ -230,7 +210,6 @@ class FlowPackageTemplateAssetDependencyResolution(
 FlowPackageDependencyResolutionEntry: TypeAlias = Annotated[
     FlowPackageModelDependencyResolution
     | FlowPackageKnowledgeDependencyResolution
-    | FlowPackageMcpToolDependencyResolution
     | FlowPackageTemplateAssetDependencyResolution,
     Field(discriminator="kind"),
 ]

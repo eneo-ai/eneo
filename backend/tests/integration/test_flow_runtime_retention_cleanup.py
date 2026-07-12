@@ -269,7 +269,6 @@ async def _create_flow_runtime_fixture(
             input_type="text",
             output_mode="render_verbatim",
             output_type="docx",
-            mcp_policy="inherit",
             created_at=created_at,
             updated_at=created_at,
         )

@@ -65,7 +65,6 @@ def _build_flow(
                 output_contract=None,
                 input_bindings={"question": "{{flow.input.question}}"},
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config=None,
             )

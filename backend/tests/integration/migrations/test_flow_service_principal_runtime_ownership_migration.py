@@ -326,7 +326,6 @@ def _insert_runtime_fixture(conn) -> dict[str, UUID]:
                                 "input_type": "text",
                                 "output_mode": "pass_through",
                                 "output_type": "json",
-                                "mcp_policy": "inherit",
                             }
                         ],
                     }

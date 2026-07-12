@@ -34,7 +34,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -192,8 +191,6 @@ def _make_flow_spec(
     *,
     model_ref: str | None,
     knowledge_refs: list[str],
-    mcp_server_refs: list[str] | None = None,
-    mcp_tool_refs: list[str] | None = None,
 ) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Grounded flow",
@@ -206,14 +203,11 @@ def _make_flow_spec(
                     instructions="Gör analysen.",
                     model_ref=model_ref,
                     knowledge_refs=knowledge_refs,
-                    mcp_server_refs=mcp_server_refs or [],
-                    mcp_tool_refs=mcp_tool_refs or [],
                 ),
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             )
         ],
     )

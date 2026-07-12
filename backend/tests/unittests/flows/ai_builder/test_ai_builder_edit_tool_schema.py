@@ -21,7 +21,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.enums import FlowMcpPolicy
 
 
 def _make_step(step_order: int) -> FlowStep:
@@ -36,7 +35,6 @@ def _make_step(step_order: int) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
     )
 
 
@@ -46,7 +44,6 @@ def _catalog_with_models(
     return build_ai_builder_resource_catalog(
         available_models=models,
         available_kbs=[],
-        available_mcps=[],
     )
 
 
@@ -54,7 +51,6 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
-        available_mcps=[],
     )
 
 
@@ -334,61 +330,6 @@ class TestBuildEditFlowToolSchema:
             "uses_previous_outputs",
         }
 
-    def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
-        self,
-    ):
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[],
-            available_mcps=[
-                {
-                    "ref": "server-1",
-                    "tools": [{"ref": "tool-1", "name": "lookup_case"}],
-                }
-            ],
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-        modify_step = _modify_step_schema(schema)
-
-        assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
-        assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
-        assistant_spec = modify_step["properties"]["assistant_spec"]
-        assert "enum" not in assistant_spec["properties"]["mcp_server_refs"]["items"]
-        assert "enum" not in assistant_spec["properties"]["mcp_tool_refs"]["items"]
-
-    def test_mcp_refs_stay_free_form_with_empty_or_malformed_resources(self):
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[],
-            available_mcps=[
-                {"ref": "", "tools": [{"ref": "ignored-tool"}]},
-                {
-                    "ref": "server-1",
-                    "tools": [
-                        {"ref": ""},
-                        {"ref": " "},
-                        {"ref": "tool-1", "name": "lookup_case"},
-                    ],
-                },
-            ],
-        )
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
-            resource_catalog=catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        )
-
-        add_payload = _add_step_payload_schema(schema)
-
-        assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
-        assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
-
     def test_modify_step_schema_exposes_typed_previous_field_refs(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1), _make_step(2)],
@@ -425,10 +366,6 @@ class TestBuildEditFlowToolSchema:
         assert props["output_type"]["enum"] == [*builder_output_type_values(), None]
         assert props["document_delivery_mode"]["enum"] == [
             *document_delivery_mode_values(),
-            None,
-        ]
-        assert props["mcp_policy"]["enum"] == [
-            *(policy.value for policy in FlowMcpPolicy),
             None,
         ]
         assert props["review_mode"]["enum"] == ["view", "edit", None]

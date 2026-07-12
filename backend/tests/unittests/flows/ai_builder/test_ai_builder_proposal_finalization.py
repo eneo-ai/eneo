@@ -6,9 +6,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
-    BackendQuestionPersistenceResult,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -19,11 +16,6 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
     StepChange,
-)
-from eneo.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
-from eneo.flows.ai_builder.ai_builder_events import (
-    build_question_event,
-    build_text_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
@@ -47,7 +39,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -80,7 +71,6 @@ def _make_flow_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             )
         ],
     )
@@ -440,70 +430,6 @@ async def test_finalize_compiled_proposal_allows_missing_usage_tracker() -> None
 
     assert [event.event for event in result.events] == ["plan"]
     assert captured_metadata[0] == {"existing": True}
-
-
-@pytest.mark.asyncio
-async def test_finalize_compiled_proposal_persists_mcp_clarification_without_plan() -> (
-    None
-):
-    finalizer = _make_finalizer()
-    issue = SimpleNamespace(
-        step_ref="step_a",
-        requested_name="case_lookup",
-        reason="ambiguous",
-        selected_server_refs={"server_a", "server_b"},
-    )
-    persist_backend_question = AsyncMock(
-        return_value=BackendQuestionPersistenceResult(
-            events=(
-                build_text_event("Choose an MCP resource."),
-                build_question_event(
-                    StructuredQuestionPayload(
-                        question_id="mcp_resource_selection",
-                        question="Choose an MCP resource.",
-                        options=[],
-                        selection_mode="single",
-                        allow_custom=False,
-                    )
-                ),
-            ),
-            new_planning_state_version=4,
-        )
-    )
-    store_plan = AsyncMock(return_value=_stored_plan_result())
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_finalization.mcp_clarification_issue_if_needed",
-            return_value=issue,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_finalization.build_mcp_resource_selection_question",
-            return_value=({"id": "mcp_resource_selection"}, "Choose an MCP resource."),
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_finalization.persist_backend_question",
-            new=persist_backend_question,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
-            new=store_plan,
-        ),
-    ):
-        result = await finalizer.finalize_compiled_proposal(
-            _make_request(resource_catalog=MagicMock())
-        )
-
-    assert [event.event for event in result.events] == ["text", "question"]
-    assert result.new_planning_state_version == 4
-    store_plan.assert_not_awaited()
-    persisted_metadata = persist_backend_question.await_args.kwargs[
-        "assistant_metadata"
-    ]
-    assert (
-        persisted_metadata["planner_telemetry"]["proposal_first_attempt_success"]
-        is True
-    )
 
 
 @pytest.mark.asyncio

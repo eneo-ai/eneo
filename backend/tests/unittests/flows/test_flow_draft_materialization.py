@@ -67,7 +67,6 @@ def _flow_step(
         input_type="text",
         output_mode=output_mode,
         output_type="text",
-        mcp_policy="inherit",
         output_config=output_config,
     )
 

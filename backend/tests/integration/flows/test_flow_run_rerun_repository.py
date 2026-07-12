@@ -168,7 +168,6 @@ def _build_flow(
                 output_contract={"type": "object"},
                 input_bindings={"question": "{{flow.input.case_id}}"},
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config=None,
             ),
@@ -187,7 +186,6 @@ def _build_flow(
                 output_contract=None,
                 input_bindings=None,
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config=None,
             ),
@@ -206,7 +204,6 @@ def _build_flow(
                 output_contract=None,
                 input_bindings=None,
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config=None,
             ),
@@ -248,7 +245,6 @@ def _published_step(step: FlowStep) -> dict[str, object]:
         "output_contract": step.output_contract,
         "output_config": step.output_config,
         "output_classification_override": step.output_classification_override,
-        "mcp_policy": step.mcp_policy.value,
     }
 
 

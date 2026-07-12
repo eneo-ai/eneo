@@ -14,7 +14,6 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCommand,
 )
 from eneo.flows.application.flow_service import FlowService
-from eneo.flows.assistant_execution_snapshot import stable_hash
 from eneo.flows.domain.flow import Flow, FlowStep, FlowVersion
 from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPersistedIdMissingError,
@@ -58,7 +57,6 @@ def _step(step_order: int = 1) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
     )
 
 
@@ -106,21 +104,13 @@ def _classification(level: int):
 
 
 class _FlowSecuritySpaceStub:
-    def __init__(
-        self, *, level: int | None = None, mcp_servers=None, completion_models=None
-    ):
+    def __init__(self, *, level: int | None = None, completion_models=None):
         self.security_classification = (
             _classification(level) if level is not None else None
         )
-        self._mcp_servers = {server.id: server for server in (mcp_servers or [])}
         self._completion_models = {
             model.id: model for model in (completion_models or [])
         }
-
-    def get_mcp_server(self, server_id):
-        if server_id not in self._mcp_servers:
-            raise NotFoundException()
-        return self._mcp_servers[server_id]
 
     def get_completion_model(self, model_id):
         return self._completion_models[model_id]
@@ -628,7 +618,7 @@ async def test_publish_flow_omits_default_review_expiry_from_definition(user):
 
 
 @pytest.mark.asyncio
-async def test_publish_flow_includes_mcp_snapshot_fields(user):
+async def test_publish_flow_rejects_mcp_assistant_before_version_creation(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -653,21 +643,14 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
     flow_repo.get.return_value = flow
     version_repo.get_latest.return_value = None
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
-    model_id = uuid4()
-    tool_schema = {"type": "object", "properties": {"city": {"type": "string"}}}
     service.assistant_service.get_assistant.return_value = (
         SimpleNamespace(
             id=step.assistant_id,
             origin=AssistantOrigin.FLOW_MANAGED,
             managing_flow_id=flow_id,
             prompt=SimpleNamespace(text="Use the weather tool only when needed."),
-            completion_model=SimpleNamespace(
-                id=model_id,
-                name="gpt-5.4-nano",
-                nickname="Nano",
-                litellm_model_name="openai/gpt-5.4-nano",
-            ),
-            completion_model_kwargs=ModelKwargs(temperature=0.2),
+            completion_model=None,
+            completion_model_kwargs=ModelKwargs(),
             collections=[],
             websites=[],
             integration_knowledge_list=[],
@@ -679,8 +662,6 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
                         SimpleNamespace(
                             id=uuid4(),
                             name="forecast_tool",
-                            description="Fetches a forecast by city.",
-                            input_schema=tool_schema,
                             is_enabled=True,
                         ),
                         SimpleNamespace(
@@ -693,98 +674,10 @@ async def test_publish_flow_includes_mcp_snapshot_fields(user):
         [],
     )
 
-    await service.publish_flow(flow_id=flow_id)
+    with pytest.raises(BadRequestException, match="Flow MCP is unsupported"):
+        await service.publish_flow(flow_id=flow_id)
 
-    definition = version_repo.create.await_args.kwargs["definition_json"]
-    assert definition["schema_version"] == 1
-    assert definition["steps"][0]["mcp_servers"] == [
-        {
-            "id": str(
-                service.assistant_service.get_assistant.return_value[0]
-                .mcp_servers[0]
-                .id
-            ),
-            "name": "Weather Server",
-        }
-    ]
-    assert definition["steps"][0]["mcp_tools_enabled"] == [
-        {
-            "tool_id": str(
-                service.assistant_service.get_assistant.return_value[0]
-                .mcp_servers[0]
-                .tools[0]
-                .id
-            ),
-            "server_id": str(
-                service.assistant_service.get_assistant.return_value[0]
-                .mcp_servers[0]
-                .id
-            ),
-            "name": "forecast_tool",
-        }
-    ]
-    snapshot = definition["steps"][0]["assistant_snapshot"]
-    assert snapshot["schema_version"] == 1
-    assert snapshot["assistant_id"] == str(step.assistant_id)
-    assert snapshot["origin"] == "flow_managed"
-    assert snapshot["instructions"] == "Use the weather tool only when needed."
-    assert snapshot["completion_model"] == {
-        "id": str(model_id),
-        "name": "gpt-5.4-nano",
-        "nickname": "Nano",
-        "litellm_model_name": "openai/gpt-5.4-nano",
-    }
-    assert snapshot["completion_model_kwargs"] == {"temperature": 0.2}
-    assert snapshot["knowledge_refs"] == []
-    assert snapshot["mcp_tools"][0] == {
-        "tool_id": str(
-            service.assistant_service.get_assistant.return_value[0]
-            .mcp_servers[0]
-            .tools[0]
-            .id
-        ),
-        "server_id": str(
-            service.assistant_service.get_assistant.return_value[0].mcp_servers[0].id
-        ),
-        "server_name": "Weather Server",
-        "name": "forecast_tool",
-        "description": "Fetches a forecast by city.",
-        "input_schema": tool_schema,
-        "input_schema_hash": stable_hash(tool_schema),
-    }
-    assert snapshot["tool_surface_hash"] == stable_hash(snapshot["mcp_tools"])
-    assert snapshot["execution_surface_hash"] == stable_hash(
-        {
-            "schema_version": 1,
-            "assistant_id": str(step.assistant_id),
-            "instructions": "Use the weather tool only when needed.",
-            "completion_model": {
-                "id": str(model_id),
-                "litellm_model_name": "openai/gpt-5.4-nano",
-            },
-            "completion_model_kwargs": {"temperature": 0.2},
-            "knowledge_refs": [],
-            "mcp_tools": [
-                {
-                    "tool_id": str(
-                        service.assistant_service.get_assistant.return_value[0]
-                        .mcp_servers[0]
-                        .tools[0]
-                        .id
-                    ),
-                    "server_id": str(
-                        service.assistant_service.get_assistant.return_value[0]
-                        .mcp_servers[0]
-                        .id
-                    ),
-                    "server_name": "Weather Server",
-                    "name": "forecast_tool",
-                    "description": "Fetches a forecast by city.",
-                    "input_schema_hash": stable_hash(tool_schema),
-                }
-            ],
-        }
-    )
+    version_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1395,7 +1288,7 @@ async def test_create_flow_rejects_forward_step_reference(user):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step(step_order=1).model_copy(
-        update={"input_bindings": {"value": "{{step_1.output.summary}}"}}
+        update={"input_bindings": {"question": "{{step_1.output.summary}}"}}
     )
 
     with pytest.raises(BadRequestException):
@@ -2342,8 +2235,6 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
     group_id = uuid4()
     website_id = uuid4()
     integration_id = uuid4()
-    server_id = uuid4()
-    tool_id = uuid4()
     attachment_id = uuid4()
     icon_id = uuid4()
     model_kwargs = ModelKwargs(reasoning_effort="low")
@@ -2357,8 +2248,6 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
         groups=[group_id],
         websites=[website_id],
         integration_knowledge_ids=[integration_id],
-        mcp_server_ids=[server_id],
-        mcp_tools=[(tool_id, False)],
         attachment_ids=[attachment_id],
         description=None,
         insight_enabled=True,
@@ -2540,279 +2429,25 @@ async def test_update_flow_assistant_security_validation_accepts_model_clear(use
 
 
 @pytest.mark.asyncio
-async def test_update_flow_assistant_rejects_step_incompatible_mcp_server(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    assistant_service = AsyncMock()
-    space_service = AsyncMock()
+async def test_update_flow_assistant_rejects_mcp_configuration(user):
     service = FlowService(
         user=user,
-        flow_repo=flow_repo,
-        flow_version_repo=version_repo,
-        assistant_service=assistant_service,
+        flow_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        assistant_service=AsyncMock(),
         file_repo=AsyncMock(),
         template_asset_repo=AsyncMock(),
-        space_service=space_service,
     )
 
-    flow_id = uuid4()
-    step_one = _step(step_order=1).model_copy(
-        update={"output_classification_override": 3}
-    )
-    step_two = _step(step_order=2).model_copy(update={"input_source": "previous_step"})
-    flow = Flow(
-        id=flow_id,
-        tenant_id=user.tenant_id,
-        space_id=uuid4(),
-        name="Flow",
-        description=None,
-        created_by_user_id=user.id,
-        owner_user_id=user.id,
-        published_version=None,
-        metadata_json=None,
-        data_retention_days=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        steps=[step_one, step_two],
-    )
-    flow_repo.get.return_value = flow
-
-    first_assistant = _build_assistant(
-        flow_id=flow_id, space_id=flow.space_id, user=user
-    )
-    first_assistant.id = step_one.assistant_id
-    first_assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    second_assistant = _build_assistant(
-        flow_id=flow_id, space_id=flow.space_id, user=user
-    )
-    second_assistant.id = step_two.assistant_id
-    second_assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    low_server = SimpleNamespace(id=uuid4(), security_classification=_classification(2))
-    space_service.get_space.return_value = _FlowSecuritySpaceStub(
-        level=1,
-        mcp_servers=[low_server],
-    )
-    assistant_service.get_assistant.side_effect = [
-        (second_assistant, []),
-        (first_assistant, []),
-    ]
-
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(BadRequestException, match="Flow MCP is unsupported"):
         await service.update_flow_assistant(
-            flow_id=flow_id,
-            assistant_id=second_assistant.id,
-            update=AssistantUpdateCommand(mcp_server_ids=[low_server.id]),
+            flow_id=uuid4(),
+            assistant_id=uuid4(),
+            update=AssistantUpdateCommand(mcp_server_ids=[uuid4()]),
         )
 
-    assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
-    assistant_service.update_assistant.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_flow_assistant_rejects_unavailable_mcp_server(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    assistant_service = AsyncMock()
-    space_service = AsyncMock()
-    service = FlowService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_version_repo=version_repo,
-        assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
-        space_service=space_service,
-    )
-
-    flow_id = uuid4()
-    flow = Flow(
-        id=flow_id,
-        tenant_id=user.tenant_id,
-        space_id=uuid4(),
-        name="Flow",
-        description=None,
-        created_by_user_id=user.id,
-        owner_user_id=user.id,
-        published_version=None,
-        metadata_json=None,
-        data_retention_days=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        steps=[_step(step_order=1)],
-    )
-    flow_repo.get.return_value = flow
-
-    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
-    assistant.id = flow.steps[0].assistant_id
-    assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    assistant_service.get_assistant.return_value = (assistant, [])
-    space_service.get_space.return_value = _FlowSecuritySpaceStub(
-        level=1,
-        mcp_servers=[],
-    )
-    unavailable_server_ids = [uuid4(), uuid4()]
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.update_flow_assistant(
-            flow_id=flow_id,
-            assistant_id=assistant.id,
-            update=AssistantUpdateCommand(mcp_server_ids=unavailable_server_ids),
-        )
-
-    assert exc_info.value.code == "flow_mcp_server_not_available"
-    assert exc_info.value.context == {
-        "mcp_server_ids": [str(server_id) for server_id in unavailable_server_ids]
-    }
-    assistant_service.update_assistant.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_flow_assistant_rejects_changes_that_invalidate_downstream_steps(
-    user,
-):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    assistant_service = AsyncMock()
-    space_service = AsyncMock()
-    service = FlowService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_version_repo=version_repo,
-        assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
-        space_service=space_service,
-    )
-
-    flow_id = uuid4()
-    step_one = _step(step_order=1)
-    step_two = _step(step_order=2).model_copy(update={"input_source": "previous_step"})
-    flow = Flow(
-        id=flow_id,
-        tenant_id=user.tenant_id,
-        space_id=uuid4(),
-        name="Flow",
-        description=None,
-        created_by_user_id=user.id,
-        owner_user_id=user.id,
-        published_version=None,
-        metadata_json=None,
-        data_retention_days=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        steps=[step_one, step_two],
-    )
-    flow_repo.get.return_value = flow
-
-    first_assistant = _build_assistant(
-        flow_id=flow_id, space_id=flow.space_id, user=user
-    )
-    first_assistant.id = step_one.assistant_id
-    first_assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    second_assistant = _build_assistant(
-        flow_id=flow_id, space_id=flow.space_id, user=user
-    )
-    second_assistant.id = step_two.assistant_id
-    second_assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    second_assistant.mcp_servers = [
-        SimpleNamespace(id=uuid4(), security_classification=_classification(2))
-    ]
-    high_server = SimpleNamespace(
-        id=uuid4(), security_classification=_classification(3)
-    )
-    space_service.get_space.return_value = _FlowSecuritySpaceStub(
-        level=1,
-        mcp_servers=[high_server],
-    )
-    assistant_service.get_assistant.side_effect = [
-        (first_assistant, []),
-        (second_assistant, []),
-    ]
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.update_flow_assistant(
-            flow_id=flow_id,
-            assistant_id=first_assistant.id,
-            update=AssistantUpdateCommand(mcp_server_ids=[high_server.id]),
-        )
-
-    assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
-    assistant_service.update_assistant.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_flow_assistant_current_step_output_override_does_not_raise_same_step_mcp_floor(
-    user,
-):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    assistant_service = AsyncMock()
-    space_service = AsyncMock()
-    service = FlowService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_version_repo=version_repo,
-        assistant_service=assistant_service,
-        file_repo=AsyncMock(),
-        template_asset_repo=AsyncMock(),
-        space_service=space_service,
-    )
-
-    flow_id = uuid4()
-    step = _step(step_order=1).model_copy(update={"output_classification_override": 3})
-    flow = Flow(
-        id=flow_id,
-        tenant_id=user.tenant_id,
-        space_id=uuid4(),
-        name="Flow",
-        description=None,
-        created_by_user_id=user.id,
-        owner_user_id=user.id,
-        published_version=None,
-        metadata_json=None,
-        data_retention_days=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        steps=[step],
-    )
-    flow_repo.get.return_value = flow
-
-    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
-    assistant.id = step.assistant_id
-    assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(3),
-        can_access=True,
-    )
-    low_server = SimpleNamespace(id=uuid4(), security_classification=_classification(1))
-    space_service.get_space.return_value = _FlowSecuritySpaceStub(
-        level=None,
-        mcp_servers=[low_server],
-    )
-    assistant_service.get_assistant.return_value = (assistant, [])
-    assistant_service.update_assistant.return_value = (assistant, [])
-
-    await service.update_flow_assistant(
-        flow_id=flow_id,
-        assistant_id=assistant.id,
-        update=AssistantUpdateCommand(mcp_server_ids=[low_server.id]),
-    )
-
-    assistant_service.update_assistant.assert_awaited_once()
+    service.flow_repo.get.assert_not_awaited()
+    service.assistant_service.update_assistant.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -105,7 +105,6 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
                 "input_type": "text",
                 "output_mode": "pass_through",
                 "output_type": "json",
-                "mcp_policy": "inherit",
             }
         ],
     }

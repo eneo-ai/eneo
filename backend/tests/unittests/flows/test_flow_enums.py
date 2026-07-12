@@ -12,7 +12,6 @@ from eneo.database.tables.flow_tables import (
     FLOW_STEP_ATTEMPT_STATUS_VALUES,
     FLOW_STEP_INPUT_SOURCE_VALUES,
     FLOW_STEP_INPUT_TYPE_VALUES,
-    FLOW_STEP_MCP_POLICY_VALUES,
     FLOW_STEP_OUTPUT_MODE_VALUES,
     FLOW_STEP_OUTPUT_TYPE_VALUES,
     FLOW_STEP_RESULT_STATUS_VALUES,
@@ -22,7 +21,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus
 from eneo.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
@@ -50,7 +48,6 @@ def test_shared_flow_enums_match_current_table_constants() -> None:
     assert tuple(item.value for item in FlowInputType) == FLOW_STEP_INPUT_TYPE_VALUES
     assert tuple(item.value for item in FlowOutputMode) == FLOW_STEP_OUTPUT_MODE_VALUES
     assert tuple(item.value for item in FlowOutputType) == FLOW_STEP_OUTPUT_TYPE_VALUES
-    assert tuple(item.value for item in FlowMcpPolicy) == FLOW_STEP_MCP_POLICY_VALUES
     assert tuple(item.value for item in FlowRunStatus) == FLOW_RUN_STATUS_VALUES
     assert (
         tuple(item.value for item in FlowRunReviewCheckpointState)
@@ -79,7 +76,6 @@ def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
     assert FlowInputType.__module__ == "eneo.flows.enums"
     assert FlowOutputMode.__module__ == "eneo.flows.enums"
     assert FlowOutputType.__module__ == "eneo.flows.enums"
-    assert FlowMcpPolicy.__module__ == "eneo.flows.enums"
     assert InputSource.__module__ == "eneo.flows.enums"
     assert InputType.__module__ == "eneo.flows.enums"
 
@@ -106,7 +102,6 @@ def test_flow_step_round_trips_string_fields_as_shared_enums() -> None:
             "input_type": "audio",
             "output_mode": "transcribe_only",
             "output_type": "text",
-            "mcp_policy": "inherit",
         }
     )
 
@@ -114,7 +109,6 @@ def test_flow_step_round_trips_string_fields_as_shared_enums() -> None:
     assert isinstance(step.input_type, FlowInputType)
     assert isinstance(step.output_mode, FlowOutputMode)
     assert isinstance(step.output_type, FlowOutputType)
-    assert isinstance(step.mcp_policy, FlowMcpPolicy)
 
 
 def test_ai_builder_step_spec_keeps_builder_subset_restrictions() -> None:

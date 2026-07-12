@@ -5,6 +5,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
@@ -25,10 +27,12 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_committed_turn_replay_events,
     build_done_event,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     resolve_plan_edit_context,
+)
+from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
+    raise_persisted_flow_mcp_plan_error,
 )
 from eneo.flows.ai_builder.ai_builder_planner_failure_events import (
     build_session_send_lease_lost_event,
@@ -185,7 +189,6 @@ class AIBuilderPlanner:
         litellm_kwargs: dict[str, Any],
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
-        available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
@@ -230,12 +233,19 @@ class AIBuilderPlanner:
         session = turn_preflight.session
         session_status = _session_status_value(session.status)
         conversation = list(session.conversation)
-        plan_edit_context, prior_plan_for_revision = await resolve_plan_edit_context(
-            repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session=session,
-            context=edit_context,
-        )
+        try:
+            (
+                plan_edit_context,
+                prior_plan_for_revision,
+            ) = await resolve_plan_edit_context(
+                repo=self.repo,
+                tenant_id=self.user.tenant_id,
+                session=session,
+                context=edit_context,
+            )
+        except ValidationError as exc:
+            raise_persisted_flow_mcp_plan_error(exc)
+            raise
         prepared_metadata = prepare_user_question_metadata(
             conversation=conversation,
             message=message,
@@ -350,7 +360,6 @@ class AIBuilderPlanner:
                     litellm_kwargs=litellm_kwargs,
                     available_models=available_models,
                     available_kbs=available_kbs,
-                    available_mcps=available_mcps,
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
                     attachment_files=attachment_files or [],

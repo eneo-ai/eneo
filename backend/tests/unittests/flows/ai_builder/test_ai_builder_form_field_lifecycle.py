@@ -378,7 +378,6 @@ def _flow_step(
         input_type=input_type,
         output_type=output_type,
         output_mode="pass_through",
-        mcp_policy="inherit",
         output_contract=output_contract,
     )
 

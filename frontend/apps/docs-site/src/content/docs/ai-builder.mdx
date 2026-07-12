@@ -19,7 +19,6 @@ AI Builder is a good fit for:
 - document workflows that read PDF/DOCX input and produce structured JSON, PDF, or DOCX output
 - audio workflows that transcribe a recording and then generate follow-up material
 - flows that need reusable runtime fields, such as audience, language, date range, or classification
-- flows that need a specific MCP tool in one step, such as fetching live data or writing to an external system
 
 It is less useful when the intended process is still unclear. In that case, use the conversation to clarify the outcome, required input, final output, and any external systems before approving the plan.
 
@@ -140,7 +139,7 @@ AI Builder can propose the same core capabilities used by manually authored Flow
 | Form fields        | Reusable values supplied at run time, such as language, audience, role, date range, or report level |
 | JSON output fields | Structured output that later steps or integrations can reuse reliably                               |
 | Final artifacts    | User-facing PDF or DOCX output rendered from a prepared body step                                   |
-| Step resources     | Knowledge sources or MCP tools attached only where the step needs them                              |
+| Step resources     | Knowledge sources attached only where the step needs them                                           |
 
 Prefer explicit form fields when a value will vary per run. Prefer JSON output fields when a downstream step or integration needs stable machine-readable data.
 
@@ -163,33 +162,15 @@ For assembly-backed create plans, the underlag channel is part of `FlowAssemblyP
 
 See <a href="/docs/flows#advanced-step-input-templates-underlag-till-steget">Advanced step input templates</a> for the runtime mental model.
 
-## MCP tools in AI Builder
+## External data and delivery
 
-AI Builder can use MCP server and tool metadata from the current space when deciding whether a step should have external tool access. It reads names, descriptions, and available tools. It does not execute MCP tools while drafting a plan.
+AI Builder does not advertise or configure MCP servers and tools for Flows. Use
+supported Flow inputs for required data: runtime form or file input, prior step
+output, knowledge, or HTTP GET. Use terminal HTTP POST output for external
+delivery through the durable webhook outbox.
 
-At runtime, only the published Flow step executes with the MCP tools configured for that step.
-
-Use MCP when a step needs external data or an external action, for example:
-
-- looking up a live case, ticket, product, or record
-- writing a result to a system of record
-- calling an approved internal calculation or validation tool
-- fetching data that should not be copied into static knowledge
-
-Use the narrowest practical access:
-
-| Selection           | Effect                                                      |
-| ------------------- | ----------------------------------------------------------- |
-| Tool-level access   | The step receives only the selected MCP tools               |
-| Server-level access | The step receives every enabled tool on the selected server |
-
-If a flow needs both knowledge retrieval and MCP tools, keep them on separate steps. This makes the data source for each result easier to inspect and avoids mixing retrieval context with external tool execution in the same assistant configuration.
-
-<Callout type="warning">
-  Treat MCP descriptions as part of the authoring contract. Good descriptions
-  should state what the tool reads, what it writes, when to use it, and any
-  important side effects.
-</Callout>
+Standalone assistants and conversations keep their separately owned MCP
+behavior.
 
 ## Token usage
 
@@ -212,7 +193,6 @@ Before approving an AI Builder plan, check:
 - runtime fields cover values that change from run to run
 - JSON outputs are structured enough for downstream steps
 - document or audio inputs are attached to the right step
-- each MCP tool is intentional and scoped to the step that needs it
-- knowledge retrieval and MCP execution are separated when both are needed
+- each knowledge source is intentional and scoped to the step that needs it
 - the final artifact has a clear reader, purpose, and format
 - sensitive workflows have the right evidence and retention policy expectations

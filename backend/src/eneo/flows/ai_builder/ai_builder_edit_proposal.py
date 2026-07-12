@@ -111,7 +111,7 @@ async def process_edit_arguments(
         return ToolProcessingResult(
             feedback=(
                 "A resource used by the existing flow is no longer available. "
-                "Re-select the affected model, knowledge base, or MCP resource "
+                "Re-select the affected model or knowledge base "
                 "and try again."
             ),
             failure_kind="validation",

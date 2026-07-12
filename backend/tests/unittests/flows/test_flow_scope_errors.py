@@ -337,7 +337,6 @@ async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
                         input_type="text",
                         output_mode="pass_through",
                         output_type="json",
-                        mcp_policy="inherit",
                     )
                 ],
             ),
@@ -422,7 +421,6 @@ async def test_flow_run_control_endpoints_reject_scope_mismatch(monkeypatch):
                 "security": {
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
                 },
             },
         }
@@ -969,7 +967,6 @@ async def test_create_flow_rejects_non_member(monkeypatch):
                 input_type="text",
                 output_mode="pass_through",
                 output_type="json",
-                mcp_policy="inherit",
             )
         ],
     )
@@ -1012,7 +1009,6 @@ async def test_create_flow_rejects_without_tenant_manage_permission(monkeypatch)
                 input_type="text",
                 output_mode="pass_through",
                 output_type="json",
-                mcp_policy="inherit",
             )
         ],
     )

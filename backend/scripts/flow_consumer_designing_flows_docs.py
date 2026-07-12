@@ -311,6 +311,8 @@ def render_flow_consumer_guide_page() -> str:
         "",
         "A Flow is a published graph of steps. Each step declares `input_source`, `input_type`, `output_type`, and `output_mode`.",
         "",
+        "Flow input can use HTTP GET, but Flow does not support HTTP POST input or MCP servers and tools. Terminal HTTP POST output remains available through the durable webhook outbox.",
+        "",
         render_markdown_table(
             (
                 "Input mode",

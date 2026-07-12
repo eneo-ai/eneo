@@ -8,10 +8,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_resources import (
-    AIBuilderMCPServerResource,
-    normalize_ai_builder_mcp_resources,
-)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
@@ -32,7 +28,6 @@ class AIBuilderPlannerContext:
     model: "CompletionModel"
     available_models: list[AIBuilderAvailableModelResource]
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource]
-    available_mcps: list[AIBuilderMCPServerResource]
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
@@ -66,44 +61,6 @@ def serialize_space_kbs(
         }
         for collection in getattr(space, "collections", [])
     ]
-
-
-def serialize_space_mcps(space: "Space") -> list[AIBuilderMCPServerResource]:
-    """Serialize local MCP IDs for catalog allocation, not prompt authoring refs."""
-    raw_servers: list[dict[str, Any]] = []
-    for server in getattr(space, "mcp_servers", []):
-        server_id = getattr(server, "id", None)
-        if server_id is None:
-            continue
-        enabled_tools: list[dict[str, str]] = []
-        for tool in getattr(server, "tools", []) or []:
-            if not getattr(tool, "is_enabled_by_default", False):
-                continue
-            tool_id = getattr(tool, "id", None)
-            if tool_id is None:
-                continue
-            enabled_tools.append(
-                {
-                    "id": str(tool_id),
-                    "ref": str(tool_id),
-                    "name": getattr(tool, "name", ""),
-                    "display_name": getattr(tool, "name", ""),
-                    "description": getattr(tool, "description", "") or "",
-                }
-            )
-        if not enabled_tools:
-            continue
-        raw_servers.append(
-            {
-                "id": str(server_id),
-                "ref": str(server_id),
-                "name": getattr(server, "name", ""),
-                "display_name": getattr(server, "name", ""),
-                "description": getattr(server, "description", "") or "",
-                "tools": enabled_tools,
-            }
-        )
-    return normalize_ai_builder_mcp_resources(raw_servers)
 
 
 def resolve_planner_model(space: "Space") -> "CompletionModel":
@@ -174,12 +131,10 @@ def build_planner_context(
 
     available_models = serialize_space_models(space)
     available_kbs = serialize_space_kbs(space)
-    available_mcps = serialize_space_mcps(space)
     return AIBuilderPlannerContext(
         model=model,
         available_models=available_models,
         available_kbs=available_kbs,
-        available_mcps=available_mcps,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,

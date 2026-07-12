@@ -9,7 +9,6 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
@@ -101,7 +100,6 @@ class FlowStepValidationView:
     output_type: FlowOutputType
     output_contract: FlowPersistedJsonObject | None
     input_bindings: FlowPersistedJsonObject | None
-    mcp_policy: FlowMcpPolicy
     input_config: FlowPersistedJsonObject | None
     output_config: FlowPersistedJsonObject | None
     review_policy: FlowStepReviewPolicy | None
@@ -121,7 +119,6 @@ def flow_step_validation_view_from_flow_step(
         output_type=step.output_type,
         output_contract=step.output_contract,
         input_bindings=step.input_bindings,
-        mcp_policy=step.mcp_policy,
         input_config=step.input_config,
         output_config=step.output_config,
         review_policy=step.review_policy,

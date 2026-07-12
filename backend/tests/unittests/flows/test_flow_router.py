@@ -47,7 +47,6 @@ def _flow_step(step_id, step_order: int) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
     )
 
 
@@ -306,7 +305,6 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 "security": {
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
                 },
             },
         },

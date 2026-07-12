@@ -32,7 +32,7 @@ def test_assistant_spec_rejects_local_model_ref() -> None:
 
 @pytest.mark.parametrize(
     "field_name",
-    ["knowledge_refs", "mcp_server_refs", "mcp_tool_refs"],
+    ["knowledge_refs"],
 )
 def test_assistant_spec_rejects_local_resource_refs(field_name: str) -> None:
     with pytest.raises(ValidationError) as exc_info:

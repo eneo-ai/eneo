@@ -31,7 +31,6 @@ from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvena
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeRequirement,
-    FlowPackageMcpToolRequirement,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
     FlowPackageModelMatchingPreferences,
@@ -419,40 +418,6 @@ async def test_install_rejects_selected_local_id_not_available_in_target_space()
     service.create_flow.assert_not_called()
 
 
-def test_validate_rejects_mcp_requirements_as_unsupported_scope() -> None:
-    envelope = _mcp_envelope(required=True)
-
-    with pytest.raises(FlowPackageValidationError) as exc_info:
-        validate_flow_package_install_selection(
-            envelope=envelope,
-            selected_bindings=tuple(),
-            candidates=_candidates(),
-        )
-
-    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED
-    assert exc_info.value.context["slot_ref"] == "mcp_tool.case-lookup"
-
-
-def test_validate_rejects_mcp_draft_refs_even_without_declared_requirement() -> None:
-    envelope = _envelope(
-        requirements=[],
-        assistant=AssistantSpec(
-            instructions="Use registry.",
-            mcp_tool_refs=["mcp_tool.case-lookup"],
-        ),
-    )
-
-    with pytest.raises(FlowPackageValidationError) as exc_info:
-        validate_flow_package_install_selection(
-            envelope=envelope,
-            selected_bindings=tuple(),
-            candidates=_candidates(),
-        )
-
-    assert exc_info.value.code is FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED
-    assert exc_info.value.context["slot_ref"] == "mcp_tool.case-lookup"
-
-
 def test_validate_rechecks_selected_model_hard_requirements_at_install_time() -> None:
     model_id = uuid4()
     binding = _binding(
@@ -652,32 +617,6 @@ def _envelope(
             schema_version=1,
             exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
         ),
-    )
-
-
-def _mcp_envelope(
-    *,
-    required: bool,
-    assistant_refs: bool = True,
-) -> FlowPackageEnvelope:
-    assistant = (
-        AssistantSpec(
-            instructions="Use the case registry.",
-            mcp_server_refs=["mcp_server.case-registry"],
-            mcp_tool_refs=["mcp_tool.case-lookup"],
-        )
-        if assistant_refs
-        else AssistantSpec(instructions="No resources.")
-    )
-    return _envelope(
-        assistant=assistant,
-        requirements=[
-            FlowPackageMcpToolRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.MCP_TOOL, "case-lookup"),
-                server_slot_ref=_slot_ref(ResourceSlotKind.MCP_SERVER, "case-registry"),
-                required=required,
-            )
-        ],
     )
 
 

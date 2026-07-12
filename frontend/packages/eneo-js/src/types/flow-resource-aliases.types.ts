@@ -47,7 +47,6 @@ const validFlowStep: FlowStep = {
   input_type: "document",
   output_mode: "pass_through",
   output_type: "text",
-  mcp_policy: "inherit",
   created_at: isoTimestamp,
   updated_at: isoTimestamp
 };
@@ -306,8 +305,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
     steps: [],
     security: {
       redaction_applied: false,
-      classification_field: "output_classification_override",
-      mcp_policy_field: "mcp_policy"
+      classification_field: "output_classification_override"
     }
   }
 };

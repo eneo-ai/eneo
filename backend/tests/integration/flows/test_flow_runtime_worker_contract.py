@@ -146,7 +146,6 @@ def _build_flow(
                 output_contract=output_contract,
                 input_bindings={"question": "{{flow.input.question}}"},
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config=None,
             )
@@ -202,7 +201,6 @@ async def _create_runtime_worker_context(
     )
     assistant_snapshot = build_assistant_execution_snapshot(
         assistant=runtime_assistant,
-        mcp_server_entities=[],
     )
     assert assistant_snapshot is not None
     step = flow.steps[0]
@@ -216,7 +214,6 @@ async def _create_runtime_worker_context(
         "input_bindings": step.input_bindings,
         "output_mode": step.output_mode,
         "output_type": step.output_type,
-        "mcp_policy": step.mcp_policy,
         "assistant_snapshot": assistant_snapshot,
     }
     if output_contract is not None:
@@ -686,7 +683,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         )
         assistant_snapshot = build_assistant_execution_snapshot(
             assistant=runtime_assistant,
-            mcp_server_entities=[],
         )
         assert assistant_snapshot is not None
 
@@ -707,7 +703,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
                     "input_bindings": step.input_bindings,
                     "output_mode": step.output_mode,
                     "output_type": step.output_type,
-                    "mcp_policy": step.mcp_policy,
                     "assistant_snapshot": assistant_snapshot,
                 }
             ],

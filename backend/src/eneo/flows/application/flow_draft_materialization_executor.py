@@ -36,8 +36,6 @@ from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
 
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
-_MCP_SERVER_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_SERVER})
-_MCP_TOOL_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_TOOL})
 
 
 class FlowDraftMaterializer:
@@ -287,7 +285,6 @@ def _build_flow_steps(
                 input_type=compiled.input_type,
                 output_mode=compiled.output_mode,
                 output_type=compiled.output_type,
-                mcp_policy=compiled.mcp_policy,
                 input_bindings=compiled.input_bindings,
                 input_contract=compiled.input_contract,
                 output_contract=compiled.output_contract,
@@ -415,63 +412,19 @@ def _resolve_assistant_resource_update_fields(
             invalid_context={"model_ref": assistant_spec.model_ref},
         )
 
-    uses_knowledge = bool(assistant_spec.knowledge_refs)
-    uses_mcp = bool(assistant_spec.mcp_server_refs or assistant_spec.mcp_tool_refs)
-
-    if uses_mcp:
-        mcp_invalid_context: dict[str, object] = {
-            "mcp_server_refs": assistant_spec.mcp_server_refs,
-            "mcp_tool_refs": assistant_spec.mcp_tool_refs,
-        }
-        mcp_server_ids = [
-            _resolve_materializer_resource_ref(
-                ref,
-                expected_slot_kind=ResourceSlotKind.MCP_SERVER,
-                allowed_local_kinds=_MCP_SERVER_LOCAL_KINDS,
-                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                invalid_code="invalid_mcp_ref",
-                invalid_message=f"Invalid MCP reference '{ref}'.",
-                invalid_context=mcp_invalid_context,
-            )
-            for ref in assistant_spec.mcp_server_refs
-        ]
-        mcp_tools = [
-            (
-                _resolve_materializer_resource_ref(
-                    ref,
-                    expected_slot_kind=ResourceSlotKind.MCP_TOOL,
-                    allowed_local_kinds=_MCP_TOOL_LOCAL_KINDS,
-                    resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                    invalid_code="invalid_mcp_ref",
-                    invalid_message=f"Invalid MCP reference '{ref}'.",
-                    invalid_context=mcp_invalid_context,
-                ),
-                True,
-            )
-            for ref in assistant_spec.mcp_tool_refs
-        ]
-        groups = []
-        websites = []
-        integration_knowledge_ids = []
-    elif uses_knowledge:
+    if assistant_spec.knowledge_refs:
         groups, websites, integration_knowledge_ids = _resolve_knowledge_refs(
             knowledge_refs=assistant_spec.knowledge_refs,
             resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
         )
-        mcp_server_ids = []
-        mcp_tools = []
     else:
         groups = []
         websites = []
         integration_knowledge_ids = []
-        mcp_server_ids = []
-        mcp_tools = []
 
     command_fields["groups"] = groups
     command_fields["websites"] = websites
     command_fields["integration_knowledge_ids"] = integration_knowledge_ids
-    command_fields["mcp_server_ids"] = mcp_server_ids
-    command_fields["mcp_tools"] = mcp_tools
 
     return command_fields
 

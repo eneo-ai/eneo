@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
@@ -40,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
 )
@@ -89,6 +91,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -243,7 +246,6 @@ async def _prepare_planner_request_for_test(
     litellm_kwargs: dict[str, object] | None = None,
     available_models: list[AIBuilderAvailableModelResource] | None = None,
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
-    available_mcps: object = None,
     flow: object = None,
     assistant_snapshots: object = None,
     attachment_files: list[File] | None = None,
@@ -265,7 +267,6 @@ async def _prepare_planner_request_for_test(
             litellm_kwargs=dict(litellm_kwargs or {}),
             available_models=available_models,
             available_kbs=available_kbs,
-            available_mcps=available_mcps,
             flow=cast(Any, flow),
             assistant_snapshots=cast(Any, assistant_snapshots),
             attachment_files=attachment_files or [],
@@ -1702,6 +1703,63 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
         await anext(stream)
 
     planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_rejects_legacy_mcp_revision_before_provider_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    plan_id = uuid4()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.AWAITING_APPROVAL,
+        planning_state_version=1,
+        latest_plan_id=plan_id,
+    )
+    planner.repo.load_planning_state.return_value = None
+    with pytest.raises(ValidationError) as validation_error:
+        AssistantSpec.model_validate(
+            {
+                "instructions": "Use the legacy tool.",
+                "mcp_tool_refs": ["mcp_tool.legacy"],
+            }
+        )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(side_effect=validation_error.value),
+    )
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Revise the plan"),
+        message="Revise the plan",
+        edit_context=AIBuilderPlanEditContext(
+            scope="whole_plan",
+            plan_id=plan_id,
+        ),
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_models=None,
+        available_kbs=None,
+        flow=None,
+        assistant_snapshots=None,
+        attachment_files=None,
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        await anext(stream)
+
+    assert exc_info.value.code is AIBuilderErrorCode.BAD_REQUEST
+    planner.litellm_client.assert_not_awaited()
+    planner.repo.accept_session_turn.assert_not_awaited()
+    planner.repo.mark_session_turn_processing.assert_not_awaited()
+    planner.repo.create_plan.assert_not_awaited()
+    planner.repo.release_session_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

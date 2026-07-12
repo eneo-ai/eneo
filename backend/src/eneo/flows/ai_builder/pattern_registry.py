@@ -431,21 +431,6 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
             "runtime_metadata_fields",
         ),
     ),
-    _pattern(
-        id="mcp_tool_step",
-        examples=(
-            "step uses a specific MCP tool for live external data",
-            "external system action isolated to one step with tool-level MCP refs",
-        ),
-        required_architectural_slots=(
-            "primary_runtime_input",
-            "terminal_output",
-        ),
-        question_template_ids=(
-            "primary_runtime_input",
-            "terminal_output",
-        ),
-    ),
     # Canonical multi-source fan-in shape: one source step feeds two or
     # more parallel JSON extractions, then a single text step composes
     # from all of them via `uses_previous_fields`. Without this archetype

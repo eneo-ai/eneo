@@ -24,10 +24,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    mcp_resource_selection_values,
-    mcp_selected_server_refs_from_values,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
@@ -35,7 +31,6 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     CreateFlowIntent,
     ProposalIntentArgumentError,
-    attach_selected_mcp_refs_to_explicit_intent_steps,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     resolve_ui_language,
@@ -81,14 +76,6 @@ async def process_create_intent_arguments(
 ) -> ToolProcessingResult:
     try:
         intent = parse_create_flow_intent_arguments(arguments)
-        if resource_catalog is not None:
-            intent = attach_selected_mcp_refs_to_explicit_intent_steps(
-                intent,
-                selected_server_refs=mcp_selected_server_refs_from_values(
-                    mcp_resource_selection_values(conversation)
-                ),
-                catalog=resource_catalog,
-            )
         aggregate_text = aggregate_freeform_user_text(conversation)
         compile_context = create_compile_context_from_planning_state(
             planning_state,

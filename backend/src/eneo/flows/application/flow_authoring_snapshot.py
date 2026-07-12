@@ -14,7 +14,6 @@ from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -69,7 +68,6 @@ def flow_step_to_authoring_spec(
         input_type=InputType(step.input_type),
         output_mode=OutputMode(step.output_mode),
         output_type=OutputType(step.output_type),
-        mcp_policy=MCPPolicy(step.mcp_policy),
         input_bindings=step.input_bindings,
         input_contract=step.input_contract,
         output_contract=step.output_contract,
@@ -95,12 +93,7 @@ def _resolve_existing_assistant_spec(
     if assistant_snapshot_projector is not None:
         return assistant_snapshot_projector(snapshot)
 
-    if (
-        snapshot.model is None
-        and not snapshot.knowledge_refs
-        and not snapshot.mcp_server_refs
-        and not snapshot.mcp_tool_refs
-    ):
+    if snapshot.model is None and not snapshot.knowledge_refs:
         return AssistantSpec(instructions=snapshot.instructions)
 
     raise ValueError("Assistant snapshot projector is required for resource refs.")

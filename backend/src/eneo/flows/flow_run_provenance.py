@@ -117,10 +117,6 @@ class AgenticProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class McpProvenance(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
 class CitationsProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -141,7 +137,6 @@ class FlowAttemptProvenance(BaseModel):
     artifacts: ArtifactProvenance | None = None
     agentic: AgenticProvenance | None = None
     guards: GuardsProvenance | None = None
-    mcp: McpProvenance | None = None
     citations: CitationsProvenance | None = None
 
     def to_payload(self) -> dict[str, Any]:
@@ -430,7 +425,6 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
         artifacts=_validate_extra_model(ArtifactProvenance, raw.get("artifacts")),
         agentic=_validate_extra_model(AgenticProvenance, raw.get("agentic")),
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
-        mcp=_validate_extra_model(McpProvenance, raw.get("mcp")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
     )
 

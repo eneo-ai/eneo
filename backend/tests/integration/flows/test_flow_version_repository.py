@@ -52,7 +52,6 @@ def _flow(
                 input_type="text",
                 output_mode="pass_through",
                 output_type="text",
-                mcp_policy="inherit",
             )
         ],
     )
@@ -82,7 +81,6 @@ def _definition_json(
                 "input_type": step.input_type,
                 "output_mode": output_mode or step.output_mode,
                 "output_type": output_type or step.output_type,
-                "mcp_policy": step.mcp_policy,
                 "output_config": output_config,
             }
         ],
@@ -187,7 +185,6 @@ async def test_create_derives_definition_checksum_from_stored_definition(
                     "input_type": step.input_type,
                     "output_mode": step.output_mode,
                     "output_type": step.output_type,
-                    "mcp_policy": step.mcp_policy,
                 }
             ],
         )

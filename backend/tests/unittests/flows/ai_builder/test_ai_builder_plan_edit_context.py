@@ -66,7 +66,6 @@ def _catalog():
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
 
 
@@ -1057,8 +1056,6 @@ def _edit_step(
             instructions=f"{name}.",
             model_ref=None,
             knowledge_refs=[],
-            mcp_server_refs=[],
-            mcp_tool_refs=[],
         ),
         input_source=InputSource.PREVIOUS_STEP
         if ref != "step_a"

@@ -63,7 +63,6 @@ from eneo.flows.runtime.docx_template_runtime import (
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
@@ -310,6 +309,13 @@ class FlowService:
             tenant_id=self.user.tenant_id,
         )
 
+    async def has_flow_mcp_configuration(self, flow: Flow) -> bool:
+        assistant_ids = list(dict.fromkeys(step.assistant_id for step in flow.steps))
+        return await self.flow_repo.has_assistant_mcp_configuration(
+            assistant_ids=assistant_ids,
+            tenant_id=self.user.tenant_id,
+        )
+
     async def update_flow_assistant(
         self,
         *,
@@ -317,6 +323,10 @@ class FlowService:
         assistant_id: UUID,
         update: AssistantUpdateCommand,
     ) -> tuple[Assistant, list[ResourcePermission]]:
+        if update.is_set("mcp_server_ids") or update.is_set("mcp_tools"):
+            raise BadRequestException(
+                "Flow MCP is unsupported. MCP servers and tools cannot be configured on a Flow assistant."
+            )
         flow = await self.get_flow(flow_id)
         self._ensure_flow_is_mutable(flow)
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
@@ -620,30 +630,11 @@ class FlowService:
                 for integration_knowledge_id in update.integration_knowledge_ids
             ]
 
-        mcp_servers: list[MCPServer] = assistant.mcp_servers
-        if update.is_set("mcp_server_ids") and update.mcp_server_ids is not None:
-            mcp_servers = []
-            unavailable_mcp_server_ids: list[str] = []
-            for mcp_server_id in update.mcp_server_ids:
-                try:
-                    mcp_servers.append(
-                        cast(MCPServer, space.get_mcp_server(mcp_server_id))
-                    )
-                except NotFoundException:
-                    unavailable_mcp_server_ids.append(str(mcp_server_id))
-            if unavailable_mcp_server_ids:
-                raise BadRequestException(
-                    "MCP server(s) are not available in this flow's space.",
-                    code="flow_mcp_server_not_available",
-                    context={"mcp_server_ids": unavailable_mcp_server_ids},
-                )
-
         return SimpleNamespace(
             completion_model=completion_model,
             collections=collections,
             websites=websites,
             integration_knowledge_list=integration_knowledge_list,
-            mcp_servers=mcp_servers,
         )
 
     def _normalize_steps_for_tenant(self, steps: list[FlowStep]) -> list[FlowStep]:
@@ -807,40 +798,13 @@ class FlowService:
                 step,
                 flow=flow,
             )
-        assistant_payload: Any = await self.assistant_service.get_assistant(
-            step.assistant_id
-        )
-        assistant = cast(
-            Any | None,
-            assistant_payload[0]
-            if isinstance(assistant_payload, tuple) and assistant_payload
-            else None,
-        )
-        mcp_server_entities: list[Any] = []
-        if assistant is not None:
-            assistant_mcp_servers = assistant.mcp_servers
-            if isinstance(assistant_mcp_servers, list):
-                mcp_server_entities = cast(list[Any], assistant_mcp_servers)
-        mcp_servers: list[dict[str, str]] = [
-            {"id": str(server.id), "name": server.name}
-            for server in mcp_server_entities
-        ]
-        mcp_tools_enabled: list[dict[str, str]] = []
-        for server in mcp_server_entities:
-            server_tools = cast(list[Any], getattr(server, "tools", []) or [])
-            for tool in server_tools:
-                if cast(bool, getattr(tool, "is_enabled", False)) is not True:
-                    continue
-                mcp_tools_enabled.append(
-                    {
-                        "tool_id": str(tool.id),
-                        "server_id": str(server.id),
-                        "name": tool.name,
-                    }
-                )
+        assistant, _ = await self.assistant_service.get_assistant(step.assistant_id)
+        if assistant.mcp_servers:
+            raise BadRequestException(
+                f"Step {step.step_order}: Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before publishing."
+            )
         assistant_snapshot = build_assistant_execution_snapshot(
             assistant=assistant,
-            mcp_server_entities=mcp_server_entities,
         )
         return {
             "step_id": str(step.id) if step.id is not None else None,
@@ -856,9 +820,6 @@ class FlowService:
             "output_contract": step.output_contract,
             "input_bindings": step.input_bindings,
             "output_classification_override": step.output_classification_override,
-            "mcp_policy": step.mcp_policy,
-            "mcp_servers": mcp_servers,
-            "mcp_tools_enabled": mcp_tools_enabled,
             "assistant_snapshot": assistant_snapshot,
             "input_config": step.input_config,
             "output_config": output_config,

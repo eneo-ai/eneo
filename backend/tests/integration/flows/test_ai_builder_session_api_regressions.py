@@ -84,7 +84,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -510,7 +509,6 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
                 existing_step_ref=existing_step_ref,
                 name="Steg A",
                 assistant_spec=AssistantSpec(instructions="Gör jobbet."),
-                mcp_policy=MCPPolicy.INHERIT,
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
@@ -4359,7 +4357,6 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
         resource_catalog = build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
-            available_mcps=[],
         )
         with pytest.raises(BadRequestException) as exc:
             _ = [
@@ -4539,7 +4536,6 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
                     existing_step_ref=None,
                     name="Step A",
                     assistant_spec=AssistantSpec(instructions="Summarize."),
-                    mcp_policy=MCPPolicy.INHERIT,
                     input_source=InputSource.FLOW_INPUT,
                     input_type=InputType.TEXT,
                     output_mode=OutputMode.PASS_THROUGH,
@@ -4999,7 +4995,6 @@ def _make_flow_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy="inherit",
         input_bindings=input_bindings,
         input_contract=None,
         output_contract=None,
@@ -6089,6 +6084,113 @@ async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_type
     payload = apply_response.json()
     assert payload["code"] == "invalid_existing_step_ref"
     assert payload["eneo_error_code"] == 9007
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_rejects_persisted_legacy_mcp_plan_before_create_effects(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder legacy MCP plan rejection",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    async with db_container() as container:
+        proposal_json = (
+            await container.session().execute(
+                select(BuilderPlans.proposal_json).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        legacy_proposal = json.loads(json.dumps(proposal_json))
+        legacy_proposal["content"]["spec"]["steps"][0]["assistant_spec"][
+            "mcp_tool_refs"
+        ] = ["mcp_tool.synthetic"]
+        await container.session().execute(
+            update(BuilderPlans)
+            .where(
+                BuilderPlans.id == plan_id,
+                BuilderPlans.tenant_id == tenant_id,
+            )
+            .values(proposal_json=legacy_proposal)
+        )
+
+    provider_call = AsyncMock(
+        side_effect=AssertionError("persisted plan rejection reached the provider")
+    )
+    authoring_prepare = AsyncMock(
+        side_effect=AssertionError("persisted plan rejection reached Flow authoring")
+    )
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=provider_call,
+        ),
+        patch.object(
+            FlowAuthoringCommandService,
+            "prepare",
+            new=authoring_prepare,
+        ),
+    ):
+        response = await client.post(
+            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == AIBuilderErrorCode.BAD_REQUEST.value
+    provider_call.assert_not_awaited()
+    authoring_prepare.assert_not_awaited()
+
+    async with db_container() as container:
+        flow_count = (
+            await container.session().execute(
+                select(sa.func.count())
+                .select_from(Flows)
+                .where(Flows.space_id == UUID(space_id))
+            )
+        ).scalar_one()
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        persisted_session_status = (
+            await container.session().execute(
+                select(BuilderSessions.status).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+
+    assert (
+        flow_count,
+        persisted_plan_status,
+        persisted_session_status,
+    ) == (
+        0,
+        PlanStatus.PROPOSED.value,
+        SessionStatus.AWAITING_APPROVAL.value,
+    )
 
 
 @pytest.mark.asyncio

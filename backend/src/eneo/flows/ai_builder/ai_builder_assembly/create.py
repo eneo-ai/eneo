@@ -103,7 +103,6 @@ _SUPPORTED_STRUCTURAL_PATTERN_IDS = frozenset(
         "json_to_artifact_report",
         "json_to_structured_payload",
         "json_to_text_summary",
-        "mcp_tool_step",
         "summarize_text",
         "text_to_artifact_report",
     }
@@ -504,8 +503,6 @@ def _assemble_create_intent(
             output_fields=tuple(semantic_step.output_fields or ()),
             model_ref=semantic_step.model_ref,
             knowledge_refs=tuple(semantic_step.knowledge_refs),
-            mcp_server_refs=tuple(semantic_step.mcp_server_refs),
-            mcp_tool_refs=tuple(semantic_step.mcp_tool_refs),
             citations_requested=semantic_step.citations_requested,
             review_mode=semantic_step.review_mode,
         )
@@ -856,8 +853,6 @@ def _is_plain_terminal_document_helper(
     if (
         step.uses_form_fields
         or step.knowledge_refs
-        or step.mcp_server_refs
-        or step.mcp_tool_refs
         or step.citations_requested
         or step.review_mode is not None
     ):
@@ -1024,8 +1019,6 @@ def _assemble_docx_template_fill(
         form_field_refs=tuple(semantic_step.uses_form_fields),
         model_ref=semantic_step.model_ref,
         knowledge_refs=tuple(semantic_step.knowledge_refs),
-        mcp_server_refs=tuple(semantic_step.mcp_server_refs),
-        mcp_tool_refs=tuple(semantic_step.mcp_tool_refs),
         citations_requested=semantic_step.citations_requested,
         review_mode=semantic_step.review_mode,
     )

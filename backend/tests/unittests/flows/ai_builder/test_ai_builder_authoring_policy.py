@@ -314,7 +314,6 @@ def _flow_step(
         input_type="text",
         output_mode="pass_through",
         output_type=output_type,
-        mcp_policy="inherit",
     )
 
 

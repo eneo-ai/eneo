@@ -33,7 +33,6 @@ from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     FLOW_INPUT_SOURCE_VALUES,
     FLOW_INPUT_TYPE_VALUES,
-    FLOW_MCP_POLICY_VALUES,
     FLOW_OUTPUT_MODE_VALUES,
     FLOW_OUTPUT_TYPE_VALUES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
@@ -61,7 +60,6 @@ FLOW_STEP_INPUT_SOURCE_VALUES = FLOW_INPUT_SOURCE_VALUES
 FLOW_STEP_INPUT_TYPE_VALUES = FLOW_INPUT_TYPE_VALUES
 FLOW_STEP_OUTPUT_MODE_VALUES = FLOW_OUTPUT_MODE_VALUES
 FLOW_STEP_OUTPUT_TYPE_VALUES = FLOW_OUTPUT_TYPE_VALUES
-FLOW_STEP_MCP_POLICY_VALUES = FLOW_MCP_POLICY_VALUES
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
 FLOW_RUN_RERUN_OPERATION_STATUS_VALUES = tuple(
     item.value for item in FlowRunRerunOperationStatus
@@ -259,11 +257,6 @@ class FlowSteps(BasePublic):
         JSONB, nullable=True
     )
     output_classification_override: Mapped[Optional[int]] = mapped_column(nullable=True)
-    mcp_policy: Mapped[str] = mapped_column(
-        sa.String(32),
-        nullable=False,
-        server_default="inherit",
-    )
     input_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     output_config: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
@@ -300,9 +293,6 @@ class FlowSteps(BasePublic):
             "NOT (input_type = 'text' AND output_mode = 'pass_through' "
             "AND output_type IN ('pdf','docx'))",
             name="ck_flow_steps_no_text_document_pass_through",
-        ),
-        CheckConstraint(
-            "mcp_policy IN ('inherit','restricted')", name="ck_flow_steps_mcp_policy"
         ),
         CheckConstraint(
             "timeout_seconds IS NULL OR timeout_seconds > 0",

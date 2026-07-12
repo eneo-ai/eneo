@@ -392,7 +392,6 @@ def test_openapi_flow_package_import_plan_preserves_discriminator(
     assert discriminator.get("propertyName") == "kind"
     assert set(discriminator.get("mapping", {}).keys()) == {
         "knowledge",
-        "mcp_tool",
         "model",
         "template_asset",
     }

@@ -17,7 +17,6 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageDependencyResolutionEntry,
     FlowPackageImportPlanStatus,
     FlowPackageLocalCandidate,
-    FlowPackageMcpToolDependencyResolution,
     FlowPackageModelCandidate,
     FlowPackageModelDependencyResolution,
     FlowPackageModelMatchIssue,
@@ -26,7 +25,6 @@ from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
-    FlowPackageMcpToolRequirement,
     FlowPackageModelGuidance,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -238,29 +236,6 @@ def test_planner_skips_optional_requirement_without_candidates() -> None:
     assert plan.can_publish_after_import is True
 
 
-def test_planner_marks_mcp_requirements_as_manual_setup_unsupported() -> None:
-    envelope = _envelope(
-        requirements=[
-            FlowPackageMcpToolRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.MCP_TOOL, "case-lookup"),
-            )
-        ]
-    )
-
-    plan = build_flow_package_import_plan(
-        envelope,
-        candidates=FlowPackageImportPlannerCandidates(),
-    )
-
-    resolution = plan.dependency_resolutions[0]
-    assert resolution.status is FlowPackageImportPlanStatus.UNSUPPORTED
-    assert resolution.install_blocks is True
-    assert resolution.publish_blocks is True
-    assert resolution.selection_required_for_install is False
-    assert resolution.auto_select_allowed is False
-    assert resolution.suggestions == []
-
-
 def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -> None:
     envelope = _envelope(
         requirements=[
@@ -290,9 +265,8 @@ def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None
             FlowPackageModelRequirement(
                 slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
             ),
-            FlowPackageMcpToolRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.MCP_TOOL, "lookup"),
-                server_slot_ref=_slot_ref(ResourceSlotKind.MCP_SERVER, "case-system"),
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
             ),
         ]
     )
@@ -308,13 +282,7 @@ def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None
     ]
 
     assert isinstance(reparsed_resolutions[0], FlowPackageModelDependencyResolution)
-    assert isinstance(
-        reparsed_resolutions[1],
-        FlowPackageMcpToolDependencyResolution,
-    )
-    assert reparsed_resolutions[1].status is FlowPackageImportPlanStatus.UNSUPPORTED
-    assert reparsed_resolutions[1].server_slot_ref is not None
-    assert reparsed_resolutions[1].server_slot_ref.ref == "mcp_server.case-system"
+    assert reparsed_resolutions[1].kind is FlowPackageRequirementKind.KNOWLEDGE
 
 
 def test_planner_caps_and_orders_suggestions_deterministically() -> None:

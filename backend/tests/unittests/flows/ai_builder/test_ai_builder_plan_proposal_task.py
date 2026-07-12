@@ -42,7 +42,6 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
-        available_mcps=[],
     )
 
 
@@ -96,8 +95,6 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
             output_type="json",
             output_mode="pass_through",
         ),
-        chosen_patterns=["mcp_tool_step"],
-        required_capabilities=["mcp_policy"],
     )
 
     catalog = build_ai_builder_resource_catalog(
@@ -119,21 +116,6 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
                 "description": "Local policy reference material.",
             }
         ],
-        available_mcps=[
-            {
-                "ref": "case-server",
-                "display_name": "Case system",
-                "description": "Reads current case data.",
-                "tools": [
-                    {
-                        "ref": "case-lookup",
-                        "display_name": "Lookup case",
-                        "description": "Fetches a case by ID.",
-                        "input_schema": {"type": "object"},
-                    }
-                ],
-            }
-        ],
     )
 
     prompt = build_plan_proposal_system_prompt(
@@ -150,16 +132,11 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
     assert "Available resources:" in prompt
     assert "ref=`model.fast-model`" in prompt
     assert "ref=`knowledge.policy-kb`" in prompt
-    assert "server_ref=`mcp_server.case-system`" in prompt
-    assert "tool_ref=`mcp_tool.case-system-lookup-case`" in prompt
     assert (
         "Exception: when the Available resources section gives portable resource slot refs"
         in prompt
     )
     assert "human-readable `flow_name`" in prompt
-    assert "mcp_tool_step" not in prompt
-    assert "mcp_policy" not in prompt
-    assert "must not execute MCP tools" in prompt
     assert "input_schema" not in prompt
     assert "assistant_ref" not in prompt
 
@@ -343,28 +320,6 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     assert "Prefer source-derived output_fields" in prompt
     assert "use input_fields only for values the user must provide at runtime" in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
-
-
-def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=PlanningState.empty(),
-        confirmed_requirements=_requirements(
-            summary="Answer without external integrations."
-        ),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=_empty_catalog(),
-        mcp_selection_values={"without_mcp"},
-    )
-
-    assert "MCP selection decision:" in prompt
-    assert "continue without MCP tools" in prompt
-    assert "`mcp_server_refs` or `mcp_tool_refs`" in prompt
-    assert (
-        "do not claim that the flow fetches live or external data by itself" in prompt
-    )
-    assert "collect it as runtime input" in prompt
 
 
 def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
@@ -616,73 +571,3 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     assert "include the leading transcription step with review_mode" in prompt
     assert "set that step's review_mode" in prompt
     assert "separate AI step" in prompt
-
-
-def test_plan_proposal_prompt_honors_selected_mcp_server():
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "ref": "time-server",
-                "display_name": "Time MCP",
-                "description": "Kan hämta tiden.",
-                "tools": [
-                    {
-                        "ref": "current-time",
-                        "display_name": "get_current_time",
-                        "description": "Get current time in a specific timezone.",
-                    }
-                ],
-            }
-        ],
-    )
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=PlanningState.empty(),
-        confirmed_requirements=_requirements(
-            summary="Use an enabled MCP for live data."
-        ),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=catalog,
-        mcp_selection_values={"use_mcp_server:mcp_server.time-mcp"},
-    )
-
-    assert "The user allowed these MCP server refs: `mcp_server.time-mcp`." in prompt
-    assert "Prefer specific `mcp_tool_refs`" in prompt
-    assert "Selected MCP tools available for step-level use" in prompt
-    assert "tool_ref=`mcp_tool.time-mcp-get-current-time`" in prompt
-    assert "server_ref=`mcp_server.time-mcp`" in prompt
-
-
-def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "ref": "time-server",
-                "display_name": "Time MCP",
-                "tools": [{"ref": "current-time", "display_name": "get_current_time"}],
-            }
-        ],
-    )
-
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=PlanningState.empty(),
-        confirmed_requirements=_requirements(
-            summary="Use an enabled MCP for live data."
-        ),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=catalog,
-        mcp_selection_values={"use_mcp_server:missing-server"},
-    )
-
-    assert "Available resources:" in prompt
-    assert "server_ref=`mcp_server.time-mcp`" in prompt
-    assert "MCP selection decision:" not in prompt
-    assert "missing-server" not in prompt

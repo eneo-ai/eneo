@@ -23,7 +23,6 @@ from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_review_mode_schema,
 )
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.enums import FlowMcpPolicy
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
@@ -38,24 +37,14 @@ def build_edit_flow_tool_schema(
 
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
-    # Do not constrain MCP refs with schema enums. When a requested MCP is
-    # absent, enums can force the model to pick an unrelated available MCP.
-    # Catalog resolution and quality feedback provide the durable guardrail.
-    mcp_server_refs: list[str] | None = None
-    mcp_tool_refs: list[str] | None = None
-
     step_payload_schema = build_semantic_step_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
     )
     modify_step_schema = _build_modify_step_schema(
         valid_refs=valid_refs,
         model_refs=model_refs,
         kb_refs=kb_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
     )
 
     return {
@@ -151,8 +140,6 @@ def _build_modify_step_schema(
     valid_refs: list[str],
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
-    mcp_server_refs: list[str] | None,
-    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     return {
         "type": "object",
@@ -169,13 +156,7 @@ def _build_modify_step_schema(
             "assistant_spec": _build_assistant_spec_schema(
                 model_refs,
                 kb_refs,
-                mcp_server_refs,
-                mcp_tool_refs,
             ),
-            "mcp_policy": {
-                "type": ["string", "null"],
-                "enum": [*(policy.value for policy in FlowMcpPolicy), None],
-            },
             "input_source": {
                 "type": ["string", "null"],
                 "enum": [*builder_input_source_values(), None],
@@ -230,8 +211,6 @@ def _build_form_field_spec_schema() -> dict[str, Any]:
 def _build_assistant_spec_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
-    mcp_server_refs: list[str] | None,
-    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
@@ -244,8 +223,6 @@ def _build_assistant_spec_schema(
             **build_resource_ref_property_schemas(
                 model_refs=model_refs,
                 kb_refs=kb_refs,
-                mcp_server_refs=mcp_server_refs,
-                mcp_tool_refs=mcp_tool_refs,
             ),
         },
     }

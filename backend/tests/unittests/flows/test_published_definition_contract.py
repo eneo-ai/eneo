@@ -613,6 +613,46 @@ def test_verified_parser_rejects_legacy_http_post_input_snapshot() -> None:
     assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
 
 
+@pytest.mark.parametrize(
+    "legacy_fields",
+    [
+        {"mcp_policy": "inherit"},
+        {"mcp_servers": [{"id": str(uuid4()), "name": "Legacy"}]},
+        {
+            "mcp_tools_enabled": [
+                {
+                    "tool_id": str(uuid4()),
+                    "server_id": str(uuid4()),
+                    "name": "mutate",
+                }
+            ]
+        },
+        {"assistant_snapshot": {"mcp_tools": [{"name": "mutate"}]}},
+    ],
+)
+def test_verified_parser_rejects_legacy_flow_mcp_snapshot(
+    legacy_fields: dict[str, object],
+) -> None:
+    legacy_step = _step(order=1)
+    legacy_step.update(legacy_fields)
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Legacy MCP flow",
+        description=None,
+        metadata_json=None,
+        steps=[legacy_step],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        published_definition_module.parse_verified_published_definition(
+            definition,
+            expected_checksum=published_definition_checksum(definition),
+            flow_version=7,
+        )
+
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
+
+
 def test_verified_parser_reuses_one_full_validation_result(monkeypatch) -> None:
     definition = build_published_definition_json(
         flow_id=uuid4(),

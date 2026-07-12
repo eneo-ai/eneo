@@ -18,7 +18,6 @@ def _assistant(
     *,
     model_level: int | None,
     knowledge_level: int | None = None,
-    mcp_level: int | None = None,
 ):
     completion_model = (
         SimpleNamespace(security_classification=_classification(model_level))
@@ -36,17 +35,11 @@ def _assistant(
         if knowledge_level is not None
         else []
     )
-    mcp_servers = (
-        [SimpleNamespace(security_classification=_classification(mcp_level))]
-        if mcp_level is not None
-        else []
-    )
     return SimpleNamespace(
         completion_model=completion_model,
         collections=collections,
         websites=[],
         integration_knowledge_list=[],
-        mcp_servers=mcp_servers,
     )
 
 
@@ -70,20 +63,6 @@ def test_rejects_model_below_previous_step_classification() -> None:
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
 
 
-def test_rejects_mcp_server_below_input_floor() -> None:
-    with pytest.raises(BadRequestException) as exc_info:
-        evaluate_step_security_classification(
-            step_order=2,
-            input_source="previous_step",
-            output_classification_override=None,
-            prior_output_levels_by_order={1: 3},
-            assistant=_assistant(model_level=3, mcp_level=2),
-            space=_space(1),
-        )
-
-    assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
-
-
 def test_rejects_output_override_write_down() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
@@ -104,7 +83,7 @@ def test_returns_effective_output_level_when_security_is_compatible() -> None:
         input_source="previous_step",
         output_classification_override=4,
         prior_output_levels_by_order={1: 3},
-        assistant=_assistant(model_level=4, knowledge_level=3, mcp_level=3),
+        assistant=_assistant(model_level=4, knowledge_level=3),
         space=_space(1),
     )
 
@@ -118,7 +97,7 @@ def test_current_step_output_override_does_not_raise_same_step_input_floor() -> 
         input_source="flow_input",
         output_classification_override=3,
         prior_output_levels_by_order={},
-        assistant=_assistant(model_level=3, mcp_level=1),
+        assistant=_assistant(model_level=3),
         space=_space(None),
     )
 
@@ -133,8 +112,8 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
             input_source="all_previous_steps",
             output_classification_override=None,
             prior_output_levels_by_order={1: 1, 2: 3, 3: 2},
-            assistant=_assistant(model_level=3, mcp_level=2),
+            assistant=_assistant(model_level=2),
             space=_space(1),
         )
 
-    assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"

@@ -201,7 +201,6 @@ async def test_space_flow_delete_blockers_detect_step_rows(db_session, admin_use
                 input_type="text",
                 output_mode="pass_through",
                 output_type="json",
-                mcp_policy="inherit",
             )
         )
         await session.flush()

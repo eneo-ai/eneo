@@ -2281,7 +2281,8 @@ def test_openapi_flow_retention_days_documents_public_range(
         "FlowSparsePublic",
         "FlowPublic",
     ):
-        properties = schemas.get(schema_name, {}).get("properties", {})
+        assert schema_name in schemas
+        properties = schemas[schema_name].get("properties", {})
         retention_schema = properties.get("data_retention_days", {})
         integer_schema = _integer_schema_option(retention_schema)
 
@@ -2493,7 +2494,6 @@ def test_openapi_flow_step_create_schema_exposes_enum_constraints(
         "input_type",
         "output_mode",
         "output_type",
-        "mcp_policy",
     ):
         field_schema = properties.get(field, {})
         enum_values = _extract_enum_values(openapi_spec, field_schema)
@@ -2524,12 +2524,65 @@ def test_openapi_flow_step_create_enum_values_match_contract(
             "template_fill",
         },
         "output_type": {"text", "json", "pdf", "docx"},
-        "mcp_policy": {"inherit", "restricted"},
     }
     for field, expected_values in expected.items():
         enum_values = _extract_enum_values(openapi_spec, properties.get(field, {}))
         missing = expected_values - enum_values
         assert not missing, f"{field} missing enum values: {sorted(missing)}"
+
+
+def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+
+    for schema_name in (
+        "FlowStepCreateRequest",
+        "FlowStepUpdateRequest",
+        "FlowStepPublic",
+        "FlowAssistantPublic",
+        "FlowAssistantUpdateRequest",
+    ):
+        assert schema_name in schemas
+        properties = schemas[schema_name].get("properties", {})
+        assert "mcp_policy" not in properties
+        assert "mcp_servers" not in properties
+        assert "mcp_tools" not in properties
+
+    assert "FlowMcpPolicy" not in schemas
+    assert "AssistantPublic" in schemas
+    standalone_assistant_properties = schemas["AssistantPublic"].get("properties", {})
+    assert "mcp_servers" in standalone_assistant_properties
+    assert "mcp_tools" in standalone_assistant_properties
+
+    flow_assistant_ref = "#/components/schemas/FlowAssistantPublic"
+    for path, method in (
+        ("/api/v1/flows/{id}/assistants/", "post"),
+        ("/api/v1/flows/{id}/assistants/{assistant_id}/", "get"),
+        ("/api/v1/flows/{id}/assistants/{assistant_id}/", "patch"),
+    ):
+        response_schema = openapi_spec["paths"][path][method]["responses"][
+            "200" if method != "post" else "201"
+        ]["content"]["application/json"]["schema"]
+        assert response_schema == {"$ref": flow_assistant_ref}
+
+
+def test_openapi_flow_package_mcp_import_example_matches_runtime_rejection(
+    openapi_spec: dict,
+) -> None:
+    import_examples = _error_example_values(
+        _get_operation(
+            openapi_spec,
+            "/api/v1/spaces/{id}/flow-packages/imports/",
+            "post",
+        ),
+        status_code="400",
+    )
+    import_example = import_examples["mcp_unsupported"]
+    assert import_example["message"] == (
+        "Flow packages do not support MCP fields or resources."
+    )
+    assert import_example["context"] == {}
 
 
 def test_openapi_excludes_http_post_input_and_retains_http_post_output(

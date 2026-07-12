@@ -21,8 +21,6 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeGuidance,
     FlowPackageKnowledgeRequirement,
-    FlowPackageMcpToolGuidance,
-    FlowPackageMcpToolRequirement,
     FlowPackageModelGuidance,
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -360,14 +358,6 @@ def test_data_sensitivity_normalizes_optional_text() -> None:
     assert sensitivity.notes == "Review local policy."
 
 
-def test_mcp_tool_requirement_requires_mcp_server_slot_for_server_context() -> None:
-    with pytest.raises(ValidationError, match="must be a mcp_server slot"):
-        FlowPackageMcpToolRequirement(
-            slot_ref=_slot_ref(ResourceSlotKind.MCP_TOOL, "lookup-case"),
-            server_slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
-        )
-
-
 def test_requirement_set_keeps_discriminated_entries() -> None:
     requirements = FlowPackageRequirementSet(
         schema_version=1,
@@ -435,10 +425,6 @@ def test_requirement_set_keeps_per_kind_typed_guidance() -> None:
                     recommended_sources=["local handbook"]
                 ),
             ),
-            FlowPackageMcpToolRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.MCP_TOOL, "lookup"),
-                guidance=FlowPackageMcpToolGuidance(expected_behavior="Lookup case"),
-            ),
             FlowPackageTemplateAssetRequirement(
                 slot_ref=_slot_ref(ResourceSlotKind.TEMPLATE_ASSET, "report"),
                 guidance=FlowPackageTemplateAssetGuidance(
@@ -450,9 +436,8 @@ def test_requirement_set_keeps_per_kind_typed_guidance() -> None:
 
     assert isinstance(requirements.requirements[0], FlowPackageModelRequirement)
     assert isinstance(requirements.requirements[1], FlowPackageKnowledgeRequirement)
-    assert isinstance(requirements.requirements[2], FlowPackageMcpToolRequirement)
     assert isinstance(
-        requirements.requirements[3],
+        requirements.requirements[2],
         FlowPackageTemplateAssetRequirement,
     )
 

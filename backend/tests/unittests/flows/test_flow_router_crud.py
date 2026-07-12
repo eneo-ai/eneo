@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 
 import eneo.flows.api.flow_http_test_router as flow_http_test_router_module
 from eneo.actors.actors.space_actor import SpaceRole
-from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
@@ -46,6 +45,7 @@ from eneo.flows.api.flow_http_test_router import (
 )
 from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
+    FlowAssistantUpdateRequest,
     FlowCreateRequest,
     FlowStepCreateRequest,
     FlowStepUpdateRequest,
@@ -387,7 +387,6 @@ async def test_create_flow_pins_audit_entity_ids(monkeypatch):
                     output_mode="pass_through",
                     output_type="json",
                     output_classification_override=2,
-                    mcp_policy="inherit",
                 )
             ],
         ),
@@ -589,8 +588,6 @@ async def test_update_flow_assistant_forwards_payload():
     group_id = uuid4()
     integration_knowledge_id = uuid4()
     completion_model_id = uuid4()
-    mcp_server_id = uuid4()
-    mcp_tool_id = uuid4()
     updated_assistant = SimpleNamespace(
         id=assistant_id,
         name="Updated assistant",
@@ -613,14 +610,12 @@ async def test_update_flow_assistant_forwards_payload():
         id=flow_id,
         assistant_id=assistant_id,
         request=SimpleNamespace(state=SimpleNamespace()),
-        assistant_in=AssistantUpdatePublic(
+        assistant_in=FlowAssistantUpdateRequest(
             name="Updated assistant",
             attachments=[{"id": attachment_id}],
             websites=[{"id": website_id}],
             groups=[{"id": group_id}],
             integration_knowledge_list=[{"id": integration_knowledge_id}],
-            mcp_servers=[{"id": mcp_server_id}],
-            mcp_tools=[{"tool_id": mcp_tool_id, "is_enabled": True}],
             completion_model={"id": completion_model_id},
         ),
         container=container,
@@ -638,8 +633,8 @@ async def test_update_flow_assistant_forwards_payload():
     assert update.websites == [website_id]
     assert update.groups == [group_id]
     assert update.integration_knowledge_ids == [integration_knowledge_id]
-    assert update.mcp_server_ids == [mcp_server_id]
-    assert update.mcp_tools == [(mcp_tool_id, True)]
+    assert update.mcp_server_ids is None
+    assert update.mcp_tools is None
     assert update.completion_model_id == completion_model_id
     audit_service.log_async.assert_awaited_once()
 
@@ -702,7 +697,6 @@ async def test_update_flow_pins_audit_entity_ids():
                 output_mode=flow.steps[0].output_mode,
                 output_type=flow.steps[0].output_type,
                 output_classification_override=3,
-                mcp_policy=flow.steps[0].mcp_policy,
             )
         ]
     )

@@ -5,10 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 
-from eneo.assistants.api.assistant_models import (
-    AssistantPublic,
-    AssistantUpdatePublic,
-)
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 from eneo.assistants.api.assistant_update_adapter import (
     to_flow_assistant_update_command,
 )
@@ -17,7 +14,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
-from eneo.flows.api.flow_models import FlowAssistantCreateRequest
+from eneo.flows.api.flow_models import (
+    FlowAssistantCreateRequest,
+    FlowAssistantPublic,
+    FlowAssistantUpdateRequest,
+)
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes, UnauthorizedException
@@ -39,8 +40,6 @@ _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
     "groups": [],
     "websites": [],
     "integration_knowledge_list": [],
-    "mcp_servers": [],
-    "mcp_tools": [],
     "published": False,
     "user": {
         "id": "00000000-0000-0000-0000-000000000030",
@@ -78,7 +77,7 @@ async def _require_flow_assistant_access(
 
 @router.post(
     "/{id}/assistants/",
-    response_model=AssistantPublic,
+    response_model=FlowAssistantPublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow_assistant",
     summary="Create Flow Assistant",
@@ -153,7 +152,7 @@ async def create_flow_assistant(
 
 @router.get(
     "/{id}/assistants/{assistant_id}/",
-    response_model=AssistantPublic,
+    response_model=FlowAssistantPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_assistant",
     summary="Get Flow Assistant",
@@ -212,13 +211,13 @@ async def get_flow_assistant(
 
 @router.patch(
     "/{id}/assistants/{assistant_id}/",
-    response_model=AssistantPublic,
+    response_model=FlowAssistantPublic,
     status_code=status.HTTP_200_OK,
     operation_id="update_flow_assistant",
     summary="Update Flow Assistant",
     description=(
         "Update a flow-managed assistant that belongs to the specified draft flow. "
-        "Only fields accepted by `AssistantUpdatePublic` are applied; omitted fields "
+        "Only fields accepted by `FlowAssistantUpdateRequest` are applied; omitted fields "
         "are left unchanged. Use this endpoint for assistant details that should travel "
         "with the flow authoring experience, not for updating unrelated shared assistants."
     ),
@@ -255,14 +254,18 @@ async def update_flow_assistant(
         UUID, Path(description="Identifier of the flow-managed assistant to update.")
     ],
     request: Request,
-    assistant_in: AssistantUpdatePublic,
+    assistant_in: FlowAssistantUpdateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
-    update = to_flow_assistant_update_command(assistant_in)
+    update = to_flow_assistant_update_command(
+        AssistantUpdatePublic.model_validate(
+            assistant_in.model_dump(exclude_unset=True)
+        )
+    )
 
     updated_assistant, permissions = await flow_service.update_flow_assistant(
         flow_id=id,

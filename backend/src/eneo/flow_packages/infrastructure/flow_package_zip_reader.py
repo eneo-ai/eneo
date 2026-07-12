@@ -31,6 +31,7 @@ from eneo.flow_packages.domain.flow_package_requirements import (
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpecLocalRefNotPortableError,
+    has_flow_mcp_unsupported_error,
 )
 
 MAX_ZIP_ENTRIES = 4
@@ -225,6 +226,11 @@ def _parse_subdocument(
                 code=FlowPackageErrorCode.LOCAL_RESOURCE_REFS_NOT_PORTABLE,
                 message="Flow package draft contains source-local resource refs.",
             ) from exc
+        if _has_removed_flow_mcp_field(exc):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED,
+                message="Flow packages do not support MCP fields or resources.",
+            ) from exc
         raise FlowPackageValidationError(
             code=invalid_code,
             message="Flow package subdocument is invalid.",
@@ -247,6 +253,16 @@ def _has_local_resource_ref_error(exc: ValidationError) -> bool:
             continue
         original_error = ctx.get("error")
         if isinstance(original_error, AssistantSpecLocalRefNotPortableError):
+            return True
+    return False
+
+
+def _has_removed_flow_mcp_field(exc: ValidationError) -> bool:
+    if has_flow_mcp_unsupported_error(exc):
+        return True
+    for error in exc.errors():
+        ctx = error.get("ctx")
+        if isinstance(ctx, Mapping) and ctx.get("tag") == "mcp_tool":
             return True
     return False
 

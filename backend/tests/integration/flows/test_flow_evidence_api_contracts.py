@@ -88,7 +88,6 @@ def _build_flow(
                 output_contract={"type": "object"},
                 input_bindings={"question": "{{flow.input.question}}"},
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
                 output_config={
                     "url": "https://example.org/hook?token=top-secret",

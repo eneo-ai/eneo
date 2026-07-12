@@ -117,7 +117,6 @@ def _assert_materialized_steps_match_compiled(
         assert materialized.input_type == compiled.input_type
         assert materialized.output_mode == compiled.output_mode
         assert materialized.output_type == compiled.output_type
-        assert materialized.mcp_policy == compiled.mcp_policy
         assert materialized.input_bindings == compiled.input_bindings
         assert materialized.input_contract == compiled.input_contract
         assert materialized.output_contract == compiled.output_contract

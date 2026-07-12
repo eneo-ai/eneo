@@ -133,7 +133,6 @@ def _payload(**overrides: object) -> dict[str, object]:
         "input_type": "text",
         "output_mode": "pass_through",
         "output_type": "json",
-        "mcp_policy": "inherit",
     }
     payload.update(overrides)
     return payload
@@ -169,7 +168,6 @@ def _assert_extra_forbidden(
         ("input_type", "banana"),
         ("output_mode", "banana"),
         ("output_type", "banana"),
-        ("mcp_policy", "banana"),
     ],
 )
 def test_flow_step_create_request_rejects_invalid_enum_values(
@@ -610,6 +608,11 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                 "created_at": "2026-03-20T12:00:00Z",
                 "updated_at": "2026-03-20T12:05:00Z",
             },
+            "definition_integrity": {
+                "status": "verified",
+                "expected_checksum": "expected-checksum",
+                "current_checksum": "expected-checksum",
+            },
             "definition_snapshot": {"steps": []},
             "step_results": [
                 {
@@ -780,17 +783,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                             "classification": None,
                             "config": None,
                         },
-                        "mcp": {
-                            "policy": "inherit",
-                            "servers": [{"id": "server-1", "name": "Weather"}],
-                            "tools_enabled": [
-                                {
-                                    "tool_id": "tool-1",
-                                    "server_id": "server-1",
-                                    "name": "forecast_tool",
-                                }
-                            ],
-                        },
                         "rag": {
                             "attempted": True,
                             "status": "success",
@@ -856,7 +848,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                 "security": {
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
                 },
             },
         }

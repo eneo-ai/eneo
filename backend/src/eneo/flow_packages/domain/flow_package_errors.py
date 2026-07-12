@@ -39,7 +39,6 @@ class FlowPackageExportErrorCode(StrEnum):
     STEP_CONFIG_NOT_PORTABLE = "flow_package_export_step_config_not_portable"
     UNMAPPED_RESOURCE_REF = "flow_package_export_unmapped_resource_ref"
     DUPLICATE_RESOURCE_BINDING = "flow_package_export_duplicate_resource_binding"
-    MCP_EXPORT_UNSUPPORTED = "flow_package_export_mcp_unsupported"
     TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED = (
         "flow_package_export_template_asset_payload_unsupported"
     )

@@ -70,7 +70,6 @@ def _flow(
                 input_type="document",
                 output_mode="pass_through",
                 output_type="json",
-                mcp_policy="inherit",
                 input_config={"runtime_input": {"enabled": True}},
             )
         ],
@@ -124,7 +123,6 @@ async def _create_version(
                     "input_config": step.input_config,
                     "output_mode": step.output_mode,
                     "output_type": step.output_type,
-                    "mcp_policy": step.mcp_policy,
                 }
                 for step in flow.steps
             ],

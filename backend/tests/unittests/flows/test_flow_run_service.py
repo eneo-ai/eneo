@@ -178,7 +178,6 @@ def _step(step_order: int = 1) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
     )
 
 
@@ -401,7 +400,6 @@ def _published_runtime_step(step: FlowStep) -> dict[str, object]:
         "output_contract": step.output_contract,
         "output_config": step.output_config,
         "output_classification_override": step.output_classification_override,
-        "mcp_policy": enum_or_string(step.mcp_policy),
     }
 
 
@@ -1509,7 +1507,6 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 },
                 {
                     "step_id": str(flow.steps[1].id),
@@ -1519,7 +1516,6 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 },
             ],
         ),
@@ -1617,7 +1613,6 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),
@@ -1692,7 +1687,6 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
                     "input_config": runtime_step.input_config,
                     "output_mode": "pass_through",
                     "output_type": "json",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),
@@ -3813,8 +3807,6 @@ async def test_get_evidence_redacts_sensitive_values(user):
     )
     assert evidence["debug_export"]["run"]["status"] == "queued"
     assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
-    assert evidence["debug_export"]["steps"][0]["mcp"]["servers"] == []
-    assert evidence["debug_export"]["steps"][0]["mcp"]["tools_enabled"] == []
     assert (
         evidence["debug_export"]["definition_snapshot"]["steps"][0]["output_config"][
             "headers"
@@ -3849,7 +3841,6 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "text",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),
@@ -3958,7 +3949,6 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "text",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),
@@ -4168,7 +4158,6 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "text",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),
@@ -4225,7 +4214,6 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "text",
-                    "mcp_policy": "inherit",
                 }
             ],
         ),

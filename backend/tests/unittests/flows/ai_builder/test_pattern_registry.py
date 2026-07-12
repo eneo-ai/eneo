@@ -60,7 +60,6 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
         "comparison",
         "sectioned_form_intake",
         "form_field_runtime_inputs",
-        "mcp_tool_step",
         "source_parallel_extractions_to_final_text",
     }
 )

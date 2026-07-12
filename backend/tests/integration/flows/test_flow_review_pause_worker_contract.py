@@ -135,7 +135,6 @@ def _build_review_pause_flow(
             output_contract=first_step_output_contract,
             input_bindings={"question": "{{flow.input.question}}"},
             output_classification_override=None,
-            mcp_policy="inherit",
             input_config=None,
             output_config=None,
             review_policy=FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW),
@@ -159,7 +158,6 @@ def _build_review_pause_flow(
                     output_contract=None,
                     input_bindings={"question": "{{step_1.output.text}}"},
                     output_classification_override=None,
-                    mcp_policy="inherit",
                     input_config=None,
                     output_config=None,
                 ),
@@ -178,7 +176,6 @@ def _build_review_pause_flow(
                     output_contract=None,
                     input_bindings={"question": "{{step_2.output.text}}"},
                     output_classification_override=None,
-                    mcp_policy="inherit",
                     input_config=None,
                     output_config=None,
                 ),
@@ -218,7 +215,6 @@ def _definition_step(
         "input_bindings": step.input_bindings,
         "output_mode": step.output_mode.value,
         "output_type": step.output_type.value,
-        "mcp_policy": step.mcp_policy.value,
         "assistant_snapshot": assistant_snapshot,
     }
     if step.review_policy is not None:
@@ -284,7 +280,6 @@ async def _create_review_pause_runtime_context(
     )
     assistant_snapshot = build_assistant_execution_snapshot(
         assistant=runtime_assistant,
-        mcp_server_entities=[],
     )
     assert assistant_snapshot is not None
     definition_json = build_published_definition_json(

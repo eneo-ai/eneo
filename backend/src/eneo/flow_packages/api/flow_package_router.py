@@ -640,7 +640,6 @@ def _raise_export_error(exc: FlowPackageExportError) -> NoReturn:
             | FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
             | FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF
             | FlowPackageExportErrorCode.DUPLICATE_RESOURCE_BINDING
-            | FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED
             | FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED
             | FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
             | FlowPackageExportErrorCode.JSON_PAYLOAD_TOO_DEEP

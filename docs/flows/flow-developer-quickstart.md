@@ -116,6 +116,11 @@ The fields below explain most step behavior.
 "how should this step execute or render?" `output_type` answers "what kind of
 value or artifact does the step produce?"
 
+Flow supports HTTP GET as an input source and durable HTTP POST as a terminal
+output mode. Flow does not support HTTP POST input or MCP servers and tools at
+authoring, publish, runtime, Builder, or package boundaries. Standalone
+assistants and conversations keep their separately owned MCP behavior.
+
 ## How data moves between steps
 
 At run time, step input resolution converts the published step definition plus

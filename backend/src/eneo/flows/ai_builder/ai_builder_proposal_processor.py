@@ -6,30 +6,17 @@ from typing import (
     Any,
 )
 
-from eneo.flows.ai_builder.ai_builder_backend_question_persistence import (
-    BackendQuestionPersistenceResult,
-    persist_backend_question,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    build_mcp_resource_selection_question,
-    find_named_mcp_request_issue,
-    mcp_selection_answer_allows_planning,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_policy import (
-    resolve_ui_language,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
@@ -56,14 +43,6 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
-
-
-def _conversation_user_text(conversation: list[ConversationMessage]) -> str:
-    return "\n".join(
-        message.content
-        for message in conversation
-        if message.role == "user" and message.content
-    )
 
 
 class AIBuilderProposalProcessor:
@@ -132,20 +111,6 @@ class AIBuilderProposalProcessor:
         the create/edit tool payload.
         """
 
-        mcp_preflight_result = await self._mcp_preflight_events_if_needed(
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            resource_catalog=resource_catalog,
-            flow=flow,
-            assistant_metadata=assistant_metadata,
-            planning_state=planning_state,
-        )
-        if mcp_preflight_result is not None:
-            for event in mcp_preflight_result.events:
-                yield event
-            return
-
         if flow is None:
             scoped_revision_result = await run_scoped_plan_revision_attempt(
                 request=ScopedPlanRevisionRequest(
@@ -195,55 +160,3 @@ class AIBuilderProposalProcessor:
             before_provider_call=before_provider_call,
         ):
             yield event
-
-    async def _mcp_preflight_events_if_needed(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        resource_catalog: AIBuilderResourceCatalog | None,
-        flow: "Flow | None",
-        assistant_metadata: dict[str, Any] | None,
-        planning_state: PlanningState | None,
-    ) -> BackendQuestionPersistenceResult | None:
-        if resource_catalog is None or mcp_selection_answer_allows_planning(
-            conversation
-        ):
-            return None
-
-        issue = find_named_mcp_request_issue(
-            catalog=resource_catalog,
-            signal_text=_conversation_user_text(conversation),
-        )
-        if issue is None:
-            return None
-
-        question_data, assistant_text = build_mcp_resource_selection_question(
-            issue=issue,
-            catalog=resource_catalog,
-            language=resolve_ui_language(conversation) or "sv",
-        )
-        logger.info(
-            "ai_builder_mcp_preflight_requires_clarification "
-            "session_id=%s requested_mcp=%s",
-            turn.session_id,
-            issue.requested_name,
-        )
-        return await persist_backend_question(
-            repo=self.repo,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            question=BackendQuestion(
-                question_data=question_data,
-                assistant_text=assistant_text,
-            ),
-            assistant_metadata=assistant_metadata,
-            tool_content=(
-                "MCP selection question presented before proposal because the user "
-                "requested an MCP by name and must choose from enabled space MCP resources."
-            ),
-            flow=flow,
-            planning_state_overlay=planning_state,
-        )

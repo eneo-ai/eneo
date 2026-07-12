@@ -57,9 +57,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
         "För en direkt textomvandling utan filer, JSON, extra fält eller granskning ska intentionen innehålla ett enda textsteg som gör omvandlingen."
     ),
 }
-CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS: frozenset[str] = frozenset(
-    {"mcp_selection_requires_semantic_support"}
-)
 
 
 def format_create_intent_quality_feedback(feedback: str | None) -> str | None:
@@ -78,9 +75,6 @@ def format_create_critic_feedback(issues: tuple[CriticIssue, ...]) -> str | None
             )
         if issue.id in CREATE_CRITIC_REMEDIATION:
             remediations.append(CREATE_CRITIC_REMEDIATION[issue.id])
-            continue
-        if issue.id in CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS:
-            remediations.append(issue.remediation)
             continue
         raise ValueError(f"No create-mode critic remediation registered for {issue.id}")
 

@@ -107,10 +107,6 @@ def _build_detailed_flow_context(
                 if knowledge_values:
                     lines.append(f"     Kunskapsbaser: {', '.join(knowledge_values)}")
 
-                mcp_tool_values = _display_snapshot_resources(snapshot.mcp_tool_refs)
-                if mcp_tool_values:
-                    lines.append(f"     MCP-verktyg: {', '.join(mcp_tool_values)}")
-
             if step.output_config:
                 output_config_str = str(step.output_config)
                 truncated_output_config = (

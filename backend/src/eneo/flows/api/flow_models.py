@@ -8,15 +8,21 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.config import JsonDict
 
+from eneo.ai_models.completion_models.completion_model import (
+    CompletionModelSparse,
+    ModelKwargs,
+)
+from eneo.assistants.api.assistant_models import AssistantType, ModelInfo
 from eneo.authentication.auth_models import (
     FlowServicePrincipalActorPublic,
 )
 from eneo.authentication.principal_types import PrincipalType
+from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.files.file_models import FilePublic, FileRestrictions
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -73,8 +79,20 @@ from eneo.flows.published_definition import (
     PublishedDefinitionIntegrityStatus,
     published_definition_checksum,
 )
+from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.main.exceptions import BadRequestException
-from eneo.main.models import NOT_PROVIDED, NotProvided, partial_model
+from eneo.main.models import (
+    NOT_PROVIDED,
+    InDB,
+    ModelId,
+    NotProvided,
+    ResourcePermissionsMixin,
+    partial_model,
+)
+from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
+from eneo.questions.question import UseTools
+from eneo.users.user import UserSparse
+from eneo.websites.presentation.website_models import WebsitePublic
 
 FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
     "Number of days to retain full Flow run and step history. "
@@ -126,7 +144,6 @@ FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "input_type": "audio",
     "output_mode": "transcribe_only",
     "output_type": "text",
-    "mcp_policy": "inherit",
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T09:30:00Z",
 }
@@ -145,7 +162,6 @@ FLOW_PUBLISHED_DEFINITION_EXAMPLE: JsonDict = {
             "input_type": "audio",
             "output_mode": "transcribe_only",
             "output_type": "text",
-            "mcp_policy": "inherit",
         }
     ],
 }
@@ -181,7 +197,6 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
             "input_type": "text",
             "output_mode": "pass_through",
             "output_type": "pdf",
-            "mcp_policy": "inherit",
             "created_at": "2026-03-17T09:30:00Z",
             "updated_at": "2026-03-17T09:30:00Z",
         },
@@ -431,7 +446,6 @@ class FlowStepCreateRequest(BaseModel):
                 "input_type": "audio",
                 "output_mode": "transcribe_only",
                 "output_type": "text",
-                "mcp_policy": "inherit",
             }
         },
     )
@@ -452,7 +466,6 @@ class FlowStepCreateRequest(BaseModel):
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = Field(
@@ -498,7 +511,6 @@ class FlowCreateRequest(BaseModel):
                         "input_type": "audio",
                         "output_mode": "transcribe_only",
                         "output_type": "text",
-                        "mcp_policy": "inherit",
                     }
                 ],
             }
@@ -534,7 +546,6 @@ class FlowUpdateRequest(BaseModel):
                         "input_type": "audio",
                         "output_mode": "transcribe_only",
                         "output_type": "text",
-                        "mcp_policy": "inherit",
                     }
                 ],
                 "metadata_json": {"wizard": {"transcription_enabled": True}},
@@ -571,7 +582,6 @@ class FlowStepPublic(BaseModel):
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    mcp_policy: FlowMcpPolicy
     input_config: dict[str, Any] | None = None
     output_config: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = Field(
@@ -693,6 +703,62 @@ class FlowAssistantCreateRequest(BaseModel):
     )
 
     name: str
+
+
+class FlowAssistantUpdateRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "name": "Flow Step Assistant",
+                "prompt": {"text": "Summarize the extracted contract fields."},
+            }
+        },
+    )
+
+    name: str | None = None
+    prompt: PromptCreate | None = None
+    attachments: list[ModelId] | None = None
+    groups: list[ModelId] | None = None
+    websites: list[ModelId] | None = None
+    integration_knowledge_list: list[ModelId] | None = None
+    completion_model: ModelId | None = None
+    completion_model_kwargs: ModelKwargs | None = None
+    logging_enabled: bool | None = None
+    description: str | None = None
+    insight_enabled: bool | None = None
+    data_retention_days: int | None = None
+    metadata_json: dict[str, object] | None | NotProvided = Field(default=NOT_PROVIDED)
+    icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
+
+
+class FlowAssistantPublic(InDB, ResourcePermissionsMixin):
+    """Public Flow-managed assistant projection without MCP configuration."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    prompt: PromptPublic | None = None
+    space_id: UUID
+    completion_model_kwargs: ModelKwargs
+    logging_enabled: bool | None
+    attachments: list[FilePublic]
+    allowed_attachments: FileRestrictions
+    groups: list[CollectionPublic]
+    websites: list[WebsitePublic]
+    integration_knowledge_list: list[IntegrationKnowledgePublic]
+    completion_model: CompletionModelSparse | None = None
+    published: bool = False
+    user: UserSparse
+    tools: UseTools
+    type: AssistantType
+    model_info: ModelInfo | None = None
+    description: str | None = None
+    icon_id: UUID | None = None
+    insight_enabled: bool
+    data_retention_days: int | None = None
+    metadata_json: dict[str, object] | None = None
+    is_help_assistant: bool = False
 
 
 class FlowRunTokenUsagePublic(BaseModel):
@@ -1134,35 +1200,6 @@ class FlowRunDebugOutput(BaseModel):
     config: dict[str, Any] | None = None
 
 
-class FlowRunDebugMcpServer(BaseModel):
-    id: str
-    name: str
-
-
-class FlowRunDebugMcpTool(BaseModel):
-    tool_id: str
-    server_id: str
-    name: str
-
-
-def _empty_flow_run_debug_mcp_servers() -> list[FlowRunDebugMcpServer]:
-    return []
-
-
-def _empty_flow_run_debug_mcp_tools() -> list[FlowRunDebugMcpTool]:
-    return []
-
-
-class FlowRunDebugMcp(BaseModel):
-    policy: str | None = None
-    servers: list[FlowRunDebugMcpServer] = Field(
-        default_factory=_empty_flow_run_debug_mcp_servers
-    )
-    tools_enabled: list[FlowRunDebugMcpTool] = Field(
-        default_factory=_empty_flow_run_debug_mcp_tools
-    )
-
-
 class FlowRunDebugRagReferenceChunk(BaseModel):
     chunk_no: int = 0
     score: float = 0.0
@@ -1317,7 +1354,6 @@ class FlowRunDebugStep(BaseModel):
     io_types: FlowRunDebugIoTypes
     input: FlowRunDebugInput
     output: FlowRunDebugOutput
-    mcp: FlowRunDebugMcp
     rag: FlowRunDebugRag | None = None
     attempts: list[FlowRunDebugAttempt] = Field(
         default_factory=lambda: cast(list[FlowRunDebugAttempt], [])
@@ -1374,7 +1410,6 @@ class FlowRunDebugDefinition(BaseModel):
 class FlowRunDebugSecurity(BaseModel):
     redaction_applied: bool
     classification_field: str
-    mcp_policy_field: str
     masked_fields_count: int | None = None
 
 
@@ -1411,7 +1446,6 @@ class FlowRunDebugExport(BaseModel):
                 "security": {
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
-                    "mcp_policy_field": "mcp_policy",
                     "masked_fields_count": 2,
                 },
             }
@@ -1461,14 +1495,12 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
             "io_types": {"input": "audio", "output": "text"},
             "input": {"source": "flow_input", "type": "audio"},
             "output": {"mode": "transcribe_only", "type": "text"},
-            "mcp": {"policy": "inherit", "servers": [], "tools_enabled": []},
             "attempts": [{"attempt_no": 1, "status": "completed"}],
         }
     ],
     "security": {
         "redaction_applied": True,
         "classification_field": "output_classification_override",
-        "mcp_policy_field": "mcp_policy",
         "masked_fields_count": 2,
     },
 }

@@ -10,13 +10,13 @@ MCP is an open protocol that lets AI assistants call external tools — such as 
 
 **Key concepts:**
 
-| Concept | Description |
-|---------|-------------|
-| **MCP Server** | A remote service that exposes tools via the MCP protocol |
-| **Tool** | A single function the server provides (e.g. `search_tickets`, `create_issue`) |
-| **Tool Sync** | Discovering tools from the remote server and detecting changes |
-| **Approval** | Admin review step before new or changed tools become active |
-| **Space** | Where you enable MCP servers so assistants can use their tools |
+| Concept        | Description                                                                   |
+| -------------- | ----------------------------------------------------------------------------- |
+| **MCP Server** | A remote service that exposes tools via the MCP protocol                      |
+| **Tool**       | A single function the server provides (e.g. `search_tickets`, `create_issue`) |
+| **Tool Sync**  | Discovering tools from the remote server and detecting changes                |
+| **Approval**   | Admin review step before new or changed tools become active                   |
+| **Space**      | Where you enable MCP servers so assistants can use their tools                |
 
 ---
 
@@ -40,7 +40,10 @@ MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit,
 Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
 
 <Callout type="info">
-  On successful creation, Eneo automatically connects to the server and discovers all available tools. These initial tools are added as **enabled by default** without requiring approval, since the admin is explicitly adding a trusted server.
+  On successful creation, Eneo automatically connects to the server and
+  discovers all available tools. These initial tools are added as **enabled by
+  default** without requiring approval, since the admin is explicitly adding a
+  trusted server.
 </Callout>
 
 ### Authentication
@@ -70,7 +73,8 @@ Use the toggle switch on each tool to enable or disable it. You can also use the
 The header shows the count of enabled tools, e.g. `2 / 5 enabled`.
 
 <Callout type="warning">
-  Disabling a tool in admin removes it globally for all spaces. To control tools per-space, manage them in the space settings instead.
+  Disabling a tool in admin removes it globally for all spaces. To control tools
+  per-space, manage them in the space settings instead.
 </Callout>
 
 ---
@@ -83,15 +87,18 @@ Over time, an MCP server may add new tools, change existing tool descriptions, o
 
 Eneo connects to the remote server, fetches the current tool list, and compares it against what is stored locally:
 
-| Scenario | What happens |
-|----------|-------------|
-| **New tool** | Created with `pending` status — requires approval before it becomes active |
+| Scenario                                         | What happens                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **New tool**                                     | Created with `pending` status — requires approval before it becomes active                                   |
 | **Changed tool** (description or schema updated) | Change is stored as pending — the tool continues using its **previous version** until the change is approved |
-| **Removed tool** (no longer on remote server) | Marked as `removed from server` — requires approval to delete |
-| **Unchanged tool** | No action needed |
+| **Removed tool** (no longer on remote server)    | Marked as `removed from server` — requires approval to delete                                                |
+| **Unchanged tool**                               | No action needed                                                                                             |
 
 <Callout type="info">
-  **Why approval?** The approval step is a security measure. It prevents a compromised or misbehaving MCP server from silently injecting or modifying tool definitions. An admin must review and explicitly approve every change before it takes effect.
+  **Why approval?** The approval step is a security measure. It prevents a
+  compromised or misbehaving MCP server from silently injecting or modifying
+  tool definitions. An admin must review and explicitly approve every change
+  before it takes effect.
 </Callout>
 
 ### Pending Changes Banner
@@ -113,10 +120,10 @@ Use the **approve** (checkmark) or **reject** (X) buttons on individual tools, o
 
 #### What Approve and Reject Do
 
-| Action | New tool | Changed tool | Removed tool |
-|--------|----------|-------------|-------------|
-| **Approve** | Tool becomes active with the proposed description and schema | Pending values replace current values | Tool is deleted from the database |
-| **Reject** | Tool is deleted (never activated) | Pending values are discarded, current values remain | Removed flag is cleared, tool stays active |
+| Action      | New tool                                                     | Changed tool                                        | Removed tool                               |
+| ----------- | ------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------ |
+| **Approve** | Tool becomes active with the proposed description and schema | Pending values replace current values               | Tool is deleted from the database          |
+| **Reject**  | Tool is deleted (never activated)                            | Pending values are discarded, current values remain | Removed flag is cleared, tool stays active |
 
 ---
 
@@ -140,18 +147,16 @@ For example, if a space is classified as "Confidential" (level 3), only MCP serv
 
 ---
 
-## Using MCP Tools in Flows and AI Builder
+## MCP boundary for Flows and AI Builder
 
-Flows can attach MCP access to the assistant configuration used by an individual step. Prefer enabling only the tools a step needs. Server-level access is useful when a step genuinely needs the whole server surface, but tool-level access is easier to review and safer by default.
+MCP remains available to standalone assistants and conversations. Flow and AI
+Builder do not support MCP servers or tools at authoring, publish, runtime, or
+package boundaries.
 
-AI Builder can see the MCP servers and tools enabled in the current space. During planning it reads tool names, descriptions, and metadata so it can decide whether a step should use external access. It does **not** execute MCP tools while drafting a plan. Tool execution happens only when a published Flow run reaches the step that has MCP access.
-
-Good MCP descriptions improve plan quality. Describe what the tool reads, what it writes, when it should be used, and any side effects. If a tool writes to an external system, make that explicit.
-
-<Callout type="info">
-  Keep knowledge retrieval and MCP execution on separate Flow steps when both
-  are needed. That separation makes the source of each result easier to inspect
-  and keeps retrieval context distinct from external tool execution.
+<Callout type="warning">
+  Do not configure MCP on an assistant managed by a Flow. Use supported Flow
+  inputs for required data and the durable terminal webhook output for external
+  delivery.
 </Callout>
 
 ---
@@ -188,6 +193,7 @@ The proxy handles authentication, connection management, and error handling tran
 **Symptoms:** Error message when adding a server
 
 **Solutions:**
+
 - Verify the URL is correct and the server is running
 - Check that the URL is reachable from the Eneo backend (firewall, DNS)
 - If using authentication, verify the token is correct
@@ -198,6 +204,7 @@ The proxy handles authentication, connection management, and error handling tran
 **Symptoms:** After syncing, no tools appear
 
 **Solutions:**
+
 - Verify the MCP server actually exposes tools (check its documentation)
 - Check backend logs for connection errors
 - Try removing and re-adding the server
@@ -207,6 +214,7 @@ The proxy handles authentication, connection management, and error handling tran
 **Symptoms:** Assistants can't use tools even though the server is enabled
 
 **Solutions:**
+
 - Verify the server is enabled in the space settings (not just in admin)
 - Check that individual tools are toggled on in the space
 - If using security classifications, verify the server meets the space's classification level
@@ -217,5 +225,6 @@ The proxy handles authentication, connection management, and error handling tran
 **Symptoms:** Tools stuck in pending state
 
 **Solutions:**
+
 - Approve or reject all pending changes
 - If the issue persists, try syncing again to refresh the state

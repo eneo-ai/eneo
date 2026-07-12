@@ -32,7 +32,6 @@ def _step(step_order: int = 1, **updates) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
     )
     return step.model_copy(update=updates)
 

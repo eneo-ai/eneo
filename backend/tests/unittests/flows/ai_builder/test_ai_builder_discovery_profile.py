@@ -46,7 +46,6 @@ def _make_flow_step(
         input_contract=input_contract,
         output_contract=output_contract,
         output_config=output_config,
-        mcp_policy="inherit",
     )
 
 

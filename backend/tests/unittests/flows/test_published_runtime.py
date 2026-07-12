@@ -46,7 +46,6 @@ def _step(*, input_type: str = "document") -> FlowStep:
         input_config=input_config,
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
     )
 
 
@@ -79,7 +78,6 @@ def _definition_json(*, flow: Flow, step: FlowStep) -> dict[str, object]:
                 "input_config": step.input_config,
                 "output_mode": step.output_mode,
                 "output_type": step.output_type,
-                "mcp_policy": step.mcp_policy,
             }
         ],
     }

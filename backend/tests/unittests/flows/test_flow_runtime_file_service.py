@@ -140,7 +140,6 @@ def _step(*, step_order: int, input_type: str) -> FlowStep:
         input_config=input_config,
         output_mode="pass_through",
         output_type="text",
-        mcp_policy="inherit",
     )
 
 
@@ -158,7 +157,6 @@ def _definition_json(flow: Flow, step: FlowStep) -> dict[str, object]:
                 "input_config": step.input_config,
                 "output_mode": step.output_mode,
                 "output_type": step.output_type,
-                "mcp_policy": step.mcp_policy,
             }
         ],
     }
@@ -1114,7 +1112,6 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
                 "input_config": runtime_step.input_config,
                 "output_mode": "pass_through",
                 "output_type": "json",
-                "mcp_policy": "inherit",
             }
         ],
     }

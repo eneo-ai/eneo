@@ -4,7 +4,6 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     CREATE_CRITIC_REMEDIATION,
-    CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS,
     format_create_critic_feedback,
     format_create_intent_quality_feedback,
 )
@@ -134,14 +133,9 @@ def test_create_critic_feedback_covers_every_semantic_invariant() -> None:
     semantic_ids = {
         invariant.id for invariant in CRITIC_INVARIANTS if invariant.kind == "semantic"
     }
-    covered_ids = set(CREATE_CRITIC_REMEDIATION) | set(
-        CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS
-    )
+    covered_ids = set(CREATE_CRITIC_REMEDIATION)
 
     assert semantic_ids == covered_ids
-    assert not (
-        set(CREATE_CRITIC_REMEDIATION) & set(CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS)
-    )
 
 
 def test_create_critic_feedback_remediations_do_not_leak_backend_mechanics() -> None:
@@ -166,23 +160,6 @@ def test_semantic_critic_keeps_compiled_contract_remediation_for_edit_mode(
 
     assert "output_contract" in invariant.remediation
     assert "output_fields" not in invariant.remediation
-
-
-def test_format_create_critic_feedback_passes_through_explicit_allowlist() -> None:
-    remediation = "Välj bara MCP-verktyg när användarens namngivna MCP matchar."
-
-    feedback = format_create_critic_feedback(
-        (
-            CriticIssue(
-                id="mcp_selection_requires_semantic_support",
-                kind="semantic",
-                remediation=remediation,
-            ),
-        )
-    )
-
-    assert feedback is not None
-    assert remediation in feedback
 
 
 def test_format_create_critic_feedback_rejects_unregistered_semantic_issue() -> None:

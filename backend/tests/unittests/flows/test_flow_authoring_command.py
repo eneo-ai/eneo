@@ -138,20 +138,6 @@ async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
             ),
             "knowledge.policy",
         ),
-        (
-            AssistantSpec(
-                instructions="Use MCP.",
-                mcp_server_refs=["mcp_server.primary"],
-            ),
-            "mcp_server.primary",
-        ),
-        (
-            AssistantSpec(
-                instructions="Use MCP tool.",
-                mcp_tool_refs=["mcp_tool.lookup"],
-            ),
-            "mcp_tool.lookup",
-        ),
     ],
 )
 async def test_prepare_rejects_unresolved_canonical_resource_refs(

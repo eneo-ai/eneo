@@ -74,7 +74,6 @@ class FlowAssembler:
             output_contract=step.output_contract,
             input_bindings=step.input_bindings,
             output_classification_override=step.output_classification_override,
-            mcp_policy=step.mcp_policy,
             input_config=step.input_config,
             output_config=step.output_config,
             review_policy=step.review_policy,

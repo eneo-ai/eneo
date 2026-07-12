@@ -283,8 +283,6 @@ def _new_step_draft_from_planned_step(
         output_type=step.output_type,
         model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
-        mcp_server_refs=list(step.mcp_server_refs),
-        mcp_tool_refs=list(step.mcp_tool_refs),
         runtime_required=step.runtime_required,
         runtime_max_files=step.runtime_max_files,
         runtime_input_execution_mode=step.runtime_input_execution_mode,

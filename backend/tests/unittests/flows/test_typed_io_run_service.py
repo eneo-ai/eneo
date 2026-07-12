@@ -21,7 +21,10 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
+from eneo.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    published_definition_checksum,
+)
 from eneo.main.exceptions import BadRequestException
 
 
@@ -88,7 +91,6 @@ def _step(step_order: int = 1) -> FlowStep:
         input_type="text",
         output_mode="pass_through",
         output_type="json",
-        mcp_policy="inherit",
         input_config={"runtime_input": {"enabled": True, "max_files": 2}},
     )
 
@@ -112,29 +114,29 @@ def _flow(user, published_version: int | None = 1) -> Flow:
 
 
 def _version(user, flow: Flow) -> FlowVersion:
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [
+            {
+                "step_id": str(step.id),
+                "step_order": step.step_order,
+                "assistant_id": str(step.assistant_id),
+                "input_source": step.input_source,
+                "input_type": step.input_type,
+                "input_config": step.input_config,
+                "output_mode": step.output_mode,
+                "output_type": step.output_type,
+            }
+            for step in flow.steps
+        ],
+    }
     return FlowVersion(
         flow_id=flow.id,
         version=1,
         tenant_id=user.tenant_id,
-        definition_checksum="checksum",
-        definition_json={
-            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
-            "flow_id": str(flow.id),
-            "steps": [
-                {
-                    "step_id": str(step.id),
-                    "step_order": step.step_order,
-                    "assistant_id": str(step.assistant_id),
-                    "input_source": step.input_source,
-                    "input_type": step.input_type,
-                    "input_config": step.input_config,
-                    "output_mode": step.output_mode,
-                    "output_type": step.output_type,
-                    "mcp_policy": step.mcp_policy,
-                }
-                for step in flow.steps
-            ],
-        },
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )

@@ -33,13 +33,12 @@ from eneo.flows.citation_sidecar import (
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 6
+FCM_VERSION: int = 7
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -412,50 +411,6 @@ def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
     )
 
 
-# Engine-truth allow-set for `step.mcp_policy`. Mirrors the legacy
-# `_ALLOWED_FLOW_MCP_POLICIES` set at `flow_validators.py:57` (which is
-# `set(FLOW_STEP_MCP_POLICY_VALUES)` — i.e. every enum value). The FCM
-# copy is typed with the enum rather than strings so consumers can do
-# enum-identity checks without re-parsing string values. Kept in lockstep
-# with `FLOW_STEP_MCP_POLICY_VALUES` by a parity test.
-ALLOWED_MCP_POLICIES: frozenset[FlowMcpPolicy] = frozenset(FlowMcpPolicy)
-
-
-def _seed_mcp_policy_capability() -> FlowCapability:
-    return FlowCapability(
-        id="mcp_policy",
-        label="MCP policy",
-        description=(
-            "Controls the flow step's MCP (Model Context Protocol) tool-access "
-            "posture within the tenant → space → step cascade. Tenant admins "
-            "enable MCP servers globally; space admins narrow that set per-MCP "
-            "and per-tool within the space; the step then chooses which of the "
-            "space-allowed MCPs/tools to expose at runtime. The legacy "
-            "validator only enforces that `step.mcp_policy` is a known enum "
-            "value; there are no per-value semantic rules today. If a future "
-            "rule diverges per value (e.g. RESTRICTED gaining explicit runtime "
-            "semantics), this singleton capability will split into per-value "
-            "entries at that point."
-        ),
-        applies_to_tuples=(),
-        required_config=(),
-        invariants=(
-            InvariantSpec(
-                id="forbids_unsupported_mcp_policy",
-                description=(
-                    "Steps must declare `mcp_policy` as one of the values in "
-                    "`ALLOWED_MCP_POLICIES` (i.e. every `FlowMcpPolicy` "
-                    "member). `flow_validators.py:183` raises "
-                    "`\"Step {order}: unsupported mcp_policy '{value}'.\"` "
-                    "when the policy falls outside this set."
-                ),
-            ),
-        ),
-        exposure="builder",
-        not_exposed_reason=None,
-    )
-
-
 def _seed_citation_sidecar_capability() -> FlowCapability:
     return FlowCapability(
         id="citation_sidecar",
@@ -556,7 +511,6 @@ CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
             f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
             for mode in FlowOutputMode
         },
-        "mcp_policy": _seed_mcp_policy_capability(),
         "citation_sidecar": _seed_citation_sidecar_capability(),
         "per_source_reader_execution": _seed_per_source_reader_execution_capability(),
     }
@@ -903,8 +857,8 @@ def resolve_capability_for_tuple(
     typed arguments. Callers that hold stringly-typed data must coerce
     at their own boundary (typically `FlowInputSource(raw_string)`).
 
-    `citation_sidecar` and `mcp_policy` capabilities are intentionally
-    NOT included — neither is conditioned on the 4-tuple alone.
+    `citation_sidecar` is intentionally not included because it is not
+    conditioned on the 4-tuple alone.
     """
     if not isinstance(input_source, FlowInputSource):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(

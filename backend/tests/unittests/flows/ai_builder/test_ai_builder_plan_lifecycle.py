@@ -322,7 +322,6 @@ def _make_flow_for_edit(
                 input_type="text",
                 output_mode="pass_through",
                 output_type="text",
-                mcp_policy="inherit",
             )
             for index in range(1, step_count + 1)
         ],

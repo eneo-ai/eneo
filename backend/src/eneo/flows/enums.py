@@ -81,16 +81,10 @@ class AIBuilderOutputMode(str, Enum):
     RENDER_VERBATIM = FlowOutputMode.RENDER_VERBATIM.value
 
 
-class FlowMcpPolicy(str, Enum):
-    INHERIT = "inherit"
-    RESTRICTED = "restricted"
-
-
 FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
 FLOW_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
 FLOW_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
 FLOW_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
-FLOW_MCP_POLICY_VALUES = tuple(item.value for item in FlowMcpPolicy)
 
 
 class FlowRunStatus(str, Enum):

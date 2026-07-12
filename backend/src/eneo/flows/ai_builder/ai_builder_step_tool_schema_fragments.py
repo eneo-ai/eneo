@@ -79,8 +79,6 @@ def build_resource_ref_property_schemas(
     *,
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
-    mcp_server_refs: list[str] | None,
-    mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
     model_ref_schema: dict[str, Any] = {
         "type": ["string", "null"],
@@ -93,43 +91,16 @@ def build_resource_ref_property_schemas(
         "type": "array",
         "items": {"type": "string"},
         "uniqueItems": True,
-        "description": (
-            "Portable knowledge slot refs this step needs. Do not combine with "
-            "MCP refs on the same step."
-        ),
-    }
-    mcp_server_refs_schema: dict[str, Any] = {
-        "type": "array",
-        "items": {"type": "string"},
-        "uniqueItems": True,
-        "description": (
-            "Portable MCP server slot refs this step needs. Use only for "
-            "external tools/live data and never together with knowledge_refs."
-        ),
-    }
-    mcp_tool_refs_schema: dict[str, Any] = {
-        "type": "array",
-        "items": {"type": "string"},
-        "uniqueItems": True,
-        "description": (
-            "Portable MCP tool slot refs for least-privilege tool access. "
-            "Prefer tool refs over whole-server refs when possible."
-        ),
+        "description": ("Portable knowledge slot refs this step needs."),
     }
     if model_refs is not None:
         model_ref_schema["enum"] = [*model_refs, None]
     if kb_refs is not None:
         knowledge_refs_schema["items"]["enum"] = kb_refs
-    if mcp_server_refs is not None:
-        mcp_server_refs_schema["items"]["enum"] = mcp_server_refs
-    if mcp_tool_refs is not None:
-        mcp_tool_refs_schema["items"]["enum"] = mcp_tool_refs
 
     return {
         "model_ref": model_ref_schema,
         "knowledge_refs": knowledge_refs_schema,
-        "mcp_server_refs": mcp_server_refs_schema,
-        "mcp_tool_refs": mcp_tool_refs_schema,
     }
 
 

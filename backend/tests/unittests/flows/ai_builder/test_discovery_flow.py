@@ -1280,7 +1280,6 @@ class TestExtendedClarificationHints:
                     input_type="audio",
                     output_mode="transcribe_only",
                     output_type="text",
-                    mcp_policy="inherit",
                 ),
                 FlowStep(
                     assistant_id=uuid4(),
@@ -1290,7 +1289,6 @@ class TestExtendedClarificationHints:
                     input_type="text",
                     output_mode="pass_through",
                     output_type="docx",
-                    mcp_policy="inherit",
                 ),
             ],
         )
@@ -1345,7 +1343,6 @@ class TestExtendedClarificationHints:
                     input_type="audio",
                     output_mode="transcribe_only",
                     output_type="text",
-                    mcp_policy="inherit",
                 ),
                 FlowStep(
                     assistant_id=uuid4(),
@@ -1355,7 +1352,6 @@ class TestExtendedClarificationHints:
                     input_type="text",
                     output_mode="pass_through",
                     output_type="text",
-                    mcp_policy="inherit",
                 ),
             ],
         )
@@ -1401,7 +1397,6 @@ class TestExtendedClarificationHints:
                     input_type="document",
                     output_mode="pass_through",
                     output_type="json",
-                    mcp_policy="inherit",
                 ),
                 FlowStep(
                     assistant_id=uuid4(),
@@ -1411,7 +1406,6 @@ class TestExtendedClarificationHints:
                     input_type="json",
                     output_mode="pass_through",
                     output_type="pdf",
-                    mcp_policy="inherit",
                 ),
             ],
         )
@@ -2652,7 +2646,6 @@ class TestExtendedClarificationHints:
                     input_type="document",
                     output_mode="pass_through",
                     output_type="text",
-                    mcp_policy="inherit",
                 )
             ],
         )
@@ -2694,7 +2687,6 @@ class TestExtendedClarificationHints:
                     input_type="document",
                     output_mode="pass_through",
                     output_type="text",
-                    mcp_policy="inherit",
                 )
             ],
         )

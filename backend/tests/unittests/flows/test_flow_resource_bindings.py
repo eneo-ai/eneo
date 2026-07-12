@@ -101,8 +101,6 @@ def test_slot_local_kind_pairs_match_local_binding_contract() -> None:
         ("knowledge", "collection"),
         ("knowledge", "integration_knowledge"),
         ("knowledge", "website"),
-        ("mcp_server", "mcp_server"),
-        ("mcp_tool", "mcp_tool"),
         ("template_asset", "template_asset"),
     )
 
@@ -114,9 +112,9 @@ def test_local_resource_kinds_for_slot_kind_exposes_binding_contract() -> None:
             LocalResourceKind.TRANSCRIPTION_MODEL,
         }
     )
-    assert local_resource_kinds_for_slot_kind(ResourceSlotKind.MCP_TOOL) == frozenset(
-        {LocalResourceKind.MCP_TOOL}
-    )
+    assert local_resource_kinds_for_slot_kind(
+        ResourceSlotKind.TEMPLATE_ASSET
+    ) == frozenset({LocalResourceKind.TEMPLATE_ASSET})
 
 
 def test_knowledge_local_kinds_have_assistant_update_fields() -> None:
@@ -186,16 +184,16 @@ def test_resource_slot_allocator_preserves_uuid_outside_slot_ref() -> None:
     allocator = ResourceSlotAllocator()
 
     slot_ref, binding = allocator.allocate(
-        slot_kind=ResourceSlotKind.MCP_TOOL,
-        local_kind=LocalResourceKind.MCP_TOOL,
+        slot_kind=ResourceSlotKind.MODEL,
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
         local_ref=str(local_id),
         display_name="Case lookup",
     )
 
     assert binding is not None
     assert binding.local_id == local_id
-    assert slot_ref.ref == "mcp_tool.case-lookup"
-    assert binding.slot_ref.ref == "mcp_tool.case-lookup"
+    assert slot_ref.ref == "model.case-lookup"
+    assert binding.slot_ref.ref == "model.case-lookup"
 
 
 def test_resource_slot_allocator_ignores_non_uuid_local_refs() -> None:
@@ -426,7 +424,7 @@ def test_resolve_local_resource_ref_resolves_matching_slot_binding() -> None:
         ("local-policy", FlowResourceBindingResolutionReason.INVALID_SLOT_REF),
         ("model.LocalPolicy", FlowResourceBindingResolutionReason.INVALID_SLOT_REF),
         (
-            "mcp_server.local-policy",
+            "model.local-policy",
             FlowResourceBindingResolutionReason.WRONG_SLOT_KIND,
         ),
         (

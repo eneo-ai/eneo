@@ -34,10 +34,6 @@ from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    mcp_resource_selection_values,
-)
-from eneo.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
@@ -111,7 +107,6 @@ class PlannerRequestPreparationInput:
     prior_plan_for_revision: BuilderPlan | None
     allow_discovery_semantic_adjudication: bool
     persisted_planning_state: PlanningState | None
-    available_mcps: AIBuilderMCPResourceInput
     before_provider_call: Callable[[], Awaitable[None]] | None = None
 
 
@@ -190,7 +185,6 @@ async def prepare_planner_request(
     resource_catalog = build_ai_builder_resource_catalog(
         available_models=request.available_models,
         available_kbs=request.available_kbs,
-        available_mcps=request.available_mcps,
         prior_bindings=prior_resource_bindings,
     )
     carry_forward_persisted_planner_state(
@@ -284,7 +278,6 @@ def build_proposal_prepared(
         flow_context=flow_context,
         is_edit_mode=is_edit_mode,
         resource_catalog=resource_catalog,
-        mcp_selection_values=mcp_resource_selection_values(conversation),
         requested_output_sections=extract_requested_output_sections(
             section_signal_text,
             model_form_intake_signals=form_intake_signal_values_from_planning_state(

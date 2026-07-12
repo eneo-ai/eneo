@@ -152,6 +152,11 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {
         "run": run.model_dump(mode="json"),
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
@@ -179,7 +184,6 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
             "security": {
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
-                "mcp_policy_field": "mcp_policy",
             },
         },
     }
@@ -239,6 +243,11 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
     run = _run(flow_id=flow_id, tenant_id=tenant_id)
     evidence = {
         "run": run.model_dump(mode="json"),
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
@@ -308,7 +317,6 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
             "security": {
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
-                "mcp_policy_field": "mcp_policy",
             },
         },
     }
@@ -413,6 +421,11 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {
         "run": run.model_dump(mode="json"),
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
@@ -440,7 +453,6 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
             "security": {
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
-                "mcp_policy_field": "mcp_policy",
             },
         },
     }
@@ -537,6 +549,11 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {
         "run": run.model_dump(mode="json"),
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
         "definition_snapshot": {"steps": []},
         "step_results": [],
         "step_attempts": [],
@@ -562,7 +579,6 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
             "security": {
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
-                "mcp_policy_field": "mcp_policy",
             },
         },
     }

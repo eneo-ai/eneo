@@ -402,7 +402,6 @@ def create_published_compose_text_flow() -> Callable[
                         "input_type": "text",
                         "output_mode": "compose_text",
                         "output_type": "text",
-                        "mcp_policy": "inherit",
                     }
                 ],
             },

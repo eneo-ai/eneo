@@ -29,7 +29,6 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
-        available_mcps=[],
     )
 
 

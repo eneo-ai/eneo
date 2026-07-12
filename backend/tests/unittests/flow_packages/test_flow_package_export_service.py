@@ -135,6 +135,39 @@ async def test_export_service_rejects_oversized_package_bytes() -> None:
 
 
 @pytest.mark.anyio
+async def test_export_service_rejects_persisted_flow_mcp_before_writing() -> None:
+    assistant_id = uuid4()
+    flow = _flow(steps=[_step(1, assistant_id=assistant_id)])
+    dependency_service = _FakeFlowPackageExportFlowService(
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+        flow_mcp_configured=True,
+    )
+    writer_called = False
+
+    def package_writer(_: object) -> bytes:
+        nonlocal writer_called
+        writer_called = True
+        return b"not-a-package"
+
+    export_service = FlowPackageExportService(
+        flow_service=dependency_service,
+        package_writer=package_writer,
+    )
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        await export_service.export_to_bytes(
+            flow_id=flow.id,
+            flow=flow,
+            manifest_metadata=_manifest_metadata(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
+    assert exc_info.value.context == {"reason": "flow_mcp_unsupported"}
+    assert writer_called is False
+
+
+@pytest.mark.anyio
 async def test_export_service_rejects_nonportable_config_before_writing_bytes() -> None:
     assistant_id = uuid4()
     writes: list[object] = []
@@ -484,46 +517,6 @@ def test_export_preserves_form_fields_from_flow_metadata() -> None:
     assert envelope.draft.spec.form_fields[0].name == "case_id"
     assert envelope.draft.spec.form_fields[0].label == "Case ID"
     assert envelope.draft.spec.form_fields[0].required is True
-
-
-@pytest.mark.parametrize(
-    "case",
-    ["server_only", "tool_only", "knowledge_and_tool"],
-)
-def test_export_rejects_mcp_resources_as_unsupported_scope(
-    case: str,
-) -> None:
-    assistant_id = uuid4()
-    snapshot = _mcp_snapshot(case)
-
-    with pytest.raises(FlowPackageExportError) as exc_info:
-        _build_envelope(
-            flow=_flow(steps=[_step(1, assistant_id=assistant_id)]),
-            assistant_snapshots={assistant_id: snapshot},
-            resource_bindings=tuple(),
-        )
-
-    assert exc_info.value.code is FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED
-
-
-def _mcp_snapshot(case: str) -> AssistantAuthoringSnapshot:
-    if case == "server_only":
-        return _snapshot(
-            model_ref=None,
-            mcp_server_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
-        )
-    if case == "tool_only":
-        return _snapshot(
-            model_ref=None,
-            mcp_tool_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
-        )
-    if case == "knowledge_and_tool":
-        return _snapshot(
-            model_ref=None,
-            knowledge_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
-            mcp_tool_refs=(AssistantAuthoringResourceRef(local_ref=str(uuid4())),),
-        )
-    raise AssertionError(f"Unknown MCP export test case: {case}")
 
 
 @pytest.mark.parametrize(
@@ -1133,11 +1126,17 @@ class _FakeFlowPackageExportFlowService:
         *,
         assistant_snapshots: AssistantAuthoringSnapshots,
         resource_bindings: tuple[LocalResourceBinding, ...],
+        flow_mcp_configured: bool = False,
     ) -> None:
         self._assistant_snapshots = assistant_snapshots
         self._resource_bindings = resource_bindings
+        self._flow_mcp_configured = flow_mcp_configured
         self.flow: Flow | None = None
         self.flow_id: UUID | None = None
+
+    async def has_flow_mcp_configuration(self, flow: Flow) -> bool:
+        self.flow = flow
+        return self._flow_mcp_configured
 
     async def get_flow_assistant_snapshots(
         self,
@@ -1184,7 +1183,6 @@ def _step(
         output_contract=output_contract,
         input_bindings=input_bindings,
         output_classification_override=None,
-        mcp_policy="inherit",
         input_config=input_config,
         output_config=output_config,
     )
@@ -1195,15 +1193,11 @@ def _snapshot(
     instructions: str = "Follow the package instructions.",
     model_ref: AssistantAuthoringResourceRef | None,
     knowledge_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
-    mcp_server_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
-    mcp_tool_refs: tuple[AssistantAuthoringResourceRef, ...] = tuple(),
 ) -> AssistantAuthoringSnapshot:
     return AssistantAuthoringSnapshot(
         instructions=instructions,
         model=model_ref,
         knowledge_refs=knowledge_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
     )
 
 

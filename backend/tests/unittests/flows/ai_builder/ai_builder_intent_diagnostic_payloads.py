@@ -83,8 +83,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             "citations_requested": False,
             "uses_form_fields": [],
             "knowledge_refs": [],
-            "mcp_server_refs": [],
-            "mcp_tool_refs": [],
             "review_mode": None,
             "assumptions": [
                 (
@@ -197,8 +195,6 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
             "citations_requested": False,
             "uses_form_fields": [],
             "knowledge_refs": [],
-            "mcp_server_refs": [],
-            "mcp_tool_refs": [],
             "review_mode": None,
             "assumptions": [
                 (

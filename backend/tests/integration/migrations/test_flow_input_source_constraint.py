@@ -1,4 +1,4 @@
-"""Fresh-chain PostgreSQL contract for Flow input and output HTTP modes."""
+"""Fresh-chain PostgreSQL contract for removed Flow effect surfaces."""
 
 from __future__ import annotations
 
@@ -69,6 +69,7 @@ def test_fresh_chain_excludes_post_input_and_retains_post_output(
 
     assert current_revisions(conn) == {CURRENT_HEAD}
     _assert_http_mode_constraints(conn)
+    _assert_flow_mcp_schema_removed(conn)
 
     command.downgrade(cfg, PRE_FLOW_REVISION)
     assert current_revisions(conn) == {PRE_FLOW_REVISION}
@@ -77,6 +78,7 @@ def test_fresh_chain_excludes_post_input_and_retains_post_output(
     command.upgrade(cfg, "head")
     assert current_revisions(conn) == {CURRENT_HEAD}
     _assert_http_mode_constraints(conn)
+    _assert_flow_mcp_schema_removed(conn)
 
 
 def _assert_http_mode_constraints(conn: PsycopgConnection) -> None:
@@ -86,6 +88,23 @@ def _assert_http_mode_constraints(conn: PsycopgConnection) -> None:
     assert "http_get" in input_source
     assert "http_post" not in input_source
     assert "http_post" in output_mode
+
+
+def _assert_flow_mcp_schema_removed(conn: PsycopgConnection) -> None:
+    assert not _column_exists(conn, "flow_steps", "mcp_policy")
+    for constraint_name in (
+        "ck_flow_resource_bindings_slot_kind",
+        "ck_flow_resource_bindings_local_resource_kind",
+        "ck_flow_resource_bindings_slot_local_kind_pair",
+    ):
+        assert (
+            "mcp"
+            not in _constraint_definition(
+                conn,
+                constraint_name,
+                table_name="flow_resource_bindings",
+            ).lower()
+        )
 
 
 def _table_exists(conn: PsycopgConnection, table_name: str) -> bool:
@@ -105,7 +124,30 @@ def _table_exists(conn: PsycopgConnection, table_name: str) -> bool:
     return bool(row and row[0])
 
 
-def _constraint_definition(conn: PsycopgConnection, name: str) -> str:
+def _column_exists(conn: PsycopgConnection, table_name: str, column_name: str) -> bool:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+                  AND column_name = %s
+            )
+            """,
+            (table_name, column_name),
+        )
+        row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _constraint_definition(
+    conn: PsycopgConnection,
+    name: str,
+    *,
+    table_name: str = "flow_steps",
+) -> str:
     with conn.cursor() as cursor:
         cursor.execute(
             """
@@ -113,10 +155,10 @@ def _constraint_definition(conn: PsycopgConnection, name: str) -> str:
             FROM pg_constraint AS constraint_row
             JOIN pg_class AS table_row
               ON table_row.oid = constraint_row.conrelid
-            WHERE table_row.relname = 'flow_steps'
+            WHERE table_row.relname = %s
               AND constraint_row.conname = %s
             """,
-            (name,),
+            (table_name, name),
         )
         row = cursor.fetchone()
     assert row is not None

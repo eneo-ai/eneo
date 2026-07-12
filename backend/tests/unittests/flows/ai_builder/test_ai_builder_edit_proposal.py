@@ -158,7 +158,6 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
-            available_mcps=[],
         ),
     )
 
@@ -987,7 +986,6 @@ def _flow_step(
         output_contract=output_contract,
         input_config=input_config,
         output_config=output_config,
-        mcp_policy="inherit",
     )
 
 

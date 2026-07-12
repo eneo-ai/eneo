@@ -153,16 +153,14 @@ source_modules =
 forbidden_modules =
     eneo.flows.ai_builder
 
-[importlinter:contract:ai-builder-no-mcp-execution]
-# AI Builder may read MCP server/tool metadata while planning, but it must not
-# open MCP clients, proxy sessions, or admin/test connections. Runtime MCP tool
-# execution belongs to the published Flow assistant/runtime path.
-name = AI Builder must not import MCP execution surfaces
+[importlinter:contract:ai-builder-no-mcp]
+# Flow AI Builder does not advertise, resolve, or execute MCP resources.
+# Non-Flow MCP behavior remains owned by the standalone assistant/conversation
+# subsystem and must not leak into Flow planning.
+name = AI Builder must not import MCP
 type = forbidden
 allow_indirect_imports = true
 source_modules =
     eneo.flows.ai_builder
 forbidden_modules =
-    eneo.mcp_servers.infrastructure.proxy
-    eneo.mcp_servers.infrastructure.client
-    eneo.mcp_servers.application.mcp_server_service
+    eneo.mcp_servers

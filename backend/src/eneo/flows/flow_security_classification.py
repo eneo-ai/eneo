@@ -34,15 +34,6 @@ def _knowledge_level(assistant: Any) -> int | None:
     return max(levels) if levels else None
 
 
-def _mcp_server_level(assistant: Any) -> int | None:
-    levels: list[int] = []
-    for server in list(getattr(assistant, "mcp_servers", []) or []):
-        level = _classification_level(getattr(server, "security_classification", None))
-        if level is not None:
-            levels.append(level)
-    return max(levels) if levels else None
-
-
 def _input_floor_level(
     *,
     step_order: int,
@@ -90,7 +81,6 @@ def evaluate_step_security_classification(
         baseline_level=baseline_level,
     )
     knowledge_level = _knowledge_level(assistant)
-    mcp_level = _mcp_server_level(assistant)
     model_level = _classification_level(
         getattr(
             getattr(assistant, "completion_model", None),
@@ -108,17 +98,7 @@ def evaluate_step_security_classification(
             code="flow_step_security_classification_mismatch",
         )
 
-    if (
-        input_floor_level is not None
-        and mcp_level is not None
-        and mcp_level < input_floor_level
-    ):
-        raise BadRequestException(
-            f"Step {step_order}: MCP tool security classification is lower than the step input classification.",
-            code="flow_step_mcp_security_classification_mismatch",
-        )
-
-    base_output_level = _max_level(input_floor_level, knowledge_level, mcp_level)
+    base_output_level = _max_level(input_floor_level, knowledge_level)
     if (
         output_classification_override is not None
         and base_output_level is not None

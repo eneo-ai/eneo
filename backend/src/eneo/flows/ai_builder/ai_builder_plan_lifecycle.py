@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse,
 )
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
-    serialize_space_mcps,
     serialize_space_models,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -51,6 +52,7 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    has_flow_mcp_unsupported_error,
 )
 from eneo.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
 
@@ -72,15 +74,18 @@ class CreateFromPlanOutcome(NamedTuple):
     replayed: bool
 
 
+def raise_persisted_flow_mcp_plan_error(exc: ValidationError) -> None:
+    if has_flow_mcp_unsupported_error(exc):
+        raise AIBuilderBadRequestException(
+            "The stored AI Builder plan contains unsupported Flow MCP configuration. Generate a new plan without MCP.",
+            code=AIBuilderErrorCode.BAD_REQUEST,
+        ) from exc
+
+
 def _spec_has_assistant_resource_refs(spec: FlowDraftSpecCore) -> bool:
     for step in spec.steps:
         assistant_spec = step.assistant_spec
-        if (
-            assistant_spec.model_ref is not None
-            or assistant_spec.knowledge_refs
-            or assistant_spec.mcp_server_refs
-            or assistant_spec.mcp_tool_refs
-        ):
+        if assistant_spec.model_ref is not None or assistant_spec.knowledge_refs:
             return True
     return False
 
@@ -92,8 +97,6 @@ def _available_local_binding_targets(
     for entry in (
         *catalog.models,
         *catalog.knowledge_bases,
-        *catalog.mcp_servers,
-        *catalog.mcp_tools,
     ):
         if entry.local_binding is not None:
             targets.add((entry.local_binding.local_kind, entry.local_binding.local_id))
@@ -588,7 +591,6 @@ class AIBuilderPlanLifecycle:
         catalog = build_ai_builder_resource_catalog(
             available_models=serialize_space_models(space),
             available_kbs=serialize_space_kbs(space),
-            available_mcps=serialize_space_mcps(space),
         )
         available_targets = _available_local_binding_targets(catalog)
         for binding in plan.resource_bindings:
@@ -609,10 +611,14 @@ class AIBuilderPlanLifecycle:
         return plan.resource_bindings
 
     async def _get_plan(self, plan_id: UUID) -> BuilderPlan:
-        return await self.repo.get_plan(
-            plan_id=plan_id,
-            tenant_id=self.user.tenant_id,
-        )
+        try:
+            return await self.repo.get_plan(
+                plan_id=plan_id,
+                tenant_id=self.user.tenant_id,
+            )
+        except ValidationError as exc:
+            raise_persisted_flow_mcp_plan_error(exc)
+            raise
 
     async def _require_session_creator(self, session_id: UUID) -> BuilderSession:
         session = await self.repo.get_session(

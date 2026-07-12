@@ -23,7 +23,6 @@ from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingEr
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -85,7 +84,6 @@ class FlowStep(BaseModel):
     output_contract: FlowPersistedJsonObject | None = None
     input_bindings: FlowPersistedJsonObject | None = None
     output_classification_override: Optional[int] = None
-    mcp_policy: FlowMcpPolicy
     input_config: FlowPersistedJsonObject | None = None
     output_config: FlowPersistedJsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None

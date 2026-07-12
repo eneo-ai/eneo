@@ -2022,14 +2022,26 @@ class FlowRunExecutor:
         self, assistant_id: UUID, state: RunExecutionState | None = None
     ) -> RuntimeAssistantProtocol:
         if state and assistant_id in state.assistant_cache:
-            return state.assistant_cache[assistant_id]
+            assistant = state.assistant_cache[assistant_id]
+            self._reject_flow_mcp_assistant(assistant)
+            return assistant
         space = await self._load_space_for_assistant(
             assistant_id=assistant_id, state=state
         )
         assistant = space.get_assistant(assistant_id=assistant_id)
+        self._reject_flow_mcp_assistant(assistant)
         if state:
             state.assistant_cache[assistant_id] = assistant
         return assistant
+
+    @staticmethod
+    def _reject_flow_mcp_assistant(assistant: RuntimeAssistantProtocol) -> None:
+        mcp_servers = getattr(assistant, "mcp_servers", None)
+        mcp_tools = getattr(assistant, "mcp_tools", None)
+        if mcp_servers or mcp_tools:
+            raise BadRequestException(
+                "Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before running the flow."
+            )
 
     async def _load_space_for_assistant(
         self, *, assistant_id: UUID, state: RunExecutionState | None = None
@@ -2064,12 +2076,9 @@ class FlowRunExecutor:
                 continue
 
             current_assistant = await self._load_assistant(step.assistant_id, state)
-            mcp_servers = getattr(current_assistant, "mcp_servers", [])
-            if not isinstance(mcp_servers, list):
-                mcp_servers = []
+            self._reject_flow_mcp_assistant(current_assistant)
             current_snapshot = build_assistant_execution_snapshot(
                 assistant=current_assistant,
-                mcp_server_entities=cast(list[Any], mcp_servers),
             )
             if current_snapshot is None:
                 raise BadRequestException(

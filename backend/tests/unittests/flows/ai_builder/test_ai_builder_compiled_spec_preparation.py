@@ -16,9 +16,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
-)
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
@@ -32,7 +29,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -53,7 +49,6 @@ def _make_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             )
         ],
     )
@@ -71,7 +66,6 @@ def _duplicate_step_name_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_b",
@@ -83,7 +77,6 @@ def _duplicate_step_name_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
         ],
     )
@@ -103,7 +96,6 @@ def _json_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.JSON,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_b",
@@ -116,7 +108,6 @@ def _json_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.JSON,
                 input_bindings={"question": "{{ step_a.output.structured }}"},
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_c",
@@ -129,7 +120,6 @@ def _json_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
                 input_bindings={"question": "{{ step_b.output.structured }}"},
-                mcp_policy=MCPPolicy.INHERIT,
             ),
         ],
     )
@@ -147,7 +137,6 @@ def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_b",
@@ -157,7 +146,6 @@ def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_c",
@@ -170,7 +158,6 @@ def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
                 input_bindings={
                     "question": "{{ step_a.output.text }}\n\n{{ step_b.output.text }}"
                 },
-                mcp_policy=MCPPolicy.INHERIT,
             ),
         ],
     )
@@ -190,7 +177,6 @@ def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.JSON,
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_b",
@@ -203,7 +189,6 @@ def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.PDF,
                 input_bindings={"question": "{{ step_a.output.structured }}"},
-                mcp_policy=MCPPolicy.INHERIT,
             ),
             StepSpec(
                 plan_step_ref="step_c",
@@ -216,7 +201,6 @@ def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
                 input_bindings={"question": "{{ step_b.output.text }}"},
-                mcp_policy=MCPPolicy.INHERIT,
             ),
         ],
     )
@@ -365,59 +349,6 @@ def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -
     assert result.spec is None
     assert result.validation is None
     assert result.failure_feedback == "resource issue"
-
-
-def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() -> None:
-    spec = _make_spec()
-    spec = spec.model_copy(
-        update={
-            "steps": [
-                spec.steps[0].model_copy(
-                    update={
-                        "assistant_spec": spec.steps[0].assistant_spec.model_copy(
-                            update={"mcp_server_refs": ["Time MCP"]}
-                        )
-                    }
-                )
-            ]
-        }
-    )
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "server-time",
-                "name": "Time MCP",
-                "tools": [
-                    {"id": "tool-current-time", "name": "get_current_time"},
-                    {"id": "tool-convert-time", "name": "convert_time"},
-                ],
-            }
-        ],
-    )
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=SpecValidationResult(),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=spec,
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=catalog,
-        )
-
-    assert result.spec is not None
-    assistant_spec = result.spec.steps[0].assistant_spec
-    assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
-    assert assistant_spec.mcp_tool_refs == [
-        "mcp_tool.time-mcp-get-current-time",
-        "mcp_tool.time-mcp-convert-time",
-    ]
 
 
 def test_prepared_simple_create_spec_is_apply_normalization_fixed_point() -> None:

@@ -8,7 +8,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
-    AIBuilderResourceReferenceEntry,
     AIBuilderResourceReferenceMaterial,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
@@ -28,7 +27,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -82,7 +80,6 @@ def _make_step_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> Step
             model_ref=model_ref,
             knowledge_refs=knowledge_refs,
         ),
-        mcp_policy=MCPPolicy.INHERIT,
         input_source=InputSource.FLOW_INPUT,
         input_type=InputType.TEXT,
         output_mode=OutputMode.PASS_THROUGH,
@@ -154,24 +151,10 @@ def test_catalog_entries_expose_portable_slot_refs_without_changing_local_refs()
                 "Local Policy",
             ),
         ],
-        available_mcps=[
-            {
-                "id": "33333333-3333-4333-8333-333333333333",
-                "name": "Case Registry",
-                "tools": [
-                    {
-                        "id": "44444444-4444-4444-8444-444444444444",
-                        "name": "lookup_case",
-                    }
-                ],
-            }
-        ],
     )
 
     model = catalog.models[0]
     knowledge = catalog.knowledge_bases[0]
-    mcp_server = catalog.mcp_servers[0]
-    mcp_tool = catalog.mcp_tools[0]
 
     assert model.local_ref == "11111111-1111-4111-8111-111111111111"
     assert model.authoring_ref == "model.gpt-5-4-mini"
@@ -185,18 +168,6 @@ def test_catalog_entries_expose_portable_slot_refs_without_changing_local_refs()
     assert knowledge.slot_ref.ref == "knowledge.local-policy"
     assert knowledge.local_binding is not None
     assert knowledge.local_binding.local_kind is LocalResourceKind.COLLECTION
-
-    assert mcp_server.local_ref == "33333333-3333-4333-8333-333333333333"
-    assert mcp_server.authoring_ref == "mcp_server.case-registry"
-    assert mcp_server.slot_ref.ref == "mcp_server.case-registry"
-    assert mcp_server.local_binding is not None
-    assert mcp_server.local_binding.local_kind is LocalResourceKind.MCP_SERVER
-
-    assert mcp_tool.local_ref == "44444444-4444-4444-8444-444444444444"
-    assert mcp_tool.authoring_ref == "mcp_tool.case-registry-lookup-case"
-    assert mcp_tool.slot_ref.ref == "mcp_tool.case-registry-lookup-case"
-    assert mcp_tool.local_binding is not None
-    assert mcp_tool.local_binding.local_kind is LocalResourceKind.MCP_TOOL
 
 
 def test_catalog_slot_refs_deduplicate_without_leaking_uuid_refs() -> None:
@@ -552,18 +523,6 @@ def test_assistant_snapshot_translates_local_refs_to_authoring_slot_refs() -> No
         available_kbs=[
             _kb_resource("22222222-2222-4222-8222-222222222222", "Policy"),
         ],
-        available_mcps=[
-            {
-                "id": "33333333-3333-4333-8333-333333333333",
-                "name": "Case system",
-                "tools": [
-                    {
-                        "id": "44444444-4444-4444-8444-444444444444",
-                        "name": "lookup_case",
-                    },
-                ],
-            }
-        ],
     )
 
     knowledge_assistant_spec = catalog.assistant_spec_from_snapshot(
@@ -581,33 +540,8 @@ def test_assistant_snapshot_translates_local_refs_to_authoring_slot_refs() -> No
             ),
         )
     )
-    mcp_assistant_spec = catalog.assistant_spec_from_snapshot(
-        AssistantAuthoringSnapshot(
-            instructions="Använd lokala resurser.",
-            model=AssistantAuthoringResourceRef(
-                local_ref="11111111-1111-4111-8111-111111111111",
-                label="GPT",
-            ),
-            mcp_server_refs=(
-                AssistantAuthoringResourceRef(
-                    local_ref="33333333-3333-4333-8333-333333333333",
-                    label="Case system",
-                ),
-            ),
-            mcp_tool_refs=(
-                AssistantAuthoringResourceRef(
-                    local_ref="44444444-4444-4444-8444-444444444444",
-                    label="lookup_case",
-                ),
-            ),
-        )
-    )
-
     assert knowledge_assistant_spec.model_ref == "model.gpt"
     assert knowledge_assistant_spec.knowledge_refs == ["knowledge.policy"]
-    assert mcp_assistant_spec.model_ref == "model.gpt"
-    assert mcp_assistant_spec.mcp_server_refs == ["mcp_server.case-system"]
-    assert mcp_assistant_spec.mcp_tool_refs == ["mcp_tool.case-system-lookup-case"]
 
 
 def test_assistant_snapshot_rejects_unavailable_local_resource() -> None:
@@ -637,107 +571,6 @@ def test_assistant_snapshot_rejects_unavailable_local_resource() -> None:
     assert "Sensitive policy name" not in str(exc_info.value)
 
 
-def test_mcp_tool_alias_adds_parent_server_without_enabling_sibling_tools() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "server-uuid-1",
-                "name": "Ärendesystem",
-                "tools": [
-                    {"id": "tool-uuid-1", "name": "lookup_case"},
-                    {"id": "tool-uuid-2", "name": "delete_case"},
-                ],
-            }
-        ],
-    )
-
-    assistant_spec, issues = canonicalize_assistant_spec_resources(
-        AssistantSpec(
-            instructions="Hämta aktuell ärendedata.",
-            mcp_tool_refs=["lookup_case"],
-        ),
-        catalog=catalog,
-        location_prefix="step 'step_a'",
-    )
-
-    assert issues == []
-    assert assistant_spec.mcp_server_refs == ["mcp_server.rendesystem"]
-    assert assistant_spec.mcp_tool_refs == ["mcp_tool.rendesystem-lookup-case"]
-
-
-def test_mcp_server_ref_expands_to_enabled_server_tools() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "server-uuid-1",
-                "name": "Ärendesystem",
-                "tools": [
-                    {"id": "tool-uuid-1", "name": "lookup_case"},
-                    {"id": "tool-uuid-2", "name": "list_cases"},
-                ],
-            }
-        ],
-    )
-
-    assistant_spec, issues = canonicalize_assistant_spec_resources(
-        AssistantSpec(
-            instructions="Använd ärendesystemet.",
-            mcp_server_refs=["Ärendesystem"],
-        ),
-        catalog=catalog,
-        location_prefix="step 'step_a'",
-    )
-
-    assert issues == []
-    assert assistant_spec.mcp_server_refs == ["mcp_server.rendesystem"]
-    assert assistant_spec.mcp_tool_refs == [
-        "mcp_tool.rendesystem-lookup-case",
-        "mcp_tool.rendesystem-list-cases",
-    ]
-
-
-def test_catalog_detects_explicit_resource_alias_mentions_with_boundaries() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "tools": [
-                    {"id": "current-time", "name": "get_current_time"},
-                    {"id": "convert-time", "name": "convert_time"},
-                ],
-            }
-        ],
-    )
-
-    assert catalog.refs_mentioned_in_text(
-        kind="mcp_server",
-        text="Hämta aktuell tid med Time MCP.",
-    ) == frozenset({"mcp_server.time-mcp"})
-    assert catalog.refs_mentioned_in_text(
-        kind="mcp_tool",
-        text="Använd get_current_time och convert_time i detta steg.",
-    ) == frozenset(
-        {
-            "mcp_tool.time-mcp-get-current-time",
-            "mcp_tool.time-mcp-convert-time",
-        }
-    )
-    assert (
-        catalog.refs_mentioned_in_text(
-            kind="mcp_server",
-            text="Runtime-input ska anges manuellt.",
-        )
-        == frozenset()
-    )
-
-
 def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
@@ -745,7 +578,6 @@ def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
 
     assert catalog.refs_mentioned_in_text(
@@ -756,102 +588,6 @@ def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
         kind="model",
         text="Jämför gpt 5.4 och gpt 5.4 nano.",
     ) == frozenset({"model.gpt-5-4", "model.gpt-5-4-nano"})
-
-
-def test_unknown_mcp_tool_alias_returns_typed_issue() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "server-uuid-1",
-                "name": "Ärendesystem",
-                "tools": [{"id": "tool-uuid-1", "name": "lookup_case"}],
-            }
-        ],
-    )
-
-    assistant_spec, issues = canonicalize_assistant_spec_resources(
-        AssistantSpec(
-            instructions="Hämta aktuell ärendedata.",
-            mcp_tool_refs=["missing_tool"],
-        ),
-        catalog=catalog,
-        location_prefix="step 'step_a'",
-    )
-
-    assert assistant_spec.mcp_tool_refs == []
-    assert len(issues) == 1
-    assert issues[0].code == "unknown_mcp_tool_ref"
-    assert "MCP tool" in format_resource_resolution_feedback(issues)
-
-
-def test_malformed_mcp_resources_do_not_enter_catalog() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {"ref": "", "name": "No ref", "tools": [{"ref": "tool-ignored"}]},
-            {
-                "ref": "server-uuid-1",
-                "name": "Ärendesystem",
-                "tools": [
-                    {"ref": "", "name": "empty"},
-                    {"ref": " ", "name": "blank"},
-                    {"ref": "tool-uuid-1", "name": "lookup_case"},
-                ],
-            },
-        ],
-    )
-
-    assert catalog.mcp_server_refs == {"mcp_server.rendesystem"}
-    assert catalog.mcp_tool_refs == {"mcp_tool.rendesystem-lookup-case"}
-
-
-def test_resource_reference_material_uses_catalog_refs_and_selected_mcp_tools() -> None:
-    long_description = "x" * (RESOURCE_DESCRIPTION_MAX_CHARS + 20)
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-uuid-1", "gpt-5.4-nano"),
-        ],
-        available_kbs=[
-            _kb_resource("kb-uuid-1", "Risk KB", description=long_description),
-        ],
-        available_mcps=[
-            {
-                "id": "server-uuid-1",
-                "name": "Ärendesystem",
-                "description": "Läser ärendedata.",
-                "tools": [
-                    {
-                        "id": "tool-uuid-1",
-                        "name": "lookup_case",
-                        "description": "Hämtar ett ärende.",
-                    },
-                    {"id": "", "name": "ignored"},
-                ],
-            },
-            {"id": "", "name": "ignored", "tools": [{"id": "ignored-tool"}]},
-        ],
-    )
-
-    material = build_ai_builder_resource_reference_material(
-        catalog=catalog,
-        selected_mcp_server_refs={"mcp_server.rendesystem"},
-    )
-
-    assert material.models[0].ref == "model.gpt-5-4-nano"
-    assert material.models[0].display_name == "gpt-5.4-nano"
-    assert material.knowledge_bases[0].ref == "knowledge.risk-kb"
-    assert (
-        len(material.knowledge_bases[0].description) == RESOURCE_DESCRIPTION_MAX_CHARS
-    )
-    assert material.knowledge_bases[0].description.endswith("...")
-    assert material.mcp_servers[0].ref == "mcp_server.rendesystem"
-    assert material.mcp_tools[0].ref == "mcp_tool.rendesystem-lookup-case"
-    assert material.mcp_tools[0].parent_ref == "mcp_server.rendesystem"
-    assert material.selected_mcp_servers == material.mcp_servers
-    assert material.selected_mcp_tools == material.mcp_tools
 
 
 def test_resource_reference_material_keeps_description_at_clamp_boundary() -> None:
@@ -872,38 +608,22 @@ def _reference_material(
     *,
     model_count: int = 0,
     kb_count: int = 0,
-    server_count: int = 0,
-    tools_per_server: int = 0,
 ) -> AIBuilderResourceReferenceMaterial:
     def _uuid(group: int, index: int) -> str:
         return f"{group:08d}-{index:04d}-4000-8000-000000000000"
 
     models = [_model_resource(_uuid(1, i), f"Model {i}") for i in range(model_count)]
     kbs = [_kb_resource(_uuid(2, i), f"Knowledge {i}") for i in range(kb_count)]
-    mcps = [
-        {
-            "id": _uuid(3, s),
-            "name": f"Server {s}",
-            "tools": [
-                {"id": _uuid(4, s * 100 + t), "name": f"tool_{s}_{t}"}
-                for t in range(tools_per_server)
-            ],
-        }
-        for s in range(server_count)
-    ]
     catalog = build_ai_builder_resource_catalog(
         available_models=models or None,
         available_kbs=kbs or None,
-        available_mcps=mcps or None,
     )
     return build_ai_builder_resource_reference_material(catalog=catalog)
 
 
 class TestRenderResourceReferenceBlock:
     def test_renders_every_resource_ref(self) -> None:
-        material = _reference_material(
-            model_count=2, kb_count=2, server_count=1, tools_per_server=2
-        )
+        material = _reference_material(model_count=2, kb_count=2)
 
         rendered = render_resource_reference_block(material)
 
@@ -911,58 +631,3 @@ class TestRenderResourceReferenceBlock:
         assert "model.model-1" in rendered.models
         assert "knowledge.knowledge-0" in rendered.knowledge_bases
         assert "knowledge.knowledge-1" in rendered.knowledge_bases
-        assert "mcp_server.server-0" in rendered.mcp
-        assert rendered.mcp.count("tool_ref=") == 2
-
-    def test_nests_each_mcp_tool_under_its_server(self) -> None:
-        material = _reference_material(server_count=2, tools_per_server=1)
-
-        rendered = render_resource_reference_block(material)
-
-        lines = rendered.mcp.splitlines()
-        assert sum(line.startswith("- server_ref=") for line in lines) == 2
-        assert sum(line.startswith("  - tool_ref=") for line in lines) == 2
-
-    def test_groups_interleaved_tools_under_parents_preserving_order(self) -> None:
-        # Tools arrive interleaved across parents, plus one orphan (unknown
-        # server) and one with no parent. Each tool must reattach to its own
-        # server in input order, the orphan and parentless tools are dropped,
-        # and a server with no tools is still emitted as a bullet.
-        def _entry(
-            ref: str, name: str, parent: str | None = None
-        ) -> AIBuilderResourceReferenceEntry:
-            return AIBuilderResourceReferenceEntry(
-                ref=ref, display_name=name, parent_ref=parent
-            )
-
-        material = AIBuilderResourceReferenceMaterial(
-            models=(),
-            knowledge_bases=(),
-            mcp_servers=(
-                _entry("mcp_server.a", "Server A"),
-                _entry("mcp_server.b", "Server B"),
-                _entry("mcp_server.c", "Server C"),
-            ),
-            mcp_tools=(
-                _entry("mcp_tool.a1", "Tool A1", parent="mcp_server.a"),
-                _entry("mcp_tool.b1", "Tool B1", parent="mcp_server.b"),
-                _entry("mcp_tool.a2", "Tool A2", parent="mcp_server.a"),
-                _entry("mcp_tool.orphan", "Orphan", parent="mcp_server.zzz"),
-                _entry("mcp_tool.loose", "Loose"),
-            ),
-            selected_mcp_servers=(),
-            selected_mcp_tools=(),
-        )
-
-        rendered = render_resource_reference_block(material)
-
-        assert rendered.mcp == (
-            "- server_ref=`mcp_server.a` | name=`Server A`\n"
-            "  - tool_ref=`mcp_tool.a1` | name=`Tool A1`\n"
-            "  - tool_ref=`mcp_tool.a2` | name=`Tool A2`\n"
-            "- server_ref=`mcp_server.b` | name=`Server B`\n"
-            "  - tool_ref=`mcp_tool.b1` | name=`Tool B1`\n"
-            "- server_ref=`mcp_server.c` | name=`Server C`"
-        )
-        assert "mcp_tool.orphan" not in rendered.mcp
-        assert "mcp_tool.loose" not in rendered.mcp

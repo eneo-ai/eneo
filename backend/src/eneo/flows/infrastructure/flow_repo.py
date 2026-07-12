@@ -24,7 +24,6 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
-from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
@@ -60,20 +59,12 @@ class _AssistantAuthoringSnapshotBuilder:
     knowledge_refs: list[AssistantAuthoringResourceRef] = field(
         default_factory=lambda: list[AssistantAuthoringResourceRef]()
     )
-    mcp_server_refs: list[AssistantAuthoringResourceRef] = field(
-        default_factory=lambda: list[AssistantAuthoringResourceRef]()
-    )
-    mcp_tool_refs: list[AssistantAuthoringResourceRef] = field(
-        default_factory=lambda: list[AssistantAuthoringResourceRef]()
-    )
 
     def snapshot(self) -> AssistantAuthoringSnapshot:
         return AssistantAuthoringSnapshot(
             instructions=self.instructions,
             model=self.model,
             knowledge_refs=tuple(self.knowledge_refs),
-            mcp_server_refs=tuple(self.mcp_server_refs),
-            mcp_tool_refs=tuple(self.mcp_tool_refs),
         )
 
 
@@ -128,7 +119,6 @@ class FlowRepository:
             "output_contract": step.output_contract,
             "input_bindings": step.input_bindings,
             "output_classification_override": step.output_classification_override,
-            "mcp_policy": step.mcp_policy,
             "input_config": step.input_config,
             "output_config": step.output_config,
             "review_policy": dump_flow_step_review_policy(step.review_policy),
@@ -411,70 +401,45 @@ class FlowRepository:
                 )
             )
 
-        mcp_server_rows = (
-            await self.session.execute(
-                sa.select(
-                    AssistantMCPServers.assistant_id,
-                    MCPServers.id,
-                    MCPServers.name,
-                )
-                .join(MCPServers, MCPServers.id == AssistantMCPServers.mcp_server_id)
-                .where(AssistantMCPServers.assistant_id.in_(assistant_ids))
-                .where(MCPServers.tenant_id == tenant_id)
-                .order_by(
-                    AssistantMCPServers.assistant_id.asc(),
-                    MCPServers.created_at.asc(),
-                )
-            )
-        ).all()
-        for row in mcp_server_rows:
-            if row.assistant_id not in snapshots:
-                continue
-            snapshots[row.assistant_id].mcp_server_refs.append(
-                AssistantAuthoringResourceRef(
-                    local_ref=str(row.id),
-                    label=row.name,
-                    local_kind=LocalResourceKind.MCP_SERVER,
-                )
-            )
-
-        mcp_tool_rows = (
-            await self.session.execute(
-                sa.select(
-                    AssistantMCPServerTools.assistant_id,
-                    MCPServerTools.id,
-                    MCPServerTools.name,
-                )
-                .join(
-                    MCPServerTools,
-                    MCPServerTools.id == AssistantMCPServerTools.mcp_server_tool_id,
-                )
-                .join(MCPServers, MCPServers.id == MCPServerTools.mcp_server_id)
-                .where(AssistantMCPServerTools.assistant_id.in_(assistant_ids))
-                .where(AssistantMCPServerTools.is_enabled.is_(True))
-                .where(MCPServers.tenant_id == tenant_id)
-                .order_by(
-                    AssistantMCPServerTools.assistant_id.asc(),
-                    MCPServerTools.name.asc(),
-                )
-            )
-        ).all()
-        for row in mcp_tool_rows:
-            if row.assistant_id not in snapshots:
-                continue
-            snapshots[row.assistant_id].mcp_tool_refs.append(
-                AssistantAuthoringResourceRef(
-                    local_ref=str(row.id),
-                    label=row.name,
-                    local_kind=LocalResourceKind.MCP_TOOL,
-                )
-            )
-
         return {
             assistant_id: snapshots[assistant_id].snapshot()
             for assistant_id in assistant_ids
             if assistant_id in snapshots
         }
+
+    async def has_assistant_mcp_configuration(
+        self,
+        *,
+        assistant_ids: list[UUID],
+        tenant_id: UUID,
+    ) -> bool:
+        if not assistant_ids:
+            return False
+
+        server_membership = (
+            sa.select(AssistantMCPServers.assistant_id)
+            .join(Assistants, Assistants.id == AssistantMCPServers.assistant_id)
+            .join(Users, Users.id == Assistants.user_id)
+            .where(AssistantMCPServers.assistant_id.in_(assistant_ids))
+            .where(Users.tenant_id == tenant_id)
+        )
+        tool_membership = (
+            sa.select(AssistantMCPServerTools.assistant_id)
+            .join(Assistants, Assistants.id == AssistantMCPServerTools.assistant_id)
+            .join(Users, Users.id == Assistants.user_id)
+            .where(AssistantMCPServerTools.assistant_id.in_(assistant_ids))
+            .where(Users.tenant_id == tenant_id)
+        )
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.or_(
+                        sa.exists(server_membership),
+                        sa.exists(tool_membership),
+                    )
+                )
+            )
+        )
 
     async def get_assistant_scope_rows(
         self,

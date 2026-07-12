@@ -12,7 +12,6 @@ from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
-    MCPPolicy,
     OutputType,
     StepSpec,
 )
@@ -79,7 +78,6 @@ class FlowDraftCompiledStep(BaseModel):
     input_type: FlowInputType
     output_mode: FlowOutputMode
     output_type: OutputType
-    mcp_policy: MCPPolicy
     assistant_id: UUID | None = None
     existing_step_ref: str | None = None
     input_bindings: FlowPersistedJsonObject | None = None
@@ -405,7 +403,6 @@ def _compile_new_step(
         input_type=FlowInputType(step_spec.input_type.value),
         output_mode=FlowOutputMode(step_spec.output_mode.value),
         output_type=OutputType(step_spec.output_type.value),
-        mcp_policy=MCPPolicy(step_spec.mcp_policy.value),
         input_bindings=step_spec.input_bindings,
         input_contract=step_spec.input_contract,
         output_contract=step_spec.output_contract,
@@ -435,7 +432,6 @@ def _compile_modified_step(
         input_type=FlowInputType(effective_spec.input_type.value),
         output_mode=FlowOutputMode(effective_spec.output_mode.value),
         output_type=OutputType(effective_spec.output_type.value),
-        mcp_policy=MCPPolicy(effective_spec.mcp_policy.value),
         input_bindings=effective_spec.input_bindings,
         input_contract=effective_spec.input_contract,
         output_contract=effective_spec.output_contract,

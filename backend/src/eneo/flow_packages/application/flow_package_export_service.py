@@ -49,7 +49,6 @@ from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -87,6 +86,8 @@ FlowPackageClock = Callable[[], datetime]
 
 
 class FlowPackageExportFlowService(Protocol):
+    async def has_flow_mcp_configuration(self, flow: Flow) -> bool: ...
+
     async def get_flow_assistant_snapshots(
         self,
         flow: Flow,
@@ -127,6 +128,15 @@ class FlowPackageExportService:
         flow: Flow,
         manifest_metadata: FlowPackageManifestMetadata,
     ) -> FlowPackageExportResult:
+        if await self._flow_service.has_flow_mcp_configuration(flow):
+            raise FlowPackageExportError(
+                code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
+                message=(
+                    "Flow package export does not support Flow assistants with MCP configuration. "
+                    "Remove MCP servers and tools before exporting."
+                ),
+                context={"reason": "flow_mcp_unsupported"},
+            )
         assistant_snapshots = await self._flow_service.get_flow_assistant_snapshots(
             flow
         )
@@ -297,7 +307,6 @@ def _step_spec(
     output_config = _portable_output_config(step)
 
     try:
-        mcp_policy = MCPPolicy(step.mcp_policy.value)
         input_source = InputSource(step.input_source.value)
         input_type = InputType(step.input_type.value)
         output_mode = OutputMode(step.output_mode.value)
@@ -319,7 +328,6 @@ def _step_spec(
         plan_step_ref=usage.step_ref,
         name=step.user_description or usage.step_ref,
         assistant_spec=assistant_spec,
-        mcp_policy=mcp_policy,
         input_source=input_source,
         input_type=input_type,
         output_mode=output_mode,
@@ -440,17 +448,6 @@ def _assistant_spec(
     requirement_drafts: dict[str, _RequirementDraft],
     usage: _StepUsage,
 ) -> AssistantSpec:
-    if snapshot.mcp_server_refs or snapshot.mcp_tool_refs:
-        raise FlowPackageExportError(
-            code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
-            message=(
-                "Flow package export does not support portable MCP resources. "
-                "Remove MCP bindings from the shared package and document any required "
-                "MCP setup in marketplace or forum guidance."
-            ),
-            context={"step_order": usage.step_order},
-        )
-
     model_ref = None
     if snapshot.model is not None:
         model_binding = _binding_for_ref(
@@ -589,22 +586,10 @@ def _requirement_from_draft(draft: _RequirementDraft) -> FlowPackageRequirementE
                 slot_ref=draft.binding.slot_ref,
                 used_by_steps=used_by_steps,
             )
-        case ResourceSlotKind.MCP_TOOL:
-            raise FlowPackageExportError(
-                code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
-                message="Flow package export does not support portable MCP resources.",
-                context={"resource_ref": draft.binding.slot_ref.ref},
-            )
         case ResourceSlotKind.TEMPLATE_ASSET:
             raise FlowPackageExportError(
                 code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
                 message="Flow package export does not support template asset payloads yet.",
-                context={"resource_ref": draft.binding.slot_ref.ref},
-            )
-        case ResourceSlotKind.MCP_SERVER:
-            raise FlowPackageExportError(
-                code=FlowPackageExportErrorCode.MCP_EXPORT_UNSUPPORTED,
-                message="Flow package export does not support portable MCP resources.",
                 context={"resource_ref": draft.binding.slot_ref.ref},
             )
 

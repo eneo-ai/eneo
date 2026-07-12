@@ -31,11 +31,6 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_intent import (
-    MCP_RESOURCE_SELECTION_QUESTION_ID,
-    MCP_SELECTION_USE_SERVER_PREFIX,
-    MCP_SELECTION_WITHOUT,
-)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -97,7 +92,6 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
-        available_mcps=[],
     )
 
 
@@ -371,7 +365,6 @@ async def test_propose_plan_edit_compile_bug_preserves_provider_outcome_unknown(
             input_type="text",
             output_mode="pass_through",
             output_type="text",
-            mcp_policy="inherit",
         )
     ]
     flow.draft_revision = 7
@@ -686,7 +679,6 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
@@ -786,7 +778,6 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
@@ -858,7 +849,6 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
@@ -921,267 +911,6 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
     finalize.assert_awaited_once()
     scoped_request = finalize.await_args_list[0].args[0]
     assert scoped_request.arguments["revision_kind"] == "scoped_step_direct"
-
-
-@pytest.mark.asyncio
-async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable() -> (
-    None
-):
-    processor = _make_processor()
-    session_id = uuid4()
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "svelte-server",
-                "name": "Svelte mcp",
-                "description": "Developer documentation helpers for Svelte apps.",
-                "tools": [{"id": "svelte-docs", "name": "get-documentation"}],
-            }
-        ],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Använd Time MCP för att hämta aktuell tid.",
-            metadata={"ui_language": "sv"},
-        )
-    ]
-
-    events = [
-        encode_ai_builder_stream_event(event)
-        async for event in processor.propose_plan(
-            turn=_make_turn(session_id=session_id),
-            conversation=conversation,
-            new_messages_start=0,
-            llm_messages=[{"role": "system", "content": "Prompt"}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=catalog,
-            max_output_tokens=4096,
-            proposal_temperature=0.2,
-            request_id="req-propose",
-            flow=None,
-        )
-    ]
-
-    assert [event["event"] for event in events] == ["text", "question"]
-    question_payload = json.loads(events[1]["data"])
-    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
-    assert "Time MCP" in question_payload["question"]
-    assert [option["label"] for option in question_payload["options"]] == [
-        "Fortsätt utan MCP",
-        "Använd Svelte mcp",
-    ]
-    assert not processor.litellm_client.acompletion.await_count
-    processor.repo.commit_turn.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> None:
-    processor = _make_processor()
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "description": "Kan hämta tiden.",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Använd Time MCP för att hämta aktuell tid.",
-            metadata={"ui_language": "sv"},
-        )
-    ]
-
-    events = [
-        encode_ai_builder_stream_event(event)
-        async for event in processor.propose_plan(
-            turn=_make_turn(),
-            conversation=conversation,
-            new_messages_start=0,
-            llm_messages=[{"role": "system", "content": "Prompt"}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=catalog,
-            max_output_tokens=4096,
-            proposal_temperature=0.2,
-            request_id="req-propose",
-            flow=None,
-        )
-    ]
-
-    assert [event["event"] for event in events] == ["text", "question"]
-    question_payload = json.loads(events[1]["data"])
-    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
-    assert [option["label"] for option in question_payload["options"]] == [
-        "Fortsätt utan MCP",
-        "Använd Time MCP",
-    ]
-    assert not processor.litellm_client.acompletion.await_count
-
-
-@pytest.mark.asyncio
-async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
-    processor = _make_processor()
-    outline_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Time fallback",
-            "plan_rationale": "Respond without external tools.",
-            "steps": [
-                {"name": "Answer", "instructions": "Build a response without MCP."}
-            ],
-        },
-    )
-    processor.litellm_client.acompletion.return_value = _make_response_with_tool_calls(
-        outline_call
-    )
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Använd Time MCP för att hämta aktuell tid.",
-            metadata={"ui_language": "sv"},
-        ),
-        ConversationMessage(
-            role="user",
-            content="Fortsätt utan MCP",
-            metadata={
-                "question_answer": {
-                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
-                    "selected_values": ["without_mcp"],
-                }
-            },
-        ),
-    ]
-
-    async def process_outline(**kwargs) -> ToolProcessingResult:
-        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
-
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
-            new=process_outline,
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
-            new=_store_compiled_plan,
-        ),
-        patch.object(
-            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
-        ),
-    ):
-        events = [
-            encode_ai_builder_stream_event(event)
-            async for event in processor.propose_plan(
-                turn=_make_turn(),
-                conversation=conversation,
-                new_messages_start=2,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=catalog,
-                max_output_tokens=4096,
-                proposal_temperature=0.2,
-                request_id="req-propose",
-                flow=None,
-            )
-        ]
-
-    assert [event["event"] for event in events] == ["plan"]
-    processor.litellm_client.acompletion.assert_awaited_once()
-    assert "response_format" not in (
-        processor.litellm_client.acompletion.await_args.kwargs
-    )
-
-
-@pytest.mark.asyncio
-async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> None:
-    processor = _make_processor()
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "description": "Kan hämta tiden.",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Använd Time MCP för att hämta aktuell tid.",
-            metadata={"ui_language": "sv"},
-        ),
-        ConversationMessage(
-            role="user",
-            content="Fortsätt utan MCP",
-            metadata={
-                "question_answer": {
-                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
-                    "selected_values": [MCP_SELECTION_WITHOUT],
-                }
-            },
-        ),
-        ConversationMessage(
-            role="user",
-            content="Jag ändrade mig, använd Time MCP ändå.",
-            metadata={"ui_language": "sv"},
-        ),
-    ]
-
-    events = [
-        encode_ai_builder_stream_event(event)
-        async for event in processor.propose_plan(
-            turn=_make_turn(),
-            conversation=conversation,
-            new_messages_start=2,
-            llm_messages=[{"role": "system", "content": "Prompt"}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=catalog,
-            max_output_tokens=4096,
-            proposal_temperature=0.2,
-            request_id="req-propose",
-            flow=None,
-        )
-    ]
-
-    assert [event["event"] for event in events] == ["text", "question"]
-    question_payload = json.loads(events[1]["data"])
-    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
-    assert [option["value"] for option in question_payload["options"]] == [
-        MCP_SELECTION_WITHOUT,
-        f"{MCP_SELECTION_USE_SERVER_PREFIX}mcp_server.time-mcp",
-    ]
-    assert not processor.litellm_client.acompletion.await_count
 
 
 @pytest.mark.asyncio
@@ -1489,7 +1218,6 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
             input_type="text",
             output_mode="pass_through",
             output_type="text",
-            mcp_policy="inherit",
         )
     ]
     flow.draft_revision = 7
@@ -1670,157 +1398,6 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
-    flow = MagicMock()
-    flow.steps = []
-    flow.draft_revision = 7
-    flow.name = "Rapportflöde"
-    flow.description = "Skapar PDF idag."
-    flow.metadata_json = {}
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-
-    arguments = {
-        "plan_rationale": "Lägg till ett tidsteg.",
-        "steps": [
-            {
-                "kind": "modify",
-                "existing_step_ref": "existing_step_1",
-                "output_type": "json",
-            }
-        ],
-    }
-    compiled_spec = _make_flow_spec(
-        model_ref=None,
-        knowledge_refs=[],
-        mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
-    )
-    edit = _make_edit_compilation(compiled_spec)
-    compiled_validation = MagicMock(valid=True, errors=[])
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=compiled_spec,
-                validation=compiled_validation,
-                failure_feedback=None,
-            ),
-        ) as prepare_spec,
-        patch(
-            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
-            return_value=edit,
-        ),
-    ):
-        result = await process_edit_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Lägg till ett steg som använder Time MCP.",
-                    metadata={"ui_language": "sv"},
-                )
-            ],
-            arguments=arguments,
-            available_model_refs=None,
-            available_kb_refs=None,
-            flow=flow,
-            assistant_snapshots=None,
-            resource_catalog=catalog,
-        )
-
-    assert result.compiled_proposal is not None
-    assert result.events == ()
-    assert prepare_spec.call_args.kwargs["resource_catalog"] is catalog
-
-
-@pytest.mark.asyncio
-async def test_edit_proposal_enforces_without_mcp_selection() -> None:
-    flow = MagicMock()
-    flow.steps = []
-    flow.draft_revision = 7
-    flow.name = "Rapportflöde"
-    flow.description = "Skapar PDF idag."
-    flow.metadata_json = {}
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-
-    arguments = {
-        "plan_rationale": "Lägg till ett tidsteg.",
-        "steps": [
-            {
-                "kind": "modify",
-                "existing_step_ref": "existing_step_1",
-                "output_type": "json",
-            }
-        ],
-    }
-    compiled_spec = _make_flow_spec(
-        model_ref=None,
-        knowledge_refs=[],
-        mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
-    )
-    edit = _make_edit_compilation(compiled_spec)
-    compiled_validation = MagicMock(valid=True, errors=[])
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=compiled_spec,
-                validation=compiled_validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
-            return_value=edit,
-        ),
-    ):
-        result = await process_edit_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Fortsätt utan MCP",
-                    metadata={
-                        "question_answer": {
-                            "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
-                            "selected_values": [MCP_SELECTION_WITHOUT],
-                        }
-                    },
-                )
-            ],
-            arguments=arguments,
-            available_model_refs=None,
-            available_kb_refs=None,
-            flow=flow,
-            assistant_snapshots=None,
-            resource_catalog=catalog,
-        )
-
-    assert result.compiled_proposal is not None
-    assert result.events == ()
-
-
-@pytest.mark.asyncio
 async def test_edit_proposal_passes_metadata_to_edit_compiler() -> None:
     flow = MagicMock()
     flow.steps = []
@@ -1892,7 +1469,6 @@ async def test_edit_proposal_passes_flat_modify_step_to_compiler() -> None:
             input_type="text",
             output_mode="pass_through",
             output_type="text",
-            mcp_policy="inherit",
         )
     ]
     flow.draft_revision = 7

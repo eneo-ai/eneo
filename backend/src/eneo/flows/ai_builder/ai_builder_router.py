@@ -929,7 +929,6 @@ async def send_message(
                         prepared_context.planner_context.available_models
                     ),
                     available_kbs=prepared_context.planner_context.available_kbs,
-                    available_mcps=prepared_context.planner_context.available_mcps,
                     flow=prepared_context.flow,
                     assistant_snapshots=prepared_context.assistant_snapshots,
                     attachment_files=prepared_context.attachment_files,

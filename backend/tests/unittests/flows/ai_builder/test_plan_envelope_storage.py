@@ -30,7 +30,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -56,7 +55,6 @@ def _make_spec(flow_name: str = "Spec A") -> FlowDraftSpecCore:
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,
                 output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
             )
         ],
     )

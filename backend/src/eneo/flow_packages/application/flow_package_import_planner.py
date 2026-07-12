@@ -18,13 +18,11 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlanSummary,
     FlowPackageKnowledgeDependencyResolution,
     FlowPackageLocalCandidate,
-    FlowPackageMcpToolDependencyResolution,
     FlowPackageModelCandidate,
     FlowPackageTemplateAssetDependencyResolution,
 )
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
-    FlowPackageMcpToolRequirement,
     FlowPackageModelRequirement,
     FlowPackageRequirementEntry,
     FlowPackageRequirementKind,
@@ -141,8 +139,6 @@ def _resolve_requirement(
             )
         case FlowPackageKnowledgeRequirement():
             return _resolve_knowledge_requirement(requirement, candidates)
-        case FlowPackageMcpToolRequirement():
-            return _resolve_mcp_setup_requirement(requirement)
         case FlowPackageTemplateAssetRequirement():
             return _resolve_unsupported_template_requirement(requirement)
         case _:
@@ -175,26 +171,6 @@ def _resolve_knowledge_requirement(
         auto_select_allowed=False,
         suggestions=suggestions,
         total_candidate_count=total_candidate_count,
-    )
-
-
-def _resolve_mcp_setup_requirement(
-    requirement: FlowPackageMcpToolRequirement,
-) -> FlowPackageMcpToolDependencyResolution:
-    return FlowPackageMcpToolDependencyResolution(
-        slot_ref=requirement.slot_ref,
-        required=requirement.required,
-        used_by_steps=list(requirement.used_by_steps),
-        data_sensitivity=requirement.data_sensitivity,
-        guidance=requirement.guidance,
-        server_slot_ref=requirement.server_slot_ref,
-        status=FlowPackageImportPlanStatus.UNSUPPORTED,
-        install_blocks=True,
-        publish_blocks=True,
-        selection_required_for_install=False,
-        auto_select_allowed=False,
-        suggestions=[],
-        total_candidate_count=0,
     )
 
 

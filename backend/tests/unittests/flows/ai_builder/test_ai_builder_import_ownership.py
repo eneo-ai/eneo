@@ -65,7 +65,6 @@ PROCESSOR_FINALIZATION_METHODS = frozenset(
         "_create_quality_result",
         "_edit_quality_result",
         "_finalize_compiled_proposal",
-        "_mcp_policy_feedback",
         "_retry_context",
         "mcp_clarification_events_if_needed",
     }
@@ -381,7 +380,6 @@ BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
         "InputSource",
         "InputType",
         "JsonObject",
-        "MCPPolicy",
         "OutputMode",
         "OutputType",
         "StepChangeKind",
@@ -585,9 +583,6 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
         "src/eneo/flows/ai_builder/ai_builder_discovery_models.py"
     )
     events_path = backend_root / Path("src/eneo/flows/ai_builder/ai_builder_events.py")
-    mcp_intent_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_mcp_intent.py"
-    )
     conversation_metadata_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_conversation_metadata.py"
     )
@@ -634,19 +629,6 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
             violations.append(
                 f"{events_path}:{function.lineno} {function_name} param={annotation}"
             )
-
-    mcp_tree = ast.parse(mcp_intent_path.read_text(), filename=str(mcp_intent_path))
-    mcp_function = next(
-        node
-        for node in ast.walk(mcp_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "build_mcp_resource_selection_question"
-    )
-    mcp_return = ast.unparse(mcp_function.returns) if mcp_function.returns else None
-    if mcp_return != "tuple[StructuredQuestionPayload, str]":
-        violations.append(
-            f"{mcp_intent_path}:{mcp_function.lineno} return={mcp_return}"
-        )
 
     metadata_tree = ast.parse(
         conversation_metadata_path.read_text(), filename=str(conversation_metadata_path)

@@ -7,7 +7,6 @@ from eneo.flows.domain.flow_step_validation import FlowStepValidationView
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
-    FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
 )
@@ -42,8 +41,6 @@ def rewrite_step_spec_variables(
             instructions=rewritten_instructions,
             model_ref=step_spec.assistant_spec.model_ref,
             knowledge_refs=list(step_spec.assistant_spec.knowledge_refs),
-            mcp_server_refs=list(step_spec.assistant_spec.mcp_server_refs),
-            mcp_tool_refs=list(step_spec.assistant_spec.mcp_tool_refs),
         )
 
     if step_spec.input_bindings:
@@ -88,7 +85,6 @@ def flow_step_validation_views_from_draft_spec(
             output_type=FlowOutputType(step.output_type.value),
             output_contract=step.output_contract,
             input_bindings=step.input_bindings,
-            mcp_policy=FlowMcpPolicy(step.mcp_policy.value),
             input_config=step.input_config,
             output_config=step.output_config,
             review_policy=step.review_policy,

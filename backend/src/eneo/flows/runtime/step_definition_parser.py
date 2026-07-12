@@ -46,6 +46,12 @@ ALLOWED_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
 FLOW_VERSION_INVALID_STEP_ORDER = "flow_version_invalid_step_order"
 FLOW_VERSION_INVALID_STEP_IDENTIFIER = "flow_version_invalid_step_identifier"
 FLOW_VERSION_MISSING_STEP_IDENTIFIERS = "flow_version_missing_step_identifiers"
+_REMOVED_FLOW_MCP_STEP_FIELDS = frozenset(
+    {"mcp_policy", "mcp_servers", "mcp_tools_enabled"}
+)
+_REMOVED_FLOW_MCP_SNAPSHOT_FIELDS = frozenset(
+    {"mcp_servers", "mcp_tools", "tool_surface_hash"}
+)
 
 
 @dataclass(frozen=True)
@@ -298,6 +304,16 @@ def _parse_step_identity(
     )
 
 
+def _reject_removed_flow_mcp_fields(item: Mapping[str, object]) -> None:
+    if _REMOVED_FLOW_MCP_STEP_FIELDS.intersection(item):
+        raise BadRequestException("Flow MCP fields are unsupported.")
+    assistant_snapshot = item.get("assistant_snapshot")
+    if isinstance(assistant_snapshot, Mapping):
+        snapshot = cast(Mapping[object, object], assistant_snapshot)
+        if _REMOVED_FLOW_MCP_SNAPSHOT_FIELDS.intersection(snapshot):
+            raise BadRequestException("Flow MCP fields are unsupported.")
+
+
 def _parse_input_fields(item: Mapping[str, object]) -> _StepInputFields:
     input_source = _field_string(item.get("input_source"), "flow_input")
     if input_source not in ALLOWED_INPUT_SOURCES:
@@ -487,6 +503,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 "Invalid step identifiers in flow snapshot."
             ) from exc
         try:
+            _reject_removed_flow_mcp_fields(item_dict)
             identity = _parse_step_identity(
                 item_dict,
                 step_order=step_order,

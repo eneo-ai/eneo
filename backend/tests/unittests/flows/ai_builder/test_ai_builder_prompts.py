@@ -65,7 +65,6 @@ def _make_step(
     input_type: str = "text",
     output_mode: str = "pass_through",
     output_type: str = "text",
-    mcp_policy: str = "inherit",
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -78,7 +77,6 @@ def _make_step(
         input_type=input_type,
         output_mode=output_mode,
         output_type=output_type,
-        mcp_policy=mcp_policy,
     )
 
 
@@ -312,7 +310,6 @@ class TestStepRefMapping:
             input_type="text",
             output_mode="pass_through",
             output_type="text",
-            mcp_policy="inherit",
         )
         flow = _make_flow(steps=[step])
         mapping = build_step_ref_mapping(flow)

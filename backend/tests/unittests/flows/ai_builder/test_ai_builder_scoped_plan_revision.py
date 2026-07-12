@@ -185,7 +185,6 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     plan_event = _plan_stream_event()
     finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
@@ -284,7 +283,6 @@ async def test_scoped_revision_returns_error_for_finalization_feedback_only() ->
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
 
     with patch.object(
@@ -332,7 +330,6 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
@@ -398,7 +395,6 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
             _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
-        available_mcps=[],
     )
     old_model_ref = "model.gpt-4o-mini"
     new_model_ref = "model.gpt-5-4-nano"

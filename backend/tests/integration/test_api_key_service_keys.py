@@ -149,7 +149,6 @@ async def _create_flow(client, *, token: str, space_id: str, name: str) -> str:
                     "input_type": "text",
                     "output_mode": "pass_through",
                     "output_type": "text",
-                    "mcp_policy": "inherit",
                 }
             ],
         },

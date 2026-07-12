@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Self
+from collections.abc import Mapping
+from typing import Self, cast
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import (
@@ -17,9 +18,6 @@ from eneo.flows.enums import (
 )
 from eneo.flows.enums import (
     AIBuilderOutputMode as OutputMode,
-)
-from eneo.flows.enums import (
-    FlowMcpPolicy as MCPPolicy,
 )
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.enums import (
@@ -37,12 +35,37 @@ class AssistantSpecLocalRefNotPortableError(ValueError):
         super().__init__("Assistant resource refs must use portable slot refs.")
 
 
+class FlowMcpUnsupportedError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Flow MCP fields are unsupported.")
+
+
+def has_flow_mcp_unsupported_error(exc: ValidationError) -> bool:
+    for error in exc.errors(include_input=False):
+        context = error.get("ctx")
+        if isinstance(context, Mapping) and isinstance(
+            context.get("error"), FlowMcpUnsupportedError
+        ):
+            return True
+    return False
+
+
 class AssistantSpec(BaseModel):
     instructions: str
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
-    mcp_server_refs: list[str] = Field(default_factory=list)
-    mcp_tool_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_mcp_fields(cls, value: object) -> object:
+        original: object = value
+        if isinstance(value, Mapping):
+            raw_value = cast(Mapping[object, object], value)
+            if any(
+                field in raw_value for field in ("mcp_server_refs", "mcp_tool_refs")
+            ):
+                raise FlowMcpUnsupportedError
+        return original
 
     @field_validator("model_ref")
     @classmethod
@@ -54,7 +77,7 @@ class AssistantSpec(BaseModel):
             raise AssistantSpecLocalRefNotPortableError(normalized)
         return normalized or None
 
-    @field_validator("knowledge_refs", "mcp_server_refs", "mcp_tool_refs")
+    @field_validator("knowledge_refs")
     @classmethod
     def normalize_resource_refs(cls, values: list[str]) -> list[str]:
         normalized: list[str] = []
@@ -69,14 +92,6 @@ class AssistantSpec(BaseModel):
             seen.add(candidate)
         return normalized
 
-    @model_validator(mode="after")
-    def validate_knowledge_mcp_exclusivity(self) -> "AssistantSpec":
-        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
-            raise ValueError(
-                "A step assistant cannot use knowledge_refs and MCP refs at the same time."
-            )
-        return self
-
 
 class StepSpec(BaseModel):
     plan_step_ref: str = Field(
@@ -88,7 +103,6 @@ class StepSpec(BaseModel):
     )
     name: str = Field(description="User-visible step name (user_description).")
     assistant_spec: AssistantSpec
-    mcp_policy: MCPPolicy = MCPPolicy.INHERIT
     input_source: InputSource
     input_type: InputType = InputType.TEXT
     output_mode: OutputMode = OutputMode.PASS_THROUGH
@@ -99,6 +113,16 @@ class StepSpec(BaseModel):
     input_config: FlowPersistedJsonObject | None = None
     output_config: FlowPersistedJsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_mcp_policy(cls, value: object) -> object:
+        original: object = value
+        if isinstance(value, Mapping):
+            raw_value = cast(Mapping[object, object], value)
+            if "mcp_policy" in raw_value:
+                raise FlowMcpUnsupportedError
+        return original
 
     @model_validator(mode="after")
     def normalize_completion_model_applicability(self) -> "StepSpec":
@@ -276,15 +300,16 @@ __all__ = [
     "AssistantSpec",
     "AssistantSpecLocalRefNotPortableError",
     "FlowDraftSpecCore",
+    "FlowMcpUnsupportedError",
     "FormFieldSpec",
     "InputSource",
     "InputType",
-    "MCPPolicy",
     "OutputMode",
     "OutputType",
     "StepSpec",
     "completion_model_ref_strip_log_extra",
     "completion_model_ref_was_stripped",
+    "has_flow_mcp_unsupported_error",
     "metadata_json_from_authoring_form_fields",
     "strip_inapplicable_completion_model",
 ]

@@ -95,8 +95,6 @@ def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
     assert assistant.instructions == "New prompt"
     assert assistant.model_ref == "model-a"
     assert assistant.knowledge_refs == ["kb-a"]
-    assert assistant.mcp_server_refs == []
-    assert assistant.mcp_tool_refs == []
 
 
 def test_edit_overlay_explicit_model_clear_is_not_omission() -> None:
@@ -122,7 +120,7 @@ def test_edit_overlay_explicit_model_clear_is_not_omission() -> None:
     assert cleared.steps[0].assistant_spec.model_ref is None
 
 
-def test_edit_overlay_explicit_resource_detach_and_mcp_selection() -> None:
+def test_edit_overlay_explicit_resource_detach() -> None:
     detached = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
         proposal=_edit_proposal(
@@ -134,21 +132,7 @@ def test_edit_overlay_explicit_resource_detach_and_mcp_selection() -> None:
             ],
         ),
     )
-    mcp_selected = compile_ordered_edit_proposal(
-        base_spec=_base_spec(),
-        proposal=_edit_proposal(
-            steps=[
-                ModifyExistingStep(
-                    existing_step_ref="existing_step_1",
-                    assistant_spec=AssistantSpecPatch(mcp_server_refs=["server-a"]),
-                )
-            ],
-        ),
-    )
-
     assert detached.steps[0].assistant_spec.knowledge_refs == []
-    assert mcp_selected.steps[0].assistant_spec.knowledge_refs == []
-    assert mcp_selected.steps[0].assistant_spec.mcp_server_refs == ["server-a"]
 
 
 def test_edit_overlay_omitted_review_mode_preserves_existing_policy() -> None:
@@ -833,7 +817,6 @@ def test_flow_to_authoring_projection_preserves_authoring_fields() -> None:
         "output_type",
         "output_contract",
         "input_bindings",
-        "mcp_policy",
         "input_config",
         "output_config",
         "review_policy",
@@ -872,7 +855,6 @@ def test_flow_to_authoring_projection_preserves_authoring_fields() -> None:
         input_config={"runtime_input": {"enabled": False}},
         output_config={"citation_mode": "inline_inref_sidecar"},
         review_policy=review_policy,
-        mcp_policy="inherit",
     )
 
     projected = flow_step_to_authoring_spec(
@@ -909,7 +891,6 @@ def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
                 input_type="json",
                 output_mode="pass_through",
                 output_type="text",
-                mcp_policy="inherit",
             ),
             FlowStep(
                 id=uuid4(),
@@ -922,7 +903,6 @@ def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
                 input_type="text",
                 output_mode="template_fill",
                 output_type="docx",
-                mcp_policy="inherit",
             ),
         ],
         flow_name="Signature flow",

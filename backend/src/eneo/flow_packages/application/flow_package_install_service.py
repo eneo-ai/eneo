@@ -20,7 +20,6 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageModelCandidate,
 )
 from eneo.flow_packages.domain.flow_package_requirements import (
-    FlowPackageMcpToolRequirement,
     FlowPackageModelRequirement,
     FlowPackageTemplateAssetRequirement,
 )
@@ -122,7 +121,6 @@ def validate_flow_package_install_selection(
     referenced_slot_refs = _referenced_slot_refs(envelope.spec)
 
     _reject_template_asset_requirements(envelope)
-    _reject_unsupported_mcp_requirements(envelope)
     _reject_unknown_referenced_slots(
         referenced_slot_refs=referenced_slot_refs,
         declared_slot_refs=declared_slot_refs,
@@ -162,14 +160,6 @@ def _declared_slot_refs(envelope: FlowPackageEnvelope) -> dict[str, ResourceSlot
     declared: dict[str, ResourceSlotRef] = {}
     for requirement in envelope.requirements.requirements:
         declared.setdefault(requirement.slot_ref.ref, requirement.slot_ref)
-        if (
-            isinstance(requirement, FlowPackageMcpToolRequirement)
-            and requirement.server_slot_ref is not None
-        ):
-            declared.setdefault(
-                requirement.server_slot_ref.ref,
-                requirement.server_slot_ref,
-            )
     return declared
 
 
@@ -185,8 +175,6 @@ def _assistant_slot_refs(assistant: AssistantSpec) -> tuple[str, ...]:
     if assistant.model_ref is not None:
         refs.append(assistant.model_ref)
     refs.extend(assistant.knowledge_refs)
-    refs.extend(assistant.mcp_server_refs)
-    refs.extend(assistant.mcp_tool_refs)
     return tuple(refs)
 
 
@@ -223,35 +211,6 @@ def _spec_with_unbound_knowledge_refs_removed(
     if not changed:
         return spec
     return spec.model_copy(update={"steps": updated_steps})
-
-
-def _reject_unsupported_mcp_requirements(envelope: FlowPackageEnvelope) -> None:
-    requirement_refs = sorted(
-        requirement.slot_ref.ref
-        for requirement in envelope.requirements.requirements
-        if isinstance(requirement, FlowPackageMcpToolRequirement)
-    )
-    spec_refs = sorted(
-        ref
-        for step in envelope.spec.steps
-        for ref in (
-            tuple(step.assistant_spec.mcp_server_refs)
-            + tuple(step.assistant_spec.mcp_tool_refs)
-        )
-    )
-    mcp_refs = requirement_refs + [
-        ref for ref in spec_refs if ref not in requirement_refs
-    ]
-    if not mcp_refs:
-        return
-    raise FlowPackageValidationError(
-        code=FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED,
-        message=(
-            "Flow package import does not support MCP resource installation or mapping. "
-            "Remove MCP resource slots from the package and document any required MCP setup externally."
-        ),
-        context={"slot_ref": mcp_refs[0], "ref_count": len(mcp_refs)},
-    )
 
 
 def _reject_template_asset_requirements(envelope: FlowPackageEnvelope) -> None:

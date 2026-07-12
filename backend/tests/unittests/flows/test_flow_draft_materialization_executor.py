@@ -65,7 +65,6 @@ def _compiled_step(
         input_type="text",
         output_mode=output_mode,
         output_type="text",
-        mcp_policy="inherit",
     )
 
 
@@ -227,98 +226,6 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow()
 
 
 @pytest.mark.asyncio
-async def test_slot_refs_configure_model_knowledge_and_mcp() -> None:
-    flow_id = uuid4()
-    model_id = uuid4()
-    collection_id = uuid4()
-    server_id = uuid4()
-    tool_id = uuid4()
-    service = _flow_service()
-    service.create_flow.return_value = _flow(flow_id=flow_id)
-    assistant = MagicMock()
-    assistant.id = uuid4()
-    service.create_flow_assistant.return_value = (assistant, [])
-
-    await FlowDraftMaterializer().execute(
-        changeset=FlowDraftChangeSet(
-            flow_name="MCP flow",
-            flow_description="",
-            assistants_to_create=[
-                FlowDraftAssistantToCreate(
-                    plan_step_ref="kb",
-                    assistant_spec=AssistantSpec(
-                        instructions="Use knowledge.",
-                        model_ref="model.default-model",
-                        knowledge_refs=["knowledge.policy"],
-                    ),
-                ),
-                FlowDraftAssistantToCreate(
-                    plan_step_ref="mcp",
-                    assistant_spec=AssistantSpec(
-                        instructions="Use tools.",
-                        mcp_server_refs=["mcp_server.case-registry"],
-                        mcp_tool_refs=["mcp_tool.case-lookup"],
-                    ),
-                ),
-            ],
-            compiled_steps=[
-                _compiled_step(plan_step_ref="kb", step_order=1),
-                _compiled_step(plan_step_ref="mcp", step_order=2),
-            ],
-        ),
-        flow_service=service,
-        space_id=uuid4(),
-        flow_id=None,
-        resource_bindings=(
-            _resource_binding(
-                slot="default-model",
-                slot_kind=ResourceSlotKind.MODEL,
-                local_kind=LocalResourceKind.COMPLETION_MODEL,
-                local_id=model_id,
-            ),
-            _resource_binding(
-                slot="policy",
-                slot_kind=ResourceSlotKind.KNOWLEDGE,
-                local_kind=LocalResourceKind.COLLECTION,
-                local_id=collection_id,
-            ),
-            _resource_binding(
-                slot="case-registry",
-                slot_kind=ResourceSlotKind.MCP_SERVER,
-                local_kind=LocalResourceKind.MCP_SERVER,
-                local_id=server_id,
-            ),
-            _resource_binding(
-                slot="case-lookup",
-                slot_kind=ResourceSlotKind.MCP_TOOL,
-                local_kind=LocalResourceKind.MCP_TOOL,
-                local_id=tool_id,
-            ),
-        ),
-        binding_source=FlowResourceBindingSource.AI_BUILDER,
-    )
-
-    first_update, second_update = service.update_flow_assistant.await_args_list
-    first_command = first_update.kwargs["update"]
-    second_command = second_update.kwargs["update"]
-    assert isinstance(first_command, AssistantUpdateCommand)
-    assert isinstance(second_command, AssistantUpdateCommand)
-    assert first_command.completion_model_id == model_id
-    assert first_command.groups == [collection_id]
-    assert first_command.mcp_server_ids == []
-    assert first_command.mcp_tools == []
-    assert first_command.websites == []
-    assert first_command.integration_knowledge_ids == []
-    assert first_command.prompt is not None
-    assert first_command.prompt.text == "Use knowledge."
-    assert second_command.mcp_server_ids == [server_id]
-    assert second_command.mcp_tools == [(tool_id, True)]
-    assert second_command.groups == []
-    assert second_command.websites == []
-    assert second_command.integration_knowledge_ids == []
-
-
-@pytest.mark.asyncio
 async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
     flow_id = uuid4()
     collection_id = uuid4()
@@ -383,7 +290,7 @@ async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
 
 
 @pytest.mark.asyncio
-async def test_step_without_knowledge_or_mcp_clears_resource_lists() -> None:
+async def test_step_without_knowledge_clears_resource_lists() -> None:
     flow_id = uuid4()
     service = _flow_service()
     service.create_flow.return_value = _flow(flow_id=flow_id)
@@ -414,8 +321,8 @@ async def test_step_without_knowledge_or_mcp_clears_resource_lists() -> None:
     assert command.groups == []
     assert command.websites == []
     assert command.integration_knowledge_ids == []
-    assert command.mcp_server_ids == []
-    assert command.mcp_tools == []
+    assert not command.is_set("mcp_server_ids")
+    assert not command.is_set("mcp_tools")
     assert command.prompt is not None
     assert command.prompt.text == ""
 
@@ -503,62 +410,6 @@ async def test_materializer_clears_completion_model_for_transcribe_only_update_c
     assert isinstance(command, AssistantUpdateCommand)
     assert command.completion_model_id is None
     assert "completion_model_id" in command.model_fields_set
-
-
-@pytest.mark.asyncio
-async def test_materializer_mcp_refs_take_precedence_over_defensive_knowledge_refs() -> (
-    None
-):
-    flow_id = uuid4()
-    server_id = uuid4()
-    service = _flow_service()
-    service.create_flow.return_value = _flow(flow_id=flow_id)
-    assistant = MagicMock()
-    assistant.id = uuid4()
-    service.create_flow_assistant.return_value = (assistant, [])
-    assistant_spec = AssistantSpec.model_construct(
-        instructions="Use tools.",
-        model_ref=None,
-        knowledge_refs=["knowledge.missing"],
-        mcp_server_refs=["mcp_server.primary"],
-        mcp_tool_refs=[],
-    )
-
-    await FlowDraftMaterializer().execute(
-        changeset=FlowDraftChangeSet.model_construct(
-            flow_name="MCP flow",
-            flow_description="",
-            assistants_to_create=[
-                FlowDraftAssistantToCreate.model_construct(
-                    plan_step_ref="mcp",
-                    assistant_spec=assistant_spec,
-                )
-            ],
-            assistants_to_update=[],
-            assistants_to_delete=[],
-            compiled_steps=[_compiled_step(plan_step_ref="mcp", step_order=1)],
-            metadata_json=None,
-        ),
-        flow_service=service,
-        space_id=uuid4(),
-        flow_id=None,
-        resource_bindings=(
-            _resource_binding(
-                slot="primary",
-                slot_kind=ResourceSlotKind.MCP_SERVER,
-                local_kind=LocalResourceKind.MCP_SERVER,
-                local_id=server_id,
-            ),
-        ),
-        binding_source=FlowResourceBindingSource.AI_BUILDER,
-    )
-
-    command = service.update_flow_assistant.await_args.kwargs["update"]
-    assert isinstance(command, AssistantUpdateCommand)
-    assert command.mcp_server_ids == [server_id]
-    assert command.groups == []
-    assert command.websites == []
-    assert command.integration_knowledge_ids == []
 
 
 @pytest.mark.asyncio

@@ -31,15 +31,6 @@ def normalize_authoring_string_list(values: list[str]) -> list[str]:
     return normalized
 
 
-def mixes_knowledge_and_mcp_refs(
-    *,
-    knowledge_refs: list[str],
-    mcp_server_refs: list[str],
-    mcp_tool_refs: list[str],
-) -> bool:
-    return bool(knowledge_refs) and bool(mcp_server_refs or mcp_tool_refs)
-
-
 class PreviousFieldRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -141,8 +132,6 @@ class NewStepDraft(BaseModel):
     output_type: OutputType = OutputType.TEXT
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
-    mcp_server_refs: list[str] = Field(default_factory=list)
-    mcp_tool_refs: list[str] = Field(default_factory=list)
     runtime_required: bool = False
     runtime_max_files: int | None = None
     runtime_input_execution_mode: RuntimeInputExecutionMode = "single_call"
@@ -188,8 +177,6 @@ class NewStepDraft(BaseModel):
 
     @field_validator(
         "knowledge_refs",
-        "mcp_server_refs",
-        "mcp_tool_refs",
         "uses_form_fields",
         mode="before",
     )
@@ -199,9 +186,7 @@ class NewStepDraft(BaseModel):
             return []
         return values
 
-    @field_validator(
-        "knowledge_refs", "mcp_server_refs", "mcp_tool_refs", "uses_form_fields"
-    )
+    @field_validator("knowledge_refs", "uses_form_fields")
     @classmethod
     def _normalize_string_lists(cls, values: list[str]) -> list[str]:
         return normalize_authoring_string_list(values)
@@ -226,14 +211,6 @@ class NewStepDraft(BaseModel):
     def _validate_structured_depth(self) -> "NewStepDraft":
         if self.instructions is None:
             raise ValueError("Steps require non-empty text values.")
-        if mixes_knowledge_and_mcp_refs(
-            knowledge_refs=self.knowledge_refs,
-            mcp_server_refs=self.mcp_server_refs,
-            mcp_tool_refs=self.mcp_tool_refs,
-        ):
-            raise ValueError(
-                "A step cannot use knowledge_refs and MCP refs at the same time."
-            )
         if self.output_fields:
             ensure_structured_field_depth(self.output_fields)
         return self

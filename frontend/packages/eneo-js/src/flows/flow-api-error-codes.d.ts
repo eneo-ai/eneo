@@ -76,6 +76,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TYPED_IO_HTTP_RESPONSE_TOO_LARGE: "typed_io_http_response_too_large";
   TYPED_IO_HTTP_SSRF_BLOCKED: "typed_io_http_ssrf_blocked";
   TYPED_IO_HTTP_TIMEOUT: "typed_io_http_timeout";
+  TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: "typed_io_input_exceeds_model_window";
   TYPED_IO_INPUT_TOO_LARGE: "typed_io_input_too_large";
   TYPED_IO_INVALID_FILE_TYPE: "typed_io_invalid_file_type";
   TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION: "typed_io_invalid_input_source_combination";
@@ -209,6 +210,7 @@ export type FlowApiErrorCode =
   | "typed_io_http_response_too_large"
   | "typed_io_http_ssrf_blocked"
   | "typed_io_http_timeout"
+  | "typed_io_input_exceeds_model_window"
   | "typed_io_input_too_large"
   | "typed_io_invalid_file_type"
   | "typed_io_invalid_input_source_combination"

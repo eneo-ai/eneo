@@ -20,7 +20,6 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -114,14 +113,12 @@ class TestFlowDraftSpecCore:
 
     def test_step_with_all_optional_fields(self) -> None:
         step = _make_step(
-            mcp_policy=MCPPolicy.RESTRICTED,
             input_bindings={"question": "{{ step_a.output.text }}"},
             input_contract={"type": "object"},
             output_contract={"type": "object"},
             input_config={"runtime_input": {"enabled": True}},
             output_config={"template_asset_id": "abc"},
         )
-        assert step.mcp_policy == MCPPolicy.RESTRICTED
         assert step.input_bindings is not None
         assert step.input_contract is not None
 
@@ -143,20 +140,25 @@ class TestFlowDraftSpecCore:
         assert spec_obj.model_ref == "gpt-4o-mini"
         assert spec_obj.knowledge_refs == ["kb_policy", "kb_guidelines"]
 
-    def test_assistant_spec_normalizes_mcp_refs(self) -> None:
-        spec_obj = AssistantSpec(
-            instructions="Test",
-            mcp_tool_refs=[" tool_a ", "tool_a", ""],
-        )
-        assert spec_obj.mcp_tool_refs == ["tool_a"]
+    @pytest.mark.parametrize("field", ["mcp_server_refs", "mcp_tool_refs"])
+    def test_assistant_spec_rejects_removed_mcp_refs(self, field: str) -> None:
+        with pytest.raises(ValidationError, match="Flow MCP fields are unsupported"):
+            AssistantSpec.model_validate(
+                {"instructions": "Test", field: ["mcp_tool.legacy"]}
+            )
+
+    def test_step_spec_rejects_removed_mcp_policy(self) -> None:
+        payload = _make_step().model_dump(mode="json")
+        payload["mcp_policy"] = "inherit"
+
+        with pytest.raises(ValidationError, match="Flow MCP fields are unsupported"):
+            StepSpec.model_validate(payload)
 
     @pytest.mark.parametrize(
         ("field", "value"),
         [
             ("model_ref", "11111111-1111-4111-8111-111111111111"),
             ("knowledge_refs", ["11111111-1111-4111-8111-111111111111"]),
-            ("mcp_server_refs", ["11111111-1111-4111-8111-111111111111"]),
-            ("mcp_tool_refs", ["11111111-1111-4111-8111-111111111111"]),
         ],
     )
     def test_assistant_spec_rejects_uuid_shaped_resource_refs(
@@ -166,14 +168,6 @@ class TestFlowDraftSpecCore:
             AssistantSpec(instructions="Test", **{field: value})
 
         assert _has_local_ref_not_portable_error(exc_info.value)
-
-    def test_assistant_spec_rejects_knowledge_and_mcp_mix(self) -> None:
-        with pytest.raises(ValueError, match="knowledge_refs and MCP refs"):
-            AssistantSpec(
-                instructions="Test",
-                knowledge_refs=["kb_policy"],
-                mcp_tool_refs=["tool_a"],
-            )
 
     def test_step_spec_strips_input_binding_question(self) -> None:
         step = _make_step(input_bindings={"question": "  {{ step_a.output.text }}  "})

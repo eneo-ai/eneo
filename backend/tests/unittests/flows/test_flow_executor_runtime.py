@@ -156,7 +156,6 @@ def _definition_step_with_default_snapshot(step: object) -> object:
         return normalized
     snapshot = build_assistant_execution_snapshot(
         assistant=_default_snapshot_assistant(str(assistant_id)),
-        mcp_server_entities=[],
     )
     if snapshot is not None:
         normalized["assistant_snapshot"] = snapshot
@@ -3707,6 +3706,96 @@ async def test_assistant_cache_hit(user):
     assert executor.space_repo.get_space_by_assistant.call_count == 1
 
 
+@pytest.mark.asyncio
+async def test_execute_rejects_later_mcp_assistant_before_any_step_effect(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    first_assistant = _default_snapshot_assistant(uuid4())
+    second_assistant = _default_snapshot_assistant(uuid4())
+    first_snapshot = build_assistant_execution_snapshot(assistant=first_assistant)
+    second_snapshot = build_assistant_execution_snapshot(assistant=second_assistant)
+    assert first_snapshot is not None
+    assert second_snapshot is not None
+    second_assistant.mcp_servers = [SimpleNamespace(id=uuid4())]
+
+    assistants = {
+        first_assistant.id: first_assistant,
+        second_assistant.id: second_assistant,
+    }
+    space = SimpleNamespace(
+        id=uuid4(),
+        default_assistant=None,
+        assistants=list(assistants.values()),
+        get_assistant=lambda assistant_id: assistants[assistant_id],
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    flow_run_repo.get = AsyncMock(
+        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    )
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.list_step_results = AsyncMock(return_value=[])
+    flow_run_repo.claim_step_result = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(first_assistant.id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "assistant_snapshot": first_snapshot,
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 2,
+                        "assistant_id": str(second_assistant.id),
+                        "input_source": "previous_step",
+                        "output_mode": "http_post",
+                        "output_config": {
+                            "url": "https://example.test/delivery",
+                            "auth": {"mode": "none"},
+                        },
+                        "assistant_snapshot": second_snapshot,
+                    },
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock()
+    insert_pending_delivery = AsyncMock()
+    executor.webhook_delivery_repo = SimpleNamespace(
+        insert_pending_delivery=insert_pending_delivery
+    )
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+    }
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    flow_run_repo.create_or_get_attempt_started.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    insert_pending_delivery.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+
+
 def _security_assistant(assistant_id: UUID, *, model_level: int = 3) -> SimpleNamespace:
     return SimpleNamespace(
         id=assistant_id,
@@ -4025,7 +4114,6 @@ async def test_validate_assistant_snapshots_accepts_matching_execution_surface(u
     )
     snapshot = build_assistant_execution_snapshot(
         assistant=assistant,
-        mcp_server_entities=[],
     )
     assert snapshot is not None
     step = replace(
@@ -4062,7 +4150,6 @@ async def test_validate_assistant_snapshots_rejects_prompt_drift(user):
     )
     snapshot = build_assistant_execution_snapshot(
         assistant=published_assistant,
-        mcp_server_entities=[],
     )
     assert snapshot is not None
     step = replace(
@@ -4660,7 +4747,6 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
     )
     snapshot = build_assistant_execution_snapshot(
         assistant=published_assistant,
-        mcp_server_entities=[],
     )
     assert snapshot is not None
     step_id = uuid4()

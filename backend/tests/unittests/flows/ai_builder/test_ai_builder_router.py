@@ -343,7 +343,6 @@ def _make_container(
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
-            available_mcps=[],
             max_input_tokens=4096,
             max_output_tokens=2048,
             budget_policy=SimpleNamespace(),
@@ -1859,7 +1858,6 @@ class TestSendMessageEndpoint:
                         "description": "Documentation",
                     }
                 ],
-                available_mcps=[],
                 max_input_tokens=4096,
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
@@ -1918,7 +1916,6 @@ class TestSendMessageEndpoint:
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}
                 ],
                 available_kbs=[],
-                available_mcps=[],
                 max_input_tokens=4096,
                 max_output_tokens=4096,
                 budget_policy=SimpleNamespace(),

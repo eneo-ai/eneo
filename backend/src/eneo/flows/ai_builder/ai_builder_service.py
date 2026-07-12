@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Protocol, cast
 from uuid import UUID
 
 import litellm
+from pydantic import ValidationError
 
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_api_models import (
@@ -62,13 +63,13 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_USAGE as _SSE_EVENT_USAGE,
 )
-from eneo.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
     CreateFromPlanOutcome,
+    raise_persisted_flow_mcp_plan_error,
 )
 from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -285,16 +286,24 @@ class AIBuilderService:
         )
 
     async def get_plan(self, plan_id: UUID) -> BuilderPlan:
-        return await self.repo.get_plan(
-            plan_id=plan_id,
-            tenant_id=self.user.tenant_id,
-        )
+        try:
+            return await self.repo.get_plan(
+                plan_id=plan_id,
+                tenant_id=self.user.tenant_id,
+            )
+        except ValidationError as exc:
+            raise_persisted_flow_mcp_plan_error(exc)
+            raise
 
     async def list_session_plans(self, session_id: UUID) -> list[BuilderPlan]:
-        return await self.repo.list_session_plans(
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
-        )
+        try:
+            return await self.repo.list_session_plans(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+            )
+        except ValidationError as exc:
+            raise_persisted_flow_mcp_plan_error(exc)
+            raise
 
     async def list_sessions(self) -> list[SessionListItemResponse]:
         sessions = await self.repo.list_sessions_with_draft_titles(
@@ -484,7 +493,6 @@ class AIBuilderService:
         litellm_kwargs: dict[str, Any],
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
-        available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
@@ -517,7 +525,6 @@ class AIBuilderService:
             litellm_kwargs=litellm_kwargs,
             available_models=available_models,
             available_kbs=available_kbs,
-            available_mcps=available_mcps,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files or [],

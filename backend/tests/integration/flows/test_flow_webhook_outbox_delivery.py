@@ -105,7 +105,6 @@ def _build_flow(
                     "timeout_seconds": 5,
                 },
                 output_classification_override=None,
-                mcp_policy="inherit",
                 input_config=None,
             )
         ],

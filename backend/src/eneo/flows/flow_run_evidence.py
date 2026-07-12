@@ -45,7 +45,6 @@ class DebugStepProjection(BaseModel):
     io_types: dict[str, Any]
     input: dict[str, Any]
     output: dict[str, Any]
-    mcp: dict[str, Any]
     rag: dict[str, Any] | None = None
     attempts: list[DebugAttemptProjection]
 
@@ -172,7 +171,6 @@ def build_debug_export(
         "security": {
             "redaction_applied": False,
             "classification_field": "output_classification_override",
-            "mcp_policy_field": "mcp_policy",
         },
     }
 
@@ -231,16 +229,6 @@ def normalize_debug_step(
     rag_metadata: dict[str, Any] | None = None,
     attempts: list[DebugAttemptProjection] | None = None,
 ) -> dict[str, Any]:
-    raw_servers = step.get("mcp_servers")
-    raw_tools_enabled = step.get("mcp_tools_enabled")
-    mcp_servers: list[object] = (
-        cast(list[object], raw_servers) if isinstance(raw_servers, list) else []
-    )
-    mcp_tools_enabled: list[object] = (
-        cast(list[object], raw_tools_enabled)
-        if isinstance(raw_tools_enabled, list)
-        else []
-    )
     input_type = step.get("input_type")
     output_type = step.get("output_type")
     return DebugStepProjection(
@@ -264,11 +252,6 @@ def normalize_debug_step(
             "contract": step.get("output_contract"),
             "classification": step.get("output_classification_override"),
             "config": step.get("output_config"),
-        },
-        mcp={
-            "policy": step.get("mcp_policy"),
-            "servers": mcp_servers,
-            "tools_enabled": mcp_tools_enabled,
         },
         rag=_normalize_debug_rag(rag_metadata),
         attempts=list(attempts or []),

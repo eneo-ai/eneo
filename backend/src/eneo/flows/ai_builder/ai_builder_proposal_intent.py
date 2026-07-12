@@ -24,7 +24,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
     ensure_structured_field_depth,
-    mixes_knowledge_and_mcp_refs,
     normalize_authoring_string_list,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -46,7 +45,6 @@ from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputType,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -130,8 +128,6 @@ class SemanticStepIntent(BaseModel):
     )
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
-    mcp_server_refs: list[str] = Field(default_factory=list)
-    mcp_tool_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
 
@@ -165,9 +161,7 @@ class SemanticStepIntent(BaseModel):
     def _normalize_output_fields(cls, value: Any) -> Any:
         return normalize_structured_field_list(value)
 
-    @field_validator(
-        "uses_form_fields", "knowledge_refs", "mcp_server_refs", "mcp_tool_refs"
-    )
+    @field_validator("uses_form_fields", "knowledge_refs")
     @classmethod
     def _normalize_string_list(cls, values: list[str]) -> list[str]:
         return normalize_authoring_string_list(values)
@@ -182,14 +176,6 @@ class SemanticStepIntent(BaseModel):
 
     @model_validator(mode="after")
     def _validate_resource_mode(self) -> "SemanticStepIntent":
-        if mixes_knowledge_and_mcp_refs(
-            knowledge_refs=self.knowledge_refs,
-            mcp_server_refs=self.mcp_server_refs,
-            mcp_tool_refs=self.mcp_tool_refs,
-        ):
-            raise ValueError(
-                "Semantic steps cannot combine knowledge_refs with MCP refs."
-            )
         if self.output_fields:
             ensure_structured_field_depth(self.output_fields)
         return self
@@ -201,8 +187,6 @@ class AssistantSpecPatch(BaseModel):
     instructions: str | None = None
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
-    mcp_server_refs: list[str] = Field(default_factory=list)
-    mcp_tool_refs: list[str] = Field(default_factory=list)
 
 
 class ModifyExistingStep(BaseModel):
@@ -212,7 +196,6 @@ class ModifyExistingStep(BaseModel):
     existing_step_ref: str
     name: str | None = None
     assistant_spec: AssistantSpecPatch | None = None
-    mcp_policy: MCPPolicy | None = None
     input_source: InputSource | None = None
     input_type: InputType | None = None
     output_type: OutputType | None = None
@@ -428,98 +411,6 @@ def _strip_backend_owned_semantic_step_keys(
     }
 
 
-def attach_selected_mcp_refs_to_explicit_intent_steps(
-    intent: CreateFlowIntent,
-    *,
-    selected_server_refs: set[str] | frozenset[str],
-    catalog: AIBuilderResourceCatalog,
-) -> CreateFlowIntent:
-    """Attach selected MCP refs when a semantic step explicitly names them.
-
-    User selection is the permission boundary. The text match is only a
-    catalog-backed recovery path for semantic steps that already say which MCP
-    they intend to use but omit the mechanical `mcp_*_refs` fields.
-    """
-
-    selected_refs = frozenset(selected_server_refs)
-    if not selected_refs:
-        return intent
-
-    changed = False
-    patched_steps: list[dict[str, object]] = []
-    updated_steps: list[SemanticStepIntent] = []
-    for step in intent.steps:
-        if step.mcp_server_refs or step.mcp_tool_refs or step.knowledge_refs:
-            updated_steps.append(step)
-            continue
-
-        step_text = f"{step.name}\n{step.instructions}"
-        mentioned_server_refs = catalog.refs_mentioned_in_text(
-            kind="mcp_server",
-            text=step_text,
-            allowed_refs=selected_refs,
-        )
-        selected_tool_refs = _tool_refs_for_servers(
-            catalog=catalog,
-            server_refs=selected_refs,
-        )
-        mentioned_tool_refs = catalog.refs_mentioned_in_text(
-            kind="mcp_tool",
-            text=step_text,
-            allowed_refs=selected_tool_refs,
-        )
-        if not mentioned_server_refs and not mentioned_tool_refs:
-            updated_steps.append(step)
-            continue
-
-        selected_mcp_server_refs = (
-            [] if mentioned_tool_refs else sorted(mentioned_server_refs)
-        )
-        selected_mcp_tool_refs = sorted(mentioned_tool_refs)
-        # Tool refs are enough: resource canonicalization adds the parent
-        # server without widening to sibling tools. If only the server was
-        # named, keep the server ref so existing server-level behavior applies.
-        updated_steps.append(
-            step.model_copy(
-                update={
-                    "mcp_server_refs": selected_mcp_server_refs,
-                    "mcp_tool_refs": selected_mcp_tool_refs,
-                }
-            )
-        )
-        patched_steps.append(
-            {
-                "step_name": step.name,
-                "mcp_server_refs": selected_mcp_server_refs,
-                "mcp_tool_refs": selected_mcp_tool_refs,
-            }
-        )
-        changed = True
-
-    if not changed:
-        return intent
-    logger.info(
-        "ai_builder_selected_mcp_refs_attached_to_semantic_steps",
-        extra={
-            "patched_step_count": len(patched_steps),
-            "patched_steps": patched_steps,
-            "selected_mcp_server_refs": sorted(selected_refs),
-        },
-    )
-    return intent.model_copy(update={"steps": updated_steps})
-
-
-def _tool_refs_for_servers(
-    *,
-    catalog: AIBuilderResourceCatalog,
-    server_refs: frozenset[str],
-) -> frozenset[str]:
-    refs: set[str] = set()
-    for server_ref in server_refs:
-        refs.update(catalog.mcp_tool_refs_for_server(server_ref))
-    return frozenset(refs)
-
-
 def build_create_flow_tool_schema(
     *,
     resource_catalog: AIBuilderResourceCatalog,
@@ -527,11 +418,6 @@ def build_create_flow_tool_schema(
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
-    # Keep MCP refs free-form. Catalog resolution and quality feedback handle
-    # unknown or unrelated MCP selections without coercing the planner into an
-    # available-but-wrong server when the requested MCP is absent.
-    mcp_server_refs: list[str] | None = None
-    mcp_tool_refs: list[str] | None = None
     return {
         "type": "function",
         "function": {
@@ -583,8 +469,6 @@ def build_create_flow_tool_schema(
                             include_output_type=False,
                             model_refs=model_refs,
                             kb_refs=kb_refs,
-                            mcp_server_refs=mcp_server_refs,
-                            mcp_tool_refs=mcp_tool_refs,
                         ),
                     },
                     "assumptions": {
@@ -622,8 +506,6 @@ def build_semantic_step_schema(
     include_previous_refs: bool = False,
     model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
-    mcp_server_refs: list[str] | None = None,
-    mcp_tool_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
@@ -678,8 +560,6 @@ def build_semantic_step_schema(
             **build_resource_ref_property_schemas(
                 model_refs=model_refs,
                 kb_refs=kb_refs,
-                mcp_server_refs=mcp_server_refs,
-                mcp_tool_refs=mcp_tool_refs,
             ),
             "citations_requested": {"type": "boolean", "default": False},
             "review_mode": build_review_mode_schema(),
@@ -699,7 +579,6 @@ __all__ = [
     "OrderedEditProposal",
     "OrderedEditStep",
     "SemanticStepIntent",
-    "attach_selected_mcp_refs_to_explicit_intent_steps",
     "build_create_flow_tool_schema",
     "build_semantic_step_schema",
     "parse_create_flow_intent_arguments",

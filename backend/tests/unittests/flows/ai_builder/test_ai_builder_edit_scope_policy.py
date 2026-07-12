@@ -35,7 +35,6 @@ def _make_flow_step(
         output_mode=output_mode,
         output_type=output_type,
         input_config=input_config,
-        mcp_policy="inherit",
     )
 
 
