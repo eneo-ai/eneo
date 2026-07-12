@@ -3,8 +3,10 @@
      accent token via relative oklch() syntax; the rest are near-transparent
      shadow overlays with no token equivalent */
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getAppContext } from "$lib/core/AppContext";
   import { getEneo } from "$lib/core/Eneo";
@@ -19,26 +21,37 @@
   import { IconCheck } from "@eneo/icons/check";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
+  import {
+    clearComposerDraft,
+    loadComposerDraft,
+    saveComposerDraft,
+    type ComposerDraftFile
+  } from "./flowAIBuilderComposerDraft";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { AIBuilderPlanEditContext } from "./protocol";
 
   interface Props {
     editContext?: AIBuilderPlanEditContext | null;
     oncleareditcontext?: () => void;
+    /** RefinementComposer mode (handoff §2): visible label, char budget,
+     *  Ctrl/Cmd+Enter submit, "updates the plan" hint. On while a proposed
+     *  plan is under review. */
+    refinement?: boolean;
   }
 
-  let { editContext = null, oncleareditcontext }: Props = $props();
+  let { editContext = null, oncleareditcontext, refinement = false }: Props = $props();
 
   const service = getAIBuilderService();
   const userMode = getFlowUserMode();
   const { limits } = getAppContext();
   const attachmentRules = getAIBuilderAttachmentRules(limits);
+  const eneo = getEneo();
   const {
     state: { attachments, isUploading, attachmentRules: managerRules },
     queueValidUploads,
     clearUploads
   } = initAttachmentManager({
-    eneo: getEneo(),
+    eneo,
     options: { rules: attachmentRules }
   });
 
@@ -48,12 +61,114 @@
   let activePlaceholder = $state<string | null>(null);
   let isDragging = $state(false);
 
-  const currentPlaceholder = $derived(activePlaceholder ?? m.ai_builder_input_placeholder());
+  const currentPlaceholder = $derived(
+    activePlaceholder ??
+      (refinement ? m.ai_builder_refine_placeholder() : m.ai_builder_input_placeholder())
+  );
+
+  // Character budget (handoff §5): counter fades in near the limit, over the
+  // limit the composer reports an error and refuses to send.
+  const MESSAGE_CHAR_LIMIT = 4000;
+  const COUNTER_THRESHOLD = 3500;
+  const numberFormatter = new Intl.NumberFormat(getLocale());
+  const charCount = $derived(inputValue.length);
+  const overLimit = $derived(refinement && charCount > MESSAGE_CHAR_LIMIT);
+  const showCounter = $derived(refinement && charCount >= COUNTER_THRESHOLD && !overLimit);
+
+  // --- Draft lifecycle (handoff §2) ------------------------------------------
+  // Explicit keyed state machine:
+  //   session changed  → replace the composer with the incoming session's draft
+  //   send delivered   → clear the current draft
+  //   send failed      → retain text, files and storage untouched
+  // The draft record is text + completed-upload references; queued/in-flight
+  // binary uploads have no durable identity and are not persisted.
+  let restoredFiles = $state<ComposerDraftFile[]>([]);
+  let draftRestored = $state(false);
+  let activeDraftSessionId: string | null = null;
+  let hadLiveSession = false;
+  // The attempted submission as one immutable value; its object identity is
+  // the ownership token. Completion rules: delivered → clear THAT session's
+  // record; failed while the same session is active → restore visibly; failed
+  // after a session switch → the record stays persisted and the UI is left
+  // alone. A completion whose attempt no longer owns the slot (a newer
+  // submission replaced it) mutates NOTHING — not the guard, not storage.
+  interface PendingSubmission {
+    sessionId: string;
+    text: string;
+    files: ComposerDraftFile[];
+  }
+  let pendingSubmission: PendingSubmission | null = null;
+
+  $effect(() => {
+    const sessionId = service.session?.session_id ?? null;
+    if (sessionId === activeDraftSessionId) return;
+    activeDraftSessionId = sessionId;
+    if (!sessionId) return; // transient gap while a session is being replaced
+    const isLiveSwitch = hadLiveSession;
+    hadLiveSession = true;
+    const stored = loadComposerDraft(sessionId);
+    if (isLiveSwitch) {
+      // Replace wholesale — one session's text must never leak into another.
+      inputValue = stored?.text ?? "";
+      restoredFiles = stored?.files ?? [];
+      draftRestored = stored !== null;
+      clearUploads();
+    } else if (stored) {
+      // First session of this composer instance: a seeded prefill may already
+      // be present, and it wins over the stored draft text.
+      if (inputValue === "" && stored.text.length > 0) {
+        inputValue = stored.text;
+        draftRestored = true;
+      }
+      if (stored.files.length > 0) {
+        restoredFiles = stored.files;
+        draftRestored = true;
+      }
+    }
+    requestAnimationFrame(() => autosizeTextarea());
+  });
+
+  $effect(() => {
+    const text = inputValue;
+    const files = [
+      ...restoredFiles,
+      ...completedUploads.flatMap((upload) =>
+        upload.fileRef
+          ? [
+              {
+                id: upload.fileRef.id,
+                name: upload.file.name,
+                size: upload.file.size,
+                mimetype: upload.file.type
+              }
+            ]
+          : []
+      )
+    ];
+    const sessionId = service.session?.session_id ?? null;
+    if (!sessionId || sessionId !== activeDraftSessionId) return;
+    // The durable record survives the optimistic clear: while a submission is
+    // in flight for this session, only its outcome may change the record.
+    if (pendingSubmission?.sessionId === sessionId) return;
+    saveComposerDraft(sessionId, { text, files });
+  });
+
+  async function removeRestoredFile(fileId: string) {
+    // Mirrors AttachmentManager: attempt the server delete, but always drop
+    // the reference locally so it is not included in the next send.
+    try {
+      await eneo.files.delete({ fileId });
+    } finally {
+      restoredFiles = restoredFiles.filter((file) => file.id !== fileId);
+    }
+  }
   const completedUploads = $derived(
     $attachments.filter((attachment) => attachment.status === "completed")
   );
   const persistedAttachments = $derived(service.session?.attachments ?? []);
-  const hasAttachments = $derived(persistedAttachments.length > 0 || $attachments.length > 0);
+  const hasAttachments = $derived(
+    persistedAttachments.length > 0 || $attachments.length > 0 || restoredFiles.length > 0
+  );
   const hasMultipleModels = $derived(service.availableModels.length > 1);
   const selectedModelName = $derived(
     service.availableModels.find((model) => model.id === service.selectedModelId)?.name ?? null
@@ -63,9 +178,10 @@
     `${m.ai_builder_model_label()}: ${selectedOrDefaultModelName}`
   );
   const canSubmit = $derived(
-    (inputValue.trim().length > 0 || completedUploads.length > 0) &&
+    (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&
-      !$isUploading
+      !$isUploading &&
+      !overLimit
   );
   const editContextLabel = $derived.by(() => {
     if (!editContext) return null;
@@ -99,26 +215,74 @@
 
   async function handleSubmit() {
     const trimmed = inputValue.trim();
-    const uploadedFileIds = completedUploads
-      .map((attachment) => attachment.fileRef?.id)
-      .filter((value): value is string => Boolean(value));
-    if ((!trimmed && uploadedFileIds.length === 0) || !service.canSendMessage || $isUploading) {
+    const uploadedFileIds = [
+      ...restoredFiles.map((file) => file.id),
+      ...completedUploads
+        .map((attachment) => attachment.fileRef?.id)
+        .filter((value): value is string => Boolean(value))
+    ];
+    if (
+      (!trimmed && uploadedFileIds.length === 0) ||
+      !service.canSendMessage ||
+      $isUploading ||
+      overLimit
+    ) {
       return;
     }
+    if (!activeDraftSessionId) return;
+    // Optimistic clear for chat feel; anything but a confirmed delivery puts
+    // the draft back — composer text is never discarded on a failure edge (§4).
+    // The submission is owned by the session that sent it: a late outcome can
+    // only mutate that session's record, never whichever session is showing.
+    const submitted: PendingSubmission = {
+      sessionId: activeDraftSessionId,
+      text: inputValue,
+      files: restoredFiles
+    };
+    pendingSubmission = submitted;
     inputValue = "";
+    draftRestored = false;
     activePlaceholder = null;
     resetTextareaHeight();
-    await service.sendMessage(
+    const outcome = await service.sendMessage(
       trimmed || m.ai_builder_attachment_only_message(),
       undefined,
       uploadedFileIds,
       editContext
     );
-    clearUploads();
+    if (pendingSubmission !== submitted) {
+      // Stale completion: a newer submission owns the slot. Its own outcome
+      // will finalize its draft; this one may not touch anything.
+      return;
+    }
+    pendingSubmission = null;
+    if (outcome === "delivered") {
+      clearComposerDraft(submitted.sessionId);
+      if (activeDraftSessionId === submitted.sessionId) {
+        restoredFiles = [];
+        clearUploads();
+      }
+    } else if (activeDraftSessionId === submitted.sessionId) {
+      inputValue = submitted.text;
+      restoredFiles = submitted.files;
+      requestAnimationFrame(() => autosizeTextarea());
+    }
+    // Failed after a session switch: the durable record was preserved by the
+    // in-flight guard, and the visible composer belongs to another session.
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key !== "Enter") return;
+    if (refinement) {
+      // Matches the visible hint: Ctrl/Cmd+Enter sends, plain Enter is a
+      // newline — refinement requests are often multi-line.
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        handleSubmit();
+      }
+      return;
+    }
+    if (!event.shiftKey) {
       event.preventDefault();
       handleSubmit();
     }
@@ -126,8 +290,10 @@
 
   function autosizeTextarea() {
     if (!textareaEl) return;
+    // Refinement composer grows to a lower cap so the plan stays visible (§2).
+    const cap = refinement ? 220 : 300;
     textareaEl.style.height = "auto";
-    textareaEl.style.height = Math.min(textareaEl.scrollHeight, 300) + "px";
+    textareaEl.style.height = Math.min(textareaEl.scrollHeight, cap) + "px";
   }
 
   function resetTextareaHeight() {
@@ -194,6 +360,16 @@
 </script>
 
 <div class="relative mx-auto w-full max-w-[71ch]">
+  {#if refinement}
+    <!-- Visible label ≥1040 container; the textarea's aria-label carries the
+         same name below that width (handoff §3.3). -->
+    <Label
+      for="ai-builder-composer-input"
+      class="text-primary mb-1.5 hidden text-[0.8125rem] font-semibold @[1040px]/builder:flex"
+    >
+      {m.ai_builder_refine_label()}
+    </Label>
+  {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="composer"
@@ -236,6 +412,34 @@
               class="chip-action"
               aria-label={m.remove_attachment()}
               onclick={() => service.removeAttachment(file.id)}
+            >
+              <IconTrash />
+            </button>
+          </li>
+        {/each}
+
+        <!-- Uploads restored from the persisted draft (completed on the server,
+             not yet sent): plain chips — the binary preview is not available. -->
+        {#each restoredFiles as file (file.id)}
+          <li class="chip">
+            <span class="chip-icon" aria-hidden="true">
+              <UploadedFileIcon file={{ mimetype: file.mimetype }} />
+            </span>
+            <div class="chip-body">
+              <div class="chip-name chip-name-static" title={file.name}>
+                {file.name}
+              </div>
+              <div class="chip-meta">
+                <span>{fileTypeLabel(file.mimetype, file.name)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{compactBytes(file.size)}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="chip-action"
+              aria-label={m.remove_attachment()}
+              onclick={() => removeRestoredFile(file.id)}
             >
               <IconTrash />
             </button>
@@ -314,19 +518,26 @@
       </div>
     {/if}
 
-    <label class="composer-textarea-wrap">
-      <span class="sr-only">{m.ai_builder_input_placeholder()}</span>
+    <div class="composer-textarea-wrap">
       <textarea
+        id="ai-builder-composer-input"
         bind:this={textareaEl}
         bind:value={inputValue}
         onkeydown={handleKeydown}
-        oninput={autosizeTextarea}
+        oninput={() => {
+          autosizeTextarea();
+          draftRestored = false;
+        }}
         onpaste={handlePaste}
         placeholder={currentPlaceholder}
         disabled={!service.canSendMessage || $isUploading}
         rows="1"
-        class="composer-textarea"></textarea>
-    </label>
+        aria-label={refinement ? m.ai_builder_refine_label() : m.ai_builder_input_placeholder()}
+        aria-invalid={overLimit || undefined}
+        aria-describedby={overLimit ? "ai-builder-composer-limit" : undefined}
+        class="composer-textarea"
+        class:composer-textarea-refine={refinement}></textarea>
+    </div>
 
     <div class="composer-actions">
       <div class="composer-actions-left">
@@ -467,6 +678,29 @@
       </div>
     {/if}
   </div>
+
+  {#if refinement}
+    <div class="composer-meta">
+      {#if overLimit}
+        <p id="ai-builder-composer-limit" class="composer-error" role="status">
+          {m.ai_builder_refine_over_limit({
+            count: numberFormatter.format(charCount),
+            limit: numberFormatter.format(MESSAGE_CHAR_LIMIT)
+          })}
+          <span class="composer-tip">{m.ai_builder_refine_over_limit_tip()}</span>
+        </p>
+      {:else}
+        <p class="composer-hint">
+          {draftRestored ? m.ai_builder_draft_persistence_note() : m.ai_builder_refine_hint()}
+        </p>
+        {#if showCounter}
+          <span class="composer-counter">
+            {numberFormatter.format(charCount)} / {numberFormatter.format(MESSAGE_CHAR_LIMIT)}
+          </span>
+        {/if}
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style lang="postcss">
@@ -703,6 +937,49 @@
   .composer-textarea:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+  }
+
+  /* Refinement composer rests lower (56px) so the plan keeps the space (§2). */
+  .composer-textarea-refine {
+    min-height: 3.5rem;
+    max-height: 13.75rem;
+  }
+
+  .composer-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.375rem 0.25rem 0;
+  }
+
+  .composer-hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .composer-counter {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .composer-error {
+    margin: 0;
+    color: var(--negative-stronger);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    font-weight: 500;
+  }
+
+  .composer-tip {
+    display: block;
+    margin-top: 0.125rem;
+    color: var(--text-muted);
+    font-weight: 400;
   }
 
   .composer-actions {

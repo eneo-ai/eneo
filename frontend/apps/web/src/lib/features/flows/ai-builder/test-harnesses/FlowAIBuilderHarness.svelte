@@ -1,6 +1,9 @@
 <script lang="ts">
   import FlowAIBuilder from "../FlowAIBuilder.svelte";
-  import { initAIBuilderService } from "../FlowAIBuilderService.svelte.ts";
+  import {
+    initAIBuilderService,
+    type FlowAIBuilderService
+  } from "../FlowAIBuilderService.svelte.ts";
   import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { Space } from "@eneo/eneo-js";
@@ -13,9 +16,17 @@
     targetKind?: TargetKind;
     flowId?: string | null;
     initialPrompt?: string | null;
+    /** Test hook: receive the service instance to drive live session changes. */
+    onservice?: (service: FlowAIBuilderService) => void;
   }
 
-  let { transport, targetKind = "create", flowId = null, initialPrompt = null }: Props = $props();
+  let {
+    transport,
+    targetKind = "create",
+    flowId = null,
+    initialPrompt = null,
+    onservice
+  }: Props = $props();
 
   initFlowUserMode();
   untrack(() => {
@@ -45,7 +56,8 @@
       } as unknown as Space,
       eneo: {} as Parameters<typeof initSpacesManager>[0]["eneo"]
     });
-    initAIBuilderService({ client: transport } as never, "space-1", flowId);
+    const service = initAIBuilderService({ client: transport } as never, "space-1", flowId);
+    onservice?.(service);
   });
 </script>
 

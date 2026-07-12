@@ -155,6 +155,10 @@ export type RequirementsSummary = Extract<
 
 export type AIBuilderPhase = "discovering" | "confirming" | "building" | "reviewing";
 
+/** Truthful outcome of a send: the composer may only discard its draft on
+ *  "delivered" — every other edge keeps the user's text (state diagram §4). */
+export type AIBuilderSendOutcome = "delivered" | "failed" | "not_started";
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

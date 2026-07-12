@@ -33,7 +33,19 @@ function makeFixtures(spaceId: string) {
         message_id: "m-2",
         role: "assistant",
         content: "Här är mitt förslag:",
-        timestamp: "2026-07-11T09:05:00Z"
+        timestamp: "2026-07-11T09:05:00Z",
+        requirements_summary: {
+          requirements_version: "v1",
+          summary: "Skapa en sammanfattning av inskickade rapporter som PDF.",
+          key_decisions: [
+            { topic: "Slutresultat", decision: "PDF-dokument" },
+            { topic: "Omfattning", decision: "En sammanfattning per körning" }
+          ],
+          input_description: "Text vid körning",
+          output_description: "PDF med samlad översikt",
+          assumptions: ["Underlaget är på svenska."],
+          manual_setup_notes: []
+        }
       }
     ],
     latest_turn: null

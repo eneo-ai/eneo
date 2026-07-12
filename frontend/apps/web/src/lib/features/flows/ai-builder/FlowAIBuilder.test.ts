@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
@@ -13,11 +13,12 @@ vi.mock("$lib/core/AppContext", () => ({
   })
 }));
 vi.mock("$lib/core/Eneo", () => ({
-  getEneo: () => ({})
+  getEneo: () => ({ files: { delete: vi.fn().mockResolvedValue(undefined) } })
 }));
 
 import FlowAIBuilderHarness from "./test-harnesses/FlowAIBuilderHarness.svelte";
 import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
+import type { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 
 function recoveryHarness(
   state: "open" | "processing" | "failed_before_provider" | "provider_outcome_unknown",
@@ -100,6 +101,8 @@ Element.prototype.animate ??= (() => ({
 
 afterEach(() => {
   cleanup();
+  // Composer drafts persist per session id; tests share ids across cases.
+  localStorage.clear();
 });
 
 // A resumable create session whose latest plan is already proposed: resuming
@@ -132,7 +135,16 @@ function planSessionHarness(): {
         message_id: "m-2",
         role: "assistant" as const,
         content: "Här är mitt förslag:",
-        timestamp: "2026-07-11T09:05:00Z"
+        timestamp: "2026-07-11T09:05:00Z",
+        requirements_summary: {
+          requirements_version: "v1",
+          summary: "Skapa ett beslutsunderlag som PDF.",
+          key_decisions: [{ topic: "Slutresultat", decision: "PDF-dokument" }],
+          input_description: "Text vid körning",
+          output_description: "PDF med rekommendation",
+          assumptions: ["Svenska som språk"],
+          manual_setup_notes: []
+        }
       }
     ],
     latest_turn: null
@@ -163,6 +175,57 @@ function planSessionHarness(): {
   }) as unknown as AIBuilderClientTransport["fetch"];
   const stream = vi.fn() as unknown as AIBuilderClientTransport["stream"];
   return { fetch, stream };
+}
+
+// Capture every composer send as an awaitable promise. The composer awaits the
+// same promise FIRST, so `await sends[n]` in a test resumes strictly after the
+// composer's completion handler for that attempt has executed — a
+// deterministic receipt, no sleeps.
+function interceptSends(service: FlowAIBuilderService) {
+  const sends: ReturnType<FlowAIBuilderService["sendMessage"]>[] = [];
+  const original = service.sendMessage.bind(service);
+  service.sendMessage = ((...args: Parameters<FlowAIBuilderService["sendMessage"]>) => {
+    const promise = original(...args);
+    sends.push(promise);
+    return promise;
+  }) as FlowAIBuilderService["sendMessage"];
+  return sends;
+}
+
+// Two plan-review sessions behind one transport, addressable by id, so a test
+// can drive live session switches through service.resumeSession.
+function twoSessionHarness(): { transport: AIBuilderClientTransport } {
+  const base = planSessionHarness();
+  const makeSession = (sessionId: string) => ({
+    session_id: sessionId,
+    space_id: "space-1",
+    status: "awaiting_approval" as const,
+    target_kind: "create" as const,
+    flow_id: null,
+    latest_plan_id: "plan-1",
+    draft_title: sessionId,
+    created_at: "2026-07-11T09:00:00Z",
+    updated_at: "2026-07-11T09:05:00Z",
+    conversation: [
+      {
+        message_id: `${sessionId}-m1`,
+        role: "user" as const,
+        content: "Sammanfatta rapporter till en PDF",
+        timestamp: "2026-07-11T09:00:00Z"
+      }
+    ],
+    latest_turn: null
+  });
+  const originalFetch = base.fetch;
+  const fetch = vi.fn(
+    async (path: string, init?: { params?: { path?: { session_id?: string } } }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return makeSession(init?.params?.path?.session_id ?? "plan-session");
+      }
+      return await (originalFetch as (p: string, i?: unknown) => Promise<unknown>)(path, init);
+    }
+  ) as unknown as AIBuilderClientTransport["fetch"];
+  return { transport: { fetch, stream: base.stream } };
 }
 
 describe("FlowAIBuilder shell layout", () => {
@@ -219,6 +282,293 @@ describe("FlowAIBuilder shell layout", () => {
         m.ai_builder_phase_step_of({ step: 3, total: 3, label: m.ai_builder_phase_ready() })
       )
     ).toBeTruthy();
+  });
+});
+
+describe("FlowAIBuilder plan-review left pane", () => {
+  it("replaces the transcript with the structured task pane in plan review", async () => {
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    expect(await screen.findByRole("heading", { name: m.ai_builder_task_heading() })).toBeTruthy();
+    expect(screen.getAllByText("Sammanfatta rapporter till en PDF").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: m.ai_builder_decisions_from_answers() })
+    ).toBeTruthy();
+    // The raw transcript is folded into a collapsed conversation section.
+    const conversationTrigger = screen.getByRole("button", {
+      name: new RegExp(
+        m.ai_builder_conversation_heading({ count: 2 }).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      )
+    });
+    expect(conversationTrigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("runs the composer in refinement mode: hint, Ctrl+Enter submit", async () => {
+    const transport = planSessionHarness();
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+    transport.stream = stream;
+    render(FlowAIBuilderHarness, { transport });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    expect(screen.getByText(m.ai_builder_refine_hint())).toBeTruthy();
+
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+    expect(textbox.placeholder).toBe(m.ai_builder_refine_placeholder());
+
+    await fireEvent.input(textbox, { target: { value: "Lägg till en sammanfattning" } });
+    // Plain Enter must NOT send in refinement mode (the hint says Ctrl+Retur).
+    await fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(stream).not.toHaveBeenCalled();
+
+    await fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
+    expect(stream).toHaveBeenCalledOnce();
+    expect(vi.mocked(stream).mock.calls[0]?.[1].requestBody["application/json"]).toEqual(
+      expect.objectContaining({ message: "Lägg till en sammanfattning" })
+    );
+  });
+
+  it("counts down from 3 500 characters and blocks sending over 4 000", async () => {
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+
+    await fireEvent.input(textbox, { target: { value: "a".repeat(3600) } });
+    expect(screen.getByText(/3\s*600\s*\/\s*4\s*000/)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
+    ).toBe(false);
+
+    await fireEvent.input(textbox, { target: { value: "a".repeat(4001) } });
+    expect(textbox.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(m.ai_builder_refine_over_limit_tip())).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
+  it("persists the composer draft per session and restores it on remount", async () => {
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+    await fireEvent.input(textbox, { target: { value: "Utkast som ska överleva" } });
+
+    const stored = JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}");
+    expect(stored.text).toBe("Utkast som ska överleva");
+
+    cleanup();
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    expect(await screen.findByDisplayValue("Utkast som ska överleva")).toBeTruthy();
+    // The note lives in the refinement meta row, which appears once the plan
+    // fetch lands and flips the composer into refinement mode.
+    expect(await screen.findByText(m.ai_builder_draft_persistence_note())).toBeTruthy();
+  });
+
+  it("keeps the draft in the textarea and in storage when the send fails", async () => {
+    const transport = planSessionHarness();
+    transport.stream = vi.fn(async () => {
+      throw new Error("stream transport down");
+    }) as AIBuilderClientTransport["stream"];
+    render(FlowAIBuilderHarness, { transport });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+
+    await fireEvent.input(textbox, { target: { value: "Får inte försvinna" } });
+    await fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(transport.stream).toHaveBeenCalledOnce());
+
+    // Composer text is never discarded on a failure edge (§4).
+    await waitFor(() => expect(textbox.value).toBe("Får inte försvinna"));
+    const stored = JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}");
+    expect(stored.text).toBe("Får inte försvinna");
+  });
+
+  it("never leaks a draft across a live session switch (A→B→A)", async () => {
+    const { transport } = twoSessionHarness();
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const textbox = () =>
+      screen.getByRole("textbox", { name: m.ai_builder_refine_label() }) as HTMLTextAreaElement;
+    await fireEvent.input(textbox(), { target: { value: "Utkast för session A" } });
+
+    await service!.resumeSession("plan-session-b");
+    // B starts empty — A's text must not follow along or be written under B.
+    await waitFor(() => expect(textbox().value).toBe(""));
+    expect(localStorage.getItem("eneo:ai-builder:draft:plan-session-b")).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}").text
+    ).toBe("Utkast för session A");
+
+    await fireEvent.input(textbox(), { target: { value: "Utkast för session B" } });
+    await service!.resumeSession("plan-session");
+    await waitFor(() => expect(textbox().value).toBe("Utkast för session A"));
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session-b") ?? "{}").text
+    ).toBe("Utkast för session B");
+  });
+
+  it("restores completed unsent uploads from the draft record", async () => {
+    localStorage.setItem(
+      "eneo:ai-builder:draft:plan-session",
+      JSON.stringify({
+        text: "",
+        files: [{ id: "file-9", name: "underlag.pdf", size: 2048, mimetype: "application/pdf" }]
+      })
+    );
+    render(FlowAIBuilderHarness, { transport: planSessionHarness() });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    expect(await screen.findByTitle("underlag.pdf")).toBeTruthy();
+
+    // Removal drops the reference from the record (and never re-sends it).
+    await fireEvent.click(screen.getByRole("button", { name: m.remove_attachment() }));
+    await waitFor(() => expect(screen.queryByTitle("underlag.pdf")).toBeNull());
+    expect(localStorage.getItem("eneo:ai-builder:draft:plan-session")).toBeNull();
+  });
+
+  it("submits a restored file-only draft and clears the record only on delivery", async () => {
+    localStorage.setItem(
+      "eneo:ai-builder:draft:plan-session",
+      JSON.stringify({
+        text: "",
+        files: [{ id: "file-9", name: "underlag.pdf", size: 2048, mimetype: "application/pdf" }]
+      })
+    );
+    const transport = planSessionHarness();
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+    transport.stream = stream;
+    render(FlowAIBuilderHarness, { transport });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    await screen.findByTitle("underlag.pdf");
+
+    const send = screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    await fireEvent.click(send);
+
+    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    expect(vi.mocked(stream).mock.calls[0]?.[1].requestBody["application/json"]).toEqual(
+      expect.objectContaining({ file_ids: ["file-9"] })
+    );
+    await waitFor(() =>
+      expect(localStorage.getItem("eneo:ai-builder:draft:plan-session")).toBeNull()
+    );
+  });
+
+  it("does not restore a late-failing send into a different session", async () => {
+    const { transport } = twoSessionHarness();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    transport.stream = vi.fn(async () => {
+      await gate;
+      throw new Error("late transport failure");
+    }) as AIBuilderClientTransport["stream"];
+
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const sends = interceptSends(service!);
+    const textbox = () =>
+      screen.getByRole("textbox", { name: m.ai_builder_refine_label() }) as HTMLTextAreaElement;
+
+    await fireEvent.input(textbox(), { target: { value: "A:s meddelande" } });
+    await fireEvent.keyDown(textbox(), { key: "Enter", ctrlKey: true });
+    // The optimistic clear must not delete A's durable record mid-flight.
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}").text
+    ).toBe("A:s meddelande");
+
+    await service!.resumeSession("plan-session-b");
+    await waitFor(() => expect(textbox().value).toBe(""));
+
+    release();
+    // Deterministic receipt: the composer awaited this same promise first, so
+    // its completion handler has run by the time this await resumes.
+    expect(await sends[0]).toBe("failed");
+
+    // B's composer and storage stay untouched; A's record survives the failure.
+    expect(textbox().value).toBe("");
+    expect(localStorage.getItem("eneo:ai-builder:draft:plan-session-b")).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}").text
+    ).toBe("A:s meddelande");
+  });
+
+  it("ignores a stale completion while a newer submission is in flight", async () => {
+    const { transport } = twoSessionHarness();
+    const gates: Array<() => void> = [];
+    transport.stream = vi.fn(async () => {
+      await new Promise<void>((resolve) => gates.push(resolve));
+      throw new Error("transport failure");
+    }) as AIBuilderClientTransport["stream"];
+
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const sends = interceptSends(service!);
+    const textbox = () =>
+      screen.getByRole("textbox", { name: m.ai_builder_refine_label() }) as HTMLTextAreaElement;
+
+    // A submits and stays in flight.
+    await fireEvent.input(textbox(), { target: { value: "A:s meddelande" } });
+    await fireEvent.keyDown(textbox(), { key: "Enter", ctrlKey: true });
+
+    // Switch to B and submit there too — B's attempt now owns the slot.
+    await service!.resumeSession("plan-session-b");
+    await waitFor(() => expect(textbox().value).toBe(""));
+    await fireEvent.input(textbox(), { target: { value: "B:s meddelande" } });
+    await fireEvent.keyDown(textbox(), { key: "Enter", ctrlKey: true });
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session-b") ?? "{}").text
+    ).toBe("B:s meddelande");
+
+    // A settles first: a stale completion may not clear B's in-flight guard,
+    // restore A's text, or touch B's durable record.
+    gates[0]!();
+    expect(await sends[0]).toBe("failed");
+    expect(textbox().value).toBe("");
+    // A reactive service update now re-runs the composer's save effect while
+    // B's optimistic clear is live; only an intact in-flight guard keeps the
+    // empty composer from being mirrored over B's durable record.
+    await service!.refreshSession();
+    expect(
+      JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session-b") ?? "{}").text
+    ).toBe("B:s meddelande");
+
+    // B settles as failed: ITS completion restores B's draft.
+    gates[1]!();
+    expect(await sends[1]).toBe("failed");
+    await waitFor(() => expect(textbox().value).toBe("B:s meddelande"));
   });
 });
 

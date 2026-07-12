@@ -13,6 +13,7 @@ import type {
   AIBuilderModel,
   AIBuilderPlanEditContext,
   AIBuilderPhase,
+  AIBuilderSendOutcome,
   AIBuilderSession,
   AIBuilderStatus,
   AIBuilderTurnState,
@@ -242,8 +243,8 @@ export class FlowAIBuilderService {
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
     editContext?: AIBuilderPlanEditContext | null
-  ): Promise<void> {
-    await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
+  ): Promise<AIBuilderSendOutcome> {
+    return await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
   }
 
   async retryLatestTurn(): Promise<void> {

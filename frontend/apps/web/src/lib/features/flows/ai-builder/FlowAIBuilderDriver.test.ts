@@ -2497,6 +2497,80 @@ describe("FlowAIBuilderDriver", () => {
   });
 });
 
+describe("FlowAIBuilderDriver send outcome contract", () => {
+  // "delivered" authorizes irreversible draft deletion in the composer, so
+  // every branch of the outcome is pinned here.
+  const publicError = JSON.stringify({
+    schema_version: 2,
+    code: "internal_error",
+    category: "internal",
+    message: "boom",
+    phase: "planner",
+    request_id: null,
+    diagnostic_context: null,
+    details: {}
+  });
+
+  function seeded(streamImpl: ReturnType<typeof vi.fn>) {
+    const made = makeDriver({
+      streamImpl,
+      fetchImpl: vi.fn(async () => makeSession())
+    });
+    made.driver.seedState({ session: makeSession() });
+    return made;
+  }
+
+  it("returns 'not_started' when the turn guards reject the send", async () => {
+    const { driver } = makeDriver();
+    expect(await driver.sendMessage("Hej")).toBe("not_started");
+  });
+
+  it("returns 'delivered' only for done without a preceding error event", async () => {
+    const { driver } = seeded(
+      vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    );
+    expect(await driver.sendMessage("Hej")).toBe("delivered");
+  });
+
+  it("returns 'failed' when an error event arrives even if done follows", async () => {
+    const { driver } = seeded(
+      vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage?.({ id: "", event: "error", data: publicError }, new AbortController());
+        completeStream(handlers);
+      })
+    );
+    expect(await driver.sendMessage("Hej")).toBe("failed");
+  });
+
+  it("returns 'failed' when the transport throws", async () => {
+    const { driver } = seeded(
+      vi.fn(async () => {
+        throw new Error("transport down");
+      })
+    );
+    expect(await driver.sendMessage("Hej")).toBe("failed");
+  });
+
+  it("returns 'failed' when stream ownership is lost mid-flight", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { driver } = seeded(
+      vi.fn(async (_path, _init, handlers) => {
+        await gate;
+        completeStream(handlers);
+      })
+    );
+    const pending = driver.sendMessage("Hej");
+    // A fresh session supersedes the in-flight stream; its outcome is
+    // unknowable for the original caller.
+    await driver.startFreshSession("edit");
+    release();
+    expect(await pending).toBe("failed");
+  });
+});
+
 describe("FlowAIBuilderDriver.createFlowFromPlan", () => {
   const CREATE_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}/create";
 

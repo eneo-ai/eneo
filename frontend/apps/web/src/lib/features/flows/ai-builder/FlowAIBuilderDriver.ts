@@ -19,6 +19,7 @@ import type {
   AIBuilderError,
   AIBuilderModel,
   AIBuilderPhase,
+  AIBuilderSendOutcome,
   AIBuilderPlanEditContext,
   AIBuilderSendMessageRequest,
   AIBuilderSession,
@@ -513,14 +514,14 @@ export class FlowAIBuilderDriver {
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
     editContext?: AIBuilderPlanEditContext | null
-  ): Promise<void> {
+  ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||
       this.#state.isStreaming ||
       this.#state.pendingOperation !== null ||
       !this.canStartNewTurn
     ) {
-      return;
+      return "not_started";
     }
 
     const userMsg: ChatMessage = {
@@ -563,7 +564,7 @@ export class FlowAIBuilderDriver {
       requestBody.edit_context = editContext;
     }
 
-    await this.#streamMessageRequest(requestBody, userMsg);
+    return await this.#streamMessageRequest(requestBody, userMsg);
   }
 
   async retryLatestTurn(): Promise<void> {
@@ -609,9 +610,9 @@ export class FlowAIBuilderDriver {
   async #streamMessageRequest(
     requestBody: AIBuilderSendMessageRequest,
     optimisticUserMessage: ChatMessage | null
-  ): Promise<void> {
+  ): Promise<AIBuilderSendOutcome> {
     const session = this.#state.session;
-    if (!session || this.#state.isStreaming) return;
+    if (!session || this.#state.isStreaming) return "not_started";
     const isRetry = optimisticUserMessage === null;
     if (isRetry) {
       this.#requiresAuthoritativeRefresh = true;
@@ -742,7 +743,8 @@ export class FlowAIBuilderDriver {
         abortController
       );
 
-      if (!ownsCurrentStream()) return;
+      // A superseded stream has an unknowable outcome for THIS caller.
+      if (!ownsCurrentStream()) return "failed";
       if ((!receivedDone || receivedStreamError) && !abortController.signal.aborted) {
         this.#requiresAuthoritativeRefresh = true;
       }
@@ -757,6 +759,7 @@ export class FlowAIBuilderDriver {
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.#refreshSession(owner);
       }
+      return receivedDone && !receivedStreamError ? "delivered" : "failed";
     } catch (e) {
       if (!abortController.signal.aborted && ownsCurrentStream()) {
         this.#requiresAuthoritativeRefresh = true;
@@ -768,6 +771,7 @@ export class FlowAIBuilderDriver {
         this.#notify();
         await this.#refreshSession(owner);
       }
+      return "failed";
     } finally {
       if (ownsCurrentStream()) {
         this.#state.isStreaming = false;

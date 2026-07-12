@@ -6,6 +6,7 @@
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
+  import FlowAIBuilderTaskPane from "./FlowAIBuilderTaskPane.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import {
     buildAIBuilderDiagnosticReport,
@@ -107,6 +108,38 @@
   let inputRef = $state<FlowAIBuilderInput | undefined>();
   let pendingEditContext = $state<AIBuilderPlanEditContext | null>(null);
 
+  // --- Plan-review left pane (handoff §2, §3.1) -----------------------------
+  // Once a plan exists the raw transcript folds into the structured task pane;
+  // the chat spine returns whenever a structured question needs an answer
+  // ("Ändra dina val" reopens S3) so question cards stay interactive.
+  const latestRequirements = $derived.by(() => {
+    for (let cursor = service.messages.length - 1; cursor >= 0; cursor -= 1) {
+      const summary = service.messages[cursor]?.requirementsSummary;
+      if (summary) return summary;
+    }
+    return null;
+  });
+
+  const firstTaskText = $derived.by(() => {
+    for (const message of service.messages) {
+      if (message.role !== "user") continue;
+      const metadata = message.metadata ?? {};
+      if (metadata.requirements_confirmed === true || "question_answer" in metadata) continue;
+      const content = message.content.trim();
+      if (content.length > 0) return content;
+    }
+    return null;
+  });
+
+  const hasPendingQuestion = $derived.by(() => {
+    const last = service.messages[service.messages.length - 1];
+    return Boolean(last?.question && !service.isQuestionAnswered(last.question.question_id));
+  });
+
+  const showTaskSummary = $derived(
+    service.hasSeenPlanInSession && !hasPendingQuestion && firstTaskText !== null
+  );
+
   const generatingText = $derived(
     service.hasSeenPlanInSession ? m.ai_builder_updating_plan() : m.ai_builder_generating()
   );
@@ -165,7 +198,9 @@
   $effect(() => {
     void service.messages.length;
     void service.isStreaming;
-    scrollToBottom();
+    // The structured task pane reads top-down; only the transcript follows
+    // its newest message.
+    if (!showTaskSummary) scrollToBottom();
   });
 </script>
 
@@ -307,52 +342,64 @@
       tabindex="0"
       class="focus-visible:ring-accent-default/40 scroll-pb-4 px-4 py-6 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset max-sm:px-3 max-sm:py-4 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-y-auto"
     >
-      <div class="mx-auto max-w-[71ch]">
-        {#each service.messages as message, i (`msg-${i}`)}
-          <FlowAIBuilderMessage
-            role={message.role}
-            content={message.content}
-            isLast={i === service.messages.length - 1}
-            isStreaming={service.isStreaming && i === service.messages.length - 1}
-            interactionDisabled={service.isCreating}
-            question={message.question}
-            questionAnswered={message.question
-              ? service.isQuestionAnswered(message.question.question_id)
-              : false}
-            requirementsSummary={message.requirementsSummary}
-            requirementsUserRequest={message.requirementsSummary
-              ? latestUserRequestBefore(i)
-              : null}
-            requirementsConfirmed={message.requirementsSummary
-              ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
-              : false}
-            requirementsActive={message.requirementsSummary
-              ? service.isLatestRequirementsSummary(message.requirementsSummary)
-              : false}
-            onQuestionAnswer={message.question ? handleQuestionAnswer : undefined}
-            onRequirementsConfirm={message.requirementsSummary &&
-            service.isLatestRequirementsSummary(message.requirementsSummary)
-              ? handleRequirementsConfirm
-              : undefined}
-            onRequirementsChange={message.requirementsSummary &&
-            service.isLatestRequirementsSummary(message.requirementsSummary)
-              ? handleRequirementsChange
-              : undefined}
+      {#if showTaskSummary}
+        <div class="mx-auto max-w-[71ch]">
+          <FlowAIBuilderTaskPane
+            taskText={firstTaskText ?? ""}
+            requirements={latestRequirements}
+            messages={service.messages}
+            disabled={service.isCreating}
+            onedittask={handleRequirementsChange}
           />
-        {/each}
-        {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
-          <div class="mt-4 py-2">
-            <div class="generating-badge" role="status" aria-label={generatingText}>
-              <span class="generating-dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </span>
-              <span class="text-[0.8125rem] leading-tight font-medium">{generatingText}</span>
+        </div>
+      {:else}
+        <div class="mx-auto max-w-[71ch]">
+          {#each service.messages as message, i (`msg-${i}`)}
+            <FlowAIBuilderMessage
+              role={message.role}
+              content={message.content}
+              isLast={i === service.messages.length - 1}
+              isStreaming={service.isStreaming && i === service.messages.length - 1}
+              interactionDisabled={service.isCreating}
+              question={message.question}
+              questionAnswered={message.question
+                ? service.isQuestionAnswered(message.question.question_id)
+                : false}
+              requirementsSummary={message.requirementsSummary}
+              requirementsUserRequest={message.requirementsSummary
+                ? latestUserRequestBefore(i)
+                : null}
+              requirementsConfirmed={message.requirementsSummary
+                ? service.isRequirementsSummaryConfirmed(message.requirementsSummary)
+                : false}
+              requirementsActive={message.requirementsSummary
+                ? service.isLatestRequirementsSummary(message.requirementsSummary)
+                : false}
+              onQuestionAnswer={message.question ? handleQuestionAnswer : undefined}
+              onRequirementsConfirm={message.requirementsSummary &&
+              service.isLatestRequirementsSummary(message.requirementsSummary)
+                ? handleRequirementsConfirm
+                : undefined}
+              onRequirementsChange={message.requirementsSummary &&
+              service.isLatestRequirementsSummary(message.requirementsSummary)
+                ? handleRequirementsChange
+                : undefined}
+            />
+          {/each}
+          {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}
+            <div class="mt-4 py-2">
+              <div class="generating-badge" role="status" aria-label={generatingText}>
+                <span class="generating-dots" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </span>
+                <span class="text-[0.8125rem] leading-tight font-medium">{generatingText}</span>
+              </div>
             </div>
-          </div>
-        {/if}
-      </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -366,6 +413,7 @@
       bind:this={inputRef}
       editContext={pendingEditContext}
       oncleareditcontext={clearPendingEditContext}
+      refinement={showTaskSummary}
     />
   </div>
   {#if showEmptyState}
