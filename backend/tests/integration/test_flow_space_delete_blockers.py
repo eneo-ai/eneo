@@ -238,7 +238,7 @@ async def test_space_flow_delete_blockers_detect_flow_managed_assistants(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_space_flow_delete_blockers_detect_draft_package_imports(
+async def test_space_flow_delete_blockers_allow_successful_package_imports(
     db_session,
     admin_user,
 ):
@@ -270,7 +270,25 @@ async def test_space_flow_delete_blockers_detect_draft_package_imports(
         )
         await session.flush()
 
-        assert await space_has_flow_delete_blockers(session, space.id)
+        assert not await space_has_flow_delete_blockers(session, space.id)
+
+        await session.execute(sa.delete(Spaces).where(Spaces.id == space.id))
+        await session.flush()
+
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(Flows).where(Flows.id == flow.id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowPackageImports)
+                .where(FlowPackageImports.flow_id == flow.id)
+            )
+            == 0
+        )
 
 
 @pytest.mark.asyncio

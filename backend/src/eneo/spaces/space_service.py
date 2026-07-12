@@ -519,8 +519,8 @@ class SpaceService:
         if await self.repo.has_flow_delete_blockers(space.id):
             raise ConflictException(
                 "Space contains Flow history or Flow-owned draft resources. "
-                "Remove draft Flows first; spaces with Flow run history or "
-                "package-import provenance require Flow data purge before deletion.",
+                "Remove draft Flows first; spaces with Flow run history require "
+                "Flow data purge before deletion.",
                 code="space_contains_flow_delete_blockers",
                 context={"space_id": str(space.id)},
             )

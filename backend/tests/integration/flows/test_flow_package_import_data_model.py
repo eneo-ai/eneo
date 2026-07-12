@@ -15,16 +15,20 @@ import pytest
 import sqlalchemy as sa
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import CheckConstraint, Index
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index
 from sqlalchemy.exc import IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.flow_tables import (
     FLOW_PACKAGE_IMPORT_SOURCE_VALUES,
     FLOW_PACKAGE_IMPORT_STATUS_VALUES,
     FlowPackageImports,
     Flows,
+    FlowSteps,
 )
 from eneo.flow_packages.api import flow_package_router
 from eneo.flow_packages.api.flow_package_models import (
@@ -90,6 +94,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.json_types import JsonObject
+from eneo.main.config import Settings, set_settings
 from eneo.main.container.container import Container
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
@@ -97,6 +102,13 @@ from eneo.roles.role import RoleCreate
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space import Space
 from eneo.users.user import UserAdd, UserState
+
+
+@pytest.fixture(autouse=True)
+def _restore_integration_settings_after_mixed_unit_modules(
+    test_settings: Settings,
+) -> None:
+    set_settings(test_settings)
 
 
 def _constraint_names(table: object) -> set[str]:
@@ -128,6 +140,20 @@ def _index_by_name(table: object, index_name: str) -> Index:
         if index.name == index_name:
             return index
     raise AssertionError(f"Index {index_name} was not found.")
+
+
+def _foreign_key_for_column(
+    table: object,
+    column_name: str,
+) -> ForeignKeyConstraint:
+    matches: list[ForeignKeyConstraint] = []
+    for constraint in table.__table__.constraints:
+        if isinstance(constraint, ForeignKeyConstraint) and tuple(
+            column.name for column in constraint.columns
+        ) == (column_name,):
+            matches.append(constraint)
+    assert len(matches) == 1
+    return matches[0]
 
 
 async def _create_space(*, session, completion_model_factory, space_factory) -> object:
@@ -548,7 +574,7 @@ async def test_flow_package_import_route_persists_failed_install_record(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_package_import_route_creates_draft_flow_and_import_record(
+async def test_successful_flow_package_import_cascades_with_created_flow(
     db_container,
     completion_model_factory,
     space_factory,
@@ -578,17 +604,6 @@ async def test_flow_package_import_route_creates_draft_flow_and_import_record(
                 models=[_model_candidate(model.id)]
             ),
         )
-        logged_imports: list[UUID] = []
-
-        async def fake_log_flow_package_import(**kwargs: object) -> None:
-            logged_imports.append(cast(UUID, kwargs["import_id"]))
-
-        monkeypatch.setattr(
-            flow_package_router,
-            "_log_flow_package_import",
-            fake_log_flow_package_import,
-        )
-
         response = await flow_package_router.import_flow_package_as_draft(
             id=space.id,
             import_request=FlowPackageImportRequest(
@@ -615,6 +630,12 @@ async def test_flow_package_import_route_creates_draft_flow_and_import_record(
                 FlowPackageImports.id == response.import_id
             )
         )
+        audit_record = await session.scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value,
+                AuditLogTable.entity_id == response.flow_id,
+            )
+        )
 
         assert imported_flow is not None
         assert imported_flow.tenant_id == admin_user.tenant_id
@@ -630,7 +651,36 @@ async def test_flow_package_import_route_creates_draft_flow_and_import_record(
         assert import_record.selected_mappings_json == {
             "selected_bindings": [],
         }
-        assert logged_imports == [response.import_id]
+        assert audit_record is not None
+        assert audit_record.log_metadata["extra"] == {
+            "import_id": str(response.import_id),
+            "space_id": str(space.id),
+            "package_id": response.package_id,
+            "package_version": response.package_version,
+            "content_checksum": response.content_checksum,
+            "steps_created": response.steps_created,
+            "resource_bindings_count": response.resource_bindings_count,
+        }
+
+        await session.execute(
+            sa.delete(FlowSteps).where(FlowSteps.flow_id == response.flow_id)
+        )
+        await session.execute(
+            sa.delete(Assistants).where(Assistants.managing_flow_id == response.flow_id)
+        )
+        await session.execute(sa.delete(Flows).where(Flows.id == response.flow_id))
+        await session.flush()
+
+        remaining_import = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.id == response.import_id
+            )
+        )
+        remaining_audit = await session.scalar(
+            sa.select(AuditLogTable).where(AuditLogTable.id == audit_record.id)
+        )
+        assert remaining_import is None
+        assert remaining_audit is not None
 
 
 @pytest.mark.asyncio
@@ -916,6 +966,11 @@ def test_flow_package_import_metadata_matches_import_record_contract() -> None:
     )
     assert "ck_flow_package_imports_terminal_shape" in _constraint_names(
         FlowPackageImports
+    )
+    flow_foreign_key = _foreign_key_for_column(FlowPackageImports, "flow_id")
+    assert flow_foreign_key.ondelete == "CASCADE"
+    assert tuple(element.target_fullname for element in flow_foreign_key.elements) == (
+        "flows.id",
     )
 
     tenant_space_index = _index_by_name(

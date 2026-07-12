@@ -113,6 +113,11 @@ async def test_delete_space_rejects_flow_delete_blockers_before_side_effects(
         await service.delete_space(space_id)
 
     assert exc_info.value.code == "space_contains_flow_delete_blockers"
+    assert str(exc_info.value) == (
+        "Space contains Flow history or Flow-owned draft resources. "
+        "Remove draft Flows first; spaces with Flow run history require "
+        "Flow data purge before deletion."
+    )
     service.api_key_scope_revoker.revoke_scope.assert_not_awaited()
     service.repo.delete.assert_not_awaited()
     service.icon_repo.delete.assert_not_awaited()

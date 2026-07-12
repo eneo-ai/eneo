@@ -615,7 +615,7 @@ class FlowRuntimeUploadedFiles(BaseCrossReference):
 
 
 class FlowPackageImports(BasePublic):
-    """Stores Flow package import attempts. Writer: FlowPackageImportRepository. Purpose: keep import plans, selected mappings, and terminal import results auditable."""
+    """Stores Flow package import outcomes. Writer: FlowPackageImportRepository. Purpose: retain operational results only while their owning Flow or space exists."""
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"),
@@ -628,7 +628,7 @@ class FlowPackageImports(BasePublic):
         index=True,
     )
     flow_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Flows.id, ondelete="SET NULL"),
+        ForeignKey(Flows.id, ondelete="CASCADE"),
         nullable=True,
         index=True,
     )

@@ -714,7 +714,7 @@ async def _log_flow_package_import(
     import_id: UUID,
 ) -> None:
     user = container.user()
-    await container.audit_service().log_async(
+    await container.audit_service().log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FLOW_PACKAGE_DRAFT_INSTALLED,

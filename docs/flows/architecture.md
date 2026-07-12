@@ -38,6 +38,7 @@ Use this split when changing code:
 | --- | --- | --- | --- |
 | Draft flow lifecycle | `FlowService` | `backend/src/eneo/flows/application/flow_service.py:70` | Creates, updates, validates, publishes, and unpublishes flows. It should not leak FastAPI or frontend concepts. |
 | Draft flow persistence | `FlowRepository` and `flow_tables.py` | `backend/src/eneo/flows/infrastructure/flow_repo.py:529`, `backend/src/eneo/database/tables/flow_tables.py:141` | `FlowRepository.update` owns optimistic draft revision writes. |
+| Package import lifecycle | `FlowPackageImportRepository`, `FlowPackageImports`, and central audit | `backend/src/eneo/flow_packages/infrastructure/flow_package_import_repo.py`, `backend/src/eneo/database/tables/flow_tables.py`, `backend/src/eneo/flow_packages/api/flow_package_router.py` | Successful operational rows follow their Flow; failed rows follow their space. Central audit owns post-deletion provenance under its configured authorization and retention policy. |
 | Published snapshot shape | `published_definition.py` | `backend/src/eneo/flows/published_definition.py:46`, `backend/src/eneo/flows/published_definition.py:112`, `backend/src/eneo/flows/published_definition.py:131`, `backend/src/eneo/flows/published_definition.py:191` | Build and parse published definitions here. Do not read mutable draft steps during runtime. |
 | Runtime consumer contract | `FlowRunContractService` | `backend/src/eneo/flows/flow_run_contract_service.py:60`, `backend/src/eneo/flows/flow_run_contract_service.py:66` | The run contract owns final output, form fields, runtime step inputs, upload limits, review requirements, and template readiness. |
 | Runtime-safe Flow projection | `FlowAssembler.to_runtime_public` | `backend/src/eneo/flows/api/flow_assembler.py:77` | Adds paths for run contract, uploads, run creation, review, evidence, and artifacts. |
@@ -122,6 +123,23 @@ The authoring path edits draft state and then freezes a runtime snapshot:
    Do not make runtime code reach back to mutable `flow_steps`. See
    `backend/src/eneo/flows/application/flow_service.py:786` and
    `backend/src/eneo/flows/published_definition.py:191`.
+
+### Package import ownership
+
+`FlowPackageImportRepository` stores operational terminal outcomes, not a
+permanent registry. A successful import row cascades with its Flow; a failed
+row has no Flow and cascades with its space. Import history is therefore not a
+space-deletion blocker. Central audit is the sole post-deletion provenance
+owner under its configured authorization and retention policy, as decided in
+[Flow launch scope and lifecycle](../adr/flow-launch-scope-and-lifecycle.md).
+There is no package tombstone, release state, compatibility path, or parallel
+retention owner.
+
+The package-import migration is part of the unreleased Flow schema chain. When
+its relationship changes, rebuild a disposable branch database and replay to
+head using the
+[Flow Developer Quickstart](./flow-developer-quickstart.md#practical-editing-rules);
+an existing Alembic stamp does not replay an amended revision.
 
 ## Runtime Execution Journey
 

@@ -459,7 +459,16 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     assert captured_repo_selection[0].selected_bindings == [selected_binding]
     assert audit_service.events[0]["action"] is ActionType.FLOW_PACKAGE_DRAFT_INSTALLED
     assert audit_service.events[0]["entity_id"] == flow_id
-    assert audit_service.events[0]["metadata"]["extra"]["import_id"] == str(import_id)
+    assert audit_service.persisted_events == audit_service.events
+    assert audit_service.events[0]["metadata"]["extra"] == {
+        "import_id": str(import_id),
+        "space_id": str(target_space_id),
+        "package_id": response.package_id,
+        "package_version": response.package_version,
+        "content_checksum": response.content_checksum,
+        "steps_created": response.steps_created,
+        "resource_bindings_count": response.resource_bindings_count,
+    }
 
 
 @pytest.mark.anyio
@@ -883,6 +892,11 @@ class _FakeUser:
 class _FakeAuditService:
     def __init__(self) -> None:
         self.events: list[dict[str, object]] = []
+        self.persisted_events: list[dict[str, object]] = []
+
+    async def log(self, **kwargs: object) -> None:
+        self.events.append(kwargs)
+        self.persisted_events.append(kwargs)
 
     async def log_async(self, **kwargs: object) -> None:
         self.events.append(kwargs)

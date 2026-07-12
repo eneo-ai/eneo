@@ -100,7 +100,7 @@ def upgrade() -> None:
             ["flow_id"],
             ["flows.id"],
             name=op.f("fk_flow_package_imports_flow_id_flows"),
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["space_id"],
