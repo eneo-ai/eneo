@@ -836,6 +836,8 @@
   "space_description_description": "En kort beskrivning av denna yta som kommer att visas för dess användare.",
   "space_description_label": "Beskrivning",
   "space_name_description": "Ett namn för att identifiera denna yta inom din organisation.",
+  "space_nav_open": "Öppna ytnavigering",
+  "space_nav_title": "Ytnavigering",
   "spaces": "Delat",
   "stability": "Stabilitet",
   "stability_stable": "Stabil",
