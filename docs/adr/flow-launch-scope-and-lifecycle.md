@@ -496,9 +496,12 @@ Additional gates:
 - Package-lane launch completion requires both WI-13B and WI-13C. WI-13C enters
   the serialized migration queue from the then-current accepted Alembic head;
   it does not share a migration with unrelated work.
-- The current launch denominator adds only WI-13B and WI-13C. WI-PKG-01 through
-  WI-PKG-03B and WI-MKT-D0 through WI-MKT-02 remain visible roadmap identities
-  but do not affect launch completion until their recorded trigger activates.
+- This amendment adds only WI-13B and WI-13C to the current full-schema
+  work-item sections. The roadmap has 35 current sections, but WI-12 remains
+  five independently accepted execution identities with separate receipts and
+  commits; the current execution denominator is therefore 39. The eight
+  trigger-gated future sections are also eight future execution identities and
+  remain excluded until their recorded trigger activates.
 - WI-19 and WI-24 coordinate so Flow finalization collects runtime-upload
   candidates before cascade removes their bindings.
 - WI-22A records persisted HTTP POST input and Flow MCP counts and whether real
