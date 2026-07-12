@@ -249,12 +249,12 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
         },
     },
     "missing_binding": {
-        "summary": "Required package slot has no local mapping",
+        "summary": "Required knowledge slot has no local mapping",
         "value": {
             "message": "Flow package import is missing a required resource binding.",
             "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
             "code": FlowPackageErrorCode.IMPORT_MISSING_REQUIRED_RESOURCE_BINDING.value,
-            "context": {"slot_ref": "model.structured", "missing_count": 1},
+            "context": {"slot_ref": "knowledge.policy", "missing_count": 1},
         },
     },
     "unavailable_resource": {

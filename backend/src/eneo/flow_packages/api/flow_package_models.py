@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_import_plan import (
@@ -196,6 +196,19 @@ def _empty_import_resource_binding_requests() -> list[
     return []
 
 
+class _FlowPackageImportTargetStateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    audio_transcription_required: bool = Field(strict=True)
+    default_transcription_model_id: UUID | None
+
+    def to_domain(self) -> FlowPackageImportTargetState:
+        return FlowPackageImportTargetState(
+            audio_transcription_required=self.audio_transcription_required,
+            default_transcription_model_id=self.default_transcription_model_id,
+        )
+
+
 class FlowPackageImportRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -253,6 +266,16 @@ class FlowPackageImportRequest(BaseModel):
             "`integration_knowledge` resources."
         ),
     )
+
+    @field_validator("expected_target_state", mode="before")
+    @classmethod
+    def parse_expected_target_state(
+        cls,
+        value: object,
+    ) -> FlowPackageImportTargetState:
+        if isinstance(value, FlowPackageImportTargetState):
+            return value
+        return _FlowPackageImportTargetStateRequest.model_validate(value).to_domain()
 
     def import_selection(self) -> FlowPackageImportSelection:
         return FlowPackageImportSelection(

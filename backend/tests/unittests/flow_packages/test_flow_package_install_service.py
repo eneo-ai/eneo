@@ -122,9 +122,49 @@ async def test_install_rejects_missing_required_model_before_creating_flow() -> 
 
 
 @pytest.mark.asyncio
-async def test_install_allows_unbound_knowledge_without_creating_dangling_refs() -> (
+async def test_install_rejects_unbound_required_knowledge_before_creating_flow() -> (
     None
 ):
+    model_id = uuid4()
+    model_binding = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+    knowledge_slot = _slot_ref(ResourceSlotKind.KNOWLEDGE, "local-rules")
+    service = _flow_service()
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await _install_as_draft(
+            envelope=_envelope(
+                requirements=[
+                    FlowPackageModelRequirement(
+                        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                    ),
+                    FlowPackageKnowledgeRequirement(slot_ref=knowledge_slot),
+                ],
+                assistant=AssistantSpec(
+                    instructions="Use local guidance.",
+                    model_ref="model.structured",
+                    knowledge_refs=[knowledge_slot.ref],
+                ),
+            ),
+            flow_service=service,
+            space_id=uuid4(),
+            selected_bindings=(model_binding,),
+            candidates=_candidates(models=[_model_candidate(model_id)]),
+        )
+
+    assert (
+        exc_info.value.code
+        is FlowPackageErrorCode.IMPORT_MISSING_REQUIRED_RESOURCE_BINDING
+    )
+    assert exc_info.value.context["slot_ref"] == knowledge_slot.ref
+    service.create_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_install_omits_only_unbound_optional_knowledge() -> None:
     flow_id = uuid4()
     assistant_id = uuid4()
     model_id = uuid4()
@@ -142,10 +182,13 @@ async def test_install_allows_unbound_knowledge_without_creating_dangling_refs()
                 FlowPackageModelRequirement(
                     slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
                 ),
-                FlowPackageKnowledgeRequirement(slot_ref=knowledge_slot),
+                FlowPackageKnowledgeRequirement(
+                    slot_ref=knowledge_slot,
+                    required=False,
+                ),
             ],
             assistant=AssistantSpec(
-                instructions="Use local guidance.",
+                instructions="Use local guidance when available.",
                 model_ref="model.structured",
                 knowledge_refs=[knowledge_slot.ref],
             ),

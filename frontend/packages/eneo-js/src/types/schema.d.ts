@@ -14313,7 +14313,6 @@ export interface components {
     FlowPackageImportPlanStatus:
       | "resolved_exact"
       | "requires_human_confirmation"
-      | "manual_setup_required"
       | "unresolved_required"
       | "skipped_optional"
       | "unsupported";

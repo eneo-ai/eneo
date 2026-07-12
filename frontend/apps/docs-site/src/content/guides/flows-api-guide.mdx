@@ -88,7 +88,10 @@ Flow package export, planning, and import are user-principal authoring
 operations. Export produces a bounded `.eneo-flowpkg` file without local
 resource identifiers. The receiving operator uploads that same file to the
 target space's import-plan endpoint and reviews the required and optional model
-and knowledge mappings.
+and knowledge mappings. Every required model or knowledge dependency needs a
+current, explicitly confirmed local mapping before import. Only a dependency
+declared optional may be omitted; in that case, the imported draft omits only
+that optional reference.
 
 | Purpose                        | Endpoint                                                    |
 | ------------------------------ | ----------------------------------------------------------- |

@@ -404,7 +404,8 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
     status_schema = schemas.get("FlowPackageImportPlanStatus", {})
     status_values = set(status_schema.get("enum", []))
     assert "resolved_compatible" not in status_values
-    assert "manual_setup_required" in status_values
+    assert "manual_setup_required" not in status_values
+    assert "unresolved_required" in status_values
     assert "unsupported" in status_values
     model_resolution_schema = schemas.get("FlowPackageModelDependencyResolution", {})
     assert "install_blocks" in model_resolution_schema.get("required", [])

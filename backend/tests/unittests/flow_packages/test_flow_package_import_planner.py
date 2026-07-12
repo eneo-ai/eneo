@@ -159,7 +159,7 @@ def test_planner_preserves_model_rejection_telemetry() -> None:
     ]
 
 
-def test_planner_marks_required_knowledge_without_candidates_as_manual_setup() -> None:
+def test_planner_blocks_required_knowledge_without_candidates() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageKnowledgeRequirement(
@@ -174,14 +174,14 @@ def test_planner_marks_required_knowledge_without_candidates_as_manual_setup() -
     )
 
     resolution = plan.dependency_resolutions[0]
-    assert resolution.status is FlowPackageImportPlanStatus.MANUAL_SETUP_REQUIRED
-    assert resolution.install_blocks is False
-    assert resolution.publish_blocks is False
-    assert resolution.selection_required_for_install is False
+    assert resolution.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert resolution.install_blocks is True
+    assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == []
-    assert plan.can_install_as_draft is True
-    assert plan.can_publish_after_import is True
+    assert plan.can_install_as_draft is False
+    assert plan.can_publish_after_import is False
 
 
 def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only() -> (
@@ -209,7 +209,7 @@ def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only(
     assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
     assert resolution.install_blocks is False
     assert resolution.publish_blocks is False
-    assert resolution.selection_required_for_install is False
+    assert resolution.selection_required_for_install is True
     assert resolution.auto_select_allowed is False
     assert resolution.suggestions == [candidate]
     assert resolution.total_candidate_count == 1

@@ -617,11 +617,6 @@
                               {/if}
                             </span>
                           </div>
-                        {:else if resolution.status === "manual_setup_required"}
-                          <div class="text-warning-stronger flex items-start gap-1.5 text-sm">
-                            <AlertTriangle class="mt-0.5 size-4 shrink-0" />
-                            <span>{m.flow_package_manual_setup_required()}</span>
-                          </div>
                         {:else if resolution.suggestions.length === 0}
                           <div class="text-destructive flex items-start gap-1.5 text-sm">
                             <AlertTriangle class="mt-0.5 size-4 shrink-0" />

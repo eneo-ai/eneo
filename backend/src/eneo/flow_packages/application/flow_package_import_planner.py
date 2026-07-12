@@ -254,6 +254,7 @@ def _resolve_knowledge_requirement(
         required=requirement.required,
         total_candidate_count=total_candidate_count,
     )
+    missing_required_candidate = requirement.required and total_candidate_count == 0
 
     return FlowPackageKnowledgeDependencyResolution(
         slot_ref=requirement.slot_ref,
@@ -262,9 +263,9 @@ def _resolve_knowledge_requirement(
         data_sensitivity=requirement.data_sensitivity,
         guidance=requirement.guidance,
         status=status,
-        install_blocks=False,
-        publish_blocks=False,
-        selection_required_for_install=False,
+        install_blocks=missing_required_candidate,
+        publish_blocks=missing_required_candidate,
+        selection_required_for_install=requirement.required,
         auto_select_allowed=False,
         suggestions=suggestions,
         total_candidate_count=total_candidate_count,
@@ -298,7 +299,7 @@ def _knowledge_resolution_status(
     if not required:
         return FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
     if total_candidate_count == 0:
-        return FlowPackageImportPlanStatus.MANUAL_SETUP_REQUIRED
+        return FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
     return FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
 
 

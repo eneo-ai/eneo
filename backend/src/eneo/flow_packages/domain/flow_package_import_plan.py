@@ -36,7 +36,6 @@ MAX_IMPORT_PLAN_SUGGESTIONS: Final[int] = 10
 class FlowPackageImportPlanStatus(StrEnum):
     RESOLVED_EXACT = "resolved_exact"
     REQUIRES_HUMAN_CONFIRMATION = "requires_human_confirmation"
-    MANUAL_SETUP_REQUIRED = "manual_setup_required"
     UNRESOLVED_REQUIRED = "unresolved_required"
     SKIPPED_OPTIONAL = "skipped_optional"
     # Unsupported dependencies stay visible in validation/import plans so users know why import is blocked.

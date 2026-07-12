@@ -137,9 +137,13 @@ Installation accepts one resolved package command containing that reviewed
 checksum, target state, and exact local-resource mappings. It revalidates
 mutable destination state before `FlowAuthoringCommandService` creates the
 draft; it never silently chooses a replacement model or knowledge source. An
-exact retry of a successful checksum, target-state, and mapping decision returns
-the existing imported draft. Failed materialization still rolls back the draft
-and records a typed terminal failure for the trusted package.
+import must map every required model and knowledge dependency to a currently
+available local resource. Only a dependency explicitly declared optional may
+be omitted, and installation removes only that optional reference from the
+draft. An exact retry of a successful checksum, target-state, and mapping
+decision returns the existing imported draft. Failed materialization still
+rolls back the draft and records a typed terminal failure for the trusted
+package.
 
 `FlowPackageImportRepository` stores operational terminal outcomes, not a
 permanent registry. A successful import row cascades with its Flow; a failed

@@ -11,7 +11,8 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from eneo.actors.actors.space_actor import SpaceActor
@@ -937,6 +938,40 @@ def test_import_request_accepts_json_resource_bindings_at_http_boundary() -> Non
     import_selection = import_request.import_selection()
 
     assert import_selection.selected_bindings == [_selected_model_binding()]
+
+
+def test_import_request_converts_non_null_target_uuid_at_fastapi_boundary() -> None:
+    app = FastAPI()
+    captured_states: list[FlowPackageImportTargetState] = []
+
+    @app.post("/flow-package-import")
+    def accept_import(import_request: FlowPackageImportRequest) -> dict[str, bool]:
+        captured_states.append(import_request.expected_target_state)
+        return {"accepted": True}
+
+    transcription_model_id = UUID("22222222-2222-4222-8222-222222222222")
+    with TestClient(app) as client:
+        response = client.post(
+            "/flow-package-import",
+            json={
+                "package_base64": "UEsDBBQAAAAIA...",
+                "expected_content_checksum": "0" * 64,
+                "expected_target_state": {
+                    "audio_transcription_required": True,
+                    "default_transcription_model_id": str(transcription_model_id),
+                },
+                "selected_bindings": [],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_states == [
+        FlowPackageImportTargetState(
+            audio_transcription_required=True,
+            default_transcription_model_id=transcription_model_id,
+        )
+    ]
+    assert type(captured_states[0]) is FlowPackageImportTargetState
 
 
 def test_import_request_rejects_invalid_json_resource_binding() -> None:

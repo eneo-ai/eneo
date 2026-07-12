@@ -101,8 +101,10 @@ describe("flowPackageTransfer", () => {
     ]);
   });
 
-  it("allows draft import when knowledge requires manual setup after import", () => {
+  it("blocks import when required knowledge has no local mapping", () => {
     const plan = flowPackageImportPlan({
+      can_install_as_draft: false,
+      can_publish_after_import: false,
       dependency_resolutions: [
         {
           kind: "knowledge",
@@ -110,10 +112,10 @@ describe("flowPackageTransfer", () => {
           required: true,
           used_by_steps: ["compose-report"],
           data_sensitivity: null,
-          status: "manual_setup_required",
-          install_blocks: false,
-          publish_blocks: false,
-          selection_required_for_install: false,
+          status: "unresolved_required",
+          install_blocks: true,
+          publish_blocks: true,
+          selection_required_for_install: true,
           auto_select_allowed: false,
           suggestions: [],
           total_candidate_count: 0,
@@ -125,12 +127,19 @@ describe("flowPackageTransfer", () => {
     const readiness = getFlowPackageImportReadiness(plan, {});
 
     expect(readiness).toMatchObject({
-      canImport: true,
-      canPublishAfterImport: true,
+      canImport: false,
+      canPublishAfterImport: false,
       selectedRequiredCount: 0,
-      totalRequiredCount: 0,
-      unresolvedRequiredCount: 0,
-      blockingReasons: []
+      totalRequiredCount: 1,
+      unresolvedRequiredCount: 1,
+      blockingReasons: [
+        {
+          code: "required_mapping_missing",
+          slotKey: "knowledge.local-rules",
+          slotLabel: "Local rules",
+          kind: "knowledge"
+        }
+      ]
     });
   });
 

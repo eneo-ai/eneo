@@ -211,10 +211,10 @@ class FlowPackageModelRequirement(FlowPackageRequirementBase):
 
 
 class FlowPackageKnowledgeRequirement(FlowPackageRequirementBase):
-    """Tenant-local knowledge used by the publisher, imported as setup guidance in V1.
+    """Tenant-local knowledge declared by the portable package.
 
-    `required=True` means the publisher considered the knowledge important for
-    equivalent results, not that the V1 importer must bind it before draft creation.
+    Required knowledge needs a current local binding before import. Only an
+    explicitly optional requirement may be omitted from the installed draft.
     """
 
     kind: Literal[FlowPackageRequirementKind.KNOWLEDGE] = (

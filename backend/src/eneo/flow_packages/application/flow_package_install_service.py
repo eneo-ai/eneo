@@ -25,6 +25,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
 )
 from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageKnowledgeRequirement,
     FlowPackageModelRequirement,
     FlowPackageTemplateAssetRequirement,
 )
@@ -38,7 +39,6 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
-    ResourceSlotKind,
     ResourceSlotRef,
     index_local_resource_bindings,
 )
@@ -116,9 +116,16 @@ def resolve_flow_package_install_command(
         selected_bindings=selection.bindings_tuple(),
         candidates=candidates,
     )
-    install_spec = _spec_with_unbound_knowledge_refs_removed(
+    optional_knowledge_slot_refs = frozenset(
+        requirement.slot_ref.ref
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageKnowledgeRequirement)
+        and not requirement.required
+    )
+    install_spec = _spec_with_unbound_optional_knowledge_refs_removed(
         spec=envelope.spec,
         selected_slot_refs=validated_selection.selected_slot_refs,
+        optional_knowledge_slot_refs=optional_knowledge_slot_refs,
     )
     return ResolvedFlowPackageInstallCommand(
         envelope=envelope,
@@ -200,7 +207,6 @@ def validate_flow_package_install_selection(
     selected_slot_refs = frozenset(selected_bindings_by_ref)
     resource_contract = envelope.validated_resource_contract()
     declared_slot_refs = resource_contract.declared_slot_refs
-    referenced_slot_refs = resource_contract.referenced_slot_refs
 
     _reject_template_asset_requirements(envelope)
     _reject_unknown_selected_bindings(
@@ -225,11 +231,7 @@ def validate_flow_package_install_selection(
         candidates=candidates,
     )
 
-    required_slot_refs = _install_required_slot_refs(
-        envelope=envelope,
-        referenced_slot_refs=referenced_slot_refs,
-        declared_slot_refs=declared_slot_refs,
-    )
+    required_slot_refs = _install_required_slot_refs(envelope)
     _reject_missing_required_bindings(
         required_slot_refs=required_slot_refs,
         selected_slot_refs=selected_slot_refs,
@@ -242,12 +244,13 @@ def validate_flow_package_install_selection(
     )
 
 
-def _spec_with_unbound_knowledge_refs_removed(
+def _spec_with_unbound_optional_knowledge_refs_removed(
     *,
     spec: FlowDraftSpecCore,
     selected_slot_refs: frozenset[str],
+    optional_knowledge_slot_refs: frozenset[str],
 ) -> FlowDraftSpecCore:
-    """Remove setup-only knowledge slots that the importer did not bind locally."""
+    """Remove only explicitly optional knowledge slots omitted by the importer."""
 
     updated_steps: list[StepSpec] = []
     changed = False
@@ -255,7 +258,7 @@ def _spec_with_unbound_knowledge_refs_removed(
         selected_knowledge_refs = [
             ref
             for ref in step.assistant_spec.knowledge_refs
-            if ref in selected_slot_refs
+            if ref not in optional_knowledge_slot_refs or ref in selected_slot_refs
         ]
         if selected_knowledge_refs == step.assistant_spec.knowledge_refs:
             updated_steps.append(step)
@@ -382,24 +385,13 @@ def _iter_candidates(
 
 
 def _install_required_slot_refs(
-    *,
     envelope: FlowPackageEnvelope,
-    referenced_slot_refs: frozenset[str],
-    declared_slot_refs: dict[str, ResourceSlotRef],
 ) -> frozenset[str]:
-    required_model_requirements = {
+    return frozenset(
         requirement.slot_ref.ref
         for requirement in envelope.requirements.requirements
-        if isinstance(requirement, FlowPackageModelRequirement) and requirement.required
-    }
-    # The install validator rejects undeclared refs before this helper, so every
-    # referenced slot can be classified by its declared portable slot kind here.
-    referenced_model_slots = {
-        ref
-        for ref in referenced_slot_refs
-        if declared_slot_refs[ref].kind is ResourceSlotKind.MODEL
-    }
-    return frozenset(required_model_requirements | referenced_model_slots)
+        if requirement.required
+    )
 
 
 def _reject_missing_required_bindings(
