@@ -180,7 +180,9 @@ networks:
 
 volumes:
   # The devcontainer's prebuilt backend venv, reused read-only so we skip a pip
-  # install. Requires the devcontainer to have been built at least once.
+  # install. Requires the devcontainer to have been built at least once. The
+  # volume is named after the checkout directory, so secondary checkouts must
+  # override E2E_BACKEND_VENV_VOLUME (see `docker volume ls`).
   backend_venv:
     external: true
-    name: eneo_devcontainer_backend_venv
+    name: ${E2E_BACKEND_VENV_VOLUME:-eneo_devcontainer_backend_venv}
