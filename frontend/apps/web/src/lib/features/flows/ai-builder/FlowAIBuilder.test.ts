@@ -543,6 +543,53 @@ describe("FlowAIBuilder plan-review left pane", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(0));
   });
 
+  it("keeps a submitted restored file when newer text is typed and the send fails", async () => {
+    localStorage.setItem(
+      "eneo:ai-builder:draft:plan-session",
+      JSON.stringify({
+        text: "Skicka med underlaget",
+        files: [{ id: "file-9", name: "underlag.pdf", size: 2048, mimetype: "application/pdf" }]
+      })
+    );
+    const transport = planSessionHarness();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    transport.stream = vi.fn(async () => {
+      await gate;
+      throw new Error("late failure");
+    }) as AIBuilderClientTransport["stream"];
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (instance: FlowAIBuilderService) => (service = instance)
+    });
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    const sends = interceptSends(service!);
+    await screen.findByTitle("underlag.pdf");
+    const textbox = screen.getByRole("textbox", {
+      name: m.ai_builder_refine_label()
+    }) as HTMLTextAreaElement;
+    expect(textbox.value).toBe("Skicka med underlaget");
+
+    await fireEvent.keyDown(textbox, { key: "Enter", ctrlKey: true });
+    // Newer intent typed while the send streams.
+    await fireEvent.input(textbox, { target: { value: "Nyare text" } });
+
+    release();
+    expect(await sends[0]).toBe("failed");
+
+    // Newer text wins visibly AND the submitted file reference survives, both
+    // in the composer and in the durable record.
+    expect(textbox.value).toBe("Nyare text");
+    expect(screen.getByTitle("underlag.pdf")).toBeTruthy();
+    const stored = JSON.parse(localStorage.getItem("eneo:ai-builder:draft:plan-session") ?? "{}");
+    expect(stored.text).toBe("Nyare text");
+    expect(stored.files).toEqual([
+      { id: "file-9", name: "underlag.pdf", size: 2048, mimetype: "application/pdf" }
+    ]);
+  });
+
   it("ignores a stale completion while a newer submission is in flight", async () => {
     const { transport } = twoSessionHarness();
     const gates: Array<() => void> = [];
@@ -592,6 +639,232 @@ describe("FlowAIBuilder plan-review left pane", () => {
     gates[1]!();
     expect(await sends[1]).toBe("failed");
     await waitFor(() => expect(textbox().value).toBe("B:s meddelande"));
+  });
+});
+
+describe("FlowAIBuilder clarification history", () => {
+  it("shows the chosen answer on an answered question and collapses superseded summaries", async () => {
+    const draft = {
+      session_id: "hist-session",
+      space_id: "space-1",
+      status: "chatting",
+      target_kind: "create",
+      flow_id: null,
+      latest_plan_id: null,
+      draft_title: "Sammanfatta dokument",
+      created_at: "2026-07-12T09:00:00Z",
+      updated_at: "2026-07-12T09:00:00Z"
+    };
+    const summary = (version: string, summaryText: string) => ({
+      requirements_version: version,
+      summary: summaryText,
+      key_decisions: [{ topic: "Slutresultat", decision: "PDF-dokument" }],
+      input_description: "Dokument vid körning",
+      output_description: "PDF-dokument",
+      assumptions: [],
+      manual_setup_notes: []
+    });
+    const session = {
+      ...draft,
+      conversation: [
+        {
+          message_id: "u1",
+          role: "user",
+          content: "Sammanfatta uppladdade dokument",
+          timestamp: "2026-07-12T09:00:00Z"
+        },
+        {
+          message_id: "a1",
+          role: "assistant",
+          content: "Hur ska rapporten hantera flera källdokument?",
+          timestamp: "2026-07-12T09:00:05Z",
+          question: {
+            question_id: "report_layout",
+            question: "Hur ska rapporten hantera flera källdokument?",
+            options: [{ id: "per_source", label: "Avsnitt per källa" }],
+            selection_mode: "single",
+            allow_custom: false
+          }
+        },
+        {
+          message_id: "u2",
+          role: "user",
+          content: "Avsnitt per källa",
+          timestamp: "2026-07-12T09:00:10Z",
+          question_answer: {
+            kind: "structured_question_answer",
+            question_id: "report_layout",
+            selected_option_ids: ["per_source"]
+          }
+        },
+        {
+          message_id: "a2",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-12T09:00:15Z",
+          requirements_summary: summary("v1", "Första tolkningen.")
+        },
+        {
+          message_id: "a3",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-12T09:00:25Z",
+          requirements_summary: summary("v2", "Andra tolkningen.")
+        }
+      ],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [draft] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      return {};
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    render(FlowAIBuilderHarness, { transport: { fetch, stream: vi.fn() } });
+
+    // Answered question shows the chosen answer inline.
+    expect(await screen.findByText("— Avsnitt per källa")).toBeTruthy();
+
+    // The superseded interpretation is collapsed; only the latest is expanded.
+    expect(screen.getByText("Andra tolkningen.")).toBeTruthy();
+    expect(screen.queryByText("Första tolkningen.")).toBeNull();
+    expect(screen.getByText(m.ai_builder_requirements_superseded())).toBeTruthy();
+  });
+});
+
+describe("FlowAIBuilder generation wait state", () => {
+  it("keeps the composer editable as a saved draft while generation streams", async () => {
+    const draft = {
+      session_id: "gen-session",
+      space_id: "space-1",
+      status: "chatting",
+      target_kind: "create",
+      flow_id: null,
+      latest_plan_id: null,
+      draft_title: "Nytt flöde",
+      created_at: "2026-07-12T09:00:00Z",
+      updated_at: "2026-07-12T09:00:00Z"
+    };
+    const session = {
+      ...draft,
+      conversation: [
+        {
+          message_id: "u1",
+          role: "user",
+          content: "Bygg ett flöde",
+          timestamp: "2026-07-12T09:00:00Z"
+        }
+      ],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [draft] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      return {};
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    // Emits a real backend phase, then stays open — the wait state persists.
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({
+        event: "status",
+        data: JSON.stringify({ status: "architecture_committed" })
+      });
+      await new Promise(() => {});
+    }) as AIBuilderClientTransport["stream"];
+
+    render(FlowAIBuilderHarness, { transport: { fetch, stream } });
+
+    const textbox = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    await fireEvent.input(textbox, { target: { value: "Bygg ett flöde" } });
+    await fireEvent.keyDown(textbox, { key: "Enter" });
+
+    // The wait state is showing and the composer promises only what is true:
+    // typing works (draft persists), sending waits for the turn to finish.
+    expect(await screen.findByText(m.ai_builder_wait_expectation())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_wait_composer_hint())).toBeTruthy();
+    expect(textbox.disabled).toBe(false);
+    await fireEvent.input(textbox, { target: { value: "Ta med en summering" } });
+    expect(JSON.parse(localStorage.getItem("eneo:ai-builder:draft:gen-session") ?? "{}").text).toBe(
+      "Ta med en summering"
+    );
+    expect(
+      (screen.getByRole("button", { name: m.ai_builder_send() }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+});
+
+describe("FlowAIBuilder generation failure (E1)", () => {
+  it("keeps the plan pane, shows E1 once and suppresses the chat banner", async () => {
+    const draft = {
+      session_id: "gen-session",
+      space_id: "space-1",
+      status: "chatting",
+      target_kind: "create",
+      flow_id: null,
+      latest_plan_id: null,
+      draft_title: "Nytt flöde",
+      created_at: "2026-07-12T09:00:00Z",
+      updated_at: "2026-07-12T09:00:00Z"
+    };
+    const session = {
+      ...draft,
+      conversation: [
+        {
+          message_id: "u1",
+          role: "user",
+          content: "Bygg ett flöde",
+          timestamp: "2026-07-12T09:00:00Z"
+        }
+      ],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [draft] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return session;
+      return {};
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    const publicError = JSON.stringify({
+      schema_version: 2,
+      code: "internal_error",
+      category: "internal",
+      message: "planner exploded mid-generation",
+      phase: "planner",
+      request_id: null,
+      diagnostic_context: null,
+      details: {}
+    });
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage({
+        event: "status",
+        data: JSON.stringify({ status: "architecture_committed" })
+      });
+      // Let the shell's generation latch observe the wait state, as it would
+      // between real SSE frames.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      handlers.onMessage({ event: "error", data: publicError });
+      handlers.onMessage({ event: "done", data: "" });
+      handlers.onClose();
+    }) as AIBuilderClientTransport["stream"];
+
+    render(FlowAIBuilderHarness, { transport: { fetch, stream } });
+
+    const textbox = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    await fireEvent.input(textbox, { target: { value: "Bygg ett flöde" } });
+    await fireEvent.keyDown(textbox, { key: "Enter" });
+
+    // E1 owns the failure: pane stays, banner renders once, and the chat's
+    // destructive alert (which would carry the raw error message) is gone.
+    expect(await screen.findByText(m.ai_builder_generation_failed_title())).toBeTruthy();
+    expect(screen.getAllByText(m.ai_builder_generation_failed_title())).toHaveLength(1);
+    expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+    expect(screen.queryByText("planner exploded mid-generation")).toBeNull();
   });
 });
 

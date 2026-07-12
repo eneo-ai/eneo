@@ -37,9 +37,18 @@
   interface Props {
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
+    /** A generation attempt failed with no plan to show — render E1 (§4). */
+    showGenerationFailure?: boolean;
+    /** Narrow layouts: bring the conversation (task pane) back into view. */
+    onshowconversation?: () => void;
   }
 
-  let { onapplied, onsuggestchange }: Props = $props();
+  let {
+    onapplied,
+    onsuggestchange,
+    showGenerationFailure = false,
+    onshowconversation
+  }: Props = $props();
 
   const service = getAIBuilderService();
   const userMode = getFlowUserMode();
@@ -195,6 +204,51 @@
   let isApplying = $state(false);
   let isUnpublishingAndApplying = $state(false);
 
+  // E1 retry goes through the durable-turn recovery contract: an unknown
+  // provider outcome must keep its explicit cost acknowledgement.
+  const turnRecoveryState = $derived(service.turnRecoveryState);
+  async function handleGenerationRetry() {
+    if (turnRecoveryState === "failed_before_provider") {
+      await service.retryLatestTurn();
+    } else if (turnRecoveryState === "provider_outcome_unknown") {
+      await service.acknowledgeAndRetryLatestTurn();
+    }
+  }
+  const generationErrorDiagnosticReport = $derived.by(() =>
+    service.error
+      ? buildAIBuilderDiagnosticReport({
+          kind: "error",
+          surface: "chat_stream",
+          error: service.error,
+          session: diagnosticSession,
+          plan: diagnosticPlan
+        })
+      : null
+  );
+
+  // "Uppdaterad nyss" receipt (§5): a NEW plan arriving after the first one
+  // IN THE SAME SESSION marks the header until the next generation starts.
+  // The footer's sr-only live span announces the same event exactly once
+  // (§3.4). Session-qualified so a resumed session's first plan never reads
+  // as an update.
+  let lastPlanOwner: { sessionId: string; planKey: string } | null = null;
+  let justUpdated = $state(false);
+  $effect(() => {
+    const plan = service.currentPlan;
+    const sessionId = service.session?.session_id ?? null;
+    if (service.isStreaming || service.statusMessage !== null) {
+      justUpdated = false;
+    }
+    if (!sessionId || !plan) return;
+    const planKey = `${plan.plan_id}:${plan.updated_at ?? ""}:${plan.spec_hash ?? ""}`;
+    if (lastPlanOwner?.sessionId === sessionId && lastPlanOwner.planKey !== planKey) {
+      justUpdated = true;
+    } else if (lastPlanOwner?.sessionId !== sessionId) {
+      justUpdated = false;
+    }
+    lastPlanOwner = { sessionId, planKey };
+  });
+
   const removedStepChanges = $derived(
     getRemovedStepChanges(service.currentPlan?.proposal.edit?.diff ?? null)
   );
@@ -323,6 +377,7 @@
     <div
       role="region"
       aria-label={m.ai_builder_plan_pane_aria()}
+      aria-labelledby="plan-heading"
       tabindex="0"
       class="focus-visible:ring-accent-default/40 scroll-pb-4 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset @[1040px]/builder:flex-1 @[1040px]/builder:overflow-y-auto"
     >
@@ -488,6 +543,11 @@
               <span class="text-muted text-xs sm:hidden">
                 {m.ai_builder_plan_meta_nothing_created_short()}
               </span>
+              {#if justUpdated}
+                <span class="text-positive-stronger text-xs font-medium">
+                  {m.ai_builder_plan_updated_receipt()}
+                </span>
+              {/if}
               {#if isPowerUser}
                 <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
               {/if}
@@ -574,9 +634,7 @@
                   </Collapsible.Trigger>
                 </h3>
                 <Collapsible.Content>
-                  <p
-                    class="border-default bg-secondary/35 text-secondary mt-2 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
-                  >
+                  <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
                     {plan.proposal.plan_rationale}
                   </p>
                 </Collapsible.Content>
@@ -612,15 +670,11 @@
                 </h3>
                 <Collapsible.Content>
                   <ul
-                    class="text-secondary mt-2 flex flex-col gap-1.5 text-[0.8125rem] leading-relaxed"
+                    class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
                   >
                     {#each planAssumptions as assumption (assumption)}
-                      <li class="flex items-start gap-2">
-                        <span
-                          class="bg-muted mt-[0.55em] block size-1 shrink-0 rounded-full opacity-60"
-                          aria-hidden="true"
-                        ></span>
-                        <span>{assumption}</span>
+                      <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
+                        {assumption}
                       </li>
                     {/each}
                   </ul>
@@ -1006,6 +1060,11 @@
               : m.ai_builder_nothing_created_yet()}
           </p>
         {/if}
+        <!-- One event = one announcement (§3.4): the refinement receipt is
+             announced here; the visible "Uppdaterad nyss" lives in the header. -->
+        <span class="sr-only" role="status" aria-live="polite">
+          {justUpdated ? m.ai_builder_plan_updated_announce() : ""}
+        </span>
 
         <!-- "Föreslå planändring" is gone from the action bar (§5 glossary):
              the refinement composer IS that path. -->
@@ -1097,14 +1156,90 @@
         </Alert.Root>
       </div>
     </div>
+  {:else if showGenerationFailure}
+    <!-- E1: generation failed with no plan to show (§4, artboard 1i).
+         Neutral surface + warning icon, role=status — no focus steal. -->
+    <div class="flex flex-1 flex-col overflow-y-auto">
+      <div class="mx-auto w-full max-w-[800px] px-4 py-6 md:px-6 @[1400px]/builder:max-w-[840px]">
+        <div
+          class="border-default bg-primary rounded-xl border p-5"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="flex items-start gap-3">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              class="text-warning-stronger mt-0.5 size-4 shrink-0"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <div class="min-w-0">
+              <h2 class="text-primary text-sm font-semibold">
+                {m.ai_builder_generation_failed_title()}
+              </h2>
+              <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed">
+                {m.ai_builder_generation_failed_body()}
+              </p>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                {#if turnRecoveryState}
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={service.isStreaming || service.isRecoveringLatestTurn}
+                    onclick={handleGenerationRetry}
+                  >
+                    {turnRecoveryState === "provider_outcome_unknown"
+                      ? m.ai_builder_turn_retry_with_cost_acknowledgement()
+                      : m.ai_builder_turn_retry()}
+                  </Button>
+                {/if}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="@[1040px]/builder:hidden"
+                  onclick={onshowconversation}
+                >
+                  {m.ai_builder_show_conversation()}
+                </Button>
+                <FlowAIBuilderDiagnosticCopyButton
+                  report={generationErrorDiagnosticReport}
+                  variant="ghost"
+                  size="xs"
+                />
+              </div>
+              <p class="text-muted mt-3 text-xs leading-relaxed">
+                {m.ai_builder_generation_failed_late_note()}
+              </p>
+              <p class="text-muted mt-1 text-xs leading-relaxed">
+                {m.ai_builder_generation_failed_clarify()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   {:else if service.statusMessage || service.isStreaming}
-    <!-- Progress state --------------------------------------------------- -->
+    <!-- Wait state (§5, artboard 1h): expectation copy plus ONLY the phase
+         lines the backend actually distinguishes — no simulated progress
+         (binding condition §7.2). -->
     <div class="flex flex-1 flex-col items-center justify-center px-4 text-center">
       <div class="progress-ring mb-4 size-10 rounded-full border-[3px]"></div>
-      <p class="text-primary text-sm font-medium">
+      <p class="text-primary text-sm font-medium" role="status" aria-live="polite">
         {progressStatusLabel(service.statusMessage)}
       </p>
-      <p class="text-muted mt-1 text-xs">{m.ai_builder_status_patience()}</p>
+      <p class="text-muted mt-1 max-w-xs text-xs leading-relaxed">
+        {m.ai_builder_wait_expectation()}
+      </p>
+      <p class="text-muted mt-4 hidden max-w-sm text-xs leading-relaxed @[1040px]/builder:block">
+        {m.ai_builder_wait_footer_note()}
+      </p>
     </div>
   {:else}
     <!-- Empty state ------------------------------------------------------ -->
@@ -1136,34 +1271,22 @@
 <style lang="postcss">
   @reference "@eneo/ui/styles";
 
+  /* The plan fades in over 200 ms (handoff S5->S6); nothing slides. */
   .plan-card-enter {
-    animation: plan-card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: plan-card-enter 200ms ease-out;
   }
 
   @keyframes plan-card-enter {
     from {
       opacity: 0;
-      transform: translateY(0.5rem);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
     }
   }
 
   .section-enter {
-    animation: section-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes section-enter {
-    from {
-      opacity: 0;
-      transform: translateY(0.25rem);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    animation: plan-card-enter 200ms ease-out;
   }
 
   /* Diff strikethrough uses a muted decoration color that works in both themes. */

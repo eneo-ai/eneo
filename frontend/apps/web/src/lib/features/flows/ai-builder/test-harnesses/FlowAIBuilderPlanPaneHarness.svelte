@@ -2,7 +2,7 @@
   import { initSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import type { Space } from "@eneo/eneo-js";
-  import { untrack } from "svelte";
+  import { untrack, type ComponentProps } from "svelte";
   import type { AIBuilderClientTransport, FlowAIBuilderState } from "../FlowAIBuilderDriver";
   import FlowAIBuilderPlanPane from "../FlowAIBuilderPlanPane.svelte";
   import { initAIBuilderService } from "../FlowAIBuilderService.svelte.ts";
@@ -13,12 +13,18 @@
     transport?: AIBuilderClientTransport;
     /** Enkel ("user", default) or Avancerad ("power_user"). */
     userMode?: "user" | "power_user";
+    /** Render-time props forwarded to the pane, typed by the component. */
+    paneProps?: Partial<ComponentProps<typeof FlowAIBuilderPlanPane>>;
+    /** Test hook: receive the service instance to drive live state changes. */
+    onservice?: (service: ReturnType<typeof initAIBuilderService>) => void;
   }
 
   let {
     currentSpace,
     state,
     userMode = "user",
+    paneProps = {},
+    onservice,
     transport = {
       fetch: async () => {
         throw new Error("Unexpected AI Builder fetch in plan pane harness.");
@@ -47,6 +53,8 @@
   });
 
   untrack(() => service.seedState(state));
+  // svelte-ignore state_referenced_locally
+  onservice?.(service);
 </script>
 
-<FlowAIBuilderPlanPane />
+<FlowAIBuilderPlanPane {...paneProps} />

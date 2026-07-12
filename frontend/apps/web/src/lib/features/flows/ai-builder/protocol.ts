@@ -13,7 +13,10 @@ import type {
   components,
   operations
 } from "@eneo/eneo-js";
-import type { StructuredQuestion } from "./structuredQuestionAnswer";
+import type {
+  PersistedStructuredQuestionAnswerMetadata,
+  StructuredQuestion
+} from "./structuredQuestionAnswer";
 
 type SendAIBuilderMessageOperation = operations["send_ai_builder_message"];
 type GeneratedAIBuilderParsedStreamEvent =
@@ -165,6 +168,9 @@ export interface ChatMessage {
   plan?: ProposedPlan;
   question?: StructuredQuestion;
   requirementsSummary?: RequirementsSummary;
+  /** Typed structured-question answer carried by a user message; set at the
+   *  hydration/optimistic boundary so views never parse metadata dicts. */
+  questionAnswer?: PersistedStructuredQuestionAnswerMetadata;
   metadata?: Record<string, unknown>;
   timestamp: number;
 }

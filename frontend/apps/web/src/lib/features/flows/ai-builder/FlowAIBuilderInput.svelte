@@ -37,9 +37,17 @@
      *  Ctrl/Cmd+Enter submit, "updates the plan" hint. On while a proposed
      *  plan is under review. */
     refinement?: boolean;
+    /** First plan generation in flight: the textarea stays editable as a
+     *  saved draft; submit remains gated until the turn completes. */
+    generationWait?: boolean;
   }
 
-  let { editContext = null, oncleareditcontext, refinement = false }: Props = $props();
+  let {
+    editContext = null,
+    oncleareditcontext,
+    refinement = false,
+    generationWait = false
+  }: Props = $props();
 
   const service = getAIBuilderService();
   const userMode = getFlowUserMode();
@@ -63,7 +71,11 @@
 
   const currentPlaceholder = $derived(
     activePlaceholder ??
-      (refinement ? m.ai_builder_refine_placeholder() : m.ai_builder_input_placeholder())
+      (generationWait
+        ? m.ai_builder_wait_composer_placeholder()
+        : refinement
+          ? m.ai_builder_refine_placeholder()
+          : m.ai_builder_input_placeholder())
   );
 
   // Character budget (handoff §5): counter fades in near the limit, over the
@@ -147,9 +159,10 @@
     ];
     const sessionId = service.session?.session_id ?? null;
     if (!sessionId || sessionId !== activeDraftSessionId) return;
-    // The durable record survives the optimistic clear: while a submission is
-    // in flight for this session, only its outcome may change the record.
-    if (pendingSubmission?.sessionId === sessionId) return;
+    // The optimistic clear must not wipe the durable record while its
+    // submission is in flight — but anything the user TYPES during the
+    // flight is newer intent and is mirrored normally.
+    if (pendingSubmission?.sessionId === sessionId && text.length === 0) return;
     saveComposerDraft(sessionId, { text, files });
   });
 
@@ -262,7 +275,9 @@
         restoredFiles = [];
         clearUploads();
       }
-    } else if (activeDraftSessionId === submitted.sessionId) {
+    } else if (activeDraftSessionId === submitted.sessionId && inputValue === "") {
+      // Restore only an untouched composer: text typed DURING the flight is
+      // newer intent and wins over the failed submission.
       inputValue = submitted.text;
       restoredFiles = submitted.files;
       requestAnimationFrame(() => autosizeTextarea());
@@ -530,7 +545,7 @@
         }}
         onpaste={handlePaste}
         placeholder={currentPlaceholder}
-        disabled={!service.canSendMessage || $isUploading}
+        disabled={(!service.canSendMessage && !generationWait) || $isUploading}
         rows="1"
         aria-label={refinement ? m.ai_builder_refine_label() : m.ai_builder_input_placeholder()}
         aria-invalid={overLimit || undefined}
@@ -678,6 +693,12 @@
       </div>
     {/if}
   </div>
+
+  {#if generationWait && !refinement}
+    <div class="composer-meta">
+      <p class="composer-hint">{m.ai_builder_wait_composer_hint()}</p>
+    </div>
+  {/if}
 
   {#if refinement}
     <div class="composer-meta">

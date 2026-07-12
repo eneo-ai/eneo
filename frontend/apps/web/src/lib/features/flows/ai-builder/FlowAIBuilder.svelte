@@ -30,11 +30,31 @@
   // svelte-ignore state_referenced_locally
   let pendingPrefill = $state(initialPrompt);
 
+  // A generation attempt was visible in the plan pane; if it fails with no
+  // plan to show, the pane stays and owns the failure banner (E1, §4).
+  let hadGenerationStatus = $state(false);
+  $effect(() => {
+    if (!service.hasSession) {
+      hadGenerationStatus = false;
+    } else if (service.statusMessage !== null || service.hasSeenPlanInSession) {
+      hadGenerationStatus = true;
+    }
+  });
+
+  // Error ownership is decided WITHOUT the streaming flag so the chat banner
+  // never flashes during the stream's final frames; the pane shows the wait
+  // state until the stream closes, then E1.
+  const planPaneOwnsError = $derived(
+    hadGenerationStatus && service.error !== null && service.currentPlan === null
+  );
+  const generationFailedWithoutPlan = $derived(planPaneOwnsError && !service.isStreaming);
+
   const hasPlanContent = $derived(
     service.currentPlan !== null ||
       service.isConflict ||
       service.statusMessage !== null ||
-      (service.hasSeenPlanInSession && service.isStreaming)
+      (service.hasSeenPlanInSession && service.isStreaming) ||
+      generationFailedWithoutPlan
   );
 
   // Narrow-container view state. Both panes stay mounted at every width so
@@ -184,14 +204,12 @@
           class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
           transition:fade={{ duration: 180 }}
         >
-          <Alert.Root
-            class="border-default bg-secondary flex items-center gap-3 rounded-lg px-3.5 py-2.5"
-          >
+          <Alert.Root class="bg-secondary flex items-center gap-2.5 rounded-lg px-3 py-1.5">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 16 16"
               fill="currentColor"
-              class="text-accent-default size-4 shrink-0"
+              class="text-secondary size-4 shrink-0"
               aria-hidden="true"
             >
               <path
@@ -200,7 +218,7 @@
                 clip-rule="evenodd"
               />
             </svg>
-            <Alert.Description class="text-primary min-w-0 flex-1 text-[0.8125rem] leading-relaxed">
+            <Alert.Description class="text-secondary min-w-0 flex-1 text-[0.8125rem] leading-snug">
               {m.ai_builder_resumed_from()}
             </Alert.Description>
             <div class="flex shrink-0 items-center gap-1">
@@ -314,7 +332,11 @@
             : 'w-full'}"
           class:hidden={hasPlanContent && activePane !== "task"}
         >
-          <FlowAIBuilderChat bind:this={chatRef} {targetKind} />
+          <FlowAIBuilderChat
+            bind:this={chatRef}
+            {targetKind}
+            suppressStreamError={planPaneOwnsError}
+          />
         </div>
 
         <!-- Plan pane: owns its scroll in split view; the split border lives here
@@ -326,9 +348,14 @@
             class:hidden={activePane !== "plan"}
           >
             <FlowAIBuilderPlanPane
+              showGenerationFailure={generationFailedWithoutPlan}
               onapplied={(detail) => onapplied?.(detail)}
               onsuggestchange={(intent: AIBuilderSuggestChangeIntent) =>
                 chatRef?.focusInput(intent)}
+              onshowconversation={() => {
+                activePane = "task";
+                chatRef?.focusInput();
+              }}
             />
           </div>
         {/if}

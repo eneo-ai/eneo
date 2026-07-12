@@ -530,15 +530,16 @@ export class FlowAIBuilderDriver {
       timestamp: Date.now()
     };
     if (questionAnswer) {
-      userMsg.metadata =
-        questionAnswer.kind === "requirements_confirmation"
-          ? {
-              requirements_confirmed: true,
-              requirements_version: questionAnswer.requirements_version
-            }
-          : {
-              question_answer: toPersistedQuestionAnswerMetadata(questionAnswer)
-            };
+      if (questionAnswer.kind === "requirements_confirmation") {
+        userMsg.metadata = {
+          requirements_confirmed: true,
+          requirements_version: questionAnswer.requirements_version
+        };
+      } else {
+        const persisted = toPersistedQuestionAnswerMetadata(questionAnswer);
+        userMsg.metadata = { question_answer: persisted };
+        userMsg.questionAnswer = persisted ?? undefined;
+      }
     }
     if (editContext) {
       userMsg.metadata = {
@@ -1305,9 +1306,14 @@ export class FlowAIBuilderDriver {
 
     for (const message of conversation) {
       if (message.role === "user") {
+        const questionAnswer =
+          message.question_answer?.kind === "structured_question_answer"
+            ? (toPersistedQuestionAnswerMetadata(message.question_answer) ?? undefined)
+            : undefined;
         hydrated.push({
           role: "user",
           content: message.content ?? "",
+          questionAnswer,
           metadata: this.#metadataFromPublicUserMessage(message),
           timestamp: this.#parseTimestamp(message.timestamp)
         });

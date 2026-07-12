@@ -2497,6 +2497,40 @@ describe("FlowAIBuilderDriver", () => {
   });
 });
 
+describe("FlowAIBuilderDriver conversation hydration", () => {
+  it("hydrates a public question_answer into the typed ChatMessage field", async () => {
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn(async (path: string) => {
+        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        return makeSession({
+          conversation: [
+            {
+              message_id: "u1",
+              role: "user",
+              content: "Avsnitt per k\u00e4lla",
+              timestamp: "2026-07-12T09:00:10Z",
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "report_layout",
+                selected_option_ids: ["per_source"]
+              }
+            }
+          ]
+        });
+      })
+    });
+
+    await driver.resumeSession("session-1");
+
+    const hydrated = driver.state.messages[0];
+    expect(hydrated?.questionAnswer).toEqual({
+      question_id: "report_layout",
+      selected_option_ids: ["per_source"]
+    });
+    expect(hydrated?.metadata?.question_answer).toEqual(hydrated?.questionAnswer);
+  });
+});
+
 describe("FlowAIBuilderDriver send outcome contract", () => {
   // "delivered" authorizes irreversible draft deletion in the composer, so
   // every branch of the outcome is pinned here.

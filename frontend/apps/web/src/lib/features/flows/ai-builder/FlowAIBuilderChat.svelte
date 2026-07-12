@@ -7,6 +7,7 @@
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderTaskPane from "./FlowAIBuilderTaskPane.svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import {
     buildAIBuilderDiagnosticReport,
@@ -18,9 +19,11 @@
 
   interface Props {
     targetKind?: "create" | "edit";
+    /** The plan pane owns the failure banner (E1) — one event, one banner. */
+    suppressStreamError?: boolean;
   }
 
-  let { targetKind = "edit" }: Props = $props();
+  let { targetKind = "edit", suppressStreamError = false }: Props = $props();
 
   const service = getAIBuilderService();
   const isEditMode = $derived(targetKind === "edit");
@@ -92,6 +95,19 @@
     service.sendMessage(answer.text, answer.questionAnswer, undefined, pendingEditContext);
   }
 
+  // One O(n) projection: question id -> the user's answer text. Later answers
+  // to the same question overwrite earlier ones — the latest is authoritative.
+  const answerLabelByQuestionId = $derived.by(() => {
+    const labels = new SvelteMap<string, string>();
+    for (const message of service.messages) {
+      const questionId = message.questionAnswer?.question_id;
+      if (!questionId) continue;
+      const content = message.content.trim();
+      if (content.length > 0) labels.set(questionId, content);
+    }
+    return labels;
+  });
+
   function latestUserRequestBefore(index: number): string | null {
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
       const message = service.messages[cursor];
@@ -138,6 +154,12 @@
 
   const showTaskSummary = $derived(
     service.hasSeenPlanInSession && !hasPendingQuestion && firstTaskText !== null
+  );
+
+  // S5 first-generation wait: the composer stays editable as a saved draft
+  // while submit waits for the turn to complete.
+  const generationWait = $derived(
+    service.statusMessage !== null && service.currentPlan === null && !service.hasSeenPlanInSession
   );
 
   const generatingText = $derived(
@@ -225,7 +247,7 @@
   class:justify-center={showEmptyState}
   class:max-md:min-h-[calc(100dvh-var(--page-header-h,4rem))]={showEmptyState}
 >
-  {#if service.error || turnRecoveryState || turnIsActive}
+  {#if !suppressStreamError && (service.error || turnRecoveryState || turnIsActive)}
     <div
       class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
       transition:fade={{ duration: 160 }}
@@ -354,6 +376,7 @@
       bind:this={scrollContainer}
       role="region"
       aria-label={m.ai_builder_task_pane_aria()}
+      aria-labelledby={showTaskSummary ? "ai-builder-task-heading" : undefined}
       tabindex="0"
       class="focus-visible:ring-accent-default/40 scroll-pb-4 px-4 py-6 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset max-sm:px-3 max-sm:py-4 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-y-auto"
     >
@@ -380,6 +403,9 @@
               questionAnswered={message.question
                 ? service.isQuestionAnswered(message.question.question_id)
                 : false}
+              questionAnswerLabel={message.question
+                ? (answerLabelByQuestionId.get(message.question.question_id) ?? null)
+                : null}
               requirementsSummary={message.requirementsSummary}
               requirementsUserRequest={message.requirementsSummary
                 ? latestUserRequestBefore(i)
@@ -429,6 +455,7 @@
       editContext={pendingEditContext}
       oncleareditcontext={clearPendingEditContext}
       refinement={showTaskSummary}
+      {generationWait}
     />
   </div>
   {#if showEmptyState}

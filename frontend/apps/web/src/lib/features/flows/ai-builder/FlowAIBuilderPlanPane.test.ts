@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import type { Space } from "@eneo/eneo-js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
@@ -248,6 +248,119 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(stepTrigger().getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("renders the §5 wait-state copy with only backend-real phase lines", () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "chatting", target_kind: "create", flow_id: null }),
+        isStreaming: true,
+        statusMessage: "architecture_committed"
+      }
+    });
+
+    // The status line maps 1:1 to a REAL backend phase (§7.2 — no simulated
+    // progress), and the §5 expectation copy frames the wait.
+    expect(screen.getByText(m.ai_builder_generating())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_wait_expectation())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_wait_footer_note())).toBeTruthy();
+  });
+
+  it("E1 with an unknown provider outcome offers ONLY the cost-acknowledging retry", async () => {
+    const acknowledge = vi.fn();
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeRecoverableSession("provider_outcome_unknown"),
+        currentPlan: null,
+        error: makeApplyError()
+      },
+      paneProps: { showGenerationFailure: true },
+      onservice: (service) => {
+        service.acknowledgeAndRetryLatestTurn = acknowledge;
+      }
+    });
+
+    const costButton = screen.getByRole("button", {
+      name: m.ai_builder_turn_retry_with_cost_acknowledgement()
+    });
+    expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+
+    await fireEvent.click(costButton);
+    expect(acknowledge).toHaveBeenCalledOnce();
+  });
+
+  it("does not announce a resumed session's first plan as an update", async () => {
+    let service: { seedState: (state: object) => void } | undefined;
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({
+          session_id: "session-a",
+          status: "awaiting_approval",
+          target_kind: "create",
+          flow_id: null
+        }),
+        currentPlan: { ...makePlan(), updated_at: "2026-07-12T10:00:00Z" }
+      },
+      onservice: (instance) => (service = instance)
+    });
+
+    // Switching to session B with a DIFFERENT plan must not read as an update.
+    service!.seedState({
+      session: makeSession({
+        session_id: "session-b",
+        status: "awaiting_approval",
+        target_kind: "create",
+        flow_id: null
+      }),
+      currentPlan: { ...makePlan({ plan_id: "plan-b" }), updated_at: "2026-07-12T11:00:00Z" }
+    });
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_plan_updated_receipt())).toBeNull());
+  });
+
+  it("renders the E1 generation-failure banner with the recovery contract intact", () => {
+    const recoverable = makeRecoverableSession();
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: recoverable,
+        currentPlan: null,
+        error: makeApplyError()
+      },
+      paneProps: { showGenerationFailure: true }
+    });
+
+    expect(screen.getByText(m.ai_builder_generation_failed_title())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_generation_failed_body())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_generation_failed_late_note())).toBeTruthy();
+    // failed_before_provider → plain retry, never the cost-acknowledging one.
+    expect(screen.getByRole("button", { name: m.ai_builder_turn_retry() })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+  });
+
+  it("announces a plan update once and shows the header receipt", async () => {
+    let service: { seedState: (state: object) => void } | undefined;
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
+        currentPlan: { ...makePlan(), updated_at: "2026-07-12T10:00:00Z" }
+      },
+      onservice: (instance) => (service = instance)
+    });
+
+    expect(screen.queryByText(m.ai_builder_plan_updated_receipt())).toBeNull();
+
+    service!.seedState({
+      currentPlan: { ...makePlan(), updated_at: "2026-07-12T10:05:00Z" }
+    });
+    expect(await screen.findByText(m.ai_builder_plan_updated_receipt())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_plan_updated_announce())).toBeTruthy();
+  });
+
   it("renders the details view as an ordered list of steps", async () => {
     render(FlowAIBuilderPlanPaneHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
@@ -297,6 +410,29 @@ function makeApprovedCreatePlanState({ step }: { step: Partial<StepSpec> }) {
       }
     })
   };
+}
+
+function makeRecoverableSession(
+  state: "failed_before_provider" | "provider_outcome_unknown" = "failed_before_provider"
+): AIBuilderSession {
+  return makeSession({
+    status: "chatting",
+    target_kind: "create",
+    flow_id: null,
+    latest_turn: {
+      client_turn_id: "11111111-1111-4111-8111-111111111111",
+      state,
+      user_message_id: "11111111-1111-4111-8111-111111111112",
+      error: null,
+      requires_duplicate_provider_spend_acknowledgement: state === "provider_outcome_unknown",
+      retry_request: {
+        client_turn_id: "11111111-1111-4111-8111-111111111111",
+        message: "Bygg ett flöde",
+        ui_language: "sv",
+        acknowledge_duplicate_provider_spend: false
+      }
+    }
+  });
 }
 
 function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSession {
