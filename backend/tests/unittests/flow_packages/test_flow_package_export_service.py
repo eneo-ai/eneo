@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 import pytest
@@ -658,6 +659,25 @@ def test_export_rejects_unsupported_output_mode() -> None:
             flow=_flow(
                 steps=[_step(1, assistant_id=assistant_id, output_mode="http_post")]
             ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO
+
+
+def test_export_rejects_legacy_http_post_input() -> None:
+    class LegacyInputSource(StrEnum):
+        HTTP_POST = "http_post"
+
+    assistant_id = uuid4()
+    legacy_step = _step(1, assistant_id=assistant_id).model_copy(
+        update={"input_source": LegacyInputSource.HTTP_POST}
+    )
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(steps=[legacy_step]),
             assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
             resource_bindings=tuple(),
         )

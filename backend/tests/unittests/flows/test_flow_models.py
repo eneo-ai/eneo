@@ -179,6 +179,23 @@ def test_flow_step_create_request_rejects_invalid_enum_values(
         FlowStepCreateRequest.model_validate(_payload(**{field: value}))
 
 
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (FlowStepCreateRequest, _payload(input_source="http_post")),
+        (
+            FlowStepUpdateRequest,
+            _payload(id=str(uuid4()), input_source="http_post"),
+        ),
+    ],
+)
+def test_flow_step_requests_reject_http_post_input_source(
+    model: type[BaseModel], payload: dict[str, object]
+) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
+
+
 def test_flow_step_create_request_accepts_template_fill_output_mode() -> None:
     request = FlowStepCreateRequest.model_validate(
         _payload(

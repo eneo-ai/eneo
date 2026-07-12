@@ -46,20 +46,6 @@ class _Deps:
     audit_http_outbound: Any
 
 
-class _EncryptionService:
-    def is_active(self) -> bool:
-        return True
-
-    def is_encrypted(self, value: str) -> bool:
-        return value.startswith("enc:")
-
-    def encrypt(self, plaintext: str) -> str:
-        return f"enc:{plaintext}"
-
-    def decrypt(self, ciphertext: str) -> str:
-        return ciphertext.removeprefix("enc:")
-
-
 def _make_deps(
     *,
     send_http_request: Any,
@@ -111,77 +97,32 @@ async def test_resolve_http_input_source_text_json_success_audits_success() -> N
 
 
 @pytest.mark.asyncio
-async def test_resolve_http_input_source_text_authored_config_compiles_request() -> (
-    None
-):
-    runtime_http = FlowHttpRuntimeHelper(
-        variable_resolver=FlowVariableResolver(),
-        request_timeout_seconds=5,
-        max_timeout_seconds=10,
-        allow_private_networks=True,
-    )
+async def test_resolve_http_input_source_text_rejects_legacy_post_before_send() -> None:
     step = _Step(
         step_order=2,
         step_id="s2",
         input_type="json",
         input_source="http_post",
         input_config={
-            "url": "https://api.example.test/items/{{ flow_input.request_id }}",
-            "auth": {
-                "mode": "bearer_token",
-                "token": "enc:{{ step_1.output.token }}",
-            },
-            "timeout_seconds": 9,
-            "body": {
-                "mode": "json_template",
-                "template": (
-                    '{"request_id": {{ flow_input.request_id }}, '
-                    '"token": "{{ step_1.output.token }}"}'
-                ),
-            },
-            "custom_headers": [
-                {
-                    "name": "X-Trace",
-                    "value": "{{ step_1.output.trace_id }}",
-                    "secret": False,
-                }
-            ],
+            "url": "https://api.example.test/items",
+            "auth": {"mode": "none"},
             "response_format": "json",
         },
     )
     run = _Run(id="run-2", flow_id="flow-1", tenant_id="tenant-1")
-    request = httpx.Request("POST", "https://api.example.test/items/42")
-    send_http_request = AsyncMock(
-        return_value=httpx.Response(200, request=request, json={"ok": True}),
-    )
-    deps = _make_deps(
-        send_http_request=send_http_request,
-        encryption_service=_EncryptionService(),
-        variable_resolver=runtime_http.variable_resolver,
-        resolve_timeout_seconds=runtime_http.resolve_timeout_seconds,
-        read_response_text=lambda **_: '{"ok": true}',
-    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(send_http_request=send_http_request)
 
-    text, structured = await resolve_http_input_source_text(
-        step=step,
-        run=run,
-        context={
-            "flow_input": {"request_id": 42},
-            "step_1": {"output": {"token": "runtime-token", "trace_id": "trace-42"}},
-        },
-        deps=deps,
-    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context={},
+            deps=deps,
+        )
 
-    kwargs = send_http_request.await_args.kwargs
-    assert kwargs["method"] == "POST"
-    assert kwargs["url"] == "https://api.example.test/items/42"
-    assert kwargs["headers"]["Authorization"] == "Bearer runtime-token"
-    assert kwargs["headers"]["X-Trace"] == "trace-42"
-    assert kwargs["timeout_seconds"] == 9.0
-    assert kwargs["body_bytes"] is None
-    assert kwargs["json_body"] == {"request_id": 42, "token": "runtime-token"}
-    assert text == '{"ok": true}'
-    assert structured == {"ok": True}
+    assert exc_info.value.code == "typed_io_invalid_input_source_combination"
+    send_http_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio

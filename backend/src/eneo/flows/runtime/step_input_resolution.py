@@ -106,7 +106,7 @@ async def resolve_step_input(
             code=FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED.value,
         )
     structured: dict[str, Any] | list[Any] | None = None
-    if step.input_source in ("http_get", "http_post"):
+    if step.input_source == "http_get":
         source_text, structured = await deps.resolve_http_input_source_text(
             step=step,
             run=run,
@@ -500,7 +500,11 @@ def _source_ref_runtime_value(
     result: FlowStepResult,
     consuming_step_order: int,
 ) -> Any:
-    payload = result.output_payload_json if isinstance(result.output_payload_json, dict) else {}
+    payload = (
+        result.output_payload_json
+        if isinstance(result.output_payload_json, dict)
+        else {}
+    )
     if ref_output == "text":
         _raise_if_output_text_overflowed(
             result,
@@ -924,7 +928,7 @@ def resolve_input_source_text(
                 f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>"
             )
         return "\n".join(parts)
-    if input_source in ("http_get", "http_post"):
+    if input_source == "http_get":
         raise BadRequestException(
             f"Input source '{input_source}' is not yet supported in runtime execution."
         )

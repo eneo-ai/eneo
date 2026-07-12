@@ -145,3 +145,18 @@ def test_flow_steps_reject_legacy_text_document_pass_through_tuple() -> None:
     assert "input_type = 'text'" in constraint_sql
     assert "output_mode = 'pass_through'" in constraint_sql
     assert "output_type IN ('pdf','docx')" in constraint_sql
+
+
+def test_flow_step_source_constraint_excludes_post_but_output_retains_post() -> None:
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in FlowSteps.__table__.constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name is not None
+    }
+
+    input_source_sql = constraints["ck_flow_steps_input_source"]
+    output_mode_sql = constraints["ck_flow_steps_output_mode"]
+
+    assert "http_get" in input_source_sql
+    assert "http_post" not in input_source_sql
+    assert "http_post" in output_mode_sql

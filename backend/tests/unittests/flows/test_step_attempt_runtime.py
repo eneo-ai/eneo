@@ -334,7 +334,7 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
 def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
     claimed = _claimed_result()
     generated_file_id = uuid4()
-    step = _runtime_step(input_source="http_post", output_mode="http_post")
+    step = _runtime_step(input_source="http_get", output_mode="http_post")
     output = _step_output()
     output.generated_file_ids = [generated_file_id]
     output.artifacts = [
@@ -390,7 +390,7 @@ def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:
         "citations",
     }
     assert provenance_payload["http"] == {
-        "input_source": "http_post",
+        "input_source": "http_get",
         "structured_input_present": True,
         "output_mode": "http_post",
     }

@@ -466,7 +466,7 @@ def _build_attempt_provenance(
                 str(file_id) for file_id in output.generated_file_ids
             ],
         }
-    if step.input_source in {"http_get", "http_post"}:
+    if step.input_source == "http_get":
         provenance_payload["http"] = {
             "input_source": step.input_source,
             "structured_input_present": output.source_text != "",

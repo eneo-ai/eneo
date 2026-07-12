@@ -217,7 +217,7 @@ def collect_step_graph_issues(
             FlowGraphIssueCode.FLOW_STEP_INVALID,
             lambda: _validate_citation_mode(step),
         )
-        if step.input_source in ("http_get", "http_post"):
+        if step.input_source == "http_get":
             _capture_bad_request_validation(
                 issues,
                 FlowGraphIssueCode.FLOW_STEP_INVALID,
@@ -830,7 +830,9 @@ def _validate_binding_references(
             step_order=current_step_order,
         ) from exc
     expressions = list(
-        iter_template_expressions(json.dumps({"question": question_binding(input_bindings)}))
+        iter_template_expressions(
+            json.dumps({"question": question_binding(input_bindings)})
+        )
     )
     expressions.extend(ref.step_ref for ref in source_refs)
     for expression in expressions:

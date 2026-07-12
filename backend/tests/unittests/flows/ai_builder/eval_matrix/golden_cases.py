@@ -814,11 +814,11 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
 KNOWN_GAPS: tuple[KnownCapabilityGap, ...] = (
     KnownCapabilityGap(
         capability_row=CapabilityRow.HTTP_POST_CALL,
-        runtime_input_sources=frozenset({FlowInputSource.HTTP_POST}),
+        runtime_input_sources=frozenset(),
         runtime_output_modes=frozenset({FlowOutputMode.HTTP_POST}),
         why_not_authorable=(
-            "AIBuilderOutputMode and AIBuilderInputSource omit http_post, so a "
-            "FlowDraftSpecCore step cannot be authored with an HTTP POST call."
+            "AIBuilderOutputMode omits http_post, so a FlowDraftSpecCore step "
+            "cannot be authored with an outbound HTTP POST call."
         ),
         product_decision=(
             "Decide whether the AI Builder should author outbound HTTP steps "

@@ -39,7 +39,6 @@ ALLOWED_INPUT_SOURCES = {
     "previous_step",
     "all_previous_steps",
     "http_get",
-    "http_post",
 }
 ALLOWED_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 ALLOWED_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
@@ -368,7 +367,7 @@ def _parse_input_config(
     raw_input_config: object,
     input_source: str,
 ) -> FlowPersistedJsonObject | None:
-    if input_source in {"http_get", "http_post"}:
+    if input_source == "http_get":
         if not _is_json_object(raw_input_config):
             raise BadRequestException("HTTP input source requires input_config object.")
         raw_headers = raw_input_config.get("headers")

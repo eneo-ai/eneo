@@ -48,7 +48,7 @@ from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
 )
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
@@ -1472,88 +1472,25 @@ async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_http_post_uses_authored_json_template_and_headers(
-    user,
-):
+async def test_resolve_step_input_rejects_legacy_http_post_before_send(user):
     executor, _, _, _ = _build_executor(user)
-    executor.encryption_service.is_encrypted = MagicMock(return_value=False)
-    executor.encryption_service.decrypt = MagicMock(side_effect=lambda value: value)
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "request_id": "42",
-            "payload": {"name": "Anna Andersson"},
-        },
+        input_payload={"request_id": "42"},
     )
     step = _runtime_step(
         input_source="http_post",
         input_type="text",
         input_config={
-            "url": "https://example.org/webhook/{{flow_input.request_id}}",
+            "url": "https://example.org/mutate/{{flow_input.request_id}}",
             "auth": {"mode": "none"},
-            "timeout_seconds": 11,
-            "custom_headers": [
-                {
-                    "name": "X-Request-Id",
-                    "value": "{{flow_input.request_id}}",
-                    "secret": False,
-                }
-            ],
-            "body": {
-                "mode": "json_template",
-                "template": (
-                    '{"citizen_name": "{{flow_input.payload.name}}", '
-                    '"request_id": {{flow_input.request_id}}}'
-                ),
-            },
         },
     )
-    request = httpx.Request("POST", "https://example.org/webhook/42")
-    executor._send_http_request = AsyncMock(
-        return_value=httpx.Response(200, request=request, text="posted")
-    )
+    executor._send_http_request = AsyncMock()
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    resolved = await executor._resolve_step_input(
-        step=step,
-        context=context,
-        run=run,
-        prior_results=[],
-    )
-
-    assert resolved.text == "posted"
-    assert resolved.source_text == "posted"
-    assert resolved.input_source == "http_post"
-    executor._send_http_request.assert_awaited_once()
-    kwargs = executor._send_http_request.await_args.kwargs
-    assert kwargs["method"] == "POST"
-    assert kwargs["url"] == "https://example.org/webhook/42"
-    assert kwargs["timeout_seconds"] == 11
-    assert kwargs["headers"] == {"X-Request-Id": "42"}
-    assert kwargs["body_bytes"] is None
-    assert kwargs["json_body"] == {
-        "citizen_name": "Anna Andersson",
-        "request_id": 42,
-    }
-
-
-@pytest.mark.asyncio
-async def test_resolve_step_input_http_post_rejects_flat_config_before_send(user):
-    executor, _, _, _ = _build_executor(user)
-    request = httpx.Request("POST", "https://example.org")
-    executor._send_http_request = AsyncMock(
-        return_value=httpx.Response(200, request=request, text="ok")
-    )
-    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
-    step = _runtime_step(
-        input_source="http_post",
-        input_type="text",
-        input_config={"url": "https://example.org"},
-    )
-    context = executor.variable_resolver.build_context(run.input_payload_json, [])
-
-    with pytest.raises(TypedIOValidationException, match="authored HTTP config") as exc:
+    with pytest.raises(BadRequestException, match="Unsupported input source"):
         await executor._resolve_step_input(
             step=step,
             context=context,
@@ -1561,7 +1498,6 @@ async def test_resolve_step_input_http_post_rejects_flat_config_before_send(user
             prior_results=[],
         )
 
-    assert exc.value.code == "typed_io_http_invalid_config"
     executor._send_http_request.assert_not_awaited()
 
 
@@ -1981,7 +1917,9 @@ async def test_file_input_uses_extracted_file_text(user):
 
 
 @pytest.mark.asyncio
-async def test_per_source_reader_executes_one_model_call_per_file_and_sets_identity(user):
+async def test_per_source_reader_executes_one_model_call_per_file_and_sets_identity(
+    user,
+):
     executor, _, flow_run_repo, _ = _build_executor(user)
     first_file_id = uuid4()
     second_file_id = uuid4()

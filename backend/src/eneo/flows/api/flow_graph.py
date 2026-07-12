@@ -102,7 +102,7 @@ def build_graph_from_steps(
         step_order = int(step["step_order"])
         input_source = step.get("input_source")
 
-        if input_source in {"flow_input", "http_get", "http_post"}:
+        if input_source in {"flow_input", "http_get"}:
             style = "dashed" if input_source != "flow_input" else None
             edges.append(
                 GraphEdge(

@@ -158,13 +158,18 @@ async def resolve_http_input_source_text(
     context: dict[str, Any],
     deps: FlowHttpOrchestrationDeps,
 ) -> tuple[str, dict[str, Any] | list[Any] | None]:
+    if step.input_source != "http_get":
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: HTTP input orchestration only supports input_source 'http_get'.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
     if not isinstance(step.input_config, dict):
         raise TypedIOValidationException(
             f"Step {step.step_order}: HTTP input source requires input_config object.",
             code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
         )
 
-    method: HttpMethod = "GET" if step.input_source == "http_get" else "POST"
+    method: HttpMethod = "GET"
     effective_request, response_format = _compile_authored_http_request(
         raw_config=step.input_config,
         direction="input",

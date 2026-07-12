@@ -281,7 +281,7 @@ class FlowSteps(BasePublic):
             name="ck_flow_steps_step_order_positive",
         ),
         CheckConstraint(
-            "input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')",
+            f"input_source IN ({_check_values(FLOW_STEP_INPUT_SOURCE_VALUES)})",
             name="ck_flow_steps_input_source",
         ),
         CheckConstraint(

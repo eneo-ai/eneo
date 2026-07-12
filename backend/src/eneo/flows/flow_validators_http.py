@@ -23,12 +23,11 @@ def validate_http_input_config(*, step: FlowStepValidationView) -> None:
             f"Step {step.step_order}: input_type '{step.input_type}' is not supported with input_source '{step.input_source}'.",
             step_order=step.step_order,
         )
-    method = "GET" if step.input_source == "http_get" else "POST"
     validate_http_config(
         step_order=step.step_order,
         label="input_config",
         config=step.input_config,
-        method=method,
+        method="GET",
         direction="input",
     )
 

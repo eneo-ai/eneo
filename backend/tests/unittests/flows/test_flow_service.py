@@ -467,6 +467,51 @@ async def test_publish_flow_rejects_snapshot_missing_stable_step_id(user):
 
 
 @pytest.mark.asyncio
+async def test_publish_flow_rejects_legacy_http_post_input_before_version_work(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Legacy POST input",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[
+            _step().model_copy(
+                update={
+                    "input_source": "http_post",
+                    "input_config": {
+                        "url": "https://example.org/mutate",
+                        "auth": {"mode": "none"},
+                    },
+                }
+            )
+        ],
+    )
+    flow_repo.get.return_value = source_flow
+
+    with pytest.raises(
+        BadRequestException, match="unsupported input_source 'http_post'"
+    ):
+        await service.publish_flow(flow_id=flow_id)
+
+    version_repo.get_latest.assert_not_awaited()
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_unpublish_flow_updates_with_expected_revision(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
@@ -1515,7 +1560,7 @@ async def test_create_flow_rejects_http_get_input_without_url(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_rejects_http_post_input_invalid_timeout(user):
+async def test_create_flow_rejects_legacy_http_post_input_before_persistence(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -1525,18 +1570,21 @@ async def test_create_flow_rejects_http_post_input_invalid_timeout(user):
             "input_config": {
                 "url": "https://example.org/source",
                 "auth": {"mode": "none"},
-                "timeout_seconds": 0,
             },
         }
     )
 
-    with pytest.raises(BadRequestException, match="HTTP_TIMEOUT_OUT_OF_RANGE"):
+    with pytest.raises(
+        BadRequestException, match="unsupported input_source 'http_post'"
+    ):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
             steps=[step],
             metadata_json=None,
         )
+
+    flow_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

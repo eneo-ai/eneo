@@ -584,6 +584,35 @@ def test_verified_parser_rejects_matching_checksum_invalid_runtime_step() -> Non
     assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
 
 
+def test_verified_parser_rejects_legacy_http_post_input_snapshot() -> None:
+    legacy_step = _step(order=1)
+    legacy_step.update(
+        {
+            "input_source": "http_post",
+            "input_config": {
+                "url": "https://example.test/mutate",
+                "auth": {"mode": "none"},
+            },
+        }
+    )
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Legacy POST input",
+        description=None,
+        metadata_json=None,
+        steps=[legacy_step],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        published_definition_module.parse_verified_published_definition(
+            definition,
+            expected_checksum=published_definition_checksum(definition),
+            flow_version=7,
+        )
+
+    assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
+
+
 def test_verified_parser_reuses_one_full_validation_result(monkeypatch) -> None:
     definition = build_published_definition_json(
         flow_id=uuid4(),

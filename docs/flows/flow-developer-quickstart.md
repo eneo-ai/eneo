@@ -101,7 +101,7 @@ The fields below explain most step behavior.
 | `step_order` | Execution order within the published Flow. |
 | `assistant_id` | Assistant/model configuration used by model-backed execution. |
 | `user_description` | Authoring prompt or task description for the step. |
-| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, or `http_post`. |
+| `input_source` | Where the step gets its input: `flow_input`, `previous_step`, `all_previous_steps`, or `http_get`. |
 | `input_type` | Expected input kind: `text`, `json`, `image`, `audio`, `document`, `file`, or `any`. |
 | `input_bindings` | Structured references to form answers, source refs, or prior structured fields. Prefer this for explicit data flow. |
 | `input_config` | Step input configuration, including HTTP or runtime file settings. |
@@ -128,7 +128,7 @@ flowchart TD
     C["Run input_payload_json"] --> D["Step input resolution"]
     E["step_inputs[step_id].file_ids"] --> D
     F["Prior FlowStepResults"] --> D
-    G["HTTP input config"] --> D
+    G["HTTP GET input config"] --> D
     B --> D
     D --> H["StepInputValue"]
     H --> I["StepHandler"]
@@ -148,7 +148,7 @@ Common input paths:
 | `all_previous_steps` | Formats all prior step outputs into a deterministic text segment. Invalid for JSON input. |
 | `input_bindings.source_refs` | Pulls selected fields or arrays from prior structured outputs and composes deterministic text. |
 | Runtime files | Loads, extracts, transcribes, or passes file data according to runtime input config and file policy. |
-| `http_get` / `http_post` | Fetches input through the runtime HTTP transport before step execution. |
+| `http_get` | Fetches input through the runtime HTTP transport before step execution. |
 
 Prefer explicit bindings over `all_previous_steps` when the Flow needs precise
 data flow. `all_previous_steps` is useful for broad summarization, but it hides
@@ -275,6 +275,13 @@ of adding a parallel path.
   tests no longer need them.
 - Keep tests behavior-focused: API contract, run lifecycle, step input/output,
   publish snapshot, and builder question/assumption behavior.
+
+Flow schema revisions are still unreleased and may be consolidated. An existing
+Alembic stamp does not replay an amended foundation revision. For a disposable
+development database, point configuration at a new empty database and run
+`cd backend && uv run alembic upgrade head`; do not reuse a stale branch
+snapshot as physical-schema proof. See
+[Per-branch database snapshots](../../backend/README.md#per-branch-database-snapshots).
 
 ## FAQ
 

@@ -413,10 +413,10 @@ def test_allows_http_only_flow_without_flow_input(user):
         ),
         _step(
             step_order=2,
-            input_source="http_post",
+            input_source="http_get",
             input_type="text",
             input_config={
-                "url": "https://example.org/input",
+                "url": "https://example.org/second-input",
                 "auth": {"mode": "none"},
             },
         ),

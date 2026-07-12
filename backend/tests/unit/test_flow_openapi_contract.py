@@ -2515,7 +2515,6 @@ def test_openapi_flow_step_create_enum_values_match_contract(
             "previous_step",
             "all_previous_steps",
             "http_get",
-            "http_post",
         },
         "input_type": {"text", "json", "image", "audio", "document", "file", "any"},
         "output_mode": {
@@ -2531,6 +2530,30 @@ def test_openapi_flow_step_create_enum_values_match_contract(
         enum_values = _extract_enum_values(openapi_spec, properties.get(field, {}))
         missing = expected_values - enum_values
         assert not missing, f"{field} missing enum values: {sorted(missing)}"
+
+
+def test_openapi_excludes_http_post_input_and_retains_http_post_output(
+    openapi_spec: dict,
+) -> None:
+    schema = (
+        openapi_spec.get("components", {})
+        .get("schemas", {})
+        .get("FlowStepCreateRequest", {})
+    )
+    properties = schema.get("properties", {})
+
+    input_sources = _extract_enum_values(
+        openapi_spec, properties.get("input_source", {})
+    )
+    output_modes = _extract_enum_values(openapi_spec, properties.get("output_mode", {}))
+
+    assert input_sources == {
+        "flow_input",
+        "previous_step",
+        "all_previous_steps",
+        "http_get",
+    }
+    assert "http_post" in output_modes
 
 
 def test_openapi_runtime_file_upload_multipart_schema_uses_upload_file_field(

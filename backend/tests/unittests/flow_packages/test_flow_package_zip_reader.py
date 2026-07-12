@@ -102,6 +102,19 @@ def test_tampered_checksum_is_rejected() -> None:
     assert exc_info.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
 
 
+def test_legacy_http_post_input_is_rejected_before_package_install() -> None:
+    docs = _package_docs()
+    flow_draft = cast(JsonObject, docs[reader.FLOW_DRAFT_PATH])
+    spec = cast(JsonObject, flow_draft["spec"])
+    steps = cast(list[JsonObject], spec["steps"])
+    steps[0]["input_source"] = "http_post"
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+
+
 @pytest.mark.parametrize(
     "path",
     [

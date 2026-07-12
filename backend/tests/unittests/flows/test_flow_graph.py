@@ -536,6 +536,15 @@ def test_build_graph_adds_flow_input_edge_for_non_first_flow_input_step() -> Non
     )
 
 
+def test_build_graph_does_not_project_legacy_http_post_as_input() -> None:
+    steps = [_step(step_order=1, input_source="http_post")]
+
+    _, edges = build_graph_from_steps(steps)
+    step_id = str(steps[0]["step_id"])
+
+    assert not any(edge.source == "input" and edge.target == step_id for edge in edges)
+
+
 def test_build_graph_emits_dependency_metadata_fields() -> None:
     steps = [
         _step(step_order=1, input_source="flow_input"),

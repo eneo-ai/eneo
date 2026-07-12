@@ -352,13 +352,18 @@ def test_validate_form_schema_options_error_mentions_select_and_multiselect():
         )
 
 
-def test_validate_steps_rejects_flat_http_config_without_authored_shape():
-    with pytest.raises(BadRequestException, match="authored HTTP config"):
+def test_validate_steps_rejects_legacy_http_post_input_source():
+    with pytest.raises(
+        BadRequestException, match="unsupported input_source 'http_post'"
+    ):
         validate_steps(
             [
                 _step(
                     input_source="http_post",
-                    input_config={"url": "https://example.com"},
+                    input_config={
+                        "url": "https://example.com",
+                        "auth": {"mode": "none"},
+                    },
                 )
             ]
         )
@@ -369,7 +374,7 @@ def test_validate_steps_rejects_invalid_http_response_format():
         validate_steps(
             [
                 _step(
-                    input_source="http_post",
+                    input_source="http_get",
                     input_config={
                         "url": "https://example.com",
                         "auth": {"mode": "none"},
@@ -658,7 +663,9 @@ def test_validate_steps_rejects_item_template_on_llm_step() -> None:
     )
 
 
-def test_validate_steps_rejects_compose_structured_object_ref_without_string_leaf() -> None:
+def test_validate_steps_rejects_compose_structured_object_ref_without_string_leaf() -> (
+    None
+):
     _assert_validate_steps_rejects(
         [
             _step(

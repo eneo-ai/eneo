@@ -513,7 +513,9 @@ def _seed_per_source_reader_execution_capability() -> FlowCapability:
             "then assembles the reader's documents[] output in source order."
         ),
         applies_to_tuples=(),
-        required_config=(ConfigRequirement(key="input_config.runtime_input.execution_mode"),),
+        required_config=(
+            ConfigRequirement(key="input_config.runtime_input.execution_mode"),
+        ),
         invariants=(
             InvariantSpec(
                 id="requires_documents_array_contract",
@@ -800,9 +802,7 @@ _TEMPORARY_REASON_MARKER = "temporary"
 # rules (e.g. step 1 cannot use `previous_step`) belong to
 # `step_chain_rules.find_first_step_chain_violation`. `previous_step`
 # chain compatibility is owned by `CHAIN_COMPATIBILITY`.
-_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
-    {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
-)
+_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset({FlowInputSource.HTTP_GET})
 _FILE_INPUT_TYPES_BANNED_OVER_HTTP: frozenset[FlowInputType] = frozenset(
     {
         FlowInputType.DOCUMENT,

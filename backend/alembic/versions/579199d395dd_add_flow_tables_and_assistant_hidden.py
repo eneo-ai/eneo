@@ -189,7 +189,7 @@ def upgrade() -> None:
         sa.Column("input_config", postgresql.JSONB(), nullable=True),
         sa.Column("output_config", postgresql.JSONB(), nullable=True),
         sa.CheckConstraint(
-            "input_source IN ('flow_input','previous_step','all_previous_steps','http_get','http_post')",
+            "input_source IN ('flow_input','previous_step','all_previous_steps','http_get')",
             name="ck_flow_steps_input_source",
         ),
         sa.CheckConstraint(
