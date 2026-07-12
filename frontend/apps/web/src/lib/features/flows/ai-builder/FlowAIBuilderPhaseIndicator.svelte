@@ -1,4 +1,7 @@
 <script lang="ts">
+  /* eslint-disable eneo/no-raw-color -- the style block derives every colour
+     from theme tokens; the only oklch() call rebuilds the active pip's token
+     colour (currentColor) with reduced alpha for its halo. */
   import { m } from "$lib/paraglide/messages";
   import type { AIBuilderPhase } from "./protocol";
 
@@ -35,6 +38,16 @@
 </script>
 
 <nav class="phase-bar" aria-label={m.ai_builder_progress_aria()}>
+  <!-- Text form for narrow containers (handoff §1.1): the full bar degrades to
+       "Steg N av 3 — …" below the split threshold. Only one form is ever in
+       the accessibility tree; the other is display:none. -->
+  <p class="phase-compact" aria-current="step">
+    {m.ai_builder_phase_step_of({
+      step: currentIndex + 1,
+      total: phases.length,
+      label: phases[currentIndex]?.label() ?? ""
+    })}
+  </p>
   <ol class="phase-list" role="list">
     {#each phases as step, i (i)}
       {@const state = stateFor(i)}
@@ -88,6 +101,15 @@
     width: 100%;
     padding: 0.75rem 1.5rem;
     background: var(--background-primary);
+  }
+
+  .phase-compact {
+    display: none;
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-primary);
   }
 
   .phase-list {
@@ -234,24 +256,22 @@
 
   /* --- Responsive --- */
 
-  @media (max-width: 640px) {
-    .phase-bar {
-      padding: 0.625rem 1rem;
+  /* Narrow builder container (tabs/mobile layouts): text form replaces the
+     full bar. Outside a "builder" container the full bar always renders.
+     Must stay after the base rules — equal specificity, source order decides. */
+  @container builder (max-width: 1039.98px) {
+    .phase-compact {
+      display: block;
     }
 
     .phase-list {
-      justify-content: center;
-    }
-
-    .phase-step:not(.active) .phase-text,
-    .phase-counter {
       display: none;
     }
+  }
 
-    .phase-rule {
-      min-width: 1rem;
-      max-width: 2.5rem;
-      margin: 0 0.375rem;
+  @media (max-width: 640px) {
+    .phase-bar {
+      padding: 0.625rem 1rem;
     }
   }
 

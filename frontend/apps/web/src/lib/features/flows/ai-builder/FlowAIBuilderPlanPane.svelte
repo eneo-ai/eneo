@@ -280,14 +280,23 @@
   }
 </script>
 
-<div class="bg-secondary/40 flex flex-col md:min-h-0 md:flex-1">
+<div class="bg-secondary/40 flex flex-col @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1">
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
     {@const spec = plan.proposal.spec}
 
-    <!-- Scrollable on md+, natural flow on mobile (page scroll handles it) -->
-    <div class="md:flex-1 md:overflow-y-auto">
-      <div class="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-5 md:px-6 md:py-6">
+    <!-- Scroll owner in split view (handoff §1.3); natural flow in the narrow
+         layouts, where the active pane owns the page scroll. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      role="region"
+      aria-label={m.ai_builder_plan_pane_aria()}
+      tabindex="0"
+      class="focus-visible:ring-accent-default/40 scroll-pb-4 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset @[1040px]/builder:flex-1 @[1040px]/builder:overflow-y-auto"
+    >
+      <div
+        class="mx-auto flex max-w-[800px] flex-col gap-4 px-4 py-5 md:px-6 md:py-6 @[1400px]/builder:max-w-[840px]"
+      >
         <!-- Attachment warnings (transient, near the top so users see it) -->
         {#if attachmentWarnings.length > 0}
           <Alert.Root
@@ -797,7 +806,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_published_flow_title()}
           </Alert.Title>
@@ -832,7 +841,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_unpublished_apply_failed_title()}
           </Alert.Title>
@@ -865,7 +874,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {createOutcomeUnknown
               ? m.ai_builder_create_unknown_title()
@@ -893,7 +902,7 @@
         role="status"
         aria-live="polite"
       >
-        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+        <div class="mx-auto max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-3 md:px-6">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_apply_failed_title()}
           </Alert.Title>
@@ -912,12 +921,14 @@
       </Alert.Root>
     {/if}
 
-    <!-- Sticky action bar ----------------------------------------------------->
+    <!-- Action bar: opaque, 1px top border, no blur (handoff §1.4). Bottom of
+         the plan pane in split view; pinned full-width to the viewport bottom
+         while the page scrolls in the narrow layouts. -->
     <div
-      class="plan-actions border-default bg-primary/85 supports-[not(backdrop-filter:blur(0))]:bg-primary relative shrink-0 border-t backdrop-blur-sm"
+      class="border-default bg-primary sticky bottom-0 z-10 shrink-0 border-t pb-[env(safe-area-inset-bottom)] @[1040px]/builder:static"
     >
       <div
-        class="mx-auto flex max-w-3xl flex-col-reverse items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-center md:px-6"
+        class="mx-auto flex max-w-[800px] flex-col-reverse items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-center md:px-6 @[1400px]/builder:max-w-[840px]"
       >
         {#if !service.applyResult && (service.isCreating || !createFailed)}
           <p
@@ -977,7 +988,7 @@
             <Button
               variant="default"
               size="sm"
-              class="max-sm:min-h-11 max-sm:w-full"
+              class="min-h-11 max-sm:min-h-12 max-sm:w-full"
               onclick={handleCreate}
               disabled={service.isCreating || applyBlockedByPrerequisites}
             >
@@ -1022,7 +1033,7 @@
   {:else if service.isConflict}
     <!-- Conflict state without a plan yet --------------------------------- -->
     <div class="flex flex-1 flex-col overflow-y-auto">
-      <div class="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
+      <div class="mx-auto w-full max-w-[800px] @[1400px]/builder:max-w-[840px] px-4 py-6 md:px-6">
         <Alert.Root class="border-warning-default/40 bg-warning-dimmer rounded-lg">
           <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
             {m.ai_builder_conflict_title()}
@@ -1129,19 +1140,6 @@
     to {
       transform: rotate(360deg);
     }
-  }
-
-  /* Subtle gradient fade above the sticky action bar so content appears
-     to slide underneath rather than getting clipped. */
-  .plan-actions::before {
-    content: "";
-    position: absolute;
-    top: -1.5rem;
-    left: 0;
-    right: 0;
-    height: 1.5rem;
-    background: linear-gradient(to top, var(--background-primary), transparent);
-    pointer-events: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

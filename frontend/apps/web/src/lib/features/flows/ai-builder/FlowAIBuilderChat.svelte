@@ -1,14 +1,11 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { fade } from "svelte/transition";
-  import { SvelteSet } from "svelte/reactivity";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
-  import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
-  import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import {
     buildAIBuilderDiagnosticReport,
@@ -26,19 +23,6 @@
 
   const service = getAIBuilderService();
   const isEditMode = $derived(targetKind === "edit");
-  const canStartOver = $derived(
-    shouldShowEditStartOver({
-      targetKind,
-      hasSession: service.hasSession,
-      messageCount: service.messages.length,
-      hasPlan: service.currentPlan !== null,
-      isConflict: service.isConflict,
-      statusMessage: service.statusMessage,
-      hasApplyError: service.applyError !== null,
-      hasApplyResult: service.applyResult !== null,
-      isStreaming: service.isStreaming
-    })
-  );
 
   const showEmptyState = $derived(
     service.messages.length === 0 &&
@@ -161,9 +145,10 @@
     inputRef?.focus({ placeholder: m.ai_builder_requirements_change_hint() });
   }
 
-  function handleStartOver() {
+  // Called by the shell before it starts a fresh session, so a scoped-edit
+  // placeholder cannot leak into the new conversation.
+  export function resetComposerContext() {
     clearPendingEditContext();
-    void service.startFreshSession("edit");
   }
 
   let scrollContainer = $state<HTMLDivElement | undefined>();
@@ -177,25 +162,6 @@
     }
   }
 
-  const answeredQuestionCount = $derived.by(() => {
-    const ids = new SvelteSet<string>();
-    for (const msg of service.messages) {
-      const qa =
-        msg.metadata && typeof msg.metadata === "object" && "question_answer" in msg.metadata
-          ? msg.metadata.question_answer
-          : null;
-      if (
-        qa &&
-        typeof qa === "object" &&
-        "question_id" in qa &&
-        typeof qa.question_id === "string"
-      ) {
-        ids.add(qa.question_id);
-      }
-    }
-    return ids.size;
-  });
-
   $effect(() => {
     void service.messages.length;
     void service.isStreaming;
@@ -204,7 +170,7 @@
 </script>
 
 <div
-  class="flex flex-col md:min-h-0 md:flex-1 md:overflow-hidden"
+  class="flex flex-col @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-hidden"
   class:items-center={showEmptyState}
   class:justify-center={showEmptyState}
   class:max-md:min-h-[calc(100dvh-var(--page-header-h,4rem))]={showEmptyState}
@@ -302,34 +268,6 @@
     </div>
   {/if}
 
-  {#if service.messages.length > 0 || canStartOver}
-    <div class="border-border-default flex w-full shrink-0 items-center border-b">
-      {#if service.messages.length > 0}
-        <div class="min-w-0 flex-1">
-          <FlowAIBuilderPhaseIndicator
-            phase={service.phase}
-            answeredCount={answeredQuestionCount}
-          />
-        </div>
-      {:else}
-        <div class="min-h-0 flex-1" aria-hidden="true"></div>
-      {/if}
-
-      {#if canStartOver}
-        <div class="shrink-0 pr-4 max-sm:pr-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={handleStartOver}
-            disabled={service.isCreating}
-          >
-            {m.ai_builder_start_fresh()}
-          </Button>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
   {#if showEmptyState}
     <div class="flex-1" aria-hidden="true"></div>
     <div
@@ -359,9 +297,15 @@
       </p>
     </div>
   {:else}
+    <!-- Focusable scroll owner (handoff §1.3): keyboard users can reach and
+         arrow-scroll the pane content without a pointer. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       bind:this={scrollContainer}
-      class="px-4 py-6 max-sm:px-3 max-sm:py-4 md:flex-1 md:overflow-y-auto"
+      role="region"
+      aria-label={m.ai_builder_task_pane_aria()}
+      tabindex="0"
+      class="focus-visible:ring-accent-default/40 scroll-pb-4 px-4 py-6 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset max-sm:px-3 max-sm:py-4 @[1040px]/builder:flex-1 @[1040px]/builder:overflow-y-auto"
     >
       <div class="mx-auto max-w-[71ch]">
         {#each service.messages as message, i (`msg-${i}`)}
@@ -412,8 +356,10 @@
     </div>
   {/if}
 
+  <!-- Composer: bottom of the pane in split view; pinned to the viewport
+       bottom while the page scrolls in the narrow (tabs) layouts. -->
   <div
-    class="bg-primary border-border-default w-full border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3"
+    class="bg-primary border-border-default sticky bottom-0 z-10 w-full border-t px-4 pt-3 pb-4 max-sm:px-2 max-sm:pt-2 max-sm:pb-3 @[1040px]/builder:static"
     class:input-area-hero={showEmptyState}
   >
     <FlowAIBuilderInput
