@@ -28,7 +28,7 @@
             data-step-ref={step.plan_step_ref}
           >
             <span
-              class="bg-accent-dimmer text-accent-default flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums"
+              class="bg-accent-dimmer text-accent-stronger flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums"
             >
               {index + 1}
             </span>

@@ -202,6 +202,21 @@
     // its newest message.
     if (!showTaskSummary) scrollToBottom();
   });
+
+  // The transcript leaves the scroller pinned to the bottom; when the task
+  // pane takes over the same scroll owner it must start at the top.
+  let wasTaskSummary = false;
+  $effect(() => {
+    if (showTaskSummary && !wasTaskSummary) {
+      const target = scrollContainer;
+      if (target) {
+        requestAnimationFrame(() => {
+          target.scrollTop = 0;
+        });
+      }
+    }
+    wasTaskSummary = showTaskSummary;
+  });
 </script>
 
 <div

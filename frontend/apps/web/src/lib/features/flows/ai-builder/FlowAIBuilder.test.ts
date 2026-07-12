@@ -520,6 +520,29 @@ describe("FlowAIBuilder plan-review left pane", () => {
     ).toBe("A:s meddelande");
   });
 
+  it("resets the shared scroller to the top when the task pane replaces the transcript", async () => {
+    const base = planSessionHarness();
+    let releasePlan!: () => void;
+    const planGate = new Promise<void>((resolve) => (releasePlan = resolve));
+    const fetch = vi.fn(async (path: string, init?: unknown) => {
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") {
+        await planGate;
+      }
+      return await (base.fetch as (p: string, i?: unknown) => Promise<unknown>)(path, init);
+    }) as unknown as AIBuilderClientTransport["fetch"];
+    render(FlowAIBuilderHarness, { transport: { fetch, stream: base.stream } });
+
+    // Transcript mode while the plan fetch is still pending; simulate a
+    // scrolled-to-bottom transcript.
+    const scroller = await screen.findByRole("region", { name: m.ai_builder_task_pane_aria() });
+    scroller.scrollTop = 480;
+    expect(scroller.scrollTop).toBe(480);
+
+    releasePlan();
+    await screen.findByRole("heading", { name: m.ai_builder_task_heading() });
+    await waitFor(() => expect(scroller.scrollTop).toBe(0));
+  });
+
   it("ignores a stale completion while a newer submission is in flight", async () => {
     const { transport } = twoSessionHarness();
     const gates: Array<() => void> = [];

@@ -11,11 +11,14 @@
     currentSpace: Pick<Space, "completion_models" | "transcription_models"> & Partial<Space>;
     state: Partial<FlowAIBuilderState>;
     transport?: AIBuilderClientTransport;
+    /** Enkel ("user", default) or Avancerad ("power_user"). */
+    userMode?: "user" | "power_user";
   }
 
   let {
     currentSpace,
     state,
+    userMode = "user",
     transport = {
       fetch: async () => {
         throw new Error("Unexpected AI Builder fetch in plan pane harness.");
@@ -26,7 +29,8 @@
     }
   }: Props = $props();
 
-  initFlowUserMode();
+  const mode = initFlowUserMode();
+  untrack(() => mode.set(userMode));
 
   const service = untrack(() => {
     const spacesManagerParams: Parameters<typeof initSpacesManager>[0] = {

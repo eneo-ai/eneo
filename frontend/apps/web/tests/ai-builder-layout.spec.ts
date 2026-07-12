@@ -64,6 +64,8 @@ const PLAN = {
       steps: [],
       form_fields: null
     },
+    plan_rationale:
+      "Tre steg håller varje delmoment enkelt att kontrollera och ger ett förutsägbart resultat.",
     assumptions: [
       "Underlaget är på svenska.",
       "En sammanfattning per körning räcker.",
@@ -204,6 +206,33 @@ test.describe("AI-builder plan-review layout contract", () => {
     expect(m.compactVisible).toBe(true);
     expect(m.phaseListVisible).toBe(false);
     await expect(page.getByRole("button", { name: "Uppgift", exact: true })).toBeVisible();
+  });
+
+  test("the rationale default follows the builder container width until the user touches it", async ({
+    page,
+    request
+  }) => {
+    await openPlanReview(page, request);
+    const trigger = page.getByRole("button", { name: "Varför Eneo föreslår detta upplägg" });
+
+    // ≥768px container (§1.5): open by default.
+    const wideViewport = await viewportForContainerWidth(page, 800);
+    await page.setViewportSize({ width: wideViewport, height: 620 });
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    // <768px container: collapsed by default — even though the VIEWPORT is
+    // far wider than 768 (the threshold is container-owned, §1).
+    const narrowViewport = await viewportForContainerWidth(page, 740);
+    expect(narrowViewport).toBeGreaterThan(768);
+    await page.setViewportSize({ width: narrowViewport, height: 620 });
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    // Once the user opens it, resizing no longer overrides their choice.
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await page.setViewportSize({ width: wideViewport, height: 620 });
+    await page.setViewportSize({ width: narrowViewport, height: 620 });
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
   test("tabs mode: phase group and action bar stay pinned while the page scrolls", async ({

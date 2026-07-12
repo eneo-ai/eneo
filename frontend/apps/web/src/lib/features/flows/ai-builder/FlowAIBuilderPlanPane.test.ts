@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import type { Space } from "@eneo/eneo-js";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -176,6 +176,88 @@ describe("FlowAIBuilderPlanPane", () => {
     expect(screen.getByText(m.ai_builder_create_unknown_title())).toBeTruthy();
     expect(screen.getAllByRole("button", { name: m.ai_builder_turn_retry() })).toHaveLength(1);
     expect(screen.queryByText(m.ai_builder_nothing_created_yet())).toBeNull();
+  });
+
+  it("renders the §5 plan header meta and 'Så fungerar flödet' as the steps section", () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: makeApprovedCreatePlanState({ step: {} })
+    });
+
+    expect(screen.getByText(m.ai_builder_draft_pill())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_plan_meta_nothing_created())).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: m.ai_builder_how_flow_works(), level: 3 })
+    ).toBeTruthy();
+    // The action bar no longer offers "Föreslå planändring" — the refinement
+    // composer is that path (§5 glossary).
+    expect(screen.queryByRole("button", { name: m.ai_builder_plan_suggest_change() })).toBeNull();
+  });
+
+  it("hides technical assumptions in Enkel and shows them collapsed in Avancerad", async () => {
+    const state = {
+      session: makeSession({ status: "awaiting_approval", target_kind: "create", flow_id: null }),
+      currentPlan: makePlan({
+        proposal: {
+          spec: { flow_name: "Flow", flow_description: "", steps: [], form_fields: [] },
+          assumptions: ["Underlaget är på svenska.", "En körning i taget."],
+          lint_warnings: [],
+          risk_acknowledgments: []
+        }
+      })
+    };
+
+    const enkel = render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state,
+      userMode: "user"
+    });
+    expect(screen.queryByText(/Tekniska antaganden|Technical assumptions/)).toBeNull();
+    enkel.unmount();
+
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state,
+      userMode: "power_user"
+    });
+    const trigger = screen.getByRole("button", {
+      name: new RegExp(
+        `${m.ai_builder_technical_assumptions().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(2\\)`
+      )
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(trigger);
+    expect(screen.getByText("Underlaget är på svenska.")).toBeTruthy();
+  });
+
+  it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
+    // §2: both views keep state — bits-ui keeps inactive tab content mounted
+    // with the hidden attribute; this pins that contract against regressions.
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: makeApprovedCreatePlanState({ step: {} })
+    });
+
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    const stepTrigger = () => screen.getByRole("button", { name: /Transcribe audio/ });
+    await fireEvent.click(stepTrigger());
+    expect(stepTrigger().getAttribute("aria-expanded")).toBe("true");
+
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_diagram() }));
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    expect(stepTrigger().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("renders the details view as an ordered list of steps", async () => {
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: makeApprovedCreatePlanState({ step: {} })
+    });
+
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    const lists = screen.getAllByRole("list");
+    const stepList = lists.find((list) => list.tagName === "OL" && list.querySelector("li"));
+    expect(stepList).toBeTruthy();
   });
 });
 

@@ -46,6 +46,35 @@
   const isPowerUser = $derived($userMode === "power_user");
   const isCreateMode = $derived(service.session?.target_kind === "create");
   let assumptionsOpen = $state(false);
+  // Rationale default: the BUILDER CONTAINER's width (≥768px open, §1.5)
+  // decides the initial state until the user changes it — never the viewport.
+  let rationaleOpen = $state(true);
+  let rationaleTouched = false;
+  let paneRoot = $state<HTMLElement | undefined>();
+
+  function handleRationaleOpenChange(open: boolean) {
+    rationaleTouched = true;
+    rationaleOpen = open;
+  }
+
+  $effect(() => {
+    const root = paneRoot;
+    if (!root || typeof ResizeObserver === "undefined") return;
+    let container: HTMLElement | null = root.parentElement;
+    while (container && getComputedStyle(container).containerName !== "builder") {
+      container = container.parentElement;
+    }
+    const observed = container ?? root;
+    const applyDefault = (width: number) => {
+      if (!rationaleTouched) rationaleOpen = width >= 768;
+    };
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) applyDefault(entry.contentRect.width);
+    });
+    observer.observe(observed);
+    applyDefault(observed.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  });
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -280,7 +309,10 @@
   }
 </script>
 
-<div class="bg-secondary/40 flex flex-col @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1">
+<div
+  bind:this={paneRoot}
+  class="bg-secondary/40 flex flex-col @[1040px]/builder:min-h-0 @[1040px]/builder:flex-1"
+>
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
     {@const spec = plan.proposal.spec}
@@ -438,9 +470,11 @@
           <!-- Plan heading band -->
           <header class="flex flex-col gap-2 px-5 pt-5 pb-4 md:px-6">
             <div class="flex flex-wrap items-center gap-2">
+              <!-- Sentence-case badge + trust meta (§5): "AI-utkast · N steg ·
+                   Ingenting är skapat ännu"; compact wording on mobile. -->
               <Badge
                 variant="outline"
-                class="bg-accent-default/8 border-accent-default/25 text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
+                class="bg-accent-default/8 border-accent-default/25 text-accent-stronger h-5 px-1.5 text-xs font-semibold"
               >
                 {m.ai_builder_draft_pill()}
               </Badge>
@@ -448,7 +482,12 @@
                 {m.flow_run_step_count({ count: stepCount })}
               </span>
               <span class="text-muted text-xs">·</span>
-              <span class="text-muted text-xs">{m.ai_builder_phase_reviewing()}</span>
+              <span class="text-muted text-xs max-sm:hidden">
+                {m.ai_builder_plan_meta_nothing_created()}
+              </span>
+              <span class="text-muted text-xs sm:hidden">
+                {m.ai_builder_plan_meta_nothing_created_short()}
+              </span>
               {#if isPowerUser}
                 <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
               {/if}
@@ -472,7 +511,7 @@
               class="section-enter border-default border-t px-5 py-4 md:px-6"
               aria-live="polite"
             >
-              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-primary mb-2 text-sm font-semibold">
                 {m.ai_builder_description_diff_title()}
               </h3>
               {#if descriptionDiff}
@@ -508,45 +547,69 @@
             </section>
           {/if}
 
-          <!-- Plan rationale -->
+          <!-- Why Eneo suggests this approach (§5). Open on wide screens,
+               collapsed below 768px (§1.5) — initial state only; after that
+               the user owns it. -->
           {#if plan.proposal.plan_rationale}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-1.5 text-xs font-semibold tracking-[0.06em] uppercase">
-                {m.ai_builder_plan_rationale()}
-              </h3>
-              <p
-                class="border-default bg-secondary/35 text-secondary rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
-              >
-                {plan.proposal.plan_rationale}
-              </p>
+              <Collapsible.Root open={rationaleOpen} onOpenChange={handleRationaleOpenChange}>
+                <h3 class="text-sm">
+                  <Collapsible.Trigger class="section-heading-trigger">
+                    <span>{m.ai_builder_why_this_design()}</span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {rationaleOpen
+                        ? 'rotate-180'
+                        : ''}"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Collapsible.Trigger>
+                </h3>
+                <Collapsible.Content>
+                  <p
+                    class="border-default bg-secondary/35 text-secondary mt-2 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
+                  >
+                    {plan.proposal.plan_rationale}
+                  </p>
+                </Collapsible.Content>
+              </Collapsible.Root>
             </section>
           {/if}
 
-          <!-- Assumptions: collapsed by default so the review reads as a short
-               summary, not a bullet wall. -->
-          {#if planAssumptions.length > 0}
+          <!-- Tekniska antaganden (§6): Avancerad only, collapsed by default —
+               the left pane's "Antaganden" is the Enkel-facing section, and
+               two sections may never share a label. -->
+          {#if isPowerUser && planAssumptions.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <Collapsible.Root bind:open={assumptionsOpen}>
-                <Collapsible.Trigger
-                  class="text-muted hover:text-primary focus-visible:ring-accent-default/30 flex w-full items-center gap-1.5 rounded text-xs font-semibold tracking-[0.06em] uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                >
-                  <span>{m.ai_builder_assumptions()} ({planAssumptions.length})</span>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    class="size-3.5 transition-transform duration-200 ease-out {assumptionsOpen
-                      ? 'rotate-180'
-                      : ''}"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </Collapsible.Trigger>
+                <h3 class="text-sm">
+                  <Collapsible.Trigger class="section-heading-trigger">
+                    <span>{m.ai_builder_technical_assumptions()} ({planAssumptions.length})</span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      class="size-3.5 shrink-0 transition-transform duration-200 ease-out {assumptionsOpen
+                        ? 'rotate-180'
+                        : ''}"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </Collapsible.Trigger>
+                </h3>
                 <Collapsible.Content>
                   <ul
                     class="text-secondary mt-2 flex flex-col gap-1.5 text-[0.8125rem] leading-relaxed"
@@ -569,7 +632,7 @@
           <!-- Edit advisories (non-description) -->
           {#if otherAdvisories.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6" aria-live="polite">
-              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-primary mb-2 text-sm font-semibold">
                 {m.ai_builder_advisory_section_title()}
               </h3>
               <ul class="flex flex-col gap-1.5">
@@ -594,7 +657,7 @@
           <!-- Form fields -->
           {#if spec.form_fields && spec.form_fields.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-primary mb-2 text-sm font-semibold">
                 {m.ai_builder_form_fields_title()}
               </h3>
               <div class="grid gap-2.5 sm:grid-cols-2">
@@ -640,9 +703,7 @@
           {#if planLintWarnings.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h3
-                  class="text-warning-stronger flex items-center gap-1.5 text-xs font-semibold tracking-[0.06em] uppercase"
-                >
+                <h3 class="text-warning-stronger flex items-center gap-1.5 text-sm font-semibold">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 16 16"
@@ -688,8 +749,8 @@
               onValueChange={(v) => (stepsView = v as "diagram" | "details")}
             >
               <div class="mb-3 flex items-center justify-between gap-3">
-                <h3 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
-                  {m.flow_steps()}
+                <h3 class="text-primary text-sm font-semibold">
+                  {m.ai_builder_how_flow_works()}
                 </h3>
                 <Tabs.List class="h-8">
                   <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
@@ -704,42 +765,46 @@
                 <FlowAIBuilderCanvas {spec} isStreaming={service.isStreaming} />
               </Tabs.Content>
               <Tabs.Content value="details">
-                <div class="flex flex-col">
+                <!-- A list, not cards (§2 StepList): the diagram view's ol/li
+                     twin, one li per step. -->
+                <ol class="m-0 flex list-none flex-col p-0">
                   {#each spec.steps as step, i (step.plan_step_ref)}
-                    <FlowAIBuilderStepCard
-                      {step}
-                      stepNumber={i + 1}
-                      planId={plan.plan_id}
-                      {isPowerUser}
-                      changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
-                      {resolveModelName}
-                      {resolveMcpServerName}
-                      {resolveMcpToolName}
-                      isFirst={i === 0}
-                      isLast={i === spec.steps.length - 1}
-                      planStatus={plan.status}
-                      buildDiagnosticReport={() =>
-                        buildAIBuilderDiagnosticReport({
-                          kind: "quality",
-                          surface: "step_quality",
-                          issue_kind: AIBuilderIssueKind.Other,
-                          session: diagnosticSession,
-                          plan: diagnosticPlan,
-                          step: {
-                            plan_step_ref: step.plan_step_ref,
-                            step_name: step.name,
-                            step_number: i + 1,
-                            input_type: step.input_type,
-                            output_type: step.output_type
-                          },
-                          details: {
-                            actual_output_type: step.output_type
-                          }
-                        })}
-                      onsuggestchange={(intent) => onsuggestchange?.(intent)}
-                    />
+                    <li>
+                      <FlowAIBuilderStepCard
+                        {step}
+                        stepNumber={i + 1}
+                        planId={plan.plan_id}
+                        {isPowerUser}
+                        changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
+                        {resolveModelName}
+                        {resolveMcpServerName}
+                        {resolveMcpToolName}
+                        isFirst={i === 0}
+                        isLast={i === spec.steps.length - 1}
+                        planStatus={plan.status}
+                        buildDiagnosticReport={() =>
+                          buildAIBuilderDiagnosticReport({
+                            kind: "quality",
+                            surface: "step_quality",
+                            issue_kind: AIBuilderIssueKind.Other,
+                            session: diagnosticSession,
+                            plan: diagnosticPlan,
+                            step: {
+                              plan_step_ref: step.plan_step_ref,
+                              step_name: step.name,
+                              step_number: i + 1,
+                              input_type: step.input_type,
+                              output_type: step.output_type
+                            },
+                            details: {
+                              actual_output_type: step.output_type
+                            }
+                          })}
+                        onsuggestchange={(intent) => onsuggestchange?.(intent)}
+                      />
+                    </li>
                   {/each}
-                </div>
+                </ol>
               </Tabs.Content>
             </Tabs.Root>
           </section>
@@ -747,7 +812,7 @@
           <!-- Removed steps -->
           {#if removedStepChanges.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3 class="text-muted mb-2 text-xs font-semibold tracking-[0.06em] uppercase">
+              <h3 class="text-primary mb-2 text-sm font-semibold">
                 {m.ai_builder_removed_steps_title()}
               </h3>
               <ul class="flex flex-col gap-1">
@@ -942,29 +1007,8 @@
           </p>
         {/if}
 
-        {#if !service.applyResult && service.canApprove}
-          <Button
-            variant="ghost"
-            size="sm"
-            class="max-sm:min-h-11 max-sm:w-full"
-            onclick={() =>
-              onsuggestchange?.({
-                placeholder: m.ai_builder_plan_change_placeholder(),
-                editContext: {
-                  scope: "whole_plan",
-                  plan_id: plan.plan_id
-                }
-              })}
-            disabled={service.isCreating ||
-              createOutcomeUnknown ||
-              isApproving ||
-              isApplying ||
-              isUnpublishingAndApplying}
-          >
-            {m.ai_builder_plan_suggest_change()}
-          </Button>
-        {/if}
-
+        <!-- "Föreslå planändring" is gone from the action bar (§5 glossary):
+             the refinement composer IS that path. -->
         {#if !service.applyResult}
           <Button
             variant="ghost"
@@ -1125,6 +1169,29 @@
   /* Diff strikethrough uses a muted decoration color that works in both themes. */
   .description-diff-old {
     text-decoration-color: var(--border-stronger);
+  }
+
+  /* Sentence-case section heading that doubles as a Collapsible trigger. */
+  :global(.section-heading-trigger) {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  :global(.section-heading-trigger:focus-visible) {
+    outline: 2px solid var(--accent-default);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
   }
 
   .progress-ring {
