@@ -201,12 +201,22 @@ def test_package_filename_removes_unsafe_or_non_ascii_characters(
     assert filename.endswith(".eneo-flowpkg")
 
 
-def test_package_filename_caps_adversarially_long_versions() -> None:
-    filename = flow_package_filename(
+def test_manifest_rejects_package_version_larger_than_persisted_contract() -> None:
+    with pytest.raises(ValidationError):
         FlowPackageManifestMetadata(
             schema_version=1,
             package_id="se.demo.flow",
-            package_version="v" * 300,
+            package_version="v" * 65,
+            name="Demo",
+        )
+
+
+def test_package_filename_caps_longest_valid_identity() -> None:
+    filename = flow_package_filename(
+        FlowPackageManifestMetadata(
+            schema_version=1,
+            package_id="a" * 128,
+            package_version="v" * 64,
             name="Demo",
         )
     )

@@ -82,6 +82,45 @@ That distinction matters because service keys and ordinary human members are int
 
 _Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence._
 
+## Transfer a Flow package
+
+Flow package export, planning, and import are user-principal authoring
+operations. Export produces a bounded `.eneo-flowpkg` file without local
+resource identifiers. The receiving operator uploads that same file to the
+target space's import-plan endpoint and reviews the required and optional model
+and knowledge mappings.
+
+| Purpose                        | Endpoint                                                    |
+| ------------------------------ | ----------------------------------------------------------- |
+| Validate package bytes         | `POST /api/v1/flow-packages/validate/`                      |
+| Plan destination mappings      | `POST /api/v1/spaces/{space_id}/flow-packages/import-plan/` |
+| Import as an unpublished draft | `POST /api/v1/spaces/{space_id}/flow-packages/imports/`     |
+| Export a draft                 | `POST /api/v1/flows/{flow_id}/package-exports/`             |
+
+When installing, send the plan's `content_checksum`, `target_state`, and the
+exact confirmed mappings as `expected_content_checksum`,
+`expected_target_state`, and `selected_bindings`. Eneo rejects a changed
+package, missing resource, ineligible model, or changed audio-transcription
+default before it creates anything. It does not silently select a replacement.
+Create a fresh plan, review it, and retry after correcting one of those errors.
+Branch on the typed error code:
+
+- `flow_package_checksum_mismatch` means the submitted file no longer matches
+  the reviewed plan. Create a new plan from that exact file.
+- `flow_package_import_unavailable_local_resource` means a selected resource or
+  the reviewed target default disappeared or changed. Refresh the plan.
+- `flow_package_import_selected_model_ineligible` means the chosen model no
+  longer satisfies the package requirement. Refresh the plan and ask the user
+  to confirm another eligible model.
+
+An exact retry of a checksum, target-state, and mapping decision that already
+succeeded returns the existing import and draft instead of creating a
+duplicate. A new decision can still import another draft. Import never
+publishes the Flow; the operator reviews and publishes the new draft through
+the ordinary authoring journey. Flow packages do not carry Flow MCP or
+HTTP-mutation input behavior, and unsupported template assets fail before
+installation.
+
 ## Common application patterns
 
 For endpoint-and-capability-first design walkthroughs, start with [Designing Flows](/guides/flows/designing-flows). This reference section keeps the deeper API field context.

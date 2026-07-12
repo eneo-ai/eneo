@@ -34,6 +34,8 @@ from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    OutputMode,
+    OutputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
@@ -108,6 +110,133 @@ def test_legacy_http_post_input_is_rejected_before_package_install() -> None:
     spec = cast(JsonObject, flow_draft["spec"])
     steps = cast(list[JsonObject], spec["steps"])
     steps[0]["input_source"] = "http_post"
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+
+
+def test_package_reader_rejects_draft_ref_not_declared_by_requirements() -> None:
+    docs = _package_docs(
+        spec=FlowDraftSpecCore(
+            flow_name="Undeclared model",
+            steps=[
+                StepSpec(
+                    plan_step_ref="extract",
+                    name="Extract",
+                    assistant_spec=AssistantSpec(
+                        instructions="Extract facts.",
+                        model_ref="model.undeclared",
+                    ),
+                    input_source=InputSource.FLOW_INPUT,
+                )
+            ],
+        )
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert (
+        exc_info.value.code
+        is FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT
+    )
+    assert exc_info.value.context == {
+        "slot_ref": "model.undeclared",
+        "unknown_count": 1,
+    }
+
+
+@pytest.mark.parametrize("case", ["template_mode", "template_resource"])
+def test_package_reader_rejects_undeclared_template_use(case: str) -> None:
+    spec = _flow_spec()
+    step = spec.steps[0]
+    if case == "template_mode":
+        step = step.model_copy(
+            update={
+                "output_mode": OutputMode.TEMPLATE_FILL,
+                "output_type": OutputType.DOCX,
+            }
+        )
+    else:
+        step = step.model_copy(
+            update={
+                "output_config": {
+                    "template_asset_id": "11111111-1111-4111-8111-111111111111"
+                }
+            }
+        )
+    spec = spec.model_copy(update={"steps": [step]})
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_package_bytes(spec=spec))
+
+    assert (
+        exc_info.value.code is FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED
+    )
+    assert exc_info.value.context == {"plan_step_ref": "extract"}
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("blank", "invalid_plan_step_ref"),
+        ("duplicate", "duplicate_plan_step_ref"),
+        ("existing", "existing_step_ref_not_portable"),
+    ],
+)
+def test_package_reader_rejects_nonportable_step_identity(
+    case: str,
+    reason: str,
+) -> None:
+    spec = _flow_spec()
+    step = spec.steps[0]
+    if case == "blank":
+        steps = [step.model_copy(update={"plan_step_ref": ""})]
+        expected_ref = ""
+    elif case == "duplicate":
+        steps = [
+            step,
+            step.model_copy(update={"name": "Second extract"}),
+        ]
+        expected_ref = "extract"
+    else:
+        steps = [step.model_copy(update={"existing_step_ref": "step_1"})]
+        expected_ref = "extract"
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(
+            _package_bytes(spec=spec.model_copy(update={"steps": steps}))
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {
+        "plan_step_ref": expected_ref,
+        "reason": reason,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda spec: spec.update({"unknown_spec_field": True}),
+        lambda spec: cast(list[JsonObject], spec["steps"])[0].update(
+            {"unknown_step_field": True}
+        ),
+        lambda spec: cast(
+            JsonObject,
+            cast(list[JsonObject], spec["steps"])[0]["assistant_spec"],
+        ).update({"unknown_assistant_field": True}),
+    ],
+)
+def test_unknown_nested_flow_draft_fields_are_rejected(
+    mutate: Callable[[JsonObject], None],
+) -> None:
+    docs = _package_docs()
+    flow_draft = cast(JsonObject, docs[reader.FLOW_DRAFT_PATH])
+    spec = cast(JsonObject, flow_draft["spec"])
+    mutate(spec)
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
         reader.read_flow_package(_zip_docs(docs))

@@ -214,7 +214,11 @@ def _parse_subdocument(
     invalid_code: FlowPackageErrorCode,
 ) -> ModelT:
     try:
-        return model.model_validate_json(payload)
+        return model.model_validate_json(
+            payload,
+            strict=True,
+            extra="forbid",
+        )
     except ValidationError as exc:
         if _has_unsupported_schema_version(exc):
             raise FlowPackageValidationError(

@@ -332,16 +332,24 @@ export function initFlows(client) {
 
       /**
        * Import a package into a target space as a draft Flow.
-       * @param {{spaceId: string, packageBase64: string, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[]}} params
+       * @param {{spaceId: string, packageBase64: string, expectedContentChecksum: string, expectedTargetState: import('../types/resources').FlowPackageImportTargetState, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[]}} params
        * @throws {EneoError}
        */
-      importDraft: async ({ spaceId, packageBase64, selectedBindings = [] }) => {
+      importDraft: async ({
+        spaceId,
+        packageBase64,
+        expectedContentChecksum,
+        expectedTargetState,
+        selectedBindings = []
+      }) => {
         return _fetch("/api/v1/spaces/{id}/flow-packages/imports/", {
           method: "post",
           params: { path: { id: spaceId } },
           requestBody: {
             "application/json": {
               package_base64: packageBase64,
+              expected_content_checksum: expectedContentChecksum,
+              expected_target_state: expectedTargetState,
               selected_bindings: selectedBindings
             }
           }

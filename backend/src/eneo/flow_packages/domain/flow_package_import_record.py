@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorContextValue,
@@ -37,6 +37,28 @@ class FlowPackageImportSelection(BaseModel):
 
     def bindings_tuple(self) -> tuple[LocalResourceBinding, ...]:
         return tuple(self.selected_bindings)
+
+    def storage_json(self) -> dict[str, object]:
+        return self.model_dump(
+            mode="json",
+            exclude={
+                "selected_bindings": {
+                    "__all__": {"slot_ref": {"ref"}},
+                }
+            },
+        )
+
+    @model_validator(mode="after")
+    def canonicalize_binding_order(self) -> "FlowPackageImportSelection":
+        self.selected_bindings = sorted(
+            self.selected_bindings,
+            key=lambda binding: (
+                binding.slot_ref.ref,
+                binding.local_kind.value,
+                str(binding.local_id),
+            ),
+        )
+        return self
 
 
 class FlowPackageImportFailurePayload(BaseModel):

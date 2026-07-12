@@ -6,6 +6,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_import_plan import (
+    FlowPackageImportTargetState,
+)
 from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
 )
@@ -199,6 +202,13 @@ class FlowPackageImportRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "package_base64": "UEsDBBQAAAAIA...",
+                "expected_content_checksum": "0" * 64,
+                "expected_target_state": {
+                    "audio_transcription_required": True,
+                    "default_transcription_model_id": (
+                        "22222222-2222-4222-8222-222222222222"
+                    ),
+                },
                 "selected_bindings": [
                     {
                         "slot_ref": {
@@ -218,6 +228,21 @@ class FlowPackageImportRequest(BaseModel):
         description=(
             "Base64-encoded `.eneo-flowpkg` bytes. The decoded package must stay "
             "within the Flow package upload byte cap."
+        )
+    )
+    expected_content_checksum: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "Checksum from the reviewed import plan. Import fails before mutation "
+            "when the submitted package does not match that plan."
+        ),
+    )
+    expected_target_state: FlowPackageImportTargetState = Field(
+        description=(
+            "Load-bearing target-space state from the reviewed plan. A changed "
+            "audio transcription default requires a fresh plan."
         )
     )
     selected_bindings: list[FlowPackageImportResourceBindingRequest] = Field(

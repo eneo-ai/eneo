@@ -169,6 +169,8 @@
       const result = await eneo.flows.packages.importDraft({
         spaceId,
         packageBase64,
+        expectedContentChecksum: plan.content_checksum,
+        expectedTargetState: plan.target_state,
         selectedBindings
       });
       await flowsManager.refreshFlows();
@@ -464,12 +466,15 @@
               </header>
 
               {#if readiness}
-                {#if readiness.blockingReasons.length > 0}
+                {#if readiness.requiresTranscriptionModel || readiness.blockingReasons.length > 0}
                   <Alert.Root variant="destructive">
                     <AlertTriangle class="size-4" />
                     <Alert.Title>{m.flow_package_blocks_import()}</Alert.Title>
                     <Alert.Description>
                       <ul class="ml-4 list-disc">
+                        {#if readiness.requiresTranscriptionModel}
+                          <li>{m.flow_package_error_transcription_model_required()}</li>
+                        {/if}
                         {#each readiness.blockingReasons as reason (`${reason.slotKey}:${reason.code}`)}
                           <li>
                             {#if reason.code === "template_asset_unsupported"}

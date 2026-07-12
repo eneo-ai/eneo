@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -11,7 +12,9 @@ from eneo.flow_packages.application.flow_package_import_planner import (
     build_flow_package_import_plan,
 )
 from eneo.flow_packages.application.flow_package_install_service import (
+    FlowPackageInstallResult,
     FlowPackageInstallService,
+    resolve_flow_package_install_command,
     validate_flow_package_install_selection,
 )
 from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
@@ -23,6 +26,9 @@ from eneo.flow_packages.domain.flow_package_errors import (
 from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageLocalCandidate,
     FlowPackageModelCandidate,
+)
+from eneo.flow_packages.domain.flow_package_import_record import (
+    FlowPackageImportSelection,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
@@ -39,6 +45,7 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flows.application.flow_service import FlowService
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -71,7 +78,7 @@ async def test_install_as_draft_materializes_package_with_package_import_binding
     )
     service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
 
-    result = await FlowPackageInstallService().install_as_draft(
+    result = await _install_as_draft(
         envelope=_envelope(),
         flow_service=service,
         space_id=space_id,
@@ -98,7 +105,7 @@ async def test_install_rejects_missing_required_model_before_creating_flow() -> 
     service = _flow_service()
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
+        await _install_as_draft(
             envelope=_envelope(),
             flow_service=service,
             space_id=uuid4(),
@@ -129,7 +136,7 @@ async def test_install_allows_unbound_knowledge_without_creating_dangling_refs()
     knowledge_slot = _slot_ref(ResourceSlotKind.KNOWLEDGE, "local-rules")
     service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
 
-    result = await FlowPackageInstallService().install_as_draft(
+    result = await _install_as_draft(
         envelope=_envelope(
             requirements=[
                 FlowPackageModelRequirement(
@@ -175,7 +182,7 @@ async def test_install_preserves_selected_knowledge_binding() -> None:
     )
     service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
 
-    result = await FlowPackageInstallService().install_as_draft(
+    result = await _install_as_draft(
         envelope=_envelope(
             requirements=[
                 FlowPackageModelRequirement(
@@ -202,7 +209,7 @@ async def test_install_preserves_selected_knowledge_binding() -> None:
     update = service.update_flow_assistant.await_args.kwargs["update"]
     assert update.groups == [knowledge_id]
     replace_kwargs = service.replace_resource_bindings.await_args.kwargs
-    assert replace_kwargs["bindings"] == (model_binding, knowledge_binding)
+    assert replace_kwargs["bindings"] == (knowledge_binding, model_binding)
 
 
 @pytest.mark.asyncio
@@ -234,7 +241,7 @@ async def test_install_preserves_selected_non_collection_knowledge_binding(
     )
     service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
 
-    result = await FlowPackageInstallService().install_as_draft(
+    result = await _install_as_draft(
         envelope=_envelope(
             requirements=[
                 FlowPackageModelRequirement(
@@ -266,35 +273,76 @@ async def test_install_preserves_selected_non_collection_knowledge_binding(
     )
 
 
-@pytest.mark.asyncio
-async def test_install_rejects_optional_slot_referenced_by_step_before_creating_flow() -> (
-    None
-):
-    service = _flow_service()
-    envelope = _envelope(
-        requirements=[
-            FlowPackageModelRequirement(
-                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
-                required=False,
-            )
-        ]
-    )
-
+def test_envelope_rejects_optional_model_slot_referenced_by_step() -> None:
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
-            envelope=envelope,
-            flow_service=service,
-            space_id=uuid4(),
-            selected_bindings=tuple(),
-            candidates=_candidates(),
+        _envelope(
+            requirements=[
+                FlowPackageModelRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                    required=False,
+                )
+            ]
         )
 
-    assert (
-        exc_info.value.code
-        is FlowPackageErrorCode.IMPORT_MISSING_REQUIRED_RESOURCE_BINDING
-    )
-    assert exc_info.value.context["slot_ref"] == "model.structured"
-    service.create_flow.assert_not_called()
+    assert exc_info.value.code is FlowPackageErrorCode.REQUIREMENTS_INVALID
+    assert exc_info.value.context == {
+        "slot_ref": "model.structured",
+        "reason": "referenced_model_must_be_required",
+    }
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("knowledge_as_model", "assistant_model_ref_kind_mismatch"),
+        ("model_as_knowledge", "assistant_knowledge_ref_kind_mismatch"),
+        ("transcription_as_model", "assistant_model_requires_completion_model"),
+    ],
+)
+def test_envelope_rejects_requirement_kind_that_does_not_match_draft_use(
+    case: str,
+    reason: str,
+) -> None:
+    if case == "knowledge_as_model":
+        requirements: list[FlowPackageRequirementEntry] = [
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy")
+            )
+        ]
+        assistant = AssistantSpec(
+            instructions="Invalid model use.",
+            model_ref="knowledge.policy",
+        )
+        slot_ref = "knowledge.policy"
+    elif case == "model_as_knowledge":
+        requirements = [
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured")
+            )
+        ]
+        assistant = AssistantSpec(
+            instructions="Invalid knowledge use.",
+            knowledge_refs=["model.structured"],
+        )
+        slot_ref = "model.structured"
+    else:
+        requirements = [
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "speech"),
+                model_kind=FlowPackageModelKind.TRANSCRIPTION_MODEL,
+            )
+        ]
+        assistant = AssistantSpec(
+            instructions="Invalid assistant model.",
+            model_ref="model.speech",
+        )
+        slot_ref = "model.speech"
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        _envelope(requirements=requirements, assistant=assistant)
+
+    assert exc_info.value.code is FlowPackageErrorCode.REQUIREMENTS_INVALID
+    assert exc_info.value.context == {"slot_ref": slot_ref, "reason": reason}
 
 
 @pytest.mark.asyncio
@@ -308,7 +356,7 @@ async def test_install_rejects_unknown_selected_binding_before_creating_flow() -
     )
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
+        await _install_as_draft(
             envelope=_envelope(),
             flow_service=service,
             space_id=uuid4(),
@@ -317,36 +365,6 @@ async def test_install_rejects_unknown_selected_binding_before_creating_flow() -
         )
 
     assert exc_info.value.code is FlowPackageErrorCode.IMPORT_UNKNOWN_RESOURCE_BINDING
-    assert exc_info.value.context["slot_ref"] == "model.undeclared"
-    service.create_flow.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_install_rejects_package_draft_referencing_undeclared_slot_before_creating_flow() -> (
-    None
-):
-    service = _flow_service()
-    envelope = _envelope(
-        requirements=[],
-        assistant=AssistantSpec(
-            instructions="Use undeclared model.",
-            model_ref="model.undeclared",
-        ),
-    )
-
-    with pytest.raises(FlowPackageValidationError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
-            envelope=envelope,
-            flow_service=service,
-            space_id=uuid4(),
-            selected_bindings=tuple(),
-            candidates=_candidates(),
-        )
-
-    assert (
-        exc_info.value.code
-        is FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT
-    )
     assert exc_info.value.context["slot_ref"] == "model.undeclared"
     service.create_flow.assert_not_called()
 
@@ -368,7 +386,7 @@ async def test_install_preserves_canonical_duplicate_binding_reason_before_creat
     service = _flow_service()
 
     with pytest.raises(FlowResourceBindingResolutionError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
+        await _install_as_draft(
             envelope=_envelope(),
             flow_service=service,
             space_id=uuid4(),
@@ -401,7 +419,7 @@ async def test_install_rejects_selected_local_id_not_available_in_target_space()
     )
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        await FlowPackageInstallService().install_as_draft(
+        await _install_as_draft(
             envelope=_envelope(),
             flow_service=service,
             space_id=uuid4(),
@@ -494,6 +512,100 @@ def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> No
     assert exc_info.value.context["reason"] == "model_context_too_small"
 
 
+def test_resolved_install_command_rejects_package_changed_after_plan() -> None:
+    envelope = _envelope()
+    candidates = _candidates(models=[_model_candidate(uuid4())])
+    plan = build_flow_package_import_plan(envelope, candidates=candidates)
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        resolve_flow_package_install_command(
+            envelope=envelope,
+            import_plan=plan,
+            expected_content_checksum="f" * 64,
+            expected_target_state=plan.target_state,
+            selection=FlowPackageImportSelection(),
+            candidates=candidates,
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
+    assert exc_info.value.context == {
+        "expected_content_checksum": "f" * 64,
+        "current_content_checksum": envelope.content_checksum,
+    }
+
+
+def test_import_selection_canonicalizes_semantically_unordered_bindings() -> None:
+    model = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=UUID("11111111-1111-4111-8111-111111111111"),
+    )
+    knowledge = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+        local_kind=LocalResourceKind.COLLECTION,
+        local_id=UUID("22222222-2222-4222-8222-222222222222"),
+    )
+
+    first = FlowPackageImportSelection(selected_bindings=[model, knowledge])
+    reversed_selection = FlowPackageImportSelection(
+        selected_bindings=[knowledge, model]
+    )
+
+    assert first.model_dump(mode="json") == reversed_selection.model_dump(mode="json")
+
+
+def test_resolved_install_command_uses_declared_slot_label_for_retry_identity() -> None:
+    envelope = _envelope()
+    model_id = UUID("11111111-1111-4111-8111-111111111111")
+    candidates = _candidates(models=[_model_candidate(model_id)])
+    plan = build_flow_package_import_plan(envelope, candidates=candidates)
+    tampered_label = ResourceSlotRef(
+        kind=ResourceSlotKind.MODEL,
+        slot="structured",
+        label="Client supplied label",
+    )
+
+    command = resolve_flow_package_install_command(
+        envelope=envelope,
+        import_plan=plan,
+        expected_content_checksum=plan.content_checksum,
+        expected_target_state=plan.target_state,
+        selection=FlowPackageImportSelection(
+            selected_bindings=[
+                _binding(
+                    slot_ref=tampered_label,
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    local_id=model_id,
+                )
+            ]
+        ),
+        candidates=candidates,
+    )
+
+    assert command.selection.selected_bindings[0].slot_ref == _slot_ref(
+        ResourceSlotKind.MODEL,
+        "structured",
+    )
+    stored_selection = command.selection.storage_json()
+    assert stored_selection == {
+        "selected_bindings": [
+            {
+                "slot_ref": {
+                    "kind": "model",
+                    "slot": "structured",
+                    "label": "Structured",
+                },
+                "local_kind": "completion_model",
+                "local_id": str(model_id),
+            }
+        ]
+    }
+    assert (
+        FlowPackageImportSelection.model_validate_json(json.dumps(stored_selection))
+        == command.selection
+    )
+
+
 def test_validate_rejects_template_requirements_until_template_install_exists() -> None:
     envelope = _envelope(
         requirements=[
@@ -522,7 +634,7 @@ async def test_install_zero_requirement_package_with_zero_bindings() -> None:
     flow_id = uuid4()
     service = _flow_service(flow_id=flow_id)
 
-    result = await FlowPackageInstallService().install_as_draft(
+    result = await _install_as_draft(
         envelope=_envelope(
             requirements=[],
             assistant=AssistantSpec(instructions="No resources."),
@@ -541,7 +653,7 @@ async def test_install_zero_requirement_package_with_zero_bindings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_install_same_package_twice_creates_two_drafts() -> None:
+async def test_distinct_resolved_commands_create_distinct_drafts() -> None:
     first_flow_id = uuid4()
     second_flow_id = uuid4()
     model_id = uuid4()
@@ -551,16 +663,14 @@ async def test_install_same_package_twice_creates_two_drafts() -> None:
         local_kind=LocalResourceKind.COMPLETION_MODEL,
         local_id=model_id,
     )
-    installer = FlowPackageInstallService()
-
-    first = await installer.install_as_draft(
+    first = await _install_as_draft(
         envelope=_envelope(),
         flow_service=service,
         space_id=uuid4(),
         selected_bindings=(binding,),
         candidates=_candidates(models=[_model_candidate(model_id)]),
     )
-    second = await installer.install_as_draft(
+    second = await _install_as_draft(
         envelope=_envelope(),
         flow_service=service,
         space_id=uuid4(),
@@ -572,6 +682,35 @@ async def test_install_same_package_twice_creates_two_drafts() -> None:
     assert second.flow_id == second_flow_id
     assert first.flow_id != second.flow_id
     assert service.create_flow.await_count == 2
+
+
+async def _install_as_draft(
+    *,
+    envelope: FlowPackageEnvelope,
+    flow_service: FlowService,
+    space_id: UUID,
+    selected_bindings: tuple[LocalResourceBinding, ...],
+    candidates: FlowPackageImportPlannerCandidates,
+    default_transcription_model_id: UUID | None = None,
+) -> FlowPackageInstallResult:
+    import_plan = build_flow_package_import_plan(
+        envelope,
+        candidates=candidates,
+        default_transcription_model_id=default_transcription_model_id,
+    )
+    command = resolve_flow_package_install_command(
+        envelope=envelope,
+        import_plan=import_plan,
+        expected_content_checksum=import_plan.content_checksum,
+        expected_target_state=import_plan.target_state,
+        selection=FlowPackageImportSelection(selected_bindings=list(selected_bindings)),
+        candidates=candidates,
+    )
+    return await FlowPackageInstallService().install_as_draft(
+        command=command,
+        flow_service=flow_service,
+        space_id=space_id,
+    )
 
 
 def _envelope(

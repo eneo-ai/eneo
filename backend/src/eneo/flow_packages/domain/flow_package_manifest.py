@@ -5,7 +5,7 @@ import unicodedata
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.json_types import JsonObject
 
@@ -14,6 +14,7 @@ _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _REPEATED_DOTS_RE = re.compile(r"\.{2,}")
 _PACKAGE_FILENAME_STEM_MAX_LENGTH = 160
+MAX_FLOW_PACKAGE_VERSION_LENGTH = 64
 
 
 class EneoPackageKind(StrEnum):
@@ -37,7 +38,7 @@ class FlowPackageManifestMetadataFields(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     package_id: str
-    package_version: str
+    package_version: str = Field(max_length=MAX_FLOW_PACKAGE_VERSION_LENGTH)
     name: str
     description: str = ""
 
@@ -58,7 +59,15 @@ class FlowPackageManifestMetadataFields(BaseModel):
             )
         return normalized
 
-    @field_validator("package_version", "name")
+    @field_validator("package_version")
+    @classmethod
+    def validate_package_version(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or len(normalized) > MAX_FLOW_PACKAGE_VERSION_LENGTH:
+            raise ValueError("Package version must be between 1 and 64 characters.")
+        return normalized
+
+    @field_validator("name")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         normalized = value.strip()

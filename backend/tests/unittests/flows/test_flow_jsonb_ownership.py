@@ -133,6 +133,20 @@ def test_builder_plan_proposal_json_has_typed_owner() -> None:
     assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
 
 
+def test_flow_package_import_plan_is_owner_validated_audit_shape() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("flow_package_imports", "import_plan_json")]
+
+    assert owner.owner_module == "eneo.flow_packages.domain.flow_package_import_plan"
+    assert owner.envelope_name == "FlowPackageImportPlan"
+    assert owner.storage_category is FlowJsonbStorageCategory.IMPORT_STATE
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
+    )
+    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
+    assert "auditable" in owner.rationale
+
+
 def test_builder_session_conversation_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "conversation")]
 

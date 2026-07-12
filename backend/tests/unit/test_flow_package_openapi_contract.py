@@ -141,8 +141,21 @@ def test_openapi_flow_package_import_request_uses_typed_json_bindings(
     properties = resolved.get("properties", {})
 
     assert resolved.get("title") == "FlowPackageImportRequest"
-    assert "package_base64" in set(resolved.get("required", []))
+    assert set(resolved.get("required", [])) == {
+        "package_base64",
+        "expected_content_checksum",
+        "expected_target_state",
+    }
     assert properties.get("package_base64", {}).get("type") == "string"
+    expected_checksum = properties.get("expected_content_checksum", {})
+    assert expected_checksum.get("minLength") == 64
+    assert expected_checksum.get("maxLength") == 64
+    assert expected_checksum.get("pattern") == "^[0-9a-f]{64}$"
+    target_state = _resolve_component_ref(
+        openapi_spec,
+        properties.get("expected_target_state", {}),
+    )
+    assert target_state.get("title") == "FlowPackageImportTargetState"
     selected_bindings = properties.get("selected_bindings", {})
     assert selected_bindings.get("type") == "array"
     binding_item = _resolve_component_ref(
@@ -242,9 +255,15 @@ def test_openapi_flow_package_error_examples_are_actionable(
     }
     assert {
         "flow_package_checksum_mismatch",
+        "flow_package_flow_draft_invalid",
+        "flow_package_import_draft_references_undeclared_slot",
+        "flow_package_import_mcp_unsupported",
+        "flow_package_import_template_assets_unsupported",
         "flow_package_local_resource_refs_not_portable",
         "flow_package_manifest_invalid",
         "flow_package_kind_unsupported",
+        "flow_package_provenance_invalid",
+        "flow_package_requirements_invalid",
         "flow_package_schema_unsupported",
         "flow_package_zip_unsafe",
     }.issubset(package_error_codes)
@@ -262,6 +281,11 @@ def test_openapi_flow_package_error_examples_are_actionable(
     scope_example = _examples(import_plan_responses, "403")["api_key_scope"]["value"]
     assert scope_example["code"] == "insufficient_scope"
     assert scope_example["context"] == {"auth_layer": "api_key_scope"}
+    plan_graph_example = _examples(import_plan_responses, "400")["flow_draft_invalid"][
+        "value"
+    ]
+    assert plan_graph_example["code"] == "flow_package_flow_draft_invalid"
+    assert plan_graph_example["context"] == {"reason": "duplicate_step_name"}
 
     import_bad_request_codes = {
         example["value"]["code"]
@@ -274,8 +298,24 @@ def test_openapi_flow_package_error_examples_are_actionable(
         "flow_package_import_mcp_unsupported",
         "flow_package_import_selected_model_ineligible",
         "flow_package_import_unavailable_local_resource",
-        "transcription_model_required",
+        "flow_package_flow_draft_invalid",
     }.issubset(import_bad_request_codes)
+    reviewed_checksum_example = _examples(import_responses, "400")[
+        "reviewed_plan_checksum_mismatch"
+    ]["value"]
+    assert reviewed_checksum_example["context"] == {
+        "expected_content_checksum": "0" * 64,
+        "current_content_checksum": "1" * 64,
+    }
+    changed_target_example = _examples(import_responses, "400")[
+        "target_transcription_model_changed"
+    ]["value"]
+    assert changed_target_example["context"] == {
+        "slot_ref": "model.flow_input_transcription",
+        "local_kind": "transcription_model",
+        "local_id": "11111111-1111-4111-8111-111111111111",
+        "current_local_id": "22222222-2222-4222-8222-222222222222",
+    }
 
     export_bad_request_codes = {
         example["value"]["code"]
@@ -328,6 +368,7 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
         "package_kind",
         "payload_schema",
         "package_summary",
+        "target_state",
     } <= set(plan_schema.get("required", []))
     summary_schema = _resolve_component_ref(
         openapi_spec,
@@ -372,6 +413,16 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
     )
     assert "auto_select_allowed" in model_resolution_schema.get("required", [])
     assert "policy_status" in model_resolution_schema.get("required", [])
+    slot_ref_schema = _resolve_component_ref(
+        openapi_spec,
+        model_resolution_schema.get("properties", {}).get("slot_ref", {}),
+    )
+    assert slot_ref_schema.get("additionalProperties") is False
+    assert set(slot_ref_schema.get("required", [])) == {
+        "kind",
+        "slot",
+        "label",
+    }
 
 
 def test_openapi_flow_package_import_plan_preserves_discriminator(

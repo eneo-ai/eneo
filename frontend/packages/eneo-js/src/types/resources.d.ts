@@ -165,6 +165,7 @@ export type FlowPackageExportRequest = components["schemas"]["FlowPackageExportR
 export type FlowPackageImportPlan = components["schemas"]["FlowPackageImportPlan"];
 export type FlowPackageImportPlanSummary = components["schemas"]["FlowPackageImportPlanSummary"];
 export type FlowPackageImportPlanStatus = components["schemas"]["FlowPackageImportPlanStatus"];
+export type FlowPackageImportTargetState = components["schemas"]["FlowPackageImportTargetState"];
 export type FlowPackageImportResult = components["schemas"]["FlowPackageImportPublic"];
 export type FlowPackageValidation = components["schemas"]["FlowPackageValidationPublic"];
 export type FlowPackageDependencyResolution = NonNullable<
@@ -172,8 +173,7 @@ export type FlowPackageDependencyResolution = NonNullable<
 >[number];
 export type FlowPackageLocalCandidate = components["schemas"]["FlowPackageLocalCandidate"];
 export type FlowPackageModelCandidate = components["schemas"]["FlowPackageModelCandidate"];
-export type FlowPackageResourceSlotRef =
-  components["schemas"]["FlowPackageImportResourceSlotRefRequest"];
+export type FlowPackageResourceSlotRef = components["schemas"]["FlowPackageResourceSlotRefJson"];
 export type FlowPackageImportResourceBinding =
   components["schemas"]["FlowPackageImportResourceBindingRequest"];
 export type FlowPackageRequirementDataSensitivity =

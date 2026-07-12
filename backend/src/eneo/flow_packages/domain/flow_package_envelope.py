@@ -21,9 +21,14 @@ from eneo.flow_packages.domain.flow_package_manifest import (
 )
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageKnowledgeRequirement,
+    FlowPackageModelKind,
+    FlowPackageModelRequirement,
     FlowPackageRequirementSet,
 )
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, OutputMode
+from eneo.flows.flow_resource_bindings import ResourceSlotRef
+from eneo.flows.flow_validators_template import has_template_fill_resource_reference
 
 MANIFEST_PATH = "manifest.json"
 FLOW_DRAFT_PATH = "flow.draft.json"
@@ -64,6 +69,69 @@ class FlowPackageEnvelope(BaseModel):
     @property
     def spec(self) -> FlowDraftSpecCore:
         return self.draft.spec
+
+    def validated_resource_contract(
+        self,
+    ) -> "ValidatedFlowPackageResourceContract":
+        declared_requirements = {
+            requirement.slot_ref.ref: requirement
+            for requirement in self.requirements.requirements
+        }
+        declared_slot_refs = {
+            ref: requirement.slot_ref
+            for ref, requirement in declared_requirements.items()
+        }
+        referenced_slot_refs = frozenset(
+            ref
+            for step in self.spec.steps
+            for ref in _assistant_slot_refs(step.assistant_spec)
+        )
+        unknown_slot_refs = referenced_slot_refs.difference(declared_slot_refs)
+        if unknown_slot_refs:
+            first_unknown = min(unknown_slot_refs)
+            raise FlowPackageValidationError(
+                code=(FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT),
+                message=(
+                    "Flow package draft references a resource slot that is not "
+                    "declared."
+                ),
+                context={
+                    "slot_ref": first_unknown,
+                    "unknown_count": len(unknown_slot_refs),
+                },
+            )
+        for step in self.spec.steps:
+            model_ref = step.assistant_spec.model_ref
+            if model_ref is not None:
+                requirement = declared_requirements[model_ref]
+                if not isinstance(requirement, FlowPackageModelRequirement):
+                    raise _invalid_requirement_use(
+                        slot_ref=model_ref,
+                        reason="assistant_model_ref_kind_mismatch",
+                    )
+                if requirement.model_kind is not FlowPackageModelKind.COMPLETION_MODEL:
+                    raise _invalid_requirement_use(
+                        slot_ref=model_ref,
+                        reason="assistant_model_requires_completion_model",
+                    )
+                if not requirement.required:
+                    raise _invalid_requirement_use(
+                        slot_ref=model_ref,
+                        reason="referenced_model_must_be_required",
+                    )
+            for knowledge_ref in step.assistant_spec.knowledge_refs:
+                if not isinstance(
+                    declared_requirements[knowledge_ref],
+                    FlowPackageKnowledgeRequirement,
+                ):
+                    raise _invalid_requirement_use(
+                        slot_ref=knowledge_ref,
+                        reason="assistant_knowledge_ref_kind_mismatch",
+                    )
+        return ValidatedFlowPackageResourceContract(
+            declared_slot_refs=declared_slot_refs,
+            referenced_slot_refs=referenced_slot_refs,
+        )
 
     @classmethod
     def verify_from_subdocuments(
@@ -128,7 +196,7 @@ class FlowPackageEnvelope(BaseModel):
         provenance: FlowPackageProvenance,
         hashes: _FlowPackageDocumentHashes,
     ) -> "FlowPackageEnvelope":
-        return cls(
+        envelope = cls(
             manifest=manifest,
             draft=draft,
             requirements=requirements,
@@ -139,6 +207,10 @@ class FlowPackageEnvelope(BaseModel):
             provenance_hash=hashes.provenance_hash,
             content_checksum=hashes.content_checksum,
         )
+        _validate_portable_step_identity(envelope.spec)
+        _reject_unsupported_template_use(envelope.spec)
+        envelope.validated_resource_contract()
+        return envelope
 
 
 def _calculate_hashes(
@@ -180,4 +252,79 @@ def _require_flow_payload(manifest: FlowPackageManifestMetadata) -> None:
             "package_kind": manifest.package_kind.value,
             "payload_schema": manifest.payload_schema,
         },
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedFlowPackageResourceContract:
+    declared_slot_refs: dict[str, ResourceSlotRef]
+    referenced_slot_refs: frozenset[str]
+
+
+def _assistant_slot_refs(assistant: AssistantSpec) -> tuple[str, ...]:
+    refs: list[str] = []
+    if assistant.model_ref is not None:
+        refs.append(assistant.model_ref)
+    refs.extend(assistant.knowledge_refs)
+    return tuple(refs)
+
+
+def _invalid_requirement_use(
+    *,
+    slot_ref: str,
+    reason: str,
+) -> FlowPackageValidationError:
+    return FlowPackageValidationError(
+        code=FlowPackageErrorCode.REQUIREMENTS_INVALID,
+        message="Flow package resource requirements do not match draft usage.",
+        context={"slot_ref": slot_ref, "reason": reason},
+    )
+
+
+def _reject_unsupported_template_use(spec: FlowDraftSpecCore) -> None:
+    for step in spec.steps:
+        if (
+            step.output_mode is OutputMode.TEMPLATE_FILL
+            or has_template_fill_resource_reference(step.output_config)
+        ):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED,
+                message=(
+                    "Flow package import does not support template asset "
+                    "installation yet."
+                ),
+                context={"plan_step_ref": step.plan_step_ref},
+            )
+
+
+def _validate_portable_step_identity(spec: FlowDraftSpecCore) -> None:
+    seen_refs: set[str] = set()
+    for step in spec.steps:
+        if not step.plan_step_ref or step.plan_step_ref != step.plan_step_ref.strip():
+            raise _invalid_portable_step_ref(
+                plan_step_ref=step.plan_step_ref,
+                reason="invalid_plan_step_ref",
+            )
+        if step.plan_step_ref in seen_refs:
+            raise _invalid_portable_step_ref(
+                plan_step_ref=step.plan_step_ref,
+                reason="duplicate_plan_step_ref",
+            )
+        seen_refs.add(step.plan_step_ref)
+        if step.existing_step_ref is not None:
+            raise _invalid_portable_step_ref(
+                plan_step_ref=step.plan_step_ref,
+                reason="existing_step_ref_not_portable",
+            )
+
+
+def _invalid_portable_step_ref(
+    *,
+    plan_step_ref: str,
+    reason: str,
+) -> FlowPackageValidationError:
+    return FlowPackageValidationError(
+        code=FlowPackageErrorCode.FLOW_DRAFT_INVALID,
+        message="Flow package step identity is not portable.",
+        context={"plan_step_ref": plan_step_ref, "reason": reason},
     )

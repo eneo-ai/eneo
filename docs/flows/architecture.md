@@ -38,7 +38,7 @@ Use this split when changing code:
 | --- | --- | --- | --- |
 | Draft flow lifecycle | `FlowService` | `backend/src/eneo/flows/application/flow_service.py:70` | Creates, updates, validates, publishes, and unpublishes flows. It should not leak FastAPI or frontend concepts. |
 | Draft flow persistence | `FlowRepository` and `flow_tables.py` | `backend/src/eneo/flows/infrastructure/flow_repo.py:529`, `backend/src/eneo/database/tables/flow_tables.py:141` | `FlowRepository.update` owns optimistic draft revision writes. |
-| Package import lifecycle | `FlowPackageImportRepository`, `FlowPackageImports`, and central audit | `backend/src/eneo/flow_packages/infrastructure/flow_package_import_repo.py`, `backend/src/eneo/database/tables/flow_tables.py`, `backend/src/eneo/flow_packages/api/flow_package_router.py` | Successful operational rows follow their Flow; failed rows follow their space. Central audit owns post-deletion provenance under its configured authorization and retention policy. |
+| Package import lifecycle | `FlowPackageEnvelope`, import planner/resolver, `FlowPackageInstallService`, `FlowPackageImportRepository`, and central audit | `backend/src/eneo/flow_packages/`, `backend/src/eneo/database/tables/flow_tables.py` | One reviewed checksum, target state, and mapping decision reaches mutation; successful operational rows follow their Flow, failed rows follow their space, and central audit owns post-deletion provenance. |
 | Published snapshot shape | `published_definition.py` | `backend/src/eneo/flows/published_definition.py:46`, `backend/src/eneo/flows/published_definition.py:112`, `backend/src/eneo/flows/published_definition.py:131`, `backend/src/eneo/flows/published_definition.py:191` | Build and parse published definitions here. Do not read mutable draft steps during runtime. |
 | Runtime consumer contract | `FlowRunContractService` | `backend/src/eneo/flows/flow_run_contract_service.py:60`, `backend/src/eneo/flows/flow_run_contract_service.py:66` | The run contract owns final output, form fields, runtime step inputs, upload limits, review requirements, and template readiness. |
 | Runtime-safe Flow projection | `FlowAssembler.to_runtime_public` | `backend/src/eneo/flows/api/flow_assembler.py:77` | Adds paths for run contract, uploads, run creation, review, evidence, and artifacts. |
@@ -125,6 +125,21 @@ The authoring path edits draft state and then freezes a runtime snapshot:
    `backend/src/eneo/flows/published_definition.py:191`.
 
 ### Package import ownership
+
+The package domain is the strict portable-file boundary. It parses the bounded
+archive, rejects unknown nested fields, verifies the checksum and declared
+resource references, and validates the deterministic Flow graph before a plan
+can be shown. The import planner then resolves that immutable package against
+current destination resources and exposes the package checksum and the
+load-bearing target state that the importer reviewed.
+
+Installation accepts one resolved package command containing that reviewed
+checksum, target state, and exact local-resource mappings. It revalidates
+mutable destination state before `FlowAuthoringCommandService` creates the
+draft; it never silently chooses a replacement model or knowledge source. An
+exact retry of a successful checksum, target-state, and mapping decision returns
+the existing imported draft. Failed materialization still rolls back the draft
+and records a typed terminal failure for the trusted package.
 
 `FlowPackageImportRepository` stores operational terminal outcomes, not a
 permanent registry. A successful import row cascades with its Flow; a failed

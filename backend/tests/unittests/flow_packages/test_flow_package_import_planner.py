@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -12,9 +13,14 @@ from eneo.flow_packages.application.flow_package_import_planner import (
 )
 from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
 from eneo.flow_packages.domain.flow_package_import_plan import (
     MAX_IMPORT_PLAN_SUGGESTIONS,
     FlowPackageDependencyResolutionEntry,
+    FlowPackageImportPlan,
     FlowPackageImportPlanStatus,
     FlowPackageLocalCandidate,
     FlowPackageModelCandidate,
@@ -39,6 +45,7 @@ from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -324,7 +331,10 @@ def test_planner_caps_and_orders_suggestions_deterministically() -> None:
 
 def test_planner_accepts_zero_requirements_as_publishable() -> None:
     plan = build_flow_package_import_plan(
-        _envelope(requirements=[]),
+        _envelope(
+            requirements=[],
+            assistant=AssistantSpec(instructions="No package resources."),
+        ),
         candidates=FlowPackageImportPlannerCandidates(),
     )
 
@@ -338,6 +348,104 @@ def test_planner_accepts_zero_requirements_as_publishable() -> None:
     assert plan.package_summary.requirements_by_kind == {}
     assert plan.dependency_resolutions == []
     assert plan.can_publish_after_import is True
+
+
+def test_envelope_rejects_draft_ref_not_declared_by_requirements() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(
+            instructions="Use selected model.",
+            model_ref="model.undeclared",
+        ),
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        envelope.validated_resource_contract()
+
+    assert (
+        exc_info.value.code
+        is FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT
+    )
+    assert exc_info.value.context == {
+        "slot_ref": "model.undeclared",
+        "unknown_count": 1,
+    }
+
+
+def test_planner_rejects_invalid_flow_graph_before_install() -> None:
+    resource_free_assistant = AssistantSpec(instructions="No package resources.")
+    envelope = _envelope(
+        requirements=[],
+        assistant=resource_free_assistant,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="also-extract",
+                name="Extract",
+                assistant_spec=resource_free_assistant,
+                input_source=InputSource.PREVIOUS_STEP,
+            )
+        ],
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        build_flow_package_import_plan(
+            envelope,
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context["reason"] == "duplicate_step_name"
+
+
+def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="No package resources."),
+    ).model_copy(
+        update={
+            "draft": FlowPackageFlowDraft(
+                schema_version=1,
+                spec=FlowDraftSpecCore(flow_name="Empty", steps=[]),
+            )
+        }
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        build_flow_package_import_plan(
+            envelope,
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {"reason": "no_executable_steps"}
+
+
+def test_planner_exposes_audio_target_state_and_blocks_missing_default_model() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="Transcribe audio."),
+        input_type=InputType.AUDIO,
+    )
+
+    blocked = build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+        default_transcription_model_id=None,
+    )
+    model_id = UUID("77777777-7777-4777-8777-777777777777")
+    ready = build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+        default_transcription_model_id=model_id,
+    )
+
+    assert blocked.target_state.audio_transcription_required is True
+    assert blocked.target_state.default_transcription_model_id is None
+    assert blocked.can_install_as_draft is False
+    assert blocked.can_publish_after_import is False
+    assert ready.target_state.audio_transcription_required is True
+    assert ready.target_state.default_transcription_model_id == model_id
+    assert ready.can_install_as_draft is True
 
 
 def test_planner_summary_counts_requirements_by_kind() -> None:
@@ -367,6 +475,23 @@ def test_planner_summary_counts_requirements_by_kind() -> None:
     assert plan.can_install_as_draft is False
 
 
+def test_import_plan_storage_projection_round_trips_without_computed_fields() -> None:
+    plan = build_flow_package_import_plan(
+        _envelope(
+            requirements=[],
+            assistant=AssistantSpec(instructions="No package resources."),
+        ),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    stored = plan.storage_json()
+    reparsed = FlowPackageImportPlan.model_validate_json(json.dumps(stored))
+
+    assert "can_install_as_draft" not in stored
+    assert "can_publish_after_import" not in stored
+    assert reparsed == plan
+
+
 def test_candidate_bucket_rejects_wrong_non_model_local_resource_kind() -> None:
     with pytest.raises(
         ValidationError,
@@ -386,19 +511,32 @@ def test_candidate_bucket_rejects_wrong_non_model_local_resource_kind() -> None:
 def _envelope(
     *,
     requirements: list[FlowPackageRequirementEntry],
+    assistant: AssistantSpec | None = None,
+    extra_steps: list[StepSpec] | None = None,
+    input_type: InputType = InputType.TEXT,
 ) -> FlowPackageEnvelope:
+    default_assistant = AssistantSpec(
+        instructions="Extract facts.",
+        model_ref=(
+            "model.structured"
+            if any(
+                isinstance(requirement, FlowPackageModelRequirement)
+                for requirement in requirements
+            )
+            else None
+        ),
+    )
     spec = FlowDraftSpecCore(
         flow_name="Demo",
         steps=[
             StepSpec(
                 plan_step_ref="extract",
                 name="Extract",
-                assistant_spec=AssistantSpec(
-                    instructions="Extract facts.",
-                    model_ref="model.structured",
-                ),
+                assistant_spec=assistant or default_assistant,
                 input_source=InputSource.FLOW_INPUT,
-            )
+                input_type=input_type,
+            ),
+            *(extra_steps or []),
         ],
     )
     return FlowPackageEnvelope(

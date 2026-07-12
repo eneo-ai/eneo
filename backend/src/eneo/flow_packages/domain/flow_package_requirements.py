@@ -11,6 +11,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from typing_extensions import TypedDict
 
 from eneo.flow_packages.domain.flow_package_checksum import json_object_from_model
 from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
@@ -26,6 +27,12 @@ class FlowPackageRequirementKind(StrEnum):
 class FlowPackageModelKind(StrEnum):
     COMPLETION_MODEL = "completion_model"
     TRANSCRIPTION_MODEL = "transcription_model"
+
+
+class FlowPackageResourceSlotRefJson(TypedDict):
+    kind: ResourceSlotKind
+    slot: str
+    label: str
 
 
 MAX_MODEL_MATCHING_IDENTITIES: Final[int] = 50
@@ -169,8 +176,11 @@ class FlowPackageRequirementBase(BaseModel):
     data_sensitivity: FlowPackageRequirementDataSensitivity | None = None
 
     @field_serializer("slot_ref")
-    def serialize_slot_ref(self, slot_ref: ResourceSlotRef) -> dict[str, str]:
-        return _serialize_slot_ref(slot_ref)
+    def serialize_slot_ref(
+        self,
+        slot_ref: ResourceSlotRef,
+    ) -> FlowPackageResourceSlotRefJson:
+        return serialize_flow_package_slot_ref(slot_ref)
 
     @field_validator("used_by_steps")
     @classmethod
@@ -278,9 +288,11 @@ def _require_slot_kind(slot_ref: ResourceSlotRef, expected: ResourceSlotKind) ->
         )
 
 
-def _serialize_slot_ref(slot_ref: ResourceSlotRef) -> dict[str, str]:
+def serialize_flow_package_slot_ref(
+    slot_ref: ResourceSlotRef,
+) -> FlowPackageResourceSlotRefJson:
     return {
-        "kind": slot_ref.kind.value,
+        "kind": slot_ref.kind,
         "label": slot_ref.label,
         "slot": slot_ref.slot,
     }

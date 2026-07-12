@@ -5762,7 +5762,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow Package Import Plan
-     * @description Upload a portable Flow package and preview how its model, knowledge, and unsupported template requirements resolve against one target space. The response is a side-effect-free setup checklist: it shows suggested local resources, unresolved required dependencies, sensitivity guidance, and whether the imported draft could be published after the mappings are confirmed.
+     * @description Upload a portable Flow package and preview how its model, knowledge, and unsupported template requirements resolve against one target space. The response is a side-effect-free setup checklist: it shows suggested local resources, unresolved required dependencies, sensitivity guidance, the reviewed package checksum and load-bearing target state, and whether the imported draft could be published after the mappings are confirmed.
      */
     post: operations["create_flow_package_import_plan"];
     delete?: never;
@@ -5782,7 +5782,7 @@ export interface paths {
     put?: never;
     /**
      * Import Flow Package As Draft
-     * @description Import a portable Flow package into a target space as a new draft Flow. The request uses typed selected resource bindings so API consumers can map package model and knowledge slots to local resources without parsing free-form JSON strings. The endpoint does not publish the Flow, does not persist package bytes, and records a compact import provenance row for successful draft creation or trusted-package install failures.
+     * @description Import a portable Flow package into a target space as a new draft Flow. The request repeats the reviewed package checksum and target state and uses typed selected resource bindings, so a changed package or destination fails before mutation instead of choosing a replacement resource. An exact retry of a successful checksum, target-state, and mapping decision returns the existing imported draft. The endpoint does not publish the Flow, does not persist package bytes, and records a compact import provenance row for successful draft creation or trusted-package install failures.
      */
     post: operations["import_flow_package_as_draft"];
     delete?: never;
@@ -14294,6 +14294,7 @@ export interface components {
       /** Content Checksum */
       content_checksum: string;
       package_summary: components["schemas"]["FlowPackageImportPlanSummary"];
+      target_state: components["schemas"]["FlowPackageImportTargetState"];
       /** Dependency Resolutions */
       dependency_resolutions?: (
         | components["schemas"]["FlowPackageModelDependencyResolution"]
@@ -14393,6 +14394,11 @@ export interface components {
     /**
      * FlowPackageImportRequest
      * @example {
+     *       "expected_content_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+     *       "expected_target_state": {
+     *         "audio_transcription_required": true,
+     *         "default_transcription_model_id": "22222222-2222-4222-8222-222222222222"
+     *       },
      *       "package_base64": "UEsDBBQAAAAIA...",
      *       "selected_bindings": [
      *         {
@@ -14413,6 +14419,13 @@ export interface components {
        * @description Base64-encoded `.eneo-flowpkg` bytes. The decoded package must stay within the Flow package upload byte cap.
        */
       package_base64: string;
+      /**
+       * Expected Content Checksum
+       * @description Checksum from the reviewed import plan. Import fails before mutation when the submitted package does not match that plan.
+       */
+      expected_content_checksum: string;
+      /** @description Load-bearing target-space state from the reviewed plan. A changed audio transcription default requires a fresh plan. */
+      expected_target_state: components["schemas"]["FlowPackageImportTargetState"];
       /**
        * Selected Bindings
        * @description Local target resources selected for package dependency slots. Knowledge slots may target `collection`, `website`, or `integration_knowledge` resources.
@@ -14447,11 +14460,22 @@ export interface components {
        */
       label: string;
     };
+    /** FlowPackageImportTargetState */
+    FlowPackageImportTargetState: {
+      /**
+       * Audio Transcription Required
+       * @description Whether the portable package needs the target space's default transcription model.
+       */
+      audio_transcription_required: boolean;
+      /**
+       * Default Transcription Model Id
+       * @description Target-space transcription default captured by the plan, or null when unavailable or not applicable.
+       */
+      default_transcription_model_id: string | null;
+    };
     /** FlowPackageKnowledgeDependencyResolution */
     FlowPackageKnowledgeDependencyResolution: {
-      slot_ref: {
-        [key: string]: string;
-      };
+      slot_ref: components["schemas"]["FlowPackageResourceSlotRefJson"];
       /** Required */
       required: boolean;
       /** Used By Steps */
@@ -14533,9 +14557,7 @@ export interface components {
     };
     /** FlowPackageModelDependencyResolution */
     FlowPackageModelDependencyResolution: {
-      slot_ref: {
-        [key: string]: string;
-      };
+      slot_ref: components["schemas"]["FlowPackageResourceSlotRefJson"];
       /** Required */
       required: boolean;
       /** Used By Steps */
@@ -14646,11 +14668,17 @@ export interface components {
      * @enum {string}
      */
     FlowPackageRequirementKind: "model" | "knowledge" | "template_asset";
+    /** FlowPackageResourceSlotRefJson */
+    FlowPackageResourceSlotRefJson: {
+      kind: components["schemas"]["ResourceSlotKind"];
+      /** Slot */
+      slot: string;
+      /** Label */
+      label: string;
+    };
     /** FlowPackageTemplateAssetDependencyResolution */
     FlowPackageTemplateAssetDependencyResolution: {
-      slot_ref: {
-        [key: string]: string;
-      };
+      slot_ref: components["schemas"]["FlowPackageResourceSlotRefJson"];
       /** Required */
       required: boolean;
       /** Used By Steps */

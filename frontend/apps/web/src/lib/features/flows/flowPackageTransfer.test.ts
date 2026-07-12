@@ -33,6 +33,7 @@ describe("flowPackageTransfer", () => {
     expect(readiness).toMatchObject({
       canImport: true,
       canPublishAfterImport: true,
+      requiresTranscriptionModel: false,
       selectedRequiredCount: 1,
       totalRequiredCount: 1,
       unresolvedRequiredCount: 0
@@ -130,6 +131,28 @@ describe("flowPackageTransfer", () => {
       totalRequiredCount: 0,
       unresolvedRequiredCount: 0,
       blockingReasons: []
+    });
+  });
+
+  it("blocks import when an audio package has no target transcription model", () => {
+    const plan = flowPackageImportPlan({
+      can_install_as_draft: false,
+      can_publish_after_import: false,
+      target_state: {
+        audio_transcription_required: true,
+        default_transcription_model_id: null
+      }
+    });
+
+    const readiness = getFlowPackageImportReadiness(
+      plan,
+      createInitialFlowPackageImportSelections(plan)
+    );
+
+    expect(readiness).toMatchObject({
+      canImport: false,
+      canPublishAfterImport: false,
+      requiresTranscriptionModel: true
     });
   });
 
@@ -356,6 +379,10 @@ function flowPackageImportPlan(
         model: 1,
         knowledge: 1
       }
+    },
+    target_state: {
+      audio_transcription_required: false,
+      default_transcription_model_id: null
     },
     can_publish_after_import: true,
     can_install_as_draft: true,

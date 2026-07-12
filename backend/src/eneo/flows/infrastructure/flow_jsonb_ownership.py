@@ -247,11 +247,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         envelope_name="FlowPackageImportPlan",
         owner_symbols=("FlowPackageImportPlan",),
         storage_category=FlowJsonbStorageCategory.IMPORT_STATE,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
         corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
         rationale=(
-            "Import plans are portable package decisions with their own schema "
-            "version and are applied atomically, not queried field-by-field."
+            "Import plans are owner-validated auditable snapshots of the exact "
+            "portable package and destination decision; computed API fields are "
+            "not persisted and the JSON is not a replay contract."
         ),
     ),
     _owner(

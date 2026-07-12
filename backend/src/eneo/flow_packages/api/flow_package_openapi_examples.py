@@ -42,6 +42,14 @@ PACKAGE_VALIDATION_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
             "code": "flow_package_manifest_invalid",
         },
     },
+    "provenance_invalid": {
+        "summary": "Package provenance schema is invalid",
+        "value": {
+            "message": "Flow package subdocument is invalid.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.PROVENANCE_INVALID.value,
+        },
+    },
     "schema_unsupported": {
         "summary": "Package schema version is unsupported",
         "value": {
@@ -70,6 +78,72 @@ PACKAGE_VALIDATION_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
             "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
             "code": "flow_package_local_resource_refs_not_portable",
             "context": {"resource_ref": "11111111-1111-4111-8111-111111111111"},
+        },
+    },
+    "undeclared_draft_ref": {
+        "summary": "Draft references an undeclared package slot",
+        "value": {
+            "message": "Flow package draft references a resource slot that is not declared.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT.value,
+            "context": {"slot_ref": "model.missing", "unknown_count": 1},
+        },
+    },
+    "requirements_usage_invalid": {
+        "summary": "Package requirement does not match its draft use",
+        "value": {
+            "message": "Flow package resource requirements do not match draft usage.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.REQUIREMENTS_INVALID.value,
+            "context": {
+                "slot_ref": "model.speech",
+                "reason": "assistant_model_requires_completion_model",
+            },
+        },
+    },
+    "portable_step_identity_invalid": {
+        "summary": "Package step identity is not portable",
+        "value": {
+            "message": "Flow package step identity is not portable.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.FLOW_DRAFT_INVALID.value,
+            "context": {
+                "plan_step_ref": "extract",
+                "reason": "existing_step_ref_not_portable",
+            },
+        },
+    },
+    "mcp_unsupported": {
+        "summary": "Package contains unsupported MCP resources",
+        "value": {
+            "message": "Flow packages do not support MCP fields or resources.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED.value,
+            "context": {},
+        },
+    },
+    "template_use_unsupported": {
+        "summary": "Package draft uses an unsupported template asset",
+        "value": {
+            "message": (
+                "Flow package import does not support template asset installation yet."
+            ),
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED.value,
+            "context": {"plan_step_ref": "render-report"},
+        },
+    },
+}
+
+FLOW_PACKAGE_IMPORT_PLAN_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
+    **PACKAGE_VALIDATION_ERROR_EXAMPLES,
+    "flow_draft_invalid": {
+        "summary": "Portable Flow graph is invalid",
+        "value": {
+            "message": "Flow package draft does not satisfy Flow graph rules.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.FLOW_DRAFT_INVALID.value,
+            "context": {"reason": "duplicate_step_name"},
         },
     },
 }
@@ -144,7 +218,19 @@ FLOW_PACKAGE_TOO_LARGE_EXAMPLE: dict[str, dict[str, object]] = {
 }
 
 FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
-    **PACKAGE_VALIDATION_ERROR_EXAMPLES,
+    **FLOW_PACKAGE_IMPORT_PLAN_BAD_REQUEST_EXAMPLES,
+    "reviewed_plan_checksum_mismatch": {
+        "summary": "Package no longer matches the reviewed import plan",
+        "value": {
+            "message": "Flow package does not match the reviewed import plan.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowPackageErrorCode.CHECKSUM_MISMATCH.value,
+            "context": {
+                "expected_content_checksum": "0" * 64,
+                "current_content_checksum": "1" * 64,
+            },
+        },
+    },
     "base64_invalid": {
         "summary": "Package payload is not valid base64",
         "value": {
@@ -160,15 +246,6 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
             "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
             "code": FlowPackageErrorCode.IMPORT_UNKNOWN_RESOURCE_BINDING.value,
             "context": {"slot_ref": "model.unknown", "unknown_count": 1},
-        },
-    },
-    "undeclared_draft_ref": {
-        "summary": "Draft references an undeclared package slot",
-        "value": {
-            "message": "Flow package draft references a resource slot that is not declared.",
-            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
-            "code": FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT.value,
-            "context": {"slot_ref": "model.missing", "unknown_count": 1},
         },
     },
     "missing_binding": {
@@ -208,13 +285,20 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
             },
         },
     },
-    "mcp_unsupported": {
-        "summary": "Package contains unsupported MCP resources",
+    "target_transcription_model_changed": {
+        "summary": "Target transcription default changed after planning",
         "value": {
-            "message": "Flow packages do not support MCP fields or resources.",
+            "message": (
+                "The target space transcription model changed after import planning."
+            ),
             "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
-            "code": FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED.value,
-            "context": {},
+            "code": FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value,
+            "context": {
+                "slot_ref": "model.flow_input_transcription",
+                "local_kind": "transcription_model",
+                "local_id": "11111111-1111-4111-8111-111111111111",
+                "current_local_id": "22222222-2222-4222-8222-222222222222",
+            },
         },
     },
     "template_assets_unsupported": {
@@ -237,14 +321,6 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
                 "slot_ref": "model.structured",
                 "expected_kind": "model",
             },
-        },
-    },
-    "transcription_model_required": {
-        "summary": "Audio package requires a target-space transcription model",
-        "value": {
-            "message": "A transcription model must be selected when using audio input steps.",
-            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
-            "code": "transcription_model_required",
         },
     },
 }

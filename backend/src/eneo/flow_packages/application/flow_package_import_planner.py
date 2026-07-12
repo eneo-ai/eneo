@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from typing import Final, TypeVar, assert_never
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -10,12 +11,17 @@ from eneo.flow_packages.application.flow_package_model_matching import (
     resolve_model_requirement,
 )
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
 from eneo.flow_packages.domain.flow_package_import_plan import (
     MAX_IMPORT_PLAN_SUGGESTIONS,
     FlowPackageDependencyResolutionEntry,
     FlowPackageImportPlan,
     FlowPackageImportPlanStatus,
     FlowPackageImportPlanSummary,
+    FlowPackageImportTargetState,
     FlowPackageKnowledgeDependencyResolution,
     FlowPackageLocalCandidate,
     FlowPackageModelCandidate,
@@ -28,10 +34,26 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementKind,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flows.application.flow_draft_materialization import (
+    build_flow_draft_metadata_json,
+)
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.flow_authoring_spec import InputSource, InputType
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
 from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     local_resource_kinds_for_slot_kind,
 )
+from eneo.flows.flow_validators import (
+    collect_step_graph_issues,
+    validate_form_schema,
+)
+from eneo.flows.flow_validators_form import (
+    validate_variable_alias_collisions_for_step_graph,
+)
+from eneo.main.exceptions import BadRequestException
 
 CandidateT = TypeVar("CandidateT", bound=FlowPackageLocalCandidate)
 
@@ -97,7 +119,17 @@ def build_flow_package_import_plan(
     envelope: FlowPackageEnvelope,
     *,
     candidates: FlowPackageImportPlannerCandidates,
+    default_transcription_model_id: UUID | None = None,
 ) -> FlowPackageImportPlan:
+    envelope.validated_resource_contract()
+    audio_transcription_required = _audio_transcription_required(envelope)
+    effective_transcription_model_id = (
+        default_transcription_model_id if audio_transcription_required else None
+    )
+    _validate_installable_draft(
+        envelope,
+        default_transcription_model_id=effective_transcription_model_id,
+    )
     dependency_resolutions = [
         _resolve_requirement(requirement, candidates)
         for requirement in envelope.requirements.requirements
@@ -109,7 +141,72 @@ def build_flow_package_import_plan(
         payload_schema=envelope.manifest.payload_schema,
         content_checksum=envelope.content_checksum,
         package_summary=_package_summary(envelope),
+        target_state=FlowPackageImportTargetState(
+            audio_transcription_required=audio_transcription_required,
+            default_transcription_model_id=effective_transcription_model_id,
+        ),
         dependency_resolutions=dependency_resolutions,
+    )
+
+
+def _validate_installable_draft(
+    envelope: FlowPackageEnvelope,
+    *,
+    default_transcription_model_id: UUID | None,
+) -> None:
+    if not envelope.spec.steps:
+        raise _invalid_flow_draft(
+            "no_executable_steps",
+            "Flow package draft must contain at least one step.",
+        )
+    steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+    metadata_json = build_flow_draft_metadata_json(
+        spec=envelope.spec,
+        current_flow=None,
+        default_transcription_model_id=default_transcription_model_id,
+    )
+    try:
+        validate_form_schema(metadata_json)
+        validate_variable_alias_collisions_for_step_graph(
+            steps=steps,
+            metadata_json=metadata_json,
+        )
+    except BadRequestException as exc:
+        raise _invalid_flow_draft(exc.code, str(exc)) from exc
+
+    issue = next(
+        (
+            candidate
+            for candidate in collect_step_graph_issues(
+                steps,
+                metadata_json=metadata_json,
+                require_complete_template_fill_config=True,
+            )
+            if candidate.code
+            is not FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED
+        ),
+        None,
+    )
+    if issue is not None:
+        raise _invalid_flow_draft(issue.code.value, issue.message)
+
+
+def _audio_transcription_required(envelope: FlowPackageEnvelope) -> bool:
+    return any(
+        step.input_source is InputSource.FLOW_INPUT
+        and step.input_type is InputType.AUDIO
+        for step in envelope.spec.steps
+    )
+
+
+def _invalid_flow_draft(
+    reason: str | None,
+    message: str,
+) -> FlowPackageValidationError:
+    return FlowPackageValidationError(
+        code=FlowPackageErrorCode.FLOW_DRAFT_INVALID,
+        message=message or "Flow package draft is not installable.",
+        context={"reason": reason or "invalid_flow_graph"},
     )
 
 

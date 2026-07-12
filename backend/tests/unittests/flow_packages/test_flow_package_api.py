@@ -32,6 +32,7 @@ from eneo.flow_packages.application.flow_package_import_planner import (
 )
 from eneo.flow_packages.application.flow_package_install_service import (
     FlowPackageInstallResult,
+    ResolvedFlowPackageInstallCommand,
 )
 from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
@@ -47,6 +48,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
 )
 from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlanStatus,
+    FlowPackageImportTargetState,
     FlowPackageModelCandidate,
     FlowPackageModelDependencyResolution,
 )
@@ -238,7 +240,7 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
             == "API key space scope does not match target package import space."
         )
         return FlowSpaceAccessContext(
-            space=cast(Space, object()),
+            space=cast(Space, _FakeSpace(default_transcription_model_id=None)),
             actor=cast(SpaceActor, _FakeSpaceActor(can_edit=True)),
             scope_filter=ScopeFilter(),
         )
@@ -270,6 +272,29 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
     assert isinstance(resolution, FlowPackageModelDependencyResolution)
     assert resolution.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
     assert resolution.suggestions == [candidate]
+
+
+@pytest.mark.anyio
+async def test_create_flow_package_import_plan_adapts_invalid_graph_to_typed_400(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=None),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await flow_package_router.create_flow_package_import_plan(
+            id=target_space_id,
+            package_file=_upload(_package_bytes(spec=_invalid_graph_spec())),
+            request=_request(),
+            container=cast(Container, _FakeContainer()),
+        )
+
+    assert exc_info.value.code == FlowPackageErrorCode.FLOW_DRAFT_INVALID.value
+    assert exc_info.value.context == {"reason": "duplicate_step_name"}
 
 
 @pytest.mark.anyio
@@ -380,7 +405,14 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
     import_id = UUID("99999999-9999-4999-8999-999999999999")
     flow_id = UUID("88888888-8888-4888-8888-888888888888")
-    selected_binding = _selected_model_binding()
+    canonical_binding = _selected_model_binding()
+    selected_binding = canonical_binding.model_copy(
+        update={
+            "slot_ref": canonical_binding.slot_ref.model_copy(
+                update={"label": "Client supplied label"}
+            )
+        }
+    )
     captured_repo_selection: list[FlowPackageImportSelection] = []
     captured_install_bindings: list[tuple[LocalResourceBinding, ...]] = []
 
@@ -394,15 +426,12 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
         async def install_as_draft(
             self,
             *,
-            envelope: object,
+            command: ResolvedFlowPackageInstallCommand,
             flow_service: object,
             space_id: UUID,
-            selected_bindings: tuple[LocalResourceBinding, ...],
-            candidates: FlowPackageImportPlannerCandidates,
-            default_transcription_model_id: UUID | None = None,
         ) -> FlowPackageInstallResult:
-            captured_install_bindings.append(selected_bindings)
-            assert default_transcription_model_id is not None
+            captured_install_bindings.append(command.selection.bindings_tuple())
+            assert command.default_transcription_model_id is None
             return FlowPackageInstallResult(
                 flow_id=flow_id,
                 flow_name="Demo",
@@ -418,6 +447,12 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     class FakeImportRepo:
         def __init__(self, session: object) -> None:
             assert isinstance(session, _FakeSession)
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            assert kwargs["space_id"] == target_space_id
+
+        async def get_successful_retry(self, **kwargs: object) -> None:
+            return None
 
         async def create_draft_created(
             self,
@@ -455,8 +490,8 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     assert response.import_id == import_id
     assert response.flow_id == flow_id
     assert response.resource_bindings_count == 1
-    assert captured_install_bindings == [(selected_binding,)]
-    assert captured_repo_selection[0].selected_bindings == [selected_binding]
+    assert captured_install_bindings == [(canonical_binding,)]
+    assert captured_repo_selection[0].selected_bindings == [canonical_binding]
     assert audit_service.events[0]["action"] is ActionType.FLOW_PACKAGE_DRAFT_INSTALLED
     assert audit_service.events[0]["entity_id"] == flow_id
     assert audit_service.persisted_events == audit_service.events
@@ -477,8 +512,16 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
 ) -> None:
     target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
     import_id = UUID("99999999-9999-4999-8999-999999999999")
-    selected_binding = _selected_model_binding()
+    canonical_binding = _selected_model_binding()
+    selected_binding = canonical_binding.model_copy(
+        update={
+            "slot_ref": canonical_binding.slot_ref.model_copy(
+                update={"label": "Client supplied label"}
+            )
+        }
+    )
     captured_failure: list[FlowPackageImportFailurePayload] = []
+    captured_selection: list[FlowPackageImportSelection] = []
     fake_session = _FakeSession()
 
     _patch_import_access(
@@ -499,13 +542,21 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
         def __init__(self, session: object) -> None:
             assert session is fake_session
 
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def get_successful_retry(self, **kwargs: object) -> None:
+            return None
+
         async def create_failed(
             self,
             *,
             failure: FlowPackageImportFailurePayload,
+            selection: FlowPackageImportSelection,
             **kwargs: object,
         ) -> UUID:
             captured_failure.append(failure)
+            captured_selection.append(selection)
             assert kwargs["space_id"] == target_space_id
             return import_id
 
@@ -531,7 +582,73 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
     assert payload["message"] == "Selected model is unavailable."
     assert payload["context"] == {"slot_ref": "model.structured"}
     assert captured_failure[0].code == payload["code"]
+    assert captured_selection[0].selected_bindings == [canonical_binding]
     assert fake_session.nested_transactions == ["rolled_back"]
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_rejects_archive_changed_after_plan_before_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    selected_binding = _selected_model_binding()
+    captured_failure: list[FlowPackageImportFailurePayload] = []
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=None),
+    )
+
+    class FailInstallService:
+        async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
+            raise AssertionError("checksum mismatch must fail before install")
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def create_failed(
+            self,
+            *,
+            failure: FlowPackageImportFailurePayload,
+            **kwargs: object,
+        ) -> UUID:
+            captured_failure.append(failure)
+            return UUID("99999999-9999-4999-8999-999999999999")
+
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageInstallService",
+        FailInstallService,
+    )
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageImportRepository",
+        FakeImportRepo,
+    )
+    import_request = _import_request(selected_binding).model_copy(
+        update={"expected_content_checksum": "f" * 64}
+    )
+
+    response = await flow_package_router.import_flow_package_as_draft(
+        id=target_space_id,
+        import_request=import_request,
+        request=_request(),
+        container=cast(Container, _FakeContainer(session=_FakeSession())),
+    )
+
+    assert isinstance(response, flow_package_router.JSONResponse)
+    payload = json.loads(response.body)
+    assert payload["code"] == FlowPackageErrorCode.CHECKSUM_MISMATCH.value
+    assert captured_failure[0].context == {
+        "expected_content_checksum": "f" * 64,
+        "current_content_checksum": reader.read_flow_package(
+            _package_bytes()
+        ).content_checksum,
+    }
 
 
 @pytest.mark.anyio
@@ -558,6 +675,11 @@ async def test_import_flow_package_rejects_invalid_base64_without_import_record(
             id=target_space_id,
             import_request=FlowPackageImportRequest(
                 package_base64="not base64!",
+                expected_content_checksum="0" * 64,
+                expected_target_state=FlowPackageImportTargetState(
+                    audio_transcription_required=False,
+                    default_transcription_model_id=None,
+                ),
                 selected_bindings=[],
             ),
             request=cast(Request, object()),
@@ -568,7 +690,56 @@ async def test_import_flow_package_rejects_invalid_base64_without_import_record(
 
 
 @pytest.mark.anyio
-async def test_import_flow_package_audio_requires_target_transcription_model(
+async def test_import_flow_package_adapts_invalid_graph_without_import_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    package_bytes = _package_bytes(spec=_invalid_graph_spec())
+    envelope = reader.read_flow_package(package_bytes)
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=None),
+    )
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def create_failed(self, **kwargs: object) -> UUID:
+            raise AssertionError("invalid plan has no complete plan receipt to store")
+
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageImportRepository",
+        FakeImportRepo,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await flow_package_router.import_flow_package_as_draft(
+            id=target_space_id,
+            import_request=FlowPackageImportRequest(
+                package_base64=base64.b64encode(package_bytes).decode("ascii"),
+                expected_content_checksum=envelope.content_checksum,
+                expected_target_state=FlowPackageImportTargetState(
+                    audio_transcription_required=False,
+                    default_transcription_model_id=None,
+                ),
+                selected_bindings=[],
+            ),
+            request=_request(),
+            container=cast(Container, _FakeContainer(session=_FakeSession())),
+        )
+
+    assert exc_info.value.code == FlowPackageErrorCode.FLOW_DRAFT_INVALID.value
+    assert exc_info.value.context == {"reason": "duplicate_step_name"}
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_reports_missing_audio_default_before_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -588,6 +759,9 @@ async def test_import_flow_package_audio_requires_target_transcription_model(
     class FakeImportRepo:
         def __init__(self, session: object) -> None:
             pass
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
 
         async def create_failed(
             self,
@@ -609,6 +783,13 @@ async def test_import_flow_package_audio_requires_target_transcription_model(
         id=target_space_id,
         import_request=FlowPackageImportRequest(
             package_base64=_package_base64(spec=_audio_spec()),
+            expected_content_checksum=reader.read_flow_package(
+                _package_bytes(spec=_audio_spec())
+            ).content_checksum,
+            expected_target_state=FlowPackageImportTargetState(
+                audio_transcription_required=True,
+                default_transcription_model_id=None,
+            ),
             selected_bindings=[],
         ),
         request=_request(),
@@ -617,8 +798,90 @@ async def test_import_flow_package_audio_requires_target_transcription_model(
 
     assert isinstance(response, flow_package_router.JSONResponse)
     payload = json.loads(response.body)
-    assert payload["code"] == "transcription_model_required"
-    assert captured_failure[0].code == "transcription_model_required"
+    assert (
+        payload["code"] == FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value
+    )
+    assert captured_failure[0].context == {
+        "slot_ref": "model.flow_input_transcription",
+        "local_kind": "transcription_model",
+        "local_id": "unselected",
+    }
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_rejects_changed_audio_default_before_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    planned_model_id = UUID("11111111-1111-4111-8111-111111111111")
+    current_model_id = UUID("22222222-2222-4222-8222-222222222222")
+    captured_failure: list[FlowPackageImportFailurePayload] = []
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=planned_model_id),
+        refreshed_space=_FakeSpace(default_transcription_model_id=current_model_id),
+    )
+
+    class FailInstallService:
+        async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
+            raise AssertionError("changed target state must fail before install")
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            pass
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def create_failed(
+            self,
+            *,
+            failure: FlowPackageImportFailurePayload,
+            **kwargs: object,
+        ) -> UUID:
+            captured_failure.append(failure)
+            return UUID("99999999-9999-4999-8999-999999999999")
+
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageInstallService",
+        FailInstallService,
+    )
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageImportRepository",
+        FakeImportRepo,
+    )
+    package_bytes = _package_bytes(spec=_audio_spec())
+    envelope = reader.read_flow_package(package_bytes)
+
+    response = await flow_package_router.import_flow_package_as_draft(
+        id=target_space_id,
+        import_request=FlowPackageImportRequest(
+            package_base64=base64.b64encode(package_bytes).decode("ascii"),
+            expected_content_checksum=envelope.content_checksum,
+            expected_target_state=FlowPackageImportTargetState(
+                audio_transcription_required=True,
+                default_transcription_model_id=planned_model_id,
+            ),
+            selected_bindings=[],
+        ),
+        request=_request(),
+        container=cast(Container, _FakeContainer(session=_FakeSession())),
+    )
+
+    assert isinstance(response, flow_package_router.JSONResponse)
+    payload = json.loads(response.body)
+    assert (
+        payload["code"] == FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value
+    )
+    assert captured_failure[0].context == {
+        "slot_ref": "model.flow_input_transcription",
+        "local_kind": "transcription_model",
+        "local_id": str(planned_model_id),
+        "current_local_id": str(current_model_id),
+    }
 
 
 def test_validation_response_forbids_extra_fields() -> None:
@@ -629,6 +892,14 @@ def test_validation_response_forbids_extra_fields() -> None:
 
     with pytest.raises(ValidationError):
         FlowPackageValidationPublic.model_validate(payload)
+
+
+def test_import_request_requires_reviewed_plan_identity() -> None:
+    with pytest.raises(ValidationError):
+        FlowPackageImportRequest(
+            package_base64=_package_base64(),
+            selected_bindings=[],
+        )
 
 
 def test_export_request_reuses_manifest_validation_rules() -> None:
@@ -644,6 +915,11 @@ def test_import_request_accepts_json_resource_bindings_at_http_boundary() -> Non
     import_request = FlowPackageImportRequest.model_validate(
         {
             "package_base64": "UEsDBBQAAAAIA...",
+            "expected_content_checksum": "0" * 64,
+            "expected_target_state": {
+                "audio_transcription_required": False,
+                "default_transcription_model_id": None,
+            },
             "selected_bindings": [
                 {
                     "slot_ref": {
@@ -982,7 +1258,11 @@ def _patch_import_access(
     *,
     target_space_id: UUID,
     space: _FakeSpace,
+    refreshed_space: _FakeSpace | None = None,
 ) -> None:
+    resolved_spaces = (space, refreshed_space or space)
+    resolve_count = 0
+
     async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
@@ -992,10 +1272,13 @@ def _patch_import_access(
         scope_mismatch_message: str = "",
         allow_service_key_principals: bool = False,
     ) -> FlowSpaceAccessContext:
+        nonlocal resolve_count
         assert space_id == target_space_id
         assert required_access is FlowApiAction.EDIT
+        resolved_space = resolved_spaces[min(resolve_count, 1)]
+        resolve_count += 1
         return FlowSpaceAccessContext(
-            space=cast(Space, space),
+            space=cast(Space, resolved_space),
             actor=cast(SpaceActor, _FakeSpaceActor(can_edit=True)),
             scope_filter=ScopeFilter(),
         )
@@ -1153,6 +1436,27 @@ def _audio_spec() -> FlowDraftSpecCore:
     )
 
 
+def _invalid_graph_spec() -> FlowDraftSpecCore:
+    assistant = AssistantSpec(instructions="No package resources.")
+    return FlowDraftSpecCore(
+        flow_name="Invalid graph",
+        steps=[
+            StepSpec(
+                plan_step_ref="extract",
+                name="Extract",
+                assistant_spec=assistant,
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            StepSpec(
+                plan_step_ref="also-extract",
+                name="Extract",
+                assistant_spec=assistant,
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+
 def _selected_model_binding() -> LocalResourceBinding:
     return LocalResourceBinding(
         slot_ref=ResourceSlotRef(
@@ -1168,9 +1472,16 @@ def _selected_model_binding() -> LocalResourceBinding:
 def _import_request(
     selected_binding: LocalResourceBinding,
 ) -> FlowPackageImportRequest:
+    package_bytes = _package_bytes()
+    envelope = reader.read_flow_package(package_bytes)
     return FlowPackageImportRequest.model_validate(
         {
-            "package_base64": _package_base64(),
+            "package_base64": base64.b64encode(package_bytes).decode("ascii"),
+            "expected_content_checksum": envelope.content_checksum,
+            "expected_target_state": {
+                "audio_transcription_required": False,
+                "default_transcription_model_id": None,
+            },
             "selected_bindings": [
                 selected_binding.model_dump(
                     mode="json",

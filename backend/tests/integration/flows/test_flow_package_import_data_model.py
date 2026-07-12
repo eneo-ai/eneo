@@ -16,11 +16,12 @@ import sqlalchemy as sa
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.flow_tables import (
@@ -50,6 +51,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
 from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlan,
     FlowPackageImportPlanSummary,
+    FlowPackageImportTargetState,
     FlowPackageModelCandidate,
 )
 from eneo.flow_packages.domain.flow_package_import_record import (
@@ -71,6 +73,9 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
 )
 from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
+from eneo.flow_packages.infrastructure.flow_package_import_repo import (
+    FlowPackageImportRepository,
+)
 from eneo.flows.api.flow_access_context import (
     FlowAccessContext,
     FlowSpaceAccessContext,
@@ -233,6 +238,10 @@ def _import_plan() -> FlowPackageImportPlan:
             requirements_count=0,
             requirements_by_kind={},
         ),
+        target_state=FlowPackageImportTargetState(
+            audio_transcription_required=False,
+            default_transcription_model_id=None,
+        ),
     )
 
 
@@ -275,6 +284,25 @@ def _package_base64() -> str:
 
 def _package_base64_with_model_requirement() -> str:
     return base64.b64encode(_package_bytes(require_model=True)).decode("ascii")
+
+
+def _import_request(
+    package_base64: str,
+    *,
+    selected_bindings: list[JsonObject] | None = None,
+) -> FlowPackageImportRequest:
+    envelope = reader.read_flow_package(base64.b64decode(package_base64))
+    return FlowPackageImportRequest.model_validate(
+        {
+            "package_base64": package_base64,
+            "expected_content_checksum": envelope.content_checksum,
+            "expected_target_state": {
+                "audio_transcription_required": False,
+                "default_transcription_model_id": None,
+            },
+            "selected_bindings": selected_bindings or [],
+        }
+    )
 
 
 def _package_bytes(*, require_model: bool = False) -> bytes:
@@ -462,8 +490,8 @@ async def test_flow_package_import_failed_record_survives_draft_savepoint_rollba
 
         response = await flow_package_router.import_flow_package_as_draft(
             id=space_id,
-            import_request=FlowPackageImportRequest(
-                package_base64=_package_base64_with_model_requirement(),
+            import_request=_import_request(
+                _package_base64_with_model_requirement(),
                 selected_bindings=[_model_binding_request(missing_model_id)],
             ),
             request=_request(),
@@ -541,12 +569,10 @@ async def test_flow_package_import_route_persists_failed_install_record(
             FakeInstallService,
         )
 
+        import_request = _import_request(_package_base64())
         response = await flow_package_router.import_flow_package_as_draft(
             id=space.id,
-            import_request=FlowPackageImportRequest(
-                package_base64=_package_base64(),
-                selected_bindings=[],
-            ),
+            import_request=import_request,
             request=_request(),
             container=cast(Container, container),
         )
@@ -604,12 +630,10 @@ async def test_successful_flow_package_import_cascades_with_created_flow(
                 models=[_model_candidate(model.id)]
             ),
         )
+        import_request = _import_request(_package_base64())
         response = await flow_package_router.import_flow_package_as_draft(
             id=space.id,
-            import_request=FlowPackageImportRequest(
-                package_base64=_package_base64(),
-                selected_bindings=[],
-            ),
+            import_request=import_request,
             request=_request(),
             container=cast(Container, container),
         )
@@ -651,6 +675,30 @@ async def test_successful_flow_package_import_cascades_with_created_flow(
         assert import_record.selected_mappings_json == {
             "selected_bindings": [],
         }
+        retry_repo = FlowPackageImportRepository(session)
+        matching_retry = await retry_repo.get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=response.content_checksum,
+            target_state=FlowPackageImportTargetState(
+                audio_transcription_required=False,
+                default_transcription_model_id=None,
+            ),
+            selection=FlowPackageImportSelection(),
+        )
+        changed_target_retry = await retry_repo.get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=response.content_checksum,
+            target_state=FlowPackageImportTargetState(
+                audio_transcription_required=True,
+                default_transcription_model_id=uuid4(),
+            ),
+            selection=FlowPackageImportSelection(),
+        )
+        assert matching_retry is not None
+        assert matching_retry.flow_id == response.flow_id
+        assert changed_target_retry is None
         assert audit_record is not None
         assert audit_record.log_metadata["extra"] == {
             "import_id": str(response.import_id),
@@ -661,6 +709,51 @@ async def test_successful_flow_package_import_cascades_with_created_flow(
             "steps_created": response.steps_created,
             "resource_bindings_count": response.resource_bindings_count,
         }
+
+        replay = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=import_request,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+        flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+        )
+        import_count = await session.scalar(
+            sa.select(sa.func.count(FlowPackageImports.id)).where(
+                FlowPackageImports.space_id == space.id
+            )
+        )
+        audit_count = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value,
+                AuditLogTable.entity_id == response.flow_id,
+            )
+        )
+
+        assert replay == response
+        assert flow_count == 1
+        assert import_count == 1
+        assert audit_count == 1
+
+        imported_flow.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+        assert (
+            await retry_repo.get_successful_retry(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                content_checksum=response.content_checksum,
+                target_state=FlowPackageImportTargetState(
+                    audio_transcription_required=False,
+                    default_transcription_model_id=None,
+                ),
+                selection=FlowPackageImportSelection(),
+            )
+            is None
+        )
+        imported_flow.deleted_at = None
+        await session.flush()
 
         await session.execute(
             sa.delete(FlowSteps).where(FlowSteps.flow_id == response.flow_id)
@@ -681,6 +774,111 @@ async def test_successful_flow_package_import_cascades_with_created_flow(
         )
         assert remaining_import is None
         assert remaining_audit is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_import_lock_serializes_successful_retry_visibility(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-lock-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package lock {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=_import_request(_package_base64()),
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        assert not isinstance(response, JSONResponse)
+        tenant_id = admin_user.tenant_id
+        user_id = admin_user.id
+        space_id = space.id
+        flow_id = response.flow_id
+
+    content_checksum = "2" * 64
+    import_plan = _import_plan().model_copy(
+        update={"content_checksum": content_checksum}
+    )
+    selection = FlowPackageImportSelection()
+
+    async with (
+        sessionmanager.session() as first_session,
+        sessionmanager.session() as second_session,
+    ):
+        await first_session.begin()
+        await second_session.begin()
+        first_repo = FlowPackageImportRepository(first_session)
+        second_repo = FlowPackageImportRepository(second_session)
+
+        await first_repo.acquire_space_import_lock(
+            tenant_id=tenant_id,
+            space_id=space_id,
+        )
+        first_import_id = await first_repo.create_draft_created(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            flow_id=flow_id,
+            created_by_user_id=user_id,
+            package_id=import_plan.package_id,
+            package_version=import_plan.package_version,
+            content_checksum=content_checksum,
+            import_plan=import_plan,
+            selection=selection,
+        )
+
+        await second_session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
+        with pytest.raises(DBAPIError):
+            await second_repo.acquire_space_import_lock(
+                tenant_id=tenant_id,
+                space_id=space_id,
+            )
+        await second_session.rollback()
+
+        await first_session.commit()
+        await second_session.begin()
+        await second_repo.acquire_space_import_lock(
+            tenant_id=tenant_id,
+            space_id=space_id,
+        )
+        visible_retry = await second_repo.get_successful_retry(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            content_checksum=content_checksum,
+            target_state=import_plan.target_state,
+            selection=selection,
+        )
+
+        assert visible_retry is not None
+        assert visible_retry.import_id == first_import_id
+        assert visible_retry.flow_id == flow_id
+        await second_session.rollback()
 
 
 @pytest.mark.asyncio
@@ -802,8 +1000,8 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
         exported_package_base64 = base64.b64encode(export_response.body).decode("ascii")
         second_import = await flow_package_router.import_flow_package_as_draft(
             id=space.id,
-            import_request=FlowPackageImportRequest(
-                package_base64=exported_package_base64,
+            import_request=_import_request(
+                exported_package_base64,
                 selected_bindings=[_model_binding_request(model.id)],
             ),
             request=_request(),

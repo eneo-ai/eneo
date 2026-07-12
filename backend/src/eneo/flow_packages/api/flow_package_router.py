@@ -43,6 +43,8 @@ from eneo.flow_packages.application.flow_package_import_planner import (
 from eneo.flow_packages.application.flow_package_install_service import (
     FlowPackageInstallResult,
     FlowPackageInstallService,
+    ResolvedFlowPackageInstallCommand,
+    resolve_flow_package_install_command,
 )
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_errors import (
@@ -58,6 +60,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
 )
 from eneo.flow_packages.infrastructure.flow_package_import_repo import (
     FlowPackageImportRepository,
+    SuccessfulFlowPackageImport,
 )
 from eneo.flow_packages.infrastructure.flow_package_zip_reader import (
     MAX_PACKAGE_UPLOAD_BYTES,
@@ -71,7 +74,6 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction, require_flow_action
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, InputSource, InputType
 from eneo.flows.flow_resource_bindings import FlowResourceBindingResolutionError
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -161,13 +163,14 @@ async def validate_flow_package(
         "Upload a portable Flow package and preview how its model, knowledge, "
         "and unsupported template requirements resolve against one target space. The "
         "response is a side-effect-free setup checklist: it shows suggested local "
-        "resources, unresolved required dependencies, sensitivity guidance, and whether "
-        "the imported draft could be published after the mappings are confirmed."
+        "resources, unresolved required dependencies, sensitivity guidance, the "
+        "reviewed package checksum and load-bearing target state, and whether the "
+        "imported draft could be published after the mappings are confirmed."
     ),
     responses={
         400: error_response(
             description=("The uploaded package is not a valid portable Flow package."),
-            examples=openapi_examples.PACKAGE_VALIDATION_ERROR_EXAMPLES,
+            examples=openapi_examples.FLOW_PACKAGE_IMPORT_PLAN_BAD_REQUEST_EXAMPLES,
         ),
         403: error_response(
             description=(
@@ -215,7 +218,16 @@ async def create_flow_package_import_plan(
     candidates = build_flow_package_import_planner_candidates_for_space(
         access_context.space
     )
-    return build_flow_package_import_plan(envelope, candidates=candidates)
+    try:
+        return build_flow_package_import_plan(
+            envelope,
+            candidates=candidates,
+            default_transcription_model_id=(
+                _target_space_default_transcription_model_id(access_context.space)
+            ),
+        )
+    except FlowPackageValidationError as exc:
+        raise _bad_flow_package_request(exc) from exc
 
 
 @space_router.post(
@@ -226,11 +238,14 @@ async def create_flow_package_import_plan(
     summary="Import Flow Package As Draft",
     description=(
         "Import a portable Flow package into a target space as a new draft Flow. "
-        "The request uses typed selected resource bindings so API consumers can map "
-        "package model and knowledge slots to local resources without parsing "
-        "free-form JSON strings. The endpoint does not publish the Flow, does not "
-        "persist package bytes, and records a compact import provenance row for "
-        "successful draft creation or trusted-package install failures."
+        "The request repeats the reviewed package checksum and target state and uses "
+        "typed selected resource bindings, so a changed package or destination fails "
+        "before mutation instead of choosing a replacement resource. An exact retry "
+        "of a successful checksum, target-state, and mapping decision returns the "
+        "existing imported "
+        "draft. The endpoint does not publish the Flow, does not persist package bytes, "
+        "and records a compact import provenance row for successful draft creation or "
+        "trusted-package install failures."
     ),
     responses={
         400: error_response(
@@ -283,30 +298,70 @@ async def import_flow_package_as_draft(
         )
 
     envelope = _read_flow_package_base64(import_request.package_base64)
-    candidates = build_flow_package_import_planner_candidates_for_space(
-        access_context.space
-    )
-    import_plan = build_flow_package_import_plan(envelope, candidates=candidates)
-    selection = import_request.import_selection()
     session = cast(AsyncSession, container.session())
     import_repo = FlowPackageImportRepository(session)
-    default_transcription_model_id = _target_space_default_transcription_model_id(
-        access_context.space
+    user = container.user()
+    await import_repo.acquire_space_import_lock(
+        tenant_id=user.tenant_id,
+        space_id=id,
     )
-
+    current_access_context = await flow_access_context.resolve_space_access_context(
+        request,
+        container,
+        space_id=id,
+        required_access=FlowApiAction.EDIT,
+        scope_mismatch_message=(openapi_examples.IMPORT_PLAN_SCOPE_MISMATCH_MESSAGE),
+    )
+    if not current_access_context.actor.can_edit_flows():
+        raise UnauthorizedException(
+            "You do not have permission to edit flows in this space.",
+            code="insufficient_space_permission",
+            context={"auth_layer": "space_membership"},
+        )
+    candidates = build_flow_package_import_planner_candidates_for_space(
+        current_access_context.space
+    )
+    default_transcription_model_id = _target_space_default_transcription_model_id(
+        current_access_context.space
+    )
     try:
-        _require_audio_transcription_model(
-            spec=envelope.spec,
+        import_plan = build_flow_package_import_plan(
+            envelope,
+            candidates=candidates,
             default_transcription_model_id=default_transcription_model_id,
         )
+    except FlowPackageValidationError as exc:
+        raise _bad_flow_package_request(exc) from exc
+    selection = import_request.import_selection()
+    failure_selection = selection
+
+    try:
+        command = resolve_flow_package_install_command(
+            envelope=envelope,
+            import_plan=import_plan,
+            expected_content_checksum=import_request.expected_content_checksum,
+            expected_target_state=import_request.expected_target_state,
+            selection=selection,
+            candidates=candidates,
+        )
+        failure_selection = command.selection
+        existing = await import_repo.get_successful_retry(
+            tenant_id=user.tenant_id,
+            space_id=id,
+            content_checksum=command.import_plan.content_checksum,
+            target_state=command.import_plan.target_state,
+            selection=command.selection,
+        )
+        if existing is not None:
+            return _flow_package_import_public(
+                import_id=existing.import_id,
+                result=_replayed_install_result(command, existing),
+            )
         async with session.begin_nested():
             install_result = await FlowPackageInstallService().install_as_draft(
-                envelope=envelope,
+                command=command,
                 flow_service=container.flow_service(),
                 space_id=id,
-                selected_bindings=selection.bindings_tuple(),
-                candidates=candidates,
-                default_transcription_model_id=default_transcription_model_id,
             )
     except (
         BadRequestException,
@@ -320,7 +375,7 @@ async def import_flow_package_as_draft(
             space_id=id,
             envelope=envelope,
             import_plan=import_plan,
-            selection=selection,
+            selection=failure_selection,
             failure=failure,
         )
         return _flow_package_import_error_response(failure, request)
@@ -331,7 +386,7 @@ async def import_flow_package_as_draft(
         space_id=id,
         result=install_result,
         import_plan=import_plan,
-        selection=selection,
+        selection=command.selection,
     )
     await _log_flow_package_import(
         container=container,
@@ -339,15 +394,39 @@ async def import_flow_package_as_draft(
         result=install_result,
         import_id=import_id,
     )
+    return _flow_package_import_public(import_id=import_id, result=install_result)
+
+
+def _flow_package_import_public(
+    *,
+    import_id: UUID,
+    result: FlowPackageInstallResult,
+) -> FlowPackageImportPublic:
     return FlowPackageImportPublic(
         import_id=import_id,
-        flow_id=install_result.flow_id,
-        flow_name=install_result.flow_name,
-        package_id=install_result.package_id,
-        package_version=install_result.package_version,
-        content_checksum=install_result.content_checksum,
-        steps_created=install_result.steps_created,
-        resource_bindings_count=install_result.resource_bindings_count,
+        flow_id=result.flow_id,
+        flow_name=result.flow_name,
+        package_id=result.package_id,
+        package_version=result.package_version,
+        content_checksum=result.content_checksum,
+        steps_created=result.steps_created,
+        resource_bindings_count=result.resource_bindings_count,
+    )
+
+
+def _replayed_install_result(
+    command: ResolvedFlowPackageInstallCommand,
+    existing: SuccessfulFlowPackageImport,
+) -> FlowPackageInstallResult:
+    envelope = command.envelope
+    return FlowPackageInstallResult(
+        flow_id=existing.flow_id,
+        flow_name=existing.flow_name,
+        package_id=envelope.manifest.package_id,
+        package_version=envelope.manifest.package_version,
+        content_checksum=envelope.content_checksum,
+        steps_created=len(command.install_spec.steps),
+        resource_bindings_count=len(command.selection.selected_bindings),
     )
 
 
@@ -476,11 +555,7 @@ def _read_flow_package_bytes(package_bytes: bytes) -> FlowPackageEnvelope:
     try:
         return read_flow_package(package_bytes)
     except FlowPackageValidationError as exc:
-        raise BadRequestException(
-            str(exc),
-            code=exc.code.value,
-            context=dict(exc.context),
-        ) from exc
+        raise _bad_flow_package_request(exc) from exc
 
 
 def _target_space_default_transcription_model_id(space: Space) -> UUID | None:
@@ -488,26 +563,11 @@ def _target_space_default_transcription_model_id(space: Space) -> UUID | None:
     return None if model is None else model.id
 
 
-def _require_audio_transcription_model(
-    *,
-    spec: FlowDraftSpecCore,
-    default_transcription_model_id: UUID | None,
-) -> None:
-    if default_transcription_model_id is not None:
-        return
-    if not _spec_uses_audio_flow_input(spec):
-        return
-    raise BadRequestException(
-        "A transcription model must be selected when using audio input steps.",
-        code="transcription_model_required",
-    )
-
-
-def _spec_uses_audio_flow_input(spec: FlowDraftSpecCore) -> bool:
-    return any(
-        step.input_source == InputSource.FLOW_INPUT
-        and step.input_type == InputType.AUDIO
-        for step in spec.steps
+def _bad_flow_package_request(exc: FlowPackageValidationError) -> BadRequestException:
+    return BadRequestException(
+        str(exc),
+        code=exc.code.value,
+        context=dict(exc.context),
     )
 
 

@@ -28,6 +28,7 @@ export type FlowPackageImportBlockingReason = {
 export type FlowPackageImportReadiness = {
   canImport: boolean;
   canPublishAfterImport: boolean;
+  requiresTranscriptionModel: boolean;
   blockingReasons: FlowPackageImportBlockingReason[];
   selectedRequiredCount: number;
   totalRequiredCount: number;
@@ -78,12 +79,6 @@ export type FlowPackageExportErrorCode = (typeof FLOW_PACKAGE_EXPORT_ERROR_CODES
 type FlowPackageErrorCode = FlowPackageImportErrorCode | FlowPackageExportErrorCode;
 type FlowPackageErrorMessageKey = `flow_package_error_${FlowPackageErrorCode}`;
 
-const RESOURCE_SLOT_KINDS = new Set<FlowPackageResourceSlotRef["kind"]>([
-  "model",
-  "knowledge",
-  "template_asset"
-]);
-
 export function getFlowPackageSlotKey(
   slotRef: Pick<FlowPackageResourceSlotRef, "kind" | "slot">
 ): string {
@@ -93,13 +88,13 @@ export function getFlowPackageSlotKey(
 export function getFlowPackageResolutionSlotKey(
   resolution: FlowPackageDependencyResolution
 ): string {
-  return getFlowPackageSlotKey(normalizeFlowPackageSlotRef(resolution.slot_ref));
+  return getFlowPackageSlotKey(resolution.slot_ref);
 }
 
 export function getFlowPackageResolutionSlotLabel(
   resolution: FlowPackageDependencyResolution
 ): string {
-  return normalizeFlowPackageSlotRef(resolution.slot_ref).label;
+  return resolution.slot_ref.label;
 }
 
 export function getFlowPackageCandidateKey(candidate: FlowPackageCandidate): string {
@@ -111,7 +106,7 @@ export function createInitialFlowPackageImportSelections(
 ): FlowPackageImportSelectionState {
   const selections: FlowPackageImportSelectionState = {};
   for (const resolution of plan.dependency_resolutions ?? []) {
-    const slotRef = normalizeFlowPackageSlotRef(resolution.slot_ref);
+    const slotRef = resolution.slot_ref;
     selections[getFlowPackageSlotKey(slotRef)] = getRecommendedCandidateKey(resolution);
   }
   return selections;
@@ -125,7 +120,7 @@ export function buildSelectedFlowPackageResourceBindings(
   const bindings: FlowPackageImportResourceBinding[] = [];
 
   for (const resolution of plan.dependency_resolutions ?? []) {
-    const slotRef = normalizeFlowPackageSlotRef(resolution.slot_ref);
+    const slotRef = resolution.slot_ref;
     const slotKey = getFlowPackageSlotKey(slotRef);
     const selectedCandidateKey = selections[slotKey];
     if (!selectedCandidateKey) continue;
@@ -155,9 +150,12 @@ export function getFlowPackageImportReadiness(
   let totalRequiredCount = 0;
   let unresolvedRequiredCount = 0;
   let unsupportedTemplateAssetCount = 0;
+  const requiresTranscriptionModel =
+    plan.target_state.audio_transcription_required &&
+    plan.target_state.default_transcription_model_id === null;
 
   for (const resolution of plan.dependency_resolutions ?? []) {
-    const slotRef = normalizeFlowPackageSlotRef(resolution.slot_ref);
+    const slotRef = resolution.slot_ref;
     const slotKey = getFlowPackageSlotKey(slotRef);
     const selectedCandidateKey = selections[slotKey];
     const selectedCandidate = selectedCandidateKey
@@ -220,10 +218,11 @@ export function getFlowPackageImportReadiness(
   }
 
   // Backend owns the package plan; the browser owns readiness after the user changes selections.
-  const canImport = blockingReasons.length === 0;
+  const canImport = !requiresTranscriptionModel && blockingReasons.length === 0;
   return {
     canImport,
     canPublishAfterImport: canImport && plan.can_publish_after_import,
+    requiresTranscriptionModel,
     blockingReasons,
     selectedRequiredCount,
     totalRequiredCount,
@@ -299,7 +298,7 @@ function indexFlowPackageCandidatesBySlot(
   const candidatesBySlot = new Map<string, Map<string, FlowPackageCandidate>>();
 
   for (const resolution of plan.dependency_resolutions ?? []) {
-    const slotRef = normalizeFlowPackageSlotRef(resolution.slot_ref);
+    const slotRef = resolution.slot_ref;
     const slotKey = getFlowPackageSlotKey(slotRef);
     const candidates = new Map<string, FlowPackageCandidate>();
     for (const candidate of resolution.suggestions) {
@@ -315,30 +314,6 @@ function getRecommendedCandidateKey(resolution: FlowPackageDependencyResolution)
   if (!resolution.auto_select_allowed) return null;
   const [firstCandidate] = resolution.suggestions;
   return firstCandidate ? getFlowPackageCandidateKey(firstCandidate) : null;
-}
-
-function normalizeFlowPackageSlotRef(
-  slotRef: FlowPackageDependencyResolution["slot_ref"]
-): FlowPackageResourceSlotRef {
-  const candidate = slotRef as Partial<FlowPackageResourceSlotRef>;
-  if (
-    typeof candidate.kind !== "string" ||
-    !isResourceSlotKind(candidate.kind) ||
-    typeof candidate.slot !== "string" ||
-    typeof candidate.label !== "string"
-  ) {
-    throw new Error("Flow package import plan contains an invalid resource slot.");
-  }
-
-  return {
-    kind: candidate.kind,
-    slot: candidate.slot,
-    label: candidate.label
-  };
-}
-
-function isResourceSlotKind(value: string): value is FlowPackageResourceSlotRef["kind"] {
-  return RESOURCE_SLOT_KINDS.has(value as FlowPackageResourceSlotRef["kind"]);
 }
 
 function flowPackageErrorMessageKey(code: FlowPackageErrorCode): FlowPackageErrorMessageKey {

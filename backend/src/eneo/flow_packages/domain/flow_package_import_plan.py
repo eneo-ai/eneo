@@ -24,7 +24,9 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelMatchingPreferences,
     FlowPackageRequirementDataSensitivity,
     FlowPackageRequirementKind,
+    FlowPackageResourceSlotRefJson,
     FlowPackageTemplateAssetGuidance,
+    serialize_flow_package_slot_ref,
 )
 from eneo.flows.flow_resource_bindings import LocalResourceKind, ResourceSlotRef
 
@@ -141,8 +143,11 @@ class FlowPackageDependencyResolutionBase(
     total_candidate_count: int = Field(ge=0)
 
     @field_serializer("slot_ref")
-    def serialize_slot_ref(self, slot_ref: ResourceSlotRef) -> dict[str, str]:
-        return _serialize_slot_ref(slot_ref)
+    def serialize_slot_ref(
+        self,
+        slot_ref: ResourceSlotRef,
+    ) -> FlowPackageResourceSlotRefJson:
+        return serialize_flow_package_slot_ref(slot_ref)
 
 
 class FlowPackageModelDependencyResolution(
@@ -230,12 +235,39 @@ class FlowPackageImportPlanSummary(BaseModel):
     requirements_by_kind: dict[FlowPackageRequirementKind, int]
 
 
-def _serialize_slot_ref(slot_ref: ResourceSlotRef) -> dict[str, str]:
-    return {
-        "kind": slot_ref.kind.value,
-        "label": slot_ref.label,
-        "slot": slot_ref.slot,
-    }
+class FlowPackageImportTargetState(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    audio_transcription_required: bool = Field(
+        description=(
+            "Whether the portable package needs the target space's default "
+            "transcription model."
+        )
+    )
+    default_transcription_model_id: UUID | None = Field(
+        description=(
+            "Target-space transcription default captured by the plan, or null when "
+            "unavailable or not applicable."
+        )
+    )
+
+    @model_validator(mode="after")
+    def validate_relevant_default(self) -> "FlowPackageImportTargetState":
+        if (
+            not self.audio_transcription_required
+            and self.default_transcription_model_id is not None
+        ):
+            raise ValueError(
+                "Non-audio package plans must not carry a transcription model."
+            )
+        return self
+
+    @property
+    def install_blocks(self) -> bool:
+        return (
+            self.audio_transcription_required
+            and self.default_transcription_model_id is None
+        )
 
 
 def _local_kind_for_model_kind(model_kind: FlowPackageModelKind) -> LocalResourceKind:
@@ -261,6 +293,7 @@ class FlowPackageImportPlan(BaseModel):
     payload_schema: str
     content_checksum: str
     package_summary: FlowPackageImportPlanSummary
+    target_state: FlowPackageImportTargetState
     dependency_resolutions: list[FlowPackageDependencyResolutionEntry] = Field(
         default_factory=_empty_dependency_resolutions
     )
@@ -268,13 +301,19 @@ class FlowPackageImportPlan(BaseModel):
     @computed_field
     @property
     def can_install_as_draft(self) -> bool:
-        return all(
+        return not self.target_state.install_blocks and all(
             not resolution.install_blocks for resolution in self.dependency_resolutions
         )
 
     @computed_field
     @property
     def can_publish_after_import(self) -> bool:
-        return all(
+        return not self.target_state.install_blocks and all(
             not resolution.publish_blocks for resolution in self.dependency_resolutions
+        )
+
+    def storage_json(self) -> dict[str, object]:
+        return self.model_dump(
+            mode="json",
+            exclude={"can_install_as_draft", "can_publish_after_import"},
         )

@@ -153,6 +153,11 @@ describe("flows templates endpoint", () => {
     await flows.packages.importDraft({
       spaceId: "space-1",
       packageBase64: "UEsDBAo=",
+      expectedContentChecksum: "0".repeat(64),
+      expectedTargetState: {
+        audio_transcription_required: false,
+        default_transcription_model_id: null
+      },
       selectedBindings
     });
 
@@ -164,6 +169,11 @@ describe("flows templates endpoint", () => {
       requestBody: {
         "application/json": {
           package_base64: "UEsDBAo=",
+          expected_content_checksum: "0".repeat(64),
+          expected_target_state: {
+            audio_transcription_required: false,
+            default_transcription_model_id: null
+          },
           selected_bindings: selectedBindings
         }
       }
