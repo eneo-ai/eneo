@@ -49,29 +49,17 @@ existing owners described in the
 
 #### Implemented state and mandatory launch hardening
 
-The current implementation exports and imports Flow packages only. It still
-uses `.eneo-flowpkg`, the Flow-specific media type
-`application/vnd.eneo.flow-package+zip`, and the manifest field
-`package_kind`. Although the manifest enum also names `assistant` and `app`, no
-Assistant/App payload, planner, installer, receipt, or marketplace exists. The
-current ZIP reader also applies the exact Flow entry allowlist before parsing
-the manifest. These are current-state facts, not the target contract.
+The implementation exports and imports Flow packages only. The external
+container is `.eneopkg` with media type `application/vnd.eneo.package+zip`, and
+the manifest's required `kind` field is the sole closed discriminator. The
+reader validates structural ZIP safety and `manifest.json`, parses the manifest,
+rejects Assistant or App kinds at the typed Flow endpoint, and only then applies
+the exact Flow entry profile and payload parser. No Flow-specific extension,
+`package_kind` alias, Assistant/App payload, planner, installer, receipt, or
+marketplace exists.
 
-Two focused slices remain mandatory for the current package lane:
+One focused slice remains mandatory for the current package lane:
 
-- **WI-13B — Finalize the kind-neutral Eneo container contract.** Replace the
-  external extension and media type with `.eneopkg` and
-  `application/vnd.eneo.package+zip`. Rename the manifest discriminator to
-  `kind`, whose closed values are `flow`, `assistant`, and `app`; do not retain
-  `package_kind` or the Flow-specific extension as compatibility aliases.
-  Reorder reads into structural ZIP safety, manifest parsing, kind/profile
-  exact-entry validation, and the kind-specific payload parser. A Flow endpoint
-  rejects a structurally valid Assistant/App manifest with its typed
-  unsupported-kind error before applying the Flow profile. A missing
-  `manifest.json` remains a structural missing-entry error. Update every API,
-  OpenAPI, generated-client, frontend, locale, documentation, example, and test
-  surface that exposes the file contract. This slice implements no
-  Assistant/App payload or install behavior.
 - **WI-13C — Enforce package-import tenant/space/Flow integrity.** Harden the
   successful-retry query so the joined Flow must match the receipt's tenant and
   space. After a read-only mismatch preflight and an explicit decision on

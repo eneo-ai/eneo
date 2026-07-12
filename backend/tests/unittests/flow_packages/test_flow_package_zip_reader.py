@@ -22,6 +22,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageZipUnsafeReason,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifest,
 )
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
@@ -417,31 +418,78 @@ def test_duplicate_entry_is_rejected() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("kind", "payload_schema", "payload_path"),
+    [
+        ("assistant", "eneo.assistant_package.v1", "assistant.draft.json"),
+        ("app", "eneo.app_package.v1", "app.draft.json"),
+    ],
+)
+def test_non_flow_manifest_is_rejected_before_flow_profile_entries(
+    kind: str,
+    payload_schema: str,
+    payload_path: str,
+) -> None:
+    package_bytes = _zip_raw(
+        {
+            reader.MANIFEST_PATH: json.dumps(
+                {
+                    "schema_version": 1,
+                    "package_id": f"se.demo.{kind}",
+                    "package_version": "1.0.0",
+                    "name": f"Demo {kind}",
+                    "kind": kind,
+                    "payload_schema": payload_schema,
+                    "content_checksum": "0" * 64,
+                }
+            ).encode(),
+            payload_path: b"{}",
+        }
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(package_bytes)
+
+    assert exc_info.value.code is FlowPackageErrorCode.PACKAGE_KIND_UNSUPPORTED
+    assert exc_info.value.context == {
+        "kind": kind,
+        "payload_schema": payload_schema,
+    }
+
+
 def test_unknown_entry_is_rejected() -> None:
+    docs = _package_docs()
+    docs.pop(reader.PROVENANCE_PATH)
+    docs["unknown.json"] = {}
+
     assert_zip_unsafe(
-        _zip_raw(
-            {
-                "unknown.json": b"{}",
-                reader.MANIFEST_PATH: b"{}",
-                reader.FLOW_DRAFT_PATH: b"{}",
-                reader.REQUIREMENTS_PATH: b"{}",
-            }
-        ),
+        _zip_docs(docs),
         FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
     )
 
 
 def test_missing_required_entry_is_rejected() -> None:
+    docs = _package_docs()
+    docs.pop(reader.PROVENANCE_PATH)
+
     assert_zip_unsafe(
-        _zip_raw(
-            {
-                reader.MANIFEST_PATH: b"{}",
-                reader.FLOW_DRAFT_PATH: b"{}",
-                reader.REQUIREMENTS_PATH: b"{}",
-            }
-        ),
+        _zip_docs(docs),
         FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
     )
+
+
+def test_missing_manifest_remains_a_structural_missing_entry_error() -> None:
+    docs = _package_docs()
+    docs.pop(reader.MANIFEST_PATH)
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.ZIP_UNSAFE
+    assert exc_info.value.context == {
+        "reason": FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY.value,
+        "path": reader.MANIFEST_PATH,
+    }
 
 
 def test_compressed_entry_too_large_is_rejected(
@@ -539,6 +587,7 @@ def _package_docs(
     )
     manifest = FlowPackageManifest(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id="se.demo.flow",
         package_version="1.0.0",
         name=manifest_name,

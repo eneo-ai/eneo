@@ -142,7 +142,7 @@ class FlowPackageEnvelope(BaseModel):
         requirements: FlowPackageRequirementSet,
         provenance: FlowPackageProvenance,
     ) -> "FlowPackageEnvelope":
-        _require_flow_payload(manifest)
+        require_flow_package_manifest(manifest)
         hashes = _calculate_hashes(
             manifest_metadata=manifest,
             draft=draft,
@@ -171,7 +171,7 @@ class FlowPackageEnvelope(BaseModel):
         requirements: FlowPackageRequirementSet,
         provenance: FlowPackageProvenance,
     ) -> "FlowPackageEnvelope":
-        _require_flow_payload(manifest_metadata)
+        require_flow_package_manifest(manifest_metadata)
         hashes = _calculate_hashes(
             manifest_metadata=manifest_metadata,
             draft=draft,
@@ -239,9 +239,9 @@ def _calculate_hashes(
     )
 
 
-def _require_flow_payload(manifest: FlowPackageManifestMetadata) -> None:
+def require_flow_package_manifest(manifest: FlowPackageManifestMetadata) -> None:
     if (
-        manifest.package_kind is EneoPackageKind.FLOW
+        manifest.kind is EneoPackageKind.FLOW
         and manifest.payload_schema == FLOW_PACKAGE_PAYLOAD_SCHEMA
     ):
         return
@@ -249,7 +249,7 @@ def _require_flow_payload(manifest: FlowPackageManifestMetadata) -> None:
         code=FlowPackageErrorCode.PACKAGE_KIND_UNSUPPORTED,
         message="This package reader only supports flow package payloads.",
         context={
-            "package_kind": manifest.package_kind.value,
+            "kind": manifest.kind.value,
             "payload_schema": manifest.payload_schema,
         },
     )

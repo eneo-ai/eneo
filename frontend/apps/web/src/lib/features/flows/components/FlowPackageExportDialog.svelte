@@ -93,7 +93,7 @@
         name: trimmedName,
         description: packageDescription.trim()
       });
-      downloadFlowPackageFile(response, "flow-package.eneo-flowpkg");
+      downloadFlowPackageFile(response, "flow-package.eneopkg");
       toast.success(m.flow_package_export_success());
       open = false;
     } catch (error) {

@@ -31,6 +31,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifestMetadata,
 )
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
@@ -779,6 +780,7 @@ def _envelope(
     return FlowPackageEnvelope.build_for_export(
         manifest_metadata=FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.import",
             package_version="1.0.0",
             name="Imported Flow",

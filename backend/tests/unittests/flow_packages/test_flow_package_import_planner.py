@@ -27,7 +27,10 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageModelDependencyResolution,
     FlowPackageModelMatchIssue,
 )
-from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
+from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
+    FlowPackageManifest,
+)
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
@@ -339,7 +342,7 @@ def test_planner_accepts_zero_requirements_as_publishable() -> None:
     )
 
     assert plan.package_summary.name == "Demo"
-    assert plan.package_kind == "flow"
+    assert plan.kind == "flow"
     assert plan.payload_schema == "eneo.flow_package.v1"
     assert plan.package_summary.description == ""
     assert plan.package_summary.spec_hash == "0" * 64
@@ -542,6 +545,7 @@ def _envelope(
     return FlowPackageEnvelope(
         manifest=FlowPackageManifest(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version="1.0.0",
             name="Demo",

@@ -13,6 +13,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifestMetadata,
     FlowPackageManifestMetadataFields,
 )
@@ -63,6 +64,7 @@ class FlowPackageExportRequest(FlowPackageManifestMetadataFields):
     def to_manifest_metadata(self) -> FlowPackageManifestMetadata:
         return FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id=self.package_id,
             package_version=self.package_version,
             name=self.name,
@@ -78,7 +80,7 @@ class FlowPackageValidationPublic(BaseModel):
             "example": {
                 "package_id": "se.demo.case-report",
                 "package_version": "1.0.0",
-                "package_kind": "flow",
+                "kind": "flow",
                 "payload_schema": "eneo.flow_package.v1",
                 "name": "Case Report",
                 "description": "Creates a structured case report from approved local material.",
@@ -100,7 +102,7 @@ class FlowPackageValidationPublic(BaseModel):
     package_version: str = Field(
         description="Publisher-assigned package version from the package manifest."
     )
-    package_kind: str = Field(
+    kind: EneoPackageKind = Field(
         description="Generic package kind. Flow package import accepts only `flow` payloads."
     )
     payload_schema: str = Field(
@@ -137,7 +139,7 @@ class FlowPackageValidationPublic(BaseModel):
         return cls(
             package_id=envelope.manifest.package_id,
             package_version=envelope.manifest.package_version,
-            package_kind=envelope.manifest.package_kind.value,
+            kind=envelope.manifest.kind,
             payload_schema=envelope.manifest.payload_schema,
             name=envelope.manifest.name,
             description=envelope.manifest.description,
@@ -239,7 +241,7 @@ class FlowPackageImportRequest(BaseModel):
 
     package_base64: str = Field(
         description=(
-            "Base64-encoded `.eneo-flowpkg` bytes. The decoded package must stay "
+            "Base64-encoded `.eneopkg` bytes. The decoded package must stay "
             "within the Flow package upload byte cap."
         )
     )

@@ -83,14 +83,14 @@ class FlowPackageManifestMetadataFields(BaseModel):
 
 class FlowPackageManifestMetadata(FlowPackageManifestMetadataFields):
     schema_version: Literal[1]
-    package_kind: EneoPackageKind = EneoPackageKind.FLOW
+    kind: EneoPackageKind
     payload_schema: str = FLOW_PACKAGE_PAYLOAD_SCHEMA
 
     def canonical_hash_input(self) -> JsonObject:
         return {
             "description": self.description,
             "name": self.name,
-            "package_kind": self.package_kind.value,
+            "kind": self.kind.value,
             "package_id": self.package_id,
             "package_version": self.package_version,
             "payload_schema": self.payload_schema,
@@ -104,7 +104,7 @@ class FlowPackageManifestMetadata(FlowPackageManifestMetadataFields):
             package_version=self.package_version,
             name=self.name,
             description=self.description,
-            package_kind=self.package_kind,
+            kind=self.kind,
             payload_schema=self.payload_schema,
             content_checksum=content_checksum,
         )
@@ -126,10 +126,10 @@ class FlowPackageManifestMetadata(FlowPackageManifestMetadataFields):
 
     @model_validator(mode="after")
     def validate_payload_schema_for_kind(self) -> "FlowPackageManifestMetadata":
-        expected = PACKAGE_PAYLOAD_SCHEMA_BY_KIND[self.package_kind]
+        expected = PACKAGE_PAYLOAD_SCHEMA_BY_KIND[self.kind]
         if self.payload_schema != expected:
             raise ValueError(
-                f"{self.package_kind.value} packages must use payload schema {expected}."
+                f"{self.kind.value} packages must use payload schema {expected}."
             )
         return self
 
@@ -152,7 +152,7 @@ class FlowPackageManifest(FlowPackageManifestMetadata):
             package_version=self.package_version,
             name=self.name,
             description=self.description,
-            package_kind=self.package_kind,
+            kind=self.kind,
             payload_schema=self.payload_schema,
         ).canonical_hash_input()
 
@@ -171,4 +171,4 @@ def flow_package_filename(manifest: FlowPackageManifestMetadataFields) -> str:
             safe_stem[:_PACKAGE_FILENAME_STEM_MAX_LENGTH].rstrip("._-")
             or "flow-package"
         )
-    return f"{safe_stem}.eneo-flowpkg"
+    return f"{safe_stem}.eneopkg"

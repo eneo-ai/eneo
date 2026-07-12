@@ -87,7 +87,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import extract_request_id
 from eneo.spaces.space import Space
 
-FLOW_PACKAGE_MEDIA_TYPE = "application/vnd.eneo.flow-package+zip"
+ENEO_PACKAGE_MEDIA_TYPE = "application/vnd.eneo.package+zip"
 MAX_PACKAGE_BASE64_CHARS = ((MAX_PACKAGE_UPLOAD_BYTES + 2) // 3) * 4
 
 tenant_router = APIRouter()
@@ -106,7 +106,7 @@ PackageUpload = Annotated[
     UploadFile,
     File(
         description=(
-            "Portable `.eneo-flowpkg` bundle. The server validates the package "
+            "Portable `.eneopkg` bundle. The server validates the package "
             "structure, checksum, schema versions, and local-resource portability."
         )
     ),
@@ -438,7 +438,7 @@ def _replayed_install_result(
     operation_id="export_flow_package",
     summary="Export Flow Package",
     description=(
-        "Export a draft Flow as a portable `.eneo-flowpkg` bundle. The export "
+        "Export a draft Flow as a portable `.eneopkg` bundle. The export "
         "contains a typed flow template and dependency requirements, never local "
         "database IDs, run history, secrets, or source-instance provenance. Use this "
         "endpoint for offline sharing first; future marketplace installs can consume "
@@ -447,7 +447,7 @@ def _replayed_install_result(
         "an authorized space/tenant administrator before distribution."
     ),
     responses={
-        200: openapi_examples.flow_package_binary_response(FLOW_PACKAGE_MEDIA_TYPE),
+        200: openapi_examples.flow_package_binary_response(ENEO_PACKAGE_MEDIA_TYPE),
         400: error_response(
             description=(
                 "The flow cannot be exported as a portable package until the reported "
@@ -507,7 +507,7 @@ async def export_flow_package(
     )
     return Response(
         content=result.package_bytes,
-        media_type=FLOW_PACKAGE_MEDIA_TYPE,
+        media_type=ENEO_PACKAGE_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
     )
 

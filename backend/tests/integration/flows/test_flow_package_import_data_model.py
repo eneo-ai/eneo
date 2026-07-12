@@ -227,7 +227,7 @@ def _import_plan() -> FlowPackageImportPlan:
     return FlowPackageImportPlan(
         package_id="se.demo.flow",
         package_version="1.0.0",
-        package_kind=EneoPackageKind.FLOW,
+        kind=EneoPackageKind.FLOW,
         payload_schema=FLOW_PACKAGE_PAYLOAD_SCHEMA,
         content_checksum="0" * 64,
         package_summary=FlowPackageImportPlanSummary(
@@ -340,6 +340,7 @@ def _package_docs(*, require_model: bool = False) -> dict[str, JsonObject]:
     )
     manifest = FlowPackageManifest(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id="se.demo.route-import",
         package_version="1.0.0",
         name="Route Import Demo",

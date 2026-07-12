@@ -22,7 +22,10 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
     FlowPackageImportPlanStatus,
     FlowPackageModelDependencyResolution,
 )
-from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
+from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
+    FlowPackageManifest,
+)
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelIdentity,
@@ -624,6 +627,7 @@ def _envelope(
     return FlowPackageEnvelope(
         manifest=FlowPackageManifest(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version="1.0.0",
             name="Demo",

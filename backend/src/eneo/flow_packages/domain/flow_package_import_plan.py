@@ -288,7 +288,7 @@ class FlowPackageImportPlan(BaseModel):
 
     package_id: str
     package_version: str
-    package_kind: EneoPackageKind
+    kind: EneoPackageKind
     payload_schema: str
     content_checksum: str
     package_summary: FlowPackageImportPlanSummary

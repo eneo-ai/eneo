@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Protocol, cast
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = BACKEND_ROOT.parent
 FLOW_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
+FLOW_PACKAGE_ARTIFACT_ROOT = BACKEND_ROOT / "src" / "eneo" / "flow_packages" / "domain"
 PACKAGE_LAYOUT_DOC = REPO_ROOT / "docs" / "flows" / "package-layout.md"
 FLOW_DEVELOPER_ARCHITECTURE_DOCS_GENERATOR = (
     BACKEND_ROOT / "scripts" / "flow_developer_architecture_docs.py"
@@ -77,6 +79,48 @@ def test_ddd_flow_modules_are_no_longer_compatibility_stubs() -> None:
     for path in targets:
         text = path.read_text()
         assert "Compatibility re-export" not in text, path.name
+
+
+def test_portable_package_artifact_modules_do_not_depend_on_flow_verticals() -> None:
+    artifact_modules = (
+        "flow_package_checksum.py",
+        "flow_package_errors.py",
+        "flow_package_limits.py",
+        "flow_package_manifest.py",
+        "flow_package_provenance.py",
+    )
+    forbidden_prefixes = (
+        "eneo.apps",
+        "eneo.assistants",
+        "eneo.flow_packages.api",
+        "eneo.flow_packages.application",
+        "eneo.flow_packages.infrastructure",
+        "eneo.flows",
+    )
+
+    violations: list[str] = []
+    for module_name in artifact_modules:
+        module_path = FLOW_PACKAGE_ARTIFACT_ROOT / module_name
+        tree = ast.parse(module_path.read_text(), filename=str(module_path))
+        imported_modules = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        imported_modules.update(
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module is not None
+        )
+        for imported_module in sorted(imported_modules):
+            if imported_module.startswith(forbidden_prefixes):
+                violations.append(f"{module_name}: {imported_module}")
+
+    assert not violations, (
+        "Portable package artifact mechanics must remain dependency-clean until "
+        "a second concrete package vertical earns extraction: " + ", ".join(violations)
+    )
 
 
 def test_flow_root_layout_decision_matches_filesystem() -> None:

@@ -66,7 +66,7 @@ PACKAGE_VALIDATION_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
             "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
             "code": FlowPackageErrorCode.PACKAGE_KIND_UNSUPPORTED.value,
             "context": {
-                "package_kind": "assistant",
+                "kind": "assistant",
                 "payload_schema": "eneo.assistant_package.v1",
             },
         },
@@ -424,7 +424,7 @@ def flow_package_binary_response(media_type: str) -> dict[str, object]:
         "content": {
             media_type: {
                 "schema": {"type": "string", "format": "binary"},
-                "example": "PK...binary .eneo-flowpkg zip payload...",
+                "example": "PK...binary .eneopkg zip payload...",
             }
         },
     }

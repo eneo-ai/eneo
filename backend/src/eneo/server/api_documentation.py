@@ -70,10 +70,10 @@ TAGS_METADATA = [
         "name": "flow-packages",
         "description": (
             "Flow package export, validation, and import-planning operations for "
-            "portable `.eneo-flowpkg` bundles. Export a draft Flow into a typed "
+            "portable `.eneopkg` bundles. Export a draft Flow into a typed "
             "package, validate a package before choosing a target space, then create "
-            "a space-scoped import plan to inspect required model, knowledge, MCP, "
-            "and template mappings before any imported draft flow is created."
+            "a space-scoped import plan to inspect required local resource mappings "
+            "before any imported draft flow is created."
         ),
     },
     {

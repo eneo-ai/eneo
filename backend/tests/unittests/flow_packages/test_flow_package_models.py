@@ -44,12 +44,45 @@ def test_manifest_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         FlowPackageManifest(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version="1.0.0",
             name="Demo",
             content_checksum="0" * 64,
             unexpected=True,
         )
+
+
+def test_manifest_requires_kind_discriminator() -> None:
+    with pytest.raises(ValidationError):
+        FlowPackageManifest(
+            schema_version=1,
+            package_id="se.demo.flow",
+            package_version="1.0.0",
+            name="Demo",
+            content_checksum="0" * 64,
+        )
+
+
+def test_manifest_rejects_legacy_package_kind_field() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        FlowPackageManifest.model_validate(
+            {
+                "schema_version": 1,
+                "package_id": "se.demo.flow",
+                "package_version": "1.0.0",
+                "name": "Demo",
+                "package_kind": "flow",
+                "payload_schema": FLOW_PACKAGE_PAYLOAD_SCHEMA,
+                "content_checksum": "0" * 64,
+            }
+        )
+
+    errors_by_location = {
+        error["loc"]: error["type"] for error in exc_info.value.errors()
+    }
+    assert errors_by_location[("kind",)] == "missing"
+    assert errors_by_location[("package_kind",)] == "extra_forbidden"
 
 
 @pytest.mark.parametrize(
@@ -63,6 +96,7 @@ def test_manifest_rejects_unknown_fields() -> None:
 def test_manifest_accepts_portable_package_ids(package_id: str) -> None:
     manifest = FlowPackageManifest(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id=package_id,
         package_version="1.0.0",
         name="Demo",
@@ -88,6 +122,7 @@ def test_manifest_rejects_ambiguous_package_ids(package_id: str) -> None:
     with pytest.raises(ValidationError):
         FlowPackageManifest(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id=package_id,
             package_version="1.0.0",
             name="Demo",
@@ -98,6 +133,7 @@ def test_manifest_rejects_ambiguous_package_ids(package_id: str) -> None:
 def test_manifest_hash_input_excludes_content_checksum() -> None:
     manifest = FlowPackageManifest(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id="se.demo.flow",
         package_version="1.0.0",
         name="Demo",
@@ -108,7 +144,7 @@ def test_manifest_hash_input_excludes_content_checksum() -> None:
     changed_metadata = manifest.model_copy(update={"description": "Second"})
     changed_kind = manifest.model_copy(
         update={
-            "package_kind": EneoPackageKind.ASSISTANT,
+            "kind": EneoPackageKind.ASSISTANT,
             "payload_schema": ASSISTANT_PACKAGE_PAYLOAD_SCHEMA,
         }
     )
@@ -126,15 +162,15 @@ def test_manifest_hash_input_excludes_content_checksum() -> None:
 
 
 @pytest.mark.parametrize(
-    ("package_kind", "payload_schema"),
+    ("kind", "payload_schema"),
     [
         (EneoPackageKind.FLOW, FLOW_PACKAGE_PAYLOAD_SCHEMA),
         (EneoPackageKind.ASSISTANT, ASSISTANT_PACKAGE_PAYLOAD_SCHEMA),
         (EneoPackageKind.APP, APP_PACKAGE_PAYLOAD_SCHEMA),
     ],
 )
-def test_manifest_validates_package_kind_payload_schema_pairs(
-    package_kind: EneoPackageKind,
+def test_manifest_validates_kind_payload_schema_pairs(
+    kind: EneoPackageKind,
     payload_schema: str,
 ) -> None:
     manifest = FlowPackageManifestMetadata(
@@ -142,22 +178,22 @@ def test_manifest_validates_package_kind_payload_schema_pairs(
         package_id="se.demo.flow",
         package_version="1.0.0",
         name="Demo",
-        package_kind=package_kind,
+        kind=kind,
         payload_schema=payload_schema,
     )
 
-    assert manifest.package_kind is package_kind
+    assert manifest.kind is kind
     assert manifest.payload_schema == payload_schema
 
 
-def test_manifest_rejects_payload_schema_for_wrong_package_kind() -> None:
+def test_manifest_rejects_payload_schema_for_wrong_kind() -> None:
     with pytest.raises(ValidationError, match="payload schema"):
         FlowPackageManifestMetadata(
             schema_version=1,
             package_id="se.demo.flow",
             package_version="1.0.0",
             name="Demo",
-            package_kind=EneoPackageKind.ASSISTANT,
+            kind=EneoPackageKind.ASSISTANT,
             payload_schema=FLOW_PACKAGE_PAYLOAD_SCHEMA,
         )
 
@@ -188,6 +224,7 @@ def test_package_filename_removes_unsafe_or_non_ascii_characters(
     filename = flow_package_filename(
         FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version=package_version,
             name="Demo",
@@ -198,13 +235,14 @@ def test_package_filename_removes_unsafe_or_non_ascii_characters(
     assert "/" not in filename
     assert "\\" not in filename
     assert ".." not in filename
-    assert filename.endswith(".eneo-flowpkg")
+    assert filename.endswith(".eneopkg")
 
 
 def test_manifest_rejects_package_version_larger_than_persisted_contract() -> None:
     with pytest.raises(ValidationError):
         FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version="v" * 65,
             name="Demo",
@@ -215,14 +253,15 @@ def test_package_filename_caps_longest_valid_identity() -> None:
     filename = flow_package_filename(
         FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="a" * 128,
             package_version="v" * 64,
             name="Demo",
         )
     )
 
-    assert len(filename) <= 160 + len(".eneo-flowpkg")
-    assert filename.endswith(".eneo-flowpkg")
+    assert len(filename) <= 160 + len(".eneopkg")
+    assert filename.endswith(".eneopkg")
 
 
 def test_flow_draft_wraps_authoring_spec() -> None:

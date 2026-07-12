@@ -180,11 +180,12 @@ def test_openapi_flow_package_export_returns_binary_package(
         .get("content", {})
     )
     package_schema = response_content.get(
-        "application/vnd.eneo.flow-package+zip",
+        "application/vnd.eneo.package+zip",
         {},
     ).get("schema", {})
 
     assert package_schema == {"type": "string", "format": "binary"}
+    assert "application/vnd.eneo.flow-package+zip" not in response_content
 
 
 def test_openapi_flow_package_error_responses_are_typed(
@@ -267,6 +268,13 @@ def test_openapi_flow_package_error_examples_are_actionable(
         "flow_package_schema_unsupported",
         "flow_package_zip_unsafe",
     }.issubset(package_error_codes)
+    wrong_kind_example = _examples(validate_responses, "400")[
+        "package_kind_unsupported"
+    ]["value"]
+    assert wrong_kind_example["context"] == {
+        "kind": "assistant",
+        "payload_schema": "eneo.assistant_package.v1",
+    }
 
     too_large_example = _examples(validate_responses, "413")["file_too_large"]["value"]
     assert too_large_example["code"] == "flow_package_file_too_large"
@@ -346,7 +354,7 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
     assert set(validation_schema.get("required", [])) == {
         "package_id",
         "package_version",
-        "package_kind",
+        "kind",
         "payload_schema",
         "name",
         "description",
@@ -365,11 +373,18 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
 
     assert plan_schema.get("additionalProperties") is False
     assert {
-        "package_kind",
+        "kind",
         "payload_schema",
         "package_summary",
         "target_state",
     } <= set(plan_schema.get("required", []))
+    assert "package_kind" not in validation_schema.get("properties", {})
+    assert "package_kind" not in plan_schema.get("properties", {})
+    kind_schema = _resolve_component_ref(
+        openapi_spec,
+        validation_schema.get("properties", {}).get("kind", {}),
+    )
+    assert kind_schema.get("enum") == ["flow", "assistant", "app"]
     summary_schema = _resolve_component_ref(
         openapi_spec,
         plan_schema.get("properties", {}).get("package_summary", {}),

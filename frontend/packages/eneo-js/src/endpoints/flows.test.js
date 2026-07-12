@@ -98,8 +98,8 @@ describe("flows templates endpoint", () => {
   it("validates portable flow packages through multipart upload", async () => {
     const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
     const flows = initFlows({ fetch });
-    const file = new File(["pkg"], "report.eneo-flowpkg", {
-      type: "application/octet-stream"
+    const file = new File(["pkg"], "report.eneopkg", {
+      type: "application/vnd.eneo.package+zip"
     });
 
     await flows.packages.validate({ file });
@@ -110,8 +110,8 @@ describe("flows templates endpoint", () => {
     const formData = fetch.mock.calls[0][1].requestBody["multipart/form-data"];
     expect(formData).toBeInstanceOf(FormData);
     expectFlowPackageFile(formData.get("package_file"), {
-      name: "report.eneo-flowpkg",
-      type: "application/octet-stream",
+      name: "report.eneopkg",
+      type: "application/vnd.eneo.package+zip",
       size: 3
     });
   });
@@ -119,7 +119,7 @@ describe("flows templates endpoint", () => {
   it("creates package import plans for a target space", async () => {
     const fetch = vi.fn(async () => ({ package_id: "se.demo.report" }));
     const flows = initFlows({ fetch });
-    const file = new File(["pkg"], "report.eneo-flowpkg");
+    const file = new File(["pkg"], "report.eneopkg");
 
     await flows.packages.createImportPlan({ spaceId: "space-1", file });
 
@@ -132,7 +132,7 @@ describe("flows templates endpoint", () => {
     expectFlowPackageFile(
       fetch.mock.calls[0][1].requestBody["multipart/form-data"].get("package_file"),
       {
-        name: "report.eneo-flowpkg",
+        name: "report.eneopkg",
         type: "",
         size: 3
       }
@@ -185,7 +185,7 @@ describe("flows templates endpoint", () => {
     const binaryFetch = vi.fn(async () => ({
       blob: new Blob(["pkg"]),
       contentType: "application/octet-stream",
-      filename: "report.eneo-flowpkg",
+      filename: "report.eneopkg",
       headers: new Headers()
     }));
     const flows = initFlows({ fetch, binaryFetch });

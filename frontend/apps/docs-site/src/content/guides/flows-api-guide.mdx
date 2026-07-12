@@ -85,13 +85,15 @@ _Flows at a glance: user principals author and publish drafts, API consumers run
 ## Transfer a Flow package
 
 Flow package export, planning, and import are user-principal authoring
-operations. Export produces a bounded `.eneo-flowpkg` file without local
+operations. Export produces a bounded `.eneopkg` file with media type
+`application/vnd.eneo.package+zip` and manifest `kind: flow`, without local
 resource identifiers. The receiving operator uploads that same file to the
 target space's import-plan endpoint and reviews the required and optional model
 and knowledge mappings. Every required model or knowledge dependency needs a
 current, explicitly confirmed local mapping before import. Only a dependency
 declared optional may be omitted; in that case, the imported draft omits only
-that optional reference.
+that optional reference. Flow endpoints reject Assistant or App package kinds
+before interpreting Flow-specific package entries.
 
 | Purpose                        | Endpoint                                                    |
 | ------------------------------ | ----------------------------------------------------------- |

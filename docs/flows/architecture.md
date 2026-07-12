@@ -127,11 +127,16 @@ The authoring path edits draft state and then freezes a runtime snapshot:
 ### Package import ownership
 
 The package domain is the strict portable-file boundary. It parses the bounded
-archive, rejects unknown nested fields, verifies the checksum and declared
-resource references, and validates the deterministic Flow graph before a plan
-can be shown. The import planner then resolves that immutable package against
-current destination resources and exposes the package checksum and the
-load-bearing target state that the importer reviewed.
+`.eneopkg` archive with media type `application/vnd.eneo.package+zip`. The
+reader first validates structural ZIP safety and requires `manifest.json`, then
+parses the required closed `kind` discriminator. A typed Flow endpoint rejects
+Assistant or App kinds before enforcing the exact Flow entry profile and
+parsing the Flow payload. A missing manifest remains a structural missing-entry
+error. The Flow payload parser rejects unknown nested fields, verifies the
+checksum and declared resource references, and validates the deterministic Flow
+graph before a plan can be shown. The import planner then resolves that
+immutable package against current destination resources and exposes the package
+checksum and the load-bearing target state that the importer reviewed.
 
 Installation accepts one resolved package command containing that reviewed
 checksum, target state, and exact local-resource mappings. It revalidates

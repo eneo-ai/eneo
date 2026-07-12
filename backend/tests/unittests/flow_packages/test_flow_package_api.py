@@ -58,6 +58,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSelection,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifest,
 )
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
@@ -98,6 +99,7 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     UnauthorizedException,
 )
+from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.space import Space
 
 
@@ -133,6 +135,73 @@ async def test_validate_flow_package_returns_tenant_scoped_summary(
     assert summary.steps_count == 1
     assert summary.requirements_count == 1
     assert summary.requirements_by_kind == {FlowPackageRequirementKind.MODEL: 1}
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload_schema", "payload_path"),
+    [
+        ("assistant", "eneo.assistant_package.v1", "assistant.draft.json"),
+        ("app", "eneo.app_package.v1", "app.draft.json"),
+    ],
+)
+def test_validate_flow_package_rejects_non_flow_kind_before_profile_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    payload_schema: str,
+    payload_path: str,
+) -> None:
+    monkeypatch.setattr(
+        flow_package_router,
+        "require_flow_action",
+        lambda *_args, **_kwargs: None,
+    )
+
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/packages/validate/")
+    async def validate_for_test(
+        package_file: flow_package_router.PackageUpload,
+    ) -> FlowPackageValidationPublic:
+        return await flow_package_router.validate_flow_package(
+            package_file=package_file,
+            container=cast(Container, _FakeContainer()),
+        )
+
+    package_bytes = _zip_docs(
+        {
+            reader.MANIFEST_PATH: {
+                "schema_version": 1,
+                "package_id": f"se.demo.{kind}",
+                "package_version": "1.0.0",
+                "name": f"Demo {kind}",
+                "kind": kind,
+                "payload_schema": payload_schema,
+                "content_checksum": "0" * 64,
+            },
+            payload_path: {},
+        }
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/packages/validate/",
+            files={
+                "package_file": (
+                    f"{kind}.eneopkg",
+                    package_bytes,
+                    flow_package_router.ENEO_PACKAGE_MEDIA_TYPE,
+                )
+            },
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == FlowPackageErrorCode.PACKAGE_KIND_UNSUPPORTED.value
+    assert payload["context"] == {
+        "kind": kind,
+        "payload_schema": payload_schema,
+    }
 
 
 @pytest.mark.anyio
@@ -1051,9 +1120,9 @@ async def test_export_flow_package_checks_access_before_exporting(
     assert access_calls == [False]
     assert export_calls == [flow_id]
     assert response.body == result.package_bytes
-    assert response.media_type == flow_package_router.FLOW_PACKAGE_MEDIA_TYPE
+    assert response.media_type == "application/vnd.eneo.package+zip"
     assert response.headers["content-disposition"] == (
-        'attachment; filename="demo.eneo-flowpkg"'
+        'attachment; filename="demo.eneopkg"'
     )
     assert len(audit_service.events) == 1
     event = audit_service.events[0]
@@ -1347,7 +1416,7 @@ def _export_result() -> FlowPackageExportResult:
     return FlowPackageExportResult(
         package_bytes=b"flow package bytes",
         envelope=envelope,
-        filename="demo.eneo-flowpkg",
+        filename="demo.eneopkg",
     )
 
 
@@ -1370,7 +1439,7 @@ def _flow(*, flow_id: UUID) -> Flow:
 
 
 def _upload(content: bytes) -> UploadFile:
-    return UploadFile(filename="demo.eneo-flowpkg", file=BytesIO(content))
+    return UploadFile(filename="demo.eneopkg", file=BytesIO(content))
 
 
 def _request() -> Request:
@@ -1427,6 +1496,7 @@ def _package_docs(*, spec: FlowDraftSpecCore | None = None) -> dict[str, JsonObj
     )
     manifest = FlowPackageManifest(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id="se.demo.flow",
         package_version="1.0.0",
         name="Demo Flow",

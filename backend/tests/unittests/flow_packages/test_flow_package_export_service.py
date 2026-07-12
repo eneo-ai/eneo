@@ -16,6 +16,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageExportErrorCode,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifestMetadata,
 )
 from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
@@ -93,7 +94,7 @@ async def test_export_service_builds_zip_with_side_effect_free_dependencies() ->
 
     assert dependency_service.flow == flow
     assert dependency_service.flow_id == flow_id
-    assert result.filename == "se.demo.meeting-report-1.0.0.eneo-flowpkg"
+    assert result.filename == "se.demo.meeting-report-1.0.0.eneopkg"
     reparsed = read_flow_package(result.package_bytes)
     assert reparsed == result.envelope
     assert reparsed.provenance.source_instance_id is None
@@ -1219,6 +1220,7 @@ def _binding(
 def _manifest_metadata() -> FlowPackageManifestMetadata:
     return FlowPackageManifestMetadata(
         schema_version=1,
+        kind=EneoPackageKind.FLOW,
         package_id="se.demo.meeting-report",
         package_version="1.0.0",
         name="Meeting report",

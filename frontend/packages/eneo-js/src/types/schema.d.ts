@@ -5160,7 +5160,7 @@ export interface paths {
     put?: never;
     /**
      * Export Flow Package
-     * @description Export a draft Flow as a portable `.eneo-flowpkg` bundle. The export contains a typed flow template and dependency requirements, never local database IDs, run history, secrets, or source-instance provenance. Use this endpoint for offline sharing first; future marketplace installs can consume the same package format. The endpoint requires human draft edit access so package metadata and dependency guidance are reviewed by the flow owner or an authorized space/tenant administrator before distribution.
+     * @description Export a draft Flow as a portable `.eneopkg` bundle. The export contains a typed flow template and dependency requirements, never local database IDs, run history, secrets, or source-instance provenance. Use this endpoint for offline sharing first; future marketplace installs can consume the same package format. The endpoint requires human draft edit access so package metadata and dependency guidance are reviewed by the flow owner or an authorized space/tenant administrator before distribution.
      */
     post: operations["export_flow_package"];
     delete?: never;
@@ -10964,7 +10964,7 @@ export interface components {
       /**
        * Package File
        * Format: binary
-       * @description Portable `.eneo-flowpkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
+       * @description Portable `.eneopkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
        */
       package_file: string;
     };
@@ -11014,7 +11014,7 @@ export interface components {
       /**
        * Package File
        * Format: binary
-       * @description Portable `.eneo-flowpkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
+       * @description Portable `.eneopkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
        */
       package_file: string;
     };
@@ -14288,7 +14288,7 @@ export interface components {
       package_id: string;
       /** Package Version */
       package_version: string;
-      package_kind: components["schemas"]["EneoPackageKind"];
+      kind: components["schemas"]["EneoPackageKind"];
       /** Payload Schema */
       payload_schema: string;
       /** Content Checksum */
@@ -14415,7 +14415,7 @@ export interface components {
     FlowPackageImportRequest: {
       /**
        * Package Base64
-       * @description Base64-encoded `.eneo-flowpkg` bytes. The decoded package must stay within the Flow package upload byte cap.
+       * @description Base64-encoded `.eneopkg` bytes. The decoded package must stay within the Flow package upload byte cap.
        */
       package_base64: string;
       /**
@@ -14717,9 +14717,9 @@ export interface components {
      * @example {
      *       "content_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
      *       "description": "Creates a structured case report from approved local material.",
+     *       "kind": "flow",
      *       "name": "Case Report",
      *       "package_id": "se.demo.case-report",
-     *       "package_kind": "flow",
      *       "package_version": "1.0.0",
      *       "payload_schema": "eneo.flow_package.v1",
      *       "requirements_by_kind": {
@@ -14742,11 +14742,8 @@ export interface components {
        * @description Publisher-assigned package version from the package manifest.
        */
       package_version: string;
-      /**
-       * Package Kind
-       * @description Generic package kind. Flow package import accepts only `flow` payloads.
-       */
-      package_kind: string;
+      /** @description Generic package kind. Flow package import accepts only `flow` payloads. */
+      kind: components["schemas"]["EneoPackageKind"];
       /**
        * Payload Schema
        * @description Payload schema identifier used by the package kind.
@@ -46524,8 +46521,8 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          /** @example PK...binary .eneo-flowpkg zip payload... */
-          "application/vnd.eneo.flow-package+zip": string;
+          /** @example PK...binary .eneopkg zip payload... */
+          "application/vnd.eneo.package+zip": string;
         };
       };
       /** @description The flow cannot be exported as a portable package until the reported authoring or dependency issue is fixed. */

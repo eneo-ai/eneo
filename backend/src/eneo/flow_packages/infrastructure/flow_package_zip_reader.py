@@ -17,6 +17,7 @@ from eneo.flow_packages.domain.flow_package_envelope import (
     REQUIRED_PACKAGE_FILES,
     REQUIREMENTS_PATH,
     FlowPackageEnvelope,
+    require_flow_package_manifest,
 )
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
@@ -47,12 +48,14 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
-    payloads = _read_required_json_payloads(package_bytes)
+    payloads = _read_bounded_json_payloads(package_bytes)
     manifest = _parse_subdocument(
         FlowPackageManifest,
         payloads[MANIFEST_PATH],
         invalid_code=FlowPackageErrorCode.MANIFEST_INVALID,
     )
+    require_flow_package_manifest(manifest)
+    _validate_flow_profile_entries(payloads)
     draft = _parse_subdocument(
         FlowPackageFlowDraft,
         payloads[FLOW_DRAFT_PATH],
@@ -76,7 +79,7 @@ def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
     )
 
 
-def _read_required_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
+def _read_bounded_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
     try:
         package = zipfile.ZipFile(BytesIO(package_bytes))
     except zipfile.BadZipFile as exc:
@@ -107,12 +110,6 @@ def _read_required_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
                     FlowPackageZipUnsafeReason.DUPLICATE_ENTRY,
                     path=normalized_path,
                 )
-            if normalized_path not in REQUIRED_PACKAGE_FILES:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
-                    path=normalized_path,
-                )
-
             remaining_budget = MAX_TOTAL_UNCOMPRESSED_BYTES - total_uncompressed_bytes
             if remaining_budget <= 0:
                 raise _zip_unsafe(
@@ -161,13 +158,27 @@ def _read_required_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
                 )
             payloads[normalized_path] = payload
 
-        missing_files = REQUIRED_PACKAGE_FILES - payloads.keys()
-        if missing_files:
+        if MANIFEST_PATH not in payloads:
             raise _zip_unsafe(
                 FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
-                path=sorted(missing_files)[0],
+                path=MANIFEST_PATH,
             )
         return payloads
+
+
+def _validate_flow_profile_entries(payloads: Mapping[str, bytes]) -> None:
+    unexpected_files = payloads.keys() - REQUIRED_PACKAGE_FILES
+    if unexpected_files:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
+            path=sorted(unexpected_files)[0],
+        )
+    missing_files = REQUIRED_PACKAGE_FILES - payloads.keys()
+    if missing_files:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+            path=sorted(missing_files)[0],
+        )
 
 
 def _validate_entry_path(entry: zipfile.ZipInfo) -> str:

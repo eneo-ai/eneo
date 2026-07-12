@@ -49,8 +49,9 @@
 
   const flowsManager = getFlowsManager();
   const SKIP_OPTIONAL_VALUE = "__skip_optional__";
-  const PACKAGE_EXTENSION = ".eneo-flowpkg";
-  const FILE_ACCEPT = ".eneo-flowpkg,application/octet-stream,application/zip";
+  const PACKAGE_EXTENSION = ".eneopkg";
+  const FILE_ACCEPT =
+    ".eneopkg,application/vnd.eneo.package+zip,application/octet-stream,application/zip";
 
   let open = $state(false);
   let selectedFile = $state<File | null>(null);

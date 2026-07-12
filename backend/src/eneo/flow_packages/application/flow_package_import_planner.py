@@ -137,7 +137,7 @@ def build_flow_package_import_plan(
     return FlowPackageImportPlan(
         package_id=envelope.manifest.package_id,
         package_version=envelope.manifest.package_version,
-        package_kind=envelope.manifest.package_kind,
+        kind=envelope.manifest.kind,
         payload_schema=envelope.manifest.payload_schema,
         content_checksum=envelope.content_checksum,
         package_summary=_package_summary(envelope),

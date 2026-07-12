@@ -17,6 +17,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageValidationError,
 )
 from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
     FlowPackageManifest,
     FlowPackageManifestMetadata,
 )
@@ -131,6 +132,7 @@ def _mutated_envelope(
         case "manifest":
             metadata = FlowPackageManifestMetadata(
                 schema_version=1,
+                kind=EneoPackageKind.FLOW,
                 package_id=base.manifest.package_id,
                 package_version=base.manifest.package_version,
                 name="Changed package",
@@ -179,6 +181,7 @@ def _metadata_from_manifest(
 ) -> FlowPackageManifestMetadata:
     return FlowPackageManifestMetadata(
         schema_version=manifest.schema_version,
+        kind=manifest.kind,
         package_id=manifest.package_id,
         package_version=manifest.package_version,
         name=manifest.name,
@@ -194,6 +197,7 @@ def _envelope(
     return FlowPackageEnvelope.build_for_export(
         manifest_metadata=FlowPackageManifestMetadata(
             schema_version=1,
+            kind=EneoPackageKind.FLOW,
             package_id="se.demo.flow",
             package_version="1.0.0",
             name=package_name,

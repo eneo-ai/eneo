@@ -287,7 +287,7 @@ describe("flowPackageTransfer", () => {
   });
 
   it("encodes package files to base64 without relying on whole-array string spreading", async () => {
-    const file = new File(["hello"], "hello.eneo-flowpkg");
+    const file = new File(["hello"], "hello.eneopkg");
 
     await expect(encodeFlowPackageFileToBase64(file)).resolves.toBe("aGVsbG8=");
   });
@@ -299,15 +299,15 @@ describe("flowPackageTransfer", () => {
       {
         blob: new Blob(["pkg"]),
         contentType: "application/octet-stream",
-        filename: "se.demo.case-report-1.0.0.eneo-flowpkg",
+        filename: "se.demo.case-report-1.0.0.eneopkg",
         headers: new Headers()
       },
-      "fallback.eneo-flowpkg",
+      "fallback.eneopkg",
       { document: documentRef, url: urlRef }
     );
 
-    expect(filename).toBe("se.demo.case-report-1.0.0.eneo-flowpkg");
-    expect(link.download).toBe("se.demo.case-report-1.0.0.eneo-flowpkg");
+    expect(filename).toBe("se.demo.case-report-1.0.0.eneopkg");
+    expect(link.download).toBe("se.demo.case-report-1.0.0.eneopkg");
     expect(link.href).toBe("blob:package");
     expect(body.appendChild).toHaveBeenCalledWith(link);
     expect(link.click).toHaveBeenCalledOnce();
@@ -324,12 +324,12 @@ describe("flowPackageTransfer", () => {
         contentType: "application/octet-stream",
         headers: new Headers()
       },
-      "flow-package.eneo-flowpkg",
+      "flow-package.eneopkg",
       { document: documentRef, url: urlRef }
     );
 
-    expect(filename).toBe("flow-package.eneo-flowpkg");
-    expect(link.download).toBe("flow-package.eneo-flowpkg");
+    expect(filename).toBe("flow-package.eneopkg");
+    expect(link.download).toBe("flow-package.eneopkg");
   });
 
   it("creates safe default package identifiers", () => {
@@ -375,7 +375,7 @@ function flowPackageImportPlan(
   return {
     package_id: "se.demo.report",
     package_version: "1.0.0",
-    package_kind: "flow",
+    kind: "flow",
     payload_schema: "eneo.flow_package.v1",
     content_checksum: "abc123",
     package_summary: {
