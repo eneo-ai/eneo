@@ -358,7 +358,7 @@ async def test_flow_resource_binding_rejects_invalid_slot_local_kind_pair(
             _binding(
                 flow=flow,
                 slot_kind=ResourceSlotKind.MODEL.value,
-                local_resource_kind=LocalResourceKind.MCP_TOOL.value,
+                local_resource_kind=LocalResourceKind.COLLECTION.value,
             ),
         )
 

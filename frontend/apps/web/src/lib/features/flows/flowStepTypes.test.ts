@@ -5,6 +5,7 @@ import {
   getAvailableOutputTypes,
   getFlowStepValidationIssues,
   getSelectableInputTypeOptions,
+  getValidInputSources,
   getValidInputTypes,
   hasOutboundDeliveryOutputMode,
   mapOutputToInputType
@@ -42,13 +43,23 @@ describe("getValidInputTypes", () => {
     expect(getValidInputTypes("previous_step", "docx")).toEqual(["text", "any"]);
   });
 
-  it("allows zero-flow_input source flows via HTTP", () => {
+  it("allows zero-flow_input source flows via HTTP GET", () => {
     expect(getValidInputTypes("http_get")).toEqual(["text", "json", "any"]);
-    expect(getValidInputTypes("http_post")).toEqual(["text", "json", "any"]);
   });
 
   it("limits all_previous_steps to text and any", () => {
     expect(getValidInputTypes("all_previous_steps")).toEqual(["text", "any"]);
+  });
+});
+
+describe("getValidInputSources", () => {
+  it("offers HTTP GET but never the removed HTTP POST input source", () => {
+    expect(getValidInputSources({ steps: [], stepOrder: 1 })).toEqual(["flow_input", "http_get"]);
+    expect(getValidInputSources({ steps: [], stepOrder: 2 })).toEqual([
+      "previous_step",
+      "all_previous_steps",
+      "http_get"
+    ]);
   });
 });
 
@@ -187,10 +198,10 @@ describe("getFlowStepValidationIssues", () => {
     expect(issues.map((issue) => issue.code)).toContain("typed_io_multiple_flow_input_steps");
   });
 
-  it("allows zero-flow_input HTTP-only flows", () => {
+  it("allows zero-flow_input HTTP GET-only flows", () => {
     const issues = getFlowStepValidationIssues([
       { step_order: 1, input_source: "http_get", input_type: "text", output_type: "text" },
-      { step_order: 2, input_source: "http_post", input_type: "text", output_type: "text" }
+      { step_order: 2, input_source: "http_get", input_type: "text", output_type: "text" }
     ]);
 
     expect(issues).toEqual([]);

@@ -66,7 +66,6 @@ export const FLOW_PACKAGE_EXPORT_ERROR_CODES = [
   "flow_package_export_step_config_not_portable",
   "flow_package_export_unmapped_resource_ref",
   "flow_package_export_duplicate_resource_binding",
-  "flow_package_export_mcp_unsupported",
   "flow_package_export_template_asset_payload_unsupported",
   "flow_package_export_variable_reference_invalid",
   "flow_package_export_json_payload_too_deep",
@@ -82,8 +81,6 @@ type FlowPackageErrorMessageKey = `flow_package_error_${FlowPackageErrorCode}`;
 const RESOURCE_SLOT_KINDS = new Set<FlowPackageResourceSlotRef["kind"]>([
   "model",
   "knowledge",
-  "mcp_server",
-  "mcp_tool",
   "template_asset"
 ]);
 

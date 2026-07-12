@@ -47,8 +47,6 @@ describe("flowAIBuilderApplyPrerequisites", () => {
         assistant_spec: {
           instructions: "Use the selected knowledge.",
           knowledge_refs: ["knowledge_1"],
-          mcp_server_refs: [],
-          mcp_tool_refs: [],
           model_ref: null
         }
       }),
@@ -86,8 +84,6 @@ function makeStep(overrides: Partial<StepSpec>): StepSpec {
     assistant_spec: {
       instructions: "Transcribe the uploaded audio.",
       knowledge_refs: [],
-      mcp_server_refs: [],
-      mcp_tool_refs: [],
       model_ref: null
     },
     input_source: "flow_input",

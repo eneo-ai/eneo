@@ -176,7 +176,7 @@
       {/if}
     </Settings.Row>
 
-    {#if step.input_source === "http_get" || step.input_source === "http_post"}
+    {#if step.input_source === "http_get"}
       <Settings.Row
         title={m.flow_step_input_config()}
         description={m.flow_step_input_config_desc()}

@@ -9,6 +9,7 @@ producer's transitive import graph.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
@@ -65,6 +66,8 @@ class RuntimeAssistantProtocol(Protocol):
     def websites(self) -> list[Website]: ...
     @property
     def integration_knowledge_list(self) -> list[IntegrationKnowledge]: ...
+    @property
+    def mcp_servers(self) -> Sequence[object]: ...
 
     def has_knowledge(self) -> bool: ...
     def get_prompt_text(self) -> str: ...

@@ -12,7 +12,7 @@
   import { getStepAiWork } from "$lib/features/flows/flowStepEditorPresentation";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import { getHttpSummaryText } from "./http/httpConfigHelpers";
-  import { parseHttpAuthoredConfig, type HttpMethod } from "./http/httpConfigTypes";
+  import { parseHttpAuthoredConfig } from "./http/httpConfigTypes";
 
   let {
     step,
@@ -56,22 +56,21 @@
         : m.flow_step_summary_next_channel_text_short()
   );
 
-  const httpMethod = $derived((step.input_source === "http_get" ? "GET" : "POST") as HttpMethod);
   const httpOutputConfig = $derived(
     step.output_mode === "http_post"
       ? parseHttpAuthoredConfig(step.output_config, createDefaultHttpConfig("output", "POST"))
       : null
   );
   const httpInputConfig = $derived(
-    step.input_source === "http_get" || step.input_source === "http_post"
-      ? parseHttpAuthoredConfig(step.input_config, createDefaultHttpConfig("input", httpMethod))
+    step.input_source === "http_get"
+      ? parseHttpAuthoredConfig(step.input_config, createDefaultHttpConfig("input", "GET"))
       : null
   );
   const httpSummary = $derived(
     httpOutputConfig
       ? getHttpSummaryText(httpOutputConfig, "POST")
       : httpInputConfig
-        ? getHttpSummaryText(httpInputConfig, httpMethod)
+        ? getHttpSummaryText(httpInputConfig, "GET")
         : ""
   );
 </script>

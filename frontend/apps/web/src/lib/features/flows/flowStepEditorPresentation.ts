@@ -15,11 +15,7 @@ export function getStepAiWorkKind(
   { instructionPresent }: { instructionPresent: boolean | null }
 ): StepAiWorkKind {
   if (step.output_mode === "transcribe_only") return "transcribe";
-  if (
-    step.output_mode === "http_post" ||
-    step.input_source === "http_get" ||
-    step.input_source === "http_post"
-  ) {
+  if (step.output_mode === "http_post" || step.input_source === "http_get") {
     return "http";
   }
   if (step.output_mode === "template_fill") return "template";

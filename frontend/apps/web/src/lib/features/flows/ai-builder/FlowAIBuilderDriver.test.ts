@@ -1671,16 +1671,16 @@ describe("FlowAIBuilderDriver", () => {
         handlers.onMessage({
           event: "question",
           data: JSON.stringify({
-            question_id: "mcp_resource_selection",
-            question: "Should AI Builder use MCP tools?",
+            question_id: "report_disposition",
+            question: "Should AI Builder create one combined report?",
             selection_mode: "single",
             allow_custom: false,
             requires_confirm: true,
             options: [
               {
-                id: "use_time",
-                label: "Use Time MCP",
-                value: "use_mcp_server:time-server"
+                id: "combined_report",
+                label: "Create one report",
+                value: "report_disposition:combined"
               }
             ]
           })
@@ -1693,7 +1693,7 @@ describe("FlowAIBuilderDriver", () => {
     await driver.sendMessage("Build a flow");
 
     expect(driver.state.messages[1]?.question).toMatchObject({
-      question_id: "mcp_resource_selection",
+      question_id: "report_disposition",
       requires_confirm: true
     });
   });

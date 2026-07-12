@@ -228,15 +228,15 @@ describe("flowPackageTransfer", () => {
       expectedFlowPackageErrorMessage("flow_package_import_missing_required_resource_binding")
     );
 
-    const exportError = new EneoError("mcp unsupported", "RESPONSE", 400, 0, undefined, {
+    const exportError = new EneoError("step config not portable", "RESPONSE", 400, 0, undefined, {
       endpoint: "POST@test"
     });
     Object.defineProperty(exportError, "code", {
-      value: "flow_package_export_mcp_unsupported"
+      value: "flow_package_export_step_config_not_portable"
     });
 
     expect(mapFlowPackageExportError(exportError)).toBe(
-      expectedFlowPackageErrorMessage("flow_package_export_mcp_unsupported")
+      expectedFlowPackageErrorMessage("flow_package_export_step_config_not_portable")
     );
   });
 

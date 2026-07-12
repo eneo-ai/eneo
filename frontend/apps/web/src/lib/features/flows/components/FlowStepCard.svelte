@@ -10,11 +10,8 @@
     getTemplateFillReadiness,
     getTemplateFillTemplateName
   } from "$lib/features/flows/templateFillConfig";
-  import type { FlowStepMcpSummary } from "$lib/features/flows/flowStepMcpConfig";
-
   let {
     step,
-    mcpSummary = null,
     isActive,
     isPublished,
     isPowerUser,
@@ -28,7 +25,6 @@
     onRemove
   }: {
     step: FlowStep;
-    mcpSummary?: FlowStepMcpSummary | null;
     isActive: boolean;
     isPublished: boolean;
     isPowerUser: boolean;
@@ -143,8 +139,6 @@
         return m.flow_step_card_source_all_previous_steps();
       case "http_get":
         return m.flow_step_card_source_http_get();
-      case "http_post":
-        return m.flow_step_card_source_http_post();
       default:
         return inputLabel;
     }
@@ -264,15 +258,6 @@
           <span class="text-accent-stronger text-xs font-medium tabular-nums">
             {m.flow_step_card_chain_short()}: {nextChannelLabel}
           </span>
-          {#if mcpSummary?.hasActiveMcp}
-            <Badge
-              variant="secondary"
-              class="bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-xs font-semibold tabular-nums"
-              >{m.flow_step_mcp_tools_badge({
-                count: String(mcpSummary.enabledToolCount)
-              })}</Badge
-            >
-          {/if}
         </div>
       {/if}
     </div>

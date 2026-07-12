@@ -77,12 +77,8 @@
     onOpenTranscriptionSettings?: () => void;
   } = $props();
 
-  const isHttpSource = $derived(
-    step.input_source === "http_get" || step.input_source === "http_post"
-  );
-  const httpMethod = $derived(
-    step.input_source === "http_get" ? ("GET" as const) : ("POST" as const)
-  );
+  const isHttpSource = $derived(step.input_source === "http_get");
+  const httpMethod = "GET" as const;
   const defaultHttpConfig = $derived(createDefaultHttpConfig("input", httpMethod));
   const httpConfig = $derived(
     isHttpSource ? parseHttpAuthoredConfig(step.input_config, defaultHttpConfig) : defaultHttpConfig

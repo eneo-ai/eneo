@@ -256,8 +256,6 @@ function makeStep(overrides: Partial<StepSpec>): StepSpec {
     assistant_spec: {
       instructions: "Transcribe the uploaded audio.",
       knowledge_refs: [],
-      mcp_server_refs: [],
-      mcp_tool_refs: [],
       model_ref: null
     },
     input_source: "flow_input",

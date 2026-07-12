@@ -951,9 +951,9 @@ def test_every_enum_tuple_is_classified() -> None:
 # Compute a structural fingerprint over the bump-relevant fields: keys,
 # applies_to_tuples, FlowCapability / nested fields, invariants,
 # required_config, CHAIN_COMPATIBILITY, FINAL_OUTPUT_ARTIFACT_BY_TYPE,
-# ALLOWED_MCP_POLICIES. Excludes UI prose (label, description,
-# not_exposed_reason body) — rewording permanent reasons or labels must
-# not bump the version.
+# and output-mode behavior. Excludes UI prose (label, description,
+# not_exposed_reason body) — rewording permanent reasons or labels must not
+# bump the version.
 #
 # Any fingerprint drift requires BOTH a version bump AND a fingerprint
 # update. The failure message spells both paths out so future authors

@@ -89,8 +89,7 @@ const INPUT_SOURCE_ORDER: InputSource[] = [
   "flow_input",
   "previous_step",
   "all_previous_steps",
-  "http_get",
-  "http_post"
+  "http_get"
 ];
 
 const ADVANCED_ONLY_INPUT_TYPES = new Set<InputType>(["file", "any"]);
@@ -131,7 +130,6 @@ export function getValidInputTypes(
     case "all_previous_steps":
       return ["text", "any"];
     case "http_get":
-    case "http_post":
       return ["text", "json", "any"];
     case "previous_step":
       return previousOutputType
@@ -147,9 +145,9 @@ export function getValidInputSources(params: {
   stepOrder: number;
 }): InputSource[] {
   if (params.stepOrder === 1) {
-    return ["flow_input", "http_get", "http_post"];
+    return ["flow_input", "http_get"];
   }
-  return ["previous_step", "all_previous_steps", "http_get", "http_post"];
+  return ["previous_step", "all_previous_steps", "http_get"];
 }
 
 export function getSelectableInputSourceOptions(params: {

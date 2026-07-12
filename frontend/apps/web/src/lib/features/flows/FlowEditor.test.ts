@@ -33,7 +33,6 @@ function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowSte
     input_type: "text",
     output_mode: "pass_through",
     output_type: "text",
-    mcp_policy: "inherit",
     ...overrides
   };
 }
@@ -874,7 +873,7 @@ describe("FlowEditor HTTP step config validation", () => {
             output_config: {}
           }),
           makeStep(2, {
-            input_source: "http_post",
+            input_source: "http_get",
             input_config: null
           })
         ]

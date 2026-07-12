@@ -35,10 +35,10 @@ export function computeStepConfigValidationIssues(
         entries.set(`${prefix}http_missing_url:${step.step_order}`, ["http_missing_url"]);
       }
     }
-    if (step.input_source === "http_get" || step.input_source === "http_post") {
+    if (step.input_source === "http_get") {
       const config = parseHttpAuthoredConfig(
         step.input_config,
-        createDefaultHttpConfig("input", step.input_source === "http_get" ? "GET" : "POST")
+        createDefaultHttpConfig("input", "GET")
       );
       if (!config.url.trim()) {
         entries.set(`${prefix}http_missing_url:${step.step_order}`, ["http_missing_url"]);

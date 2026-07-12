@@ -44,7 +44,6 @@ export function buildBlankStep(params: {
     input_source: params.isFirst ? "flow_input" : "previous_step",
     input_type: params.isFirst ? "text" : mapOutputToInputType(params.prevStepOutputType),
     output_mode: params.outputMode ?? "pass_through",
-    output_type: params.outputType ?? "text",
-    mcp_policy: "inherit"
+    output_type: params.outputType ?? "text"
   };
 }

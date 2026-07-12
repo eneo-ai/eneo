@@ -41,15 +41,6 @@ def test_assistant_spec_rejects_local_resource_refs(field_name: str) -> None:
     assert _has_local_ref_not_portable_error(exc_info.value)
 
 
-def test_assistant_spec_rejects_mixed_knowledge_and_mcp_refs() -> None:
-    with pytest.raises(ValidationError):
-        AssistantSpec(
-            instructions="Use incompatible resources.",
-            knowledge_refs=["knowledge.local_policy"],
-            mcp_tool_refs=["mcp.case_lookup"],
-        )
-
-
 @pytest.mark.parametrize(
     ("raw_type", "normalized_type"),
     [

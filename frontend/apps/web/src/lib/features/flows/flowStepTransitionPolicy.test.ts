@@ -35,7 +35,6 @@ function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
     input_type: "text",
     output_mode: "pass_through",
     output_type: "text",
-    mcp_policy: "inherit",
     input_bindings: null,
     input_contract: null,
     output_contract: null,
@@ -88,7 +87,7 @@ describe("flow step transition policy", () => {
           headers: { "X-Legacy": "kept" }
         }
       }),
-      nextSource: "http_post",
+      nextSource: "http_get",
       previousOutputType: undefined,
       runtimeInputConfig: makeRuntimeInputConfig(),
       isAdvancedMode: false
@@ -121,7 +120,7 @@ describe("flow step transition policy", () => {
           runtime_input: { enabled: true }
         }
       }),
-      nextSource: "http_post",
+      nextSource: "http_get",
       previousOutputType: undefined,
       runtimeInputConfig: makeRuntimeInputConfig(),
       isAdvancedMode: false

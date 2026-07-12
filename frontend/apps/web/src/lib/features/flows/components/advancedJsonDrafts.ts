@@ -50,7 +50,7 @@ export function getVisibleAdvancedJsonFields(step: FlowStep | null): Set<Advance
     return new Set<AdvancedJsonField>();
   }
   const visible = new Set<AdvancedJsonField>(["input_contract", "output_contract"]);
-  if (step && (step.input_source === "http_get" || step.input_source === "http_post")) {
+  if (step.input_source === "http_get") {
     visible.add("input_config");
   }
   if (step?.output_mode === "http_post") {

@@ -112,12 +112,6 @@
   import FlowStepReviewSection from "./FlowStepReviewSection.svelte";
   import FlowStepSecuritySection from "./FlowStepSecuritySection.svelte";
   import FlowStepAdvancedSection from "./FlowStepAdvancedSection.svelte";
-  import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
-  import {
-    shouldShowStepMcpSection,
-    summarizeAssistantMcp
-  } from "$lib/features/flows/flowStepMcpConfig";
-  import { FlowStepMcpState } from "./FlowStepMcpState.svelte.ts";
 
   // ---------------------------------------------------------------------------
   // Props
@@ -163,7 +157,6 @@
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
-  const assistantRevision = flowEditor.assistantRevision;
   const flowResource = flowEditor.state.resource;
   const currentFlowId = $derived($flowResource?.id ?? "");
   const {
@@ -192,7 +185,6 @@
   });
 
   const templateState = new FlowTemplateState({ eneo, flowEditor });
-  const mcpState = new FlowStepMcpState({ flowEditor });
 
   // ---------------------------------------------------------------------------
   // Core derived state
@@ -518,40 +510,6 @@
       assistantState.assistant.attachments.length > 0
     )
   );
-  const mcpSummary = $derived(summarizeAssistantMcp(assistantState.assistant));
-  const hasActiveMcp = $derived(mcpSummary.hasActiveMcp);
-  const showMcpSection = $derived(shouldShowStepMcpSection(activeStep?.output_mode));
-  const knowledgeDisabledByMcp = $derived(hasActiveMcp && !hasKnowledgeSelections);
-  const mcpDisabledByKnowledge = $derived(hasKnowledgeSelections && !hasActiveMcp);
-  const mcpStatus = $derived(
-    hasActiveMcp ? m.flow_section_status_mcp_active() : m.flow_section_status_mcp_none()
-  );
-  const flowMcpCompatibilityById = $derived(
-    mcpState.getCompatibilityById({
-      activeStep,
-      steps,
-      showMcpSection,
-      availableServers: ($currentSpace.mcp_servers ?? []) as Array<{
-        id: string;
-        security_classification?: { security_level?: number; name?: string } | null;
-      }>,
-      spaceSecurityClassification: $currentSpace.security_classification,
-      reasonWhenIncompatible: m.flow_step_mcp_server_does_not_meet_security_classification()
-    })
-  );
-  const mcpCompatibilityReady = $derived(mcpState.isCompatibilityReady({ activeStep, steps }));
-
-  // Read $assistantRevision here to force a re-run when an assistant save bumps
-  // the revision; the state class owns the map population and concurrency gate.
-  $effect(() => {
-    mcpState.syncAssistants({
-      revision: $assistantRevision,
-      activeStep,
-      steps,
-      activeAssistant: assistantState.assistant,
-      showMcpSection
-    });
-  });
   const currentStepIssues = $derived(
     activeStep
       ? getFlowStepValidationIssues(steps).filter(
@@ -962,86 +920,23 @@
               />
             {/if}
 
-            {#if showMcpSection && isAdvancedMode}
-              {#if knowledgeDisabledByMcp}
-                <p
-                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-                >
-                  <span class="font-bold">{m.warning()}:&nbsp;</span
-                  >{m.knowledge_disabled_when_mcp_active()}
-                </p>
-              {/if}
-              <div class={knowledgeDisabledByMcp ? "pointer-events-none opacity-50" : ""}>
-                <FlowStepContextSection
-                  collapsible
-                  resetKey={activeStep?.step_order}
-                  assistant={assistantState.assistant}
-                  assistantLoading={assistantState.loading}
-                  runningUploads={assistantState.runningUploads}
-                  onKnowledgeChange={(detail) => {
-                    updateAssistantField("websites", detail.websites);
-                    updateAssistantField("groups", detail.groups);
-                    updateAssistantField(
-                      "integration_knowledge_list",
-                      detail.integrationKnowledgeList
-                    );
-                  }}
-                  onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
-                />
-              </div>
-            {/if}
-
-            {#if showMcpSection && isAdvancedMode}
-              {#if mcpDisabledByKnowledge}
-                <p
-                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-                >
-                  <span class="font-bold">{m.warning()}:&nbsp;</span
-                  >{m.mcp_disabled_when_knowledge_active()}
-                </p>
-              {/if}
-              {#if !mcpCompatibilityReady}
-                <p
-                  class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
-                >
-                  <span class="font-bold">{m.hint()}:&nbsp;</span
-                  >{m.flow_step_mcp_security_context_loading()}
-                </p>
-              {/if}
-              <FlowStepSection
-                title={m.mcp_servers()}
+            {#if isAdvancedMode && !isTranscribeOnly && !isTemplateFill}
+              <FlowStepContextSection
                 collapsible
-                status={mcpStatus}
                 resetKey={activeStep?.step_order}
-              >
-                <Settings.Row
-                  title={m.mcp_servers()}
-                  description={m.select_mcp_servers_description()}
-                >
-                  <div
-                    class={mcpDisabledByKnowledge || !mcpCompatibilityReady
-                      ? "pointer-events-none opacity-50"
-                      : ""}
-                  >
-                    {#if assistantState.assistant}
-                      <SelectMCPServers
-                        bind:selectedMCPServers={assistantState.assistant.mcp_servers}
-                        bind:selectedMCPTools={assistantState.assistant.mcp_tools}
-                        selectedModel={assistantState.assistant.completion_model}
-                        serverCompatibilityById={flowMcpCompatibilityById}
-                        on:change={(event) =>
-                          assistantState.updateFields(
-                            {
-                              mcp_servers: event.detail.selectedMCPServers,
-                              mcp_tools: event.detail.selectedMCPTools
-                            },
-                            { immediate: true }
-                          )}
-                      />
-                    {/if}
-                  </div>
-                </Settings.Row>
-              </FlowStepSection>
+                assistant={assistantState.assistant}
+                assistantLoading={assistantState.loading}
+                runningUploads={assistantState.runningUploads}
+                onKnowledgeChange={(detail) => {
+                  updateAssistantField("websites", detail.websites);
+                  updateAssistantField("groups", detail.groups);
+                  updateAssistantField(
+                    "integration_knowledge_list",
+                    detail.integrationKnowledgeList
+                  );
+                }}
+                onRemoveAttachment={(detail) => void assistantState.removeAttachment(detail.file)}
+              />
             {/if}
 
             {#if !isTranscribeOnly && !isTemplateFill}

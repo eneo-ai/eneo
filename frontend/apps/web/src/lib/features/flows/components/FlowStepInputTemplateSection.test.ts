@@ -23,7 +23,6 @@ function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowSte
     input_type: "text",
     output_mode: "pass_through",
     output_type: "text",
-    mcp_policy: "inherit",
     ...overrides
   };
 }

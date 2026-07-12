@@ -27,7 +27,10 @@ describe("FlowPromptEditor", () => {
       onCommit
     });
 
-    const chip = screen.getByRole("button", { name: "{{flow_input.user_flow}}" });
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Infoga variabel|Insert variable)$/ })
+    );
+    const chip = await screen.findByRole("menuitem", { name: /user_flow/ });
     await fireEvent.click(chip);
 
     expect(onChange).toHaveBeenCalledWith("{{flow_input.user_flow}}");
@@ -45,8 +48,7 @@ describe("FlowPromptEditor", () => {
       input_source: "previous_step",
       input_type: "text",
       output_mode: "pass_through",
-      output_type: "text",
-      mcp_policy: "inherit"
+      output_type: "text"
     } as FlowStep;
 
     render(FlowPromptEditor, {

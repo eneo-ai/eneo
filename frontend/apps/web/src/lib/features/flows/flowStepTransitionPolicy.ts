@@ -46,7 +46,7 @@ export function applyInputSourceChange({
   runtimeInputConfig: FlowRuntimeInputConfigValue;
   isAdvancedMode: boolean;
 }): InputSourceChangeResult {
-  const httpSourceSelected = nextSource === "http_get" || nextSource === "http_post";
+  const httpSourceSelected = nextSource === "http_get";
   const nextInputTypeOptions = getSelectableInputTypeOptions({
     inputSource: nextSource,
     previousOutputType,
@@ -54,7 +54,7 @@ export function applyInputSourceChange({
     isAdvancedMode
   });
   const nextInputConfig = httpSourceSelected
-    ? withHttpInputSourceDefaults(step.input_config, nextSource === "http_get" ? "GET" : "POST")
+    ? withHttpInputSourceDefaults(step.input_config, "GET")
     : (step.input_config ?? null);
   const nextInputType = keepOrRecommendInputType({
     currentInputType: step.input_type,

@@ -11,7 +11,7 @@
   // `title` is optional so a section can render bare inside a chapter that
   // already provides the heading (avoids a redundant "Utdata › Utdata").
   // `collapsible` turns the section into a disclosure: secondary sections inside
-  // a chapter (knowledge, MCP, custom input) collapse to their title row so the
+  // a chapter (knowledge, custom input) collapse to their title row so the
   // chapter isn't a wall of controls. This is a bare `<section>`, not a card, so
   // collapsing it inside a chapter adds no nested-card chrome.
   let {

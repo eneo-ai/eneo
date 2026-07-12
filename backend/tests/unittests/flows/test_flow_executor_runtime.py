@@ -3682,7 +3682,7 @@ async def test_assistant_cache_hit(user):
     """Same assistant ID loaded twice — get_space_by_assistant called once."""
     executor, _, _, _ = _build_executor(user)
     assistant_id = uuid4()
-    mock_assistant = SimpleNamespace(id=assistant_id)
+    mock_assistant = SimpleNamespace(id=assistant_id, mcp_servers=[])
     mock_space = SimpleNamespace(
         id=uuid4(),
         default_assistant=None,

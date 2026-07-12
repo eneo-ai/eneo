@@ -21,6 +21,7 @@
     isPowerUser?: boolean;
     onsuggestchange?: (intent: AIBuilderSuggestChangeIntent) => void;
     resolveModelName?: (ref: string | null) => string | null;
+    // Caller-only bridge while PlanPane drops its obsolete resolver plumbing.
     resolveMcpServerName?: (ref: string) => string | null;
     resolveMcpToolName?: (ref: string) => string | null;
   }
@@ -35,9 +36,7 @@
     planStatus = "",
     isPowerUser = true,
     onsuggestchange,
-    resolveModelName,
-    resolveMcpServerName,
-    resolveMcpToolName
+    resolveModelName
   }: Props = $props();
 
   let showDetails = $state(false);
@@ -96,9 +95,6 @@
   const hasOutputContract = $derived(Object.keys(outputContractProperties).length > 0);
   const hasInstructions = $derived(!!step.assistant_spec.instructions?.trim());
   const hasKnowledge = $derived(knowledgeRefs.length > 0);
-  const mcpServerRefs = $derived(step.assistant_spec.mcp_server_refs ?? []);
-  const mcpToolRefs = $derived(step.assistant_spec.mcp_tool_refs ?? []);
-  const hasMcp = $derived(mcpServerRefs.length > 0 || mcpToolRefs.length > 0);
   const hasDiagnosticCopy = $derived(planStatus === "proposed" && !!buildDiagnosticReport);
   // Bindings, contracts, model refs, and diagnostics are Avancerad vocabulary;
   // Enkel reviews the step through its instructions and knowledge only.
@@ -109,7 +105,6 @@
     hasInstructions ||
       usesFlowTranscriptionModel ||
       hasKnowledge ||
-      hasMcp ||
       (isPowerUser && hasTechnicalDetails)
   );
 
@@ -134,14 +129,6 @@
   }
   const inputTypeDisplay = $derived(isPowerUser ? inputType : simpleTypeLabel(inputType));
   const outputTypeDisplay = $derived(isPowerUser ? outputType : simpleTypeLabel(outputType));
-
-  function mcpServerLabel(ref: string): string {
-    return resolveMcpServerName?.(ref) ?? ref;
-  }
-
-  function mcpToolLabel(ref: string): string {
-    return resolveMcpToolName?.(ref) ?? ref;
-  }
 
   function requestStepChange() {
     if (!planId) return;
@@ -207,15 +194,6 @@
                 class="border-warning-default/30 bg-warning-dimmer text-warning-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
               >
                 {m.ai_builder_badge_modified()}
-              </Badge>
-            {/if}
-
-            {#if hasMcp}
-              <Badge
-                variant="outline"
-                class="bg-accent-default/6 border-accent-default/20 text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
-              >
-                {m.mcp()}
               </Badge>
             {/if}
 
@@ -303,7 +281,7 @@
                 </section>
               {/if}
 
-              {#if (resolvedModel && isPowerUser) || usesFlowTranscriptionModel || hasKnowledge || hasMcp}
+              {#if (resolvedModel && isPowerUser) || usesFlowTranscriptionModel || hasKnowledge}
                 <section class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                   {#if resolvedModel && isPowerUser}
                     <div class="flex flex-col gap-1">
@@ -330,39 +308,6 @@
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">
                         {knowledgeRefs.join(", ")}
-                      </p>
-                    </div>
-                  {/if}
-                  {#if hasMcp}
-                    <div class="flex flex-col gap-2 sm:col-span-2">
-                      <h4 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
-                        {m.ai_builder_step_mcp_tools()}
-                      </h4>
-                      <div class="flex flex-wrap gap-1.5">
-                        {#if mcpToolRefs.length > 0}
-                          {#each mcpToolRefs as ref (ref)}
-                            <Badge
-                              variant="outline"
-                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-xs font-medium"
-                              title={ref}
-                            >
-                              <span class="truncate">{mcpToolLabel(ref)}</span>
-                            </Badge>
-                          {/each}
-                        {:else}
-                          {#each mcpServerRefs as ref (ref)}
-                            <Badge
-                              variant="outline"
-                              class="bg-accent-default/6 border-accent-default/20 text-accent-stronger max-w-full px-2 py-0.5 text-xs font-medium"
-                              title={ref}
-                            >
-                              <span class="truncate">{mcpServerLabel(ref)}</span>
-                            </Badge>
-                          {/each}
-                        {/if}
-                      </div>
-                      <p class="text-muted text-xs leading-snug">
-                        {m.ai_builder_step_mcp_tools_hint()}
                       </p>
                     </div>
                   {/if}

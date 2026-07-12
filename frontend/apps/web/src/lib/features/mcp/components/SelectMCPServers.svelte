@@ -10,7 +10,7 @@
   import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
-  import { SvelteSet } from "svelte/reactivity";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import {
     sanitizeMcpSelection,
     type MCPSelectionServer,
@@ -33,12 +33,6 @@
     tools?: MCPTool[];
   }
 
-  type ServerCompatibility = {
-    isCompatible: boolean;
-    requiredLevel?: number | null;
-    reason?: string;
-  };
-
   type MCPSelectionChangeDetail = {
     selectedMCPServers: MCPSelectionServer[];
     selectedMCPTools: MCPToolSelection[];
@@ -48,7 +42,6 @@
     selectedMCPServers: MCPSelectionServer[] | undefined;
     selectedMCPTools?: MCPToolSelection[];
     selectedModel?: { supports_tool_calling?: boolean } | null;
-    serverCompatibilityById?: Record<string, ServerCompatibility>;
     /** Optional policy-filtered server list for personal assistant governance */
     allowedMCPServers?: { [key: string]: unknown }[] | undefined;
   };
@@ -57,7 +50,6 @@
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
     selectedModel = null,
-    serverCompatibilityById = {},
     allowedMCPServers = undefined
   }: Props = $props();
 
@@ -127,7 +119,9 @@
     selectedServers: MCPSelectionServer[],
     currentTools: MCPToolSelection[]
   ): MCPToolSelection[] {
-    const toolsById = new Map(currentTools.map((tool) => [tool.tool_id, tool.is_enabled]));
+    const toolsById = new SvelteMap(
+      currentTools.map((tool) => [tool.tool_id, tool.is_enabled] as const)
+    );
 
     for (const selectedServer of selectedServers) {
       for (const tool of selectedServer.tools ?? []) {
@@ -179,10 +173,6 @@
     return tool?.is_enabled ?? false;
   }
 
-  function isServerCompatible(serverId: string): boolean {
-    return serverCompatibilityById[serverId]?.isCompatible !== false;
-  }
-
   function toggleServer(server: MCPServer) {
     if (isServerSelected(server.id)) {
       const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
@@ -192,8 +182,6 @@
       );
       return;
     }
-
-    if (!isServerCompatible(server.id)) return;
 
     const nextServer = {
       ...server,
@@ -251,7 +239,7 @@
         )
       };
     });
-    const nextToolsById = new Map(
+    const nextToolsById = new SvelteMap(
       withAllSelectedToolOverrides(nextServers, selectedMCPTools).map((tool) => [
         tool.tool_id,
         tool.is_enabled
@@ -309,7 +297,6 @@
         {@const hasTools = isSelected && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
-        {@const isCompatible = isServerCompatible(server.id)}
         {@const enabledToolCount =
           server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
         <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
@@ -328,26 +315,10 @@
             </button>
 
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch
-                value={isSelected}
-                disabled={!isSelected && !isCompatible}
-                sideEffect={() => toggleServer(server)}
-              >
+              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
                 <div class="flex flex-col gap-0.5">
                   <div class="flex items-center gap-2">
                     <span class="text-default font-medium">{server.name}</span>
-                    {#if !isCompatible}
-                      <Tooltip
-                        text={m.flow_step_mcp_server_does_not_meet_security_classification()}
-                        placement="bottom"
-                      >
-                        <span
-                          class="label-warning border-label-default bg-label-dimmer text-label-stronger inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium"
-                        >
-                          {m.security_classification()}
-                        </span>
-                      </Tooltip>
-                    {/if}
                     {#if hasTools}
                       <span
                         class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"

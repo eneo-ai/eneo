@@ -20,8 +20,7 @@
     flow_input: () => m.flow_input_source_flow_input(),
     previous_step: () => m.flow_input_source_previous_step(),
     all_previous_steps: () => m.flow_input_source_all_previous_steps(),
-    http_get: () => m.flow_input_source_http_get(),
-    http_post: () => m.flow_input_source_http_post()
+    http_get: () => m.flow_input_source_http_get()
   };
 
   type StepValidation = {

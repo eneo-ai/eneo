@@ -203,8 +203,6 @@
         return m.flow_package_kind_model();
       case "knowledge":
         return m.flow_package_kind_knowledge();
-      case "mcp_tool":
-        return m.flow_package_kind_mcp_tool();
       case "template_asset":
         return m.flow_package_kind_template_asset();
       default:
@@ -233,15 +231,6 @@
     }
     if (resolution.kind === "knowledge") {
       return resolution.guidance?.summary ?? resolution.guidance?.setup_notes ?? null;
-    }
-    if (resolution.kind === "mcp_tool") {
-      return (
-        resolution.guidance?.summary ??
-        resolution.guidance?.expected_behavior ??
-        resolution.guidance?.auth_notes ??
-        resolution.guidance?.risk_notes ??
-        null
-      );
     }
     return (
       resolution.guidance?.summary ??

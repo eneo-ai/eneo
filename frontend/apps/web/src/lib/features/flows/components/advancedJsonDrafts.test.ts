@@ -10,8 +10,7 @@ import {
   clearHiddenFieldErrors,
   parseAdvancedJsonField,
   formatAdvancedJsonDraftField,
-  getErrorFields,
-  ADVANCED_JSON_FIELDS
+  getErrorFields
 } from "./advancedJsonDrafts";
 
 function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
@@ -23,7 +22,6 @@ function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
     input_type: "text",
     output_type: "text",
     output_mode: "pass_through",
-    mcp_policy: "inherit",
     input_contract: null,
     output_contract: null,
     input_config: null,
@@ -124,11 +122,6 @@ describe("getVisibleAdvancedJsonFields", () => {
 
   test("includes input_config for http_get source", () => {
     const fields = getVisibleAdvancedJsonFields(makeStep({ input_source: "http_get" }));
-    expect(fields.has("input_config")).toBe(true);
-  });
-
-  test("includes input_config for http_post source", () => {
-    const fields = getVisibleAdvancedJsonFields(makeStep({ input_source: "http_post" }));
     expect(fields.has("input_config")).toBe(true);
   });
 

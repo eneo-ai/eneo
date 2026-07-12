@@ -15,7 +15,6 @@ function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
     input_type: "text",
     output_type: "text",
     output_mode: "pass_through",
-    mcp_policy: "inherit",
     input_contract: null,
     output_contract: null,
     input_config: null,

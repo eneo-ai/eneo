@@ -2036,9 +2036,7 @@ class FlowRunExecutor:
 
     @staticmethod
     def _reject_flow_mcp_assistant(assistant: RuntimeAssistantProtocol) -> None:
-        mcp_servers = getattr(assistant, "mcp_servers", None)
-        mcp_tools = getattr(assistant, "mcp_tools", None)
-        if mcp_servers or mcp_tools:
+        if assistant.mcp_servers:
             raise BadRequestException(
                 "Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before running the flow."
             )

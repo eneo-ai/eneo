@@ -12,36 +12,6 @@ afterEach(() => {
 });
 
 describe("FlowAIBuilderStepCard", () => {
-  it("surfaces step-scoped MCP tools before approval", async () => {
-    render(FlowAIBuilderStepCard, {
-      step: makeStep({
-        assistant_spec: {
-          instructions: "Fetch the current time through MCP.",
-          model_ref: "model-1",
-          knowledge_refs: [],
-          mcp_server_refs: ["server-time"],
-          mcp_tool_refs: ["tool-current-time"]
-        }
-      }),
-      stepNumber: 1,
-      changeKind: "added",
-      resolveMcpToolName: (ref) =>
-        ref === "tool-current-time" ? "Time MCP: get_current_time" : null
-    });
-
-    expect(screen.getByText("MCP")).toBeTruthy();
-
-    await fireEvent.click(
-      screen.getByRole("button", { name: /^(Step|Steg) 1: Fetch time \((NEW|NY)\)$/ })
-    );
-
-    expect(await screen.findByText(/MCP( tools|-verktyg)/)).toBeTruthy();
-    expect(screen.getByText("Time MCP: get_current_time")).toBeTruthy();
-    expect(
-      screen.getByText(/(Only this step gets these external tools|Endast detta steg får)/)
-    ).toBeTruthy();
-  });
-
   it("hides completion model details for transcribe-only steps by output mode", async () => {
     render(FlowAIBuilderStepCard, {
       step: makeStep({
@@ -50,9 +20,7 @@ describe("FlowAIBuilderStepCard", () => {
         assistant_spec: {
           instructions: "Transcribe the audio.",
           model_ref: "model.gpt-5-4-nano",
-          knowledge_refs: [],
-          mcp_server_refs: [],
-          mcp_tool_refs: []
+          knowledge_refs: []
         }
       }),
       stepNumber: 1,
@@ -77,9 +45,7 @@ describe("FlowAIBuilderStepCard", () => {
         assistant_spec: {
           instructions: "Summarize the transcript.",
           model_ref: "model.gpt-5-4-nano",
-          knowledge_refs: [],
-          mcp_server_refs: [],
-          mcp_tool_refs: []
+          knowledge_refs: []
         }
       }),
       stepNumber: 1,
@@ -199,9 +165,7 @@ function makeStep(overrides: Partial<StepSpec> = {}): StepSpec {
     assistant_spec: {
       instructions: "Fetch the current time.",
       model_ref: null,
-      knowledge_refs: [],
-      mcp_server_refs: [],
-      mcp_tool_refs: []
+      knowledge_refs: []
     },
     input_source: "flow_input",
     input_type: "text",

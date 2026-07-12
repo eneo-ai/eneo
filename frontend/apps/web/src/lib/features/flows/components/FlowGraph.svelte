@@ -25,11 +25,6 @@
   import { onMount, tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
-  import {
-    createEmptyFlowStepMcpSummary,
-    summarizeAssistantMcp,
-    type FlowStepMcpSummary
-  } from "$lib/features/flows/flowStepMcpConfig";
 
   interface Props {
     flow: Flow;
@@ -47,7 +42,6 @@
   type AssistantFlowMeta = {
     modelName: string | null;
     assistantClassificationLevel: number | null;
-    mcpSummary: FlowStepMcpSummary;
   };
 
   const nodeTypes = {
@@ -144,16 +138,14 @@
     if (assistant === null || typeof assistant !== "object") {
       return {
         modelName: null,
-        assistantClassificationLevel: null,
-        mcpSummary: createEmptyFlowStepMcpSummary()
+        assistantClassificationLevel: null
       };
     }
     const completionModel = (assistant as { completion_model?: unknown }).completion_model;
     if (completionModel === null || typeof completionModel !== "object") {
       return {
         modelName: null,
-        assistantClassificationLevel: null,
-        mcpSummary: summarizeAssistantMcp(assistant as { mcp_servers?: unknown[] })
+        assistantClassificationLevel: null
       };
     }
     const modelName =
@@ -170,8 +162,7 @@
         : null;
     return {
       modelName,
-      assistantClassificationLevel,
-      mcpSummary: summarizeAssistantMcp(assistant as { mcp_servers?: unknown[] })
+      assistantClassificationLevel
     };
   }
 
@@ -186,8 +177,7 @@
     } catch {
       assistantMetaById.set(assistantId, {
         modelName: null,
-        assistantClassificationLevel: null,
-        mcpSummary: createEmptyFlowStepMcpSummary()
+        assistantClassificationLevel: null
       });
       lastLoadedRevisionByAssistant.set(assistantId, revision);
     } finally {
@@ -293,9 +283,7 @@
           modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
           assistantClassLevel:
             assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
-          classLevel: getClassificationLevel(step),
-          mcpSummary:
-            assistantMetaById.get(step.assistant_id)?.mcpSummary ?? createEmptyFlowStepMcpSummary()
+          classLevel: getClassificationLevel(step)
         }
       });
     }

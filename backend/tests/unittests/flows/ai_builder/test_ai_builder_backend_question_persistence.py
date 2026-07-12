@@ -53,14 +53,14 @@ def _expected_question_arguments() -> dict[str, object]:
 
 def _expected_confirming_question_arguments() -> dict[str, object]:
     return {
-        "question_id": "mcp_resource_selection",
-        "question": "Ska AI Builder använda MCP-verktyg?",
+        "question_id": "report_disposition",
+        "question": "Hur ska rapporten sammanställas?",
         "options": [
             {
-                "id": "continue_without_mcp",
-                "value": "without_mcp",
-                "label": "Fortsätt utan MCP",
-                "description": "Bygg flödet utan externa MCP-verktyg.",
+                "id": "confirm_combined_report",
+                "value": "combined",
+                "label": "En gemensam rapport",
+                "description": "Sammanställ alla källor i en rapport.",
             }
         ],
         "selection_mode": "single",
@@ -142,7 +142,7 @@ async def test_persist_backend_question_preserves_explicit_id_and_confirm_flag()
         new_messages_start=1,
         question=BackendQuestion(
             question_data=StructuredQuestionPayload.model_validate(expected_arguments),
-            assistant_text="Ska AI Builder använda MCP-verktyg?",
+            assistant_text="Hur ska rapporten sammanställas?",
         ),
     )
 

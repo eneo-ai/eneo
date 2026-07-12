@@ -172,7 +172,8 @@ export type FlowPackageDependencyResolution = NonNullable<
 >[number];
 export type FlowPackageLocalCandidate = components["schemas"]["FlowPackageLocalCandidate"];
 export type FlowPackageModelCandidate = components["schemas"]["FlowPackageModelCandidate"];
-export type FlowPackageResourceSlotRef = components["schemas"]["ResourceSlotRef-Input"];
+export type FlowPackageResourceSlotRef =
+  components["schemas"]["FlowPackageImportResourceSlotRefRequest"];
 export type FlowPackageImportResourceBinding =
   components["schemas"]["FlowPackageImportResourceBindingRequest"];
 export type FlowPackageRequirementDataSensitivity =
@@ -228,7 +229,6 @@ export type FlowGraph = components["schemas"]["GraphResponse"];
 export type FlowRunDebugIoTypes = components["schemas"]["FlowRunDebugIoTypes"];
 export type FlowRunDebugInput = components["schemas"]["FlowRunDebugInput"];
 export type FlowRunDebugOutput = components["schemas"]["FlowRunDebugOutput"];
-export type FlowRunDebugMcp = components["schemas"]["FlowRunDebugMcp"];
 export type FlowRunDebugRagReferenceChunk = components["schemas"]["FlowRunDebugRagReferenceChunk"];
 export type FlowRunDebugRagReference = components["schemas"]["FlowRunDebugRagReference"];
 export type FlowRunDebugRag = components["schemas"]["FlowRunDebugRag"];

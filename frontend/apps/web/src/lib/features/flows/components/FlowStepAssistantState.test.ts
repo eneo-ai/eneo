@@ -14,8 +14,7 @@ function makeStep(assistantId: string): FlowStep {
     input_source: "flow_input",
     input_type: "text",
     output_mode: "pass_through",
-    output_type: "text",
-    mcp_policy: "inherit"
+    output_type: "text"
   };
 }
 

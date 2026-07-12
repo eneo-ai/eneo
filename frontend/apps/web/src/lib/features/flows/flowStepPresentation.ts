@@ -63,7 +63,6 @@ export function getSourceHintKind(params: {
     case "all_previous_steps":
       return "all_previous_steps";
     case "http_get":
-    case "http_post":
       return "http_source";
     case "previous_step":
       if (previousOutputType === "json") return "previous_step_json";

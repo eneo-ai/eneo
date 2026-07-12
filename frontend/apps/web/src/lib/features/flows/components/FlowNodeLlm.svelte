@@ -5,7 +5,6 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
-  import type { FlowStepMcpSummary } from "$lib/features/flows/flowStepMcpConfig";
 
   let {
     data
@@ -18,7 +17,6 @@
         | "input_type"
         | "output_type"
         | "output_mode"
-        | "mcp_policy"
         | "output_classification_override"
       >;
       isActive: boolean;
@@ -30,7 +28,6 @@
       modelName?: string;
       classLevel?: number | null;
       assistantClassLevel?: number | null;
-      mcpSummary?: FlowStepMcpSummary | null;
     };
   } = $props();
 
@@ -159,11 +156,6 @@
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </Badge>
       </div>
-      {#if data.mcpSummary?.hasActiveMcp}
-        <div class="text-warning-stronger flex items-center gap-1">
-          {m.flow_step_mcp_tools_badge({ count: String(data.mcpSummary.enabledToolCount) })}
-        </div>
-      {/if}
       {#if data.runStatus && (data.numTokensInput || data.numTokensOutput)}
         <div class="text-secondary">
           {m.flow_node_token_usage({

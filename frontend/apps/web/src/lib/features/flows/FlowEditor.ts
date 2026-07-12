@@ -110,7 +110,6 @@ function createFlowEditor(data: FlowEditorInitData) {
         "input_bindings",
         "output_classification_override",
         "review_policy",
-        "mcp_policy",
         "input_config",
         "output_config"
       ],

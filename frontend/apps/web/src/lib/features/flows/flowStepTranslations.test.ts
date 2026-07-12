@@ -58,13 +58,5 @@ describe("flow step translation copy", () => {
       "Controls which text the AI actually receives. Leave this empty if the step should use its normal material. The same variables work here as in Instructions, but here you build the text the AI will process, e.g. with title or step_1.output.text."
     );
     expect(messages.flow_step_input_template_tooltip).toContain("step_1.output.text");
-    expect(messages.flow_step_mcp_tools_badge).toBe("{count} tools");
-    expect(messages.flow_step_mcp_servers_badge).toBe("{count} servers");
-    expect(messages.flow_step_mcp_server_does_not_meet_security_classification).toBe(
-      "This MCP server does not meet this step's required security classification."
-    );
-    expect(messages.flow_step_mcp_security_context_loading).toBe(
-      "Loading security classification requirements for this step..."
-    );
   });
 });
