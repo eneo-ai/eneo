@@ -253,50 +253,22 @@ graph LR
 
 ---
 
-## Flow-Step MCP Security Classification
+## Flow external-effect boundary
 
-Flow steps reuse the same MCP server catalog and security-classification model that already exists for tenant admins and spaces. Flows do **not** introduce a new classification hierarchy; they adapt the existing one to step-level authoring and execution.
+Flow and Flow AI Builder do not support MCP servers or tools at authoring,
+publish, runtime, or package boundaries. Eneo rejects MCP-bearing current
+assistants, persisted Builder plans, packages, and historical published
+definitions before it mutates Flow state or performs external work.
 
-### Classification hierarchy
+Standalone assistants and conversations retain their separately owned MCP
+behavior. Flow accepts HTTP GET as an input source and sends terminal HTTP POST
+output through the durable webhook outbox.
 
-1. **Tenant admin**
-   - creates and updates MCP servers
-   - assigns an optional security classification to each MCP server
-2. **Space**
-   - applies the space security classification
-   - determines which MCP servers are compatible enough to be available in that space
-3. **Flow step**
-   - selects MCP servers only from the already-space-available pool
-   - may require a stricter MCP floor based on the step input context
-4. **Publish/runtime**
-   - re-validates the same rules before execution
-
-### Step-floor semantics
-
-The step floor is derived from the data a step is about to consume:
-
-- the **space security classification** is the baseline
-- `previous_step` uses the previous step’s **effective output classification**
-- `all_previous_steps` uses the **maximum** effective output classification among earlier steps
-- the **current step’s** `output_classification_override` does **not** affect same-step MCP compatibility
-- **prior steps’** output overrides matter indirectly because they change downstream effective output levels
-
-### Enforcement layers
-
-Eneo uses three layers here:
-
-- **UI guidance**
-  - the flow editor disables MCP servers that do not meet the current step floor
-- **fail-fast update validation**
-  - invalid MCP changes on a flow-managed assistant are rejected immediately
-- **publish/runtime validation**
-  - flows are re-validated before execution, even if an invalid state somehow bypasses the UI
-
-This keeps the generic MCP picker reusable while putting flow-specific classification logic in the flow layer.
-
-### Operational note
-
-If the security-classification selector is missing in the admin MCP dialog, the most common cause is that the tenant has not enabled or configured security classifications yet. In that case, downstream flow-step MCP classification guidance cannot be fully applied either.
+The accepted
+[Flow launch scope and lifecycle ADR](adr/flow-launch-scope-and-lifecycle.md#4-flow-mcp-is-hard-disabled)
+owns the launch decision. The
+[Flow Developer Quickstart](flows/flow-developer-quickstart.md#step-schema)
+documents the supported step and effect boundary.
 
 ---
 
