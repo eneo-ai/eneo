@@ -2,8 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
+- **Last revised:** 2026-07-12
 - **Decision owners:** Product, security, and architecture
-- **Scope:** Flow and Flow AI Builder launch behavior
+- **Scope:** Flow and Flow AI Builder launch behavior and the portable-package
+  platform boundary
 
 ## Context
 
@@ -31,17 +33,181 @@ existing owners described in the
   before installation. No permissive or legacy interpretation is allowed.
 - **Retained surface:** Strict file export, plan, and import for the supported
   subset, with checksums, explicit mappings, and complete import receipts.
-- **Removed or unavailable surface:** Signing, a registry or marketplace, MCP,
-  HTTP mutation, attached-template portability, and compatibility shims. Each
-  requires a separate concrete contract before it can ship.
-- **Implementation owner:** WI-13 owns strict planning and installation after
-  WI-22A and WI-22B settle portable capabilities and WI-23 settles import-row
-  lifecycle.
+- **Removed or unavailable launch surface:** Assistant/App package payloads and
+  installation, a registry or marketplace, signing, MCP, HTTP mutation,
+  attached-template portability, and compatibility shims. Each requires the
+  trigger and contract recorded below before it can ship.
+- **Implementation owner:** Accepted WI-13 owns strict Flow planning and
+  installation. WI-13B owns the final external container contract. WI-13C owns
+  package-import tenant/space/Flow integrity. Future Assistant, App, and
+  marketplace work remains trigger-gated.
 - **Deferred trigger:** A named product owner may propose an excluded capability
   only with its authorization, integrity, lifecycle, recovery, and consumer
   contract.
 - **Revision rule:** Revise this record before expanding the portable subset;
   never infer support from fields that happen to serialize.
+
+#### Implemented state and mandatory launch hardening
+
+The current implementation exports and imports Flow packages only. It still
+uses `.eneo-flowpkg`, the Flow-specific media type
+`application/vnd.eneo.flow-package+zip`, and the manifest field
+`package_kind`. Although the manifest enum also names `assistant` and `app`, no
+Assistant/App payload, planner, installer, receipt, or marketplace exists. The
+current ZIP reader also applies the exact Flow entry allowlist before parsing
+the manifest. These are current-state facts, not the target contract.
+
+Two focused slices remain mandatory for the current package lane:
+
+- **WI-13B — Finalize the kind-neutral Eneo container contract.** Replace the
+  external extension and media type with `.eneopkg` and
+  `application/vnd.eneo.package+zip`. Rename the manifest discriminator to
+  `kind`, whose closed values are `flow`, `assistant`, and `app`; do not retain
+  `package_kind` or the Flow-specific extension as compatibility aliases.
+  Reorder reads into structural ZIP safety, manifest parsing, kind/profile
+  exact-entry validation, and the kind-specific payload parser. A Flow endpoint
+  rejects a structurally valid Assistant/App manifest with its typed
+  unsupported-kind error before applying the Flow profile. A missing
+  `manifest.json` remains a structural missing-entry error. Update every API,
+  OpenAPI, generated-client, frontend, locale, documentation, example, and test
+  surface that exposes the file contract. This slice implements no
+  Assistant/App payload or install behavior.
+- **WI-13C — Enforce package-import tenant/space/Flow integrity.** Harden the
+  successful-retry query so the joined Flow must match the receipt's tenant and
+  space. After a read-only mismatch preflight and an explicit decision on
+  Flow-between-space updates, enforce the successful receipt's Flow/tenant/space
+  relation with the narrow Flow-side unique target and composite foreign key.
+  `uq_flows_id_tenant_id` already covers the tenant pair; add or prove only the
+  needed `(id, tenant_id, space_id)` target rather than a generic integrity
+  framework.
+  Preserve `ON DELETE CASCADE` and the terminal-shape constraint. Defer a Spaces
+  `(id, tenant_id)` constraint unless the shared Spaces owner approves it;
+  failed receipts remain space-owned display/audit rows and are not retry
+  candidates. This slice follows the then-current serialized Alembic head and
+  adds no imaginary-production repair path.
+
+#### Portable container and module ownership
+
+The target user-facing container is one `.eneopkg` ZIP archive with media type
+`application/vnd.eneo.package+zip`. The manifest's `kind` field is the sole
+package-kind discriminator. Per-kind HTTP endpoints remain typed; the container
+does not create one generic upload or install API.
+
+For now, dependency-clean artifact mechanics stay inside
+`eneo.flow_packages`, and their dependency direction is frozen in place. A
+shared module with one consumer would add ceremony without removing
+duplication. When Assistant packaging is scheduled as the second concrete
+consumer, WI-PKG-01 extracts only the proven shared archive, manifest,
+checksum, and bounded-reader mechanics into `eneo.packages`. Error descriptors
+move only if two real verticals later prove identical semantics.
+
+Vertical owners remain `eneo.flow_packages`, future
+`eneo.assistant_packages`, and future `eneo.app_packages`. Each vertical owns
+its strict portable authoring payload, authorization, requirement topology,
+destination planning, installation, transaction and recovery behavior, and
+concrete FK-backed receipt lifecycle. Shared requirement descriptors may move
+only after two real verticals prove identical semantics; topology and
+destination binding stay vertical. Kind dispatch is closed and exhaustive. It
+does not use a Protocol, dynamic registry, plugin framework, service locator,
+`BasePackageService`, generic CRUD installer, or package god module.
+
+#### Integrity and digest vocabulary
+
+- **`content_checksum`:** checksum of canonical manifest metadata, the Flow
+  draft, requirements, and provenance. It identifies the exact canonical
+  content reviewed for import, not necessarily the compressed archive bytes.
+  Provenance includes export time today, so an unchanged Flow re-export can
+  produce a different checksum. Deduplication and update logic must not assume
+  stable equality across re-exports.
+- **`spec_hash`:** hash of the Flow draft specification only. It is a
+  Flow-internal payload fact, not a universal package semantic digest.
+- **`archive_digest`:** future marketplace digest of the exact immutable bytes
+  stored and served. It appears only when marketplace storage exists.
+
+Do not add a fourth generic payload digest until a concrete update,
+deduplication, signing, or comparison contract needs it. Manifest v1 contains
+no marketplace listing or publisher UUID, signature or key, compatibility
+matrix, destination-local ID, user or space identity, secret, credential, or
+mutable install state. The offline `package_version` remains a bounded non-empty
+label; marketplace release ordering may define a stricter version policy later,
+but manifest v1 does not impose SemVer for architectural symmetry.
+
+#### Trigger-gated package and marketplace expansion
+
+The following work is part of the long-term roadmap but does not enter the
+current launch denominator until its named trigger or D0 decision activates it:
+
+- **WI-PKG-01:** extract `eneo.packages` only when Assistant packaging is
+  scheduled and two concrete consumers prove the seam.
+- **WI-PKG-02A:** define one strict, secret-free, local-ID-free portable
+  Assistant authoring contract. Preflight deployed Assistant data and decide
+  which unsupported state is deleted, migrated, or rejected. A Flow-managed
+  Assistant cannot export as a standalone Assistant package.
+- **WI-PKG-02B:** implement Assistant export, plan, and install in the Assistant
+  package vertical, ending in the canonical Assistant authoring owner and a
+  concrete Assistant receipt.
+- **WI-PKG-03A:** define one strict portable App authoring contract and decide
+  executable and asset boundaries.
+- **WI-PKG-03B:** implement App export, plan, and install in the App package
+  vertical, ending in the canonical App authoring owner and a concrete App
+  receipt.
+- **WI-MKT-D0:** decide publisher authority, municipality/tenant audiences,
+  moderation, licensing, release ordering and version policy, withdrawal and
+  yanking, telemetry/privacy, asset scanning and limits, template-gallery
+  disposition, central versus federated topology, and the required trust or
+  signing stage.
+- **WI-MKT-01:** after WI-MKT-D0, implement immutable publisher, listing, and
+  release metadata; exact archive-byte storage; authorized browse/search;
+  moderation; and bounded cursor pagination.
+- **WI-MKT-02:** install one selected release by delegating to its existing
+  kind-specific plan/install vertical. Marketplace code never owns destination
+  planning or installation semantics.
+
+Federation, detached signing, key rotation/revocation, trust roots,
+update/merge/rollback policy, publisher analytics, and large assets require
+separate later triggers. They are not implicit consequences of WI-MKT-01 or
+WI-MKT-02.
+
+#### Marketplace and data-model guardrails
+
+- Model publisher, listing, and immutable release as one relational aggregate.
+  Use unique publisher/kind/package coordinates and an immutable release-version
+  key.
+- Store exact archive bytes in object storage, not the relational database.
+  Compute `archive_digest`, store bytes before publishing the release row, and
+  clean bounded orphan uploads.
+- Use explicit `draft -> published -> yanked` release state, audience and
+  visibility, and moderation state. Browse/search uses indexed cursor
+  pagination; it never materializes the full catalog or relies on offset-only
+  pagination for large lists.
+- Same-instance distribution uses ordinary authorization and moderation, not
+  signature theater. Known cross-instance transfer uses TLS plus digest
+  pinning. Untrusted/federated distribution earns detached signatures, key
+  rotation/revocation, and trust roots through a later decision.
+- Keep install receipts concrete and FK-backed by kind. Never add a generic
+  polymorphic `target_uuid`.
+- Asset support requires an explicit inventory, media type, byte size, digest,
+  bidirectional archive-coverage check, strict caps, scanning policy, and no
+  executable plugin interpretation.
+- Existing Assistant and App template galleries are already catalog-like
+  owners. WI-MKT-D0 must count deployed rows and choose whether they remain
+  local creation shortcuts or migrate curated entries to marketplace releases
+  with a deletion plan. A third unrelated catalog is forbidden.
+
+#### Package-platform must-not-build ledger
+
+- No shared package module with one consumer.
+- No generic package installer or service, plugin system, dynamic registry,
+  service locator, one-implementation port, or package god module.
+- No FK-less polymorphic install records.
+- No mutable marketplace releases, implicit auto-update, or hidden dual
+  formats.
+- No portable local IDs, credentials, users, spaces, publisher-local UUIDs, or
+  source trust.
+- No manifest-v1 signature, key, catalog, or compatibility fields.
+- No database archive blobs, unbounded assets or fan-out, N+1 candidate loading,
+  or full-catalog materialization.
+- No third template or catalog owner.
 
 ### 2. Terminal webhooks are a launch guarantee
 
@@ -304,8 +470,9 @@ existing owners described in the
 
 ## Delivery order and gates
 
-The immediate next dependency is **WI-20 in protection mode**. It must finish
-before WI-03 changes retention selection. The accepted lifecycle/package order is:
+This record defines dependency order, not current execution status; accepted
+receipts and the ranked roadmap record completion. WI-20 protection must
+precede WI-03 retention selection. The lifecycle/package dependency order is:
 
 1. WI-20 protection mode
 2. WI-22A
@@ -315,14 +482,23 @@ before WI-03 changes retention selection. The accepted lifecycle/package order i
 6. WI-19
 7. WI-24
 8. WI-13
-9. WI-14
-10. WI-15
-11. WI-21 as the final cleanup slice
+9. WI-13B
+10. WI-14 and WI-13C after WI-13B, in parallel when file and migration
+    ownership allow
+11. WI-15
+12. WI-21 as the final cleanup slice
 
 Additional gates:
 
-- WI-14 waits for the WI-22A/WI-22B capability shape and the WI-13 public package
-  shape.
+- WI-14 waits for the WI-22A/WI-22B capability shape and WI-13B's final public
+  package shape. WI-13C does not change that public shape, so it need not block
+  WI-14.
+- Package-lane launch completion requires both WI-13B and WI-13C. WI-13C enters
+  the serialized migration queue from the then-current accepted Alembic head;
+  it does not share a migration with unrelated work.
+- The current launch denominator adds only WI-13B and WI-13C. WI-PKG-01 through
+  WI-PKG-03B and WI-MKT-D0 through WI-MKT-02 remain visible roadmap identities
+  but do not affect launch completion until their recorded trigger activates.
 - WI-19 and WI-24 coordinate so Flow finalization collects runtime-upload
   candidates before cascade removes their bindings.
 - WI-22A records persisted HTTP POST input and Flow MCP counts and whether real
