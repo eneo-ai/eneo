@@ -24,9 +24,11 @@
     disabled = false
   }: Props = $props();
 
-  // Manual reveal after confirmation; before confirmation the summary stays expanded.
+  // Manual reveal after confirmation; before confirmation the ACTIVE summary
+  // stays expanded. A superseded summary collapses regardless — two expanded
+  // interpretation cards would state everything twice.
   let userExpanded = $state(false);
-  const expanded = $derived(!confirmed || userExpanded);
+  const expanded = $derived(active ? !confirmed || userExpanded : userExpanded);
   // Assumptions are supporting detail, collapsed so the summary reads fast.
   let assumptionsExpanded = $state(false);
 
@@ -67,7 +69,7 @@
       {m.ai_builder_requirements_title()}
     </h2>
 
-    {#if confirmed}
+    {#if confirmed || !active}
       <button
         type="button"
         class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/30 ml-auto cursor-pointer rounded-md px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
@@ -85,57 +87,55 @@
       </div>
 
       {#if userRequest}
-        <section class="border-default bg-secondary/30 rounded-lg border px-3 py-2.5">
-          <h3 class="text-muted mb-1 text-xs font-semibold tracking-[0.06em] uppercase">
+        <!-- The quoted task is a quote, not a box: a plain left rule. -->
+        <section class="border-stronger border-l-2 py-0.5 pl-3">
+          <h3 class="text-secondary mb-1 text-[0.8125rem]">
             {m.ai_builder_requirements_user_request()}
           </h3>
-          <p class="text-secondary text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
+          <p class="text-primary text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
             {userRequest}
           </p>
         </section>
       {/if}
 
-      {#if hasDecisions}
-        <section class="flex flex-col gap-2">
-          <h3 class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
+      <!-- One definition pattern for ALL metadata: decisions and input/output
+           share the same label–value grid — nothing is stated twice in two
+           different shapes. -->
+      <section class="flex flex-col gap-2">
+        {#if hasDecisions}
+          <h3 class="text-primary text-sm font-semibold">
             {m.ai_builder_requirements_decisions()}
           </h3>
-          <dl class="divide-default flex flex-col divide-y">
-            {#each summary.key_decisions as decision (decision.topic)}
-              <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[12rem_1fr]">
-                <dt class="text-primary text-[0.8125rem] font-semibold">{decision.topic}</dt>
-                <dd class="text-secondary text-[0.8125rem] leading-normal">
-                  {decision.decision}
-                </dd>
-              </div>
-            {/each}
-          </dl>
-        </section>
-      {/if}
-
-      <div class="border-default grid gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-2">
-        <div class="flex flex-col gap-1">
-          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
-            {m.ai_builder_requirements_input()}
-          </span>
-          <span class="text-primary text-[0.8125rem] leading-snug">{summary.input_description}</span
-          >
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
-            {m.ai_builder_requirements_output()}
-          </span>
-          <span class="text-primary text-[0.8125rem] leading-snug"
-            >{summary.output_description}</span
-          >
-        </div>
-      </div>
+        {/if}
+        <dl class="divide-dimmer flex flex-col divide-y">
+          {#each summary.key_decisions as decision (decision.topic)}
+            <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 sm:grid-cols-[12rem_1fr]">
+              <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
+              <dd class="text-primary text-[0.8125rem] leading-normal">
+                {decision.decision}
+              </dd>
+            </div>
+          {/each}
+          <div class="grid gap-x-4 gap-y-1 py-2 first:pt-0 sm:grid-cols-[12rem_1fr]">
+            <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_input()}</dt>
+            <dd class="text-primary text-[0.8125rem] leading-normal">
+              {summary.input_description}
+            </dd>
+          </div>
+          <div class="grid gap-x-4 gap-y-1 py-2 last:pb-0 sm:grid-cols-[12rem_1fr]">
+            <dt class="text-secondary text-[0.8125rem]">{m.ai_builder_requirements_output()}</dt>
+            <dd class="text-primary text-[0.8125rem] leading-normal">
+              {summary.output_description}
+            </dd>
+          </div>
+        </dl>
+      </section>
 
       {#if hasAssumptions}
         <section class="flex flex-col gap-1.5">
           <button
             type="button"
-            class="text-muted hover:text-primary focus-visible:ring-accent-default/30 flex w-fit items-center gap-1.5 rounded text-xs font-semibold tracking-[0.06em] uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            class="text-primary focus-visible:ring-accent-default/30 flex w-fit items-center gap-1.5 rounded text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
             aria-expanded={assumptionsExpanded}
             onclick={() => (assumptionsExpanded = !assumptionsExpanded)}
           >
@@ -157,14 +157,10 @@
             </svg>
           </button>
           {#if assumptionsExpanded}
-            <ul class="flex flex-col gap-1 p-0">
+            <ul class="divide-dimmer flex flex-col divide-y p-0">
               {#each summary.assumptions ?? [] as assumption (assumption)}
-                <li class="text-secondary flex items-start gap-2 text-[0.8125rem] leading-snug">
-                  <span
-                    class="bg-accent-default mt-[0.55em] block size-1.5 shrink-0 rounded-full opacity-70"
-                    aria-hidden="true"
-                  ></span>
-                  <span>{assumption}</span>
+                <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
+                  {assumption}
                 </li>
               {/each}
             </ul>
@@ -174,17 +170,13 @@
 
       {#if hasManualNotes}
         <section class="flex flex-col gap-1.5">
-          <span class="text-muted text-xs font-semibold tracking-[0.06em] uppercase">
+          <h3 class="text-primary text-sm font-semibold">
             {m.ai_builder_requirements_manual_notes()}
-          </span>
-          <ul class="flex flex-col gap-1 p-0">
+          </h3>
+          <ul class="divide-dimmer flex flex-col divide-y p-0">
             {#each summary.manual_setup_notes ?? [] as note (note)}
-              <li class="text-secondary flex items-start gap-2 text-[0.8125rem] leading-snug">
-                <span
-                  class="bg-muted mt-[0.55em] block size-1 shrink-0 rounded-full opacity-60"
-                  aria-hidden="true"
-                ></span>
-                <span>{note}</span>
+              <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
+                {note}
               </li>
             {/each}
           </ul>
@@ -206,11 +198,16 @@
         </p>
       {/if}
     </div>
-  {:else if confirmed}
+  {:else}
     <div class="px-4 pb-3.5">
       {#if hasDecisions}
         <p class="text-muted text-xs leading-snug">
           {summary.key_decisions.map((d) => d.topic).join(" · ")}
+        </p>
+      {/if}
+      {#if !active}
+        <p class="text-muted mt-1 text-xs font-medium">
+          {m.ai_builder_requirements_superseded()}
         </p>
       {/if}
     </div>

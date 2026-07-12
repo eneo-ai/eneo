@@ -18,6 +18,7 @@
     isStreaming?: boolean;
     question?: StructuredQuestion;
     questionAnswered?: boolean;
+    questionAnswerLabel?: string | null;
     requirementsSummary?: RequirementsSummary;
     requirementsUserRequest?: string | null;
     requirementsConfirmed?: boolean;
@@ -36,6 +37,7 @@
     isStreaming = false,
     question = undefined,
     questionAnswered = false,
+    questionAnswerLabel = null,
     requirementsSummary = undefined,
     requirementsUserRequest = null,
     requirementsConfirmed = false,
@@ -78,6 +80,7 @@
         <FlowAIBuilderQuestion
           {question}
           answered={questionAnswered}
+          answerLabel={questionAnswerLabel}
           disabled={interactionDisabled}
           onanswer={(payload) => onQuestionAnswer?.(payload)}
         />

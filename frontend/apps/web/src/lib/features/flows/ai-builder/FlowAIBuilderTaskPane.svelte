@@ -150,14 +150,12 @@
         </Collapsible.Trigger>
       </h2>
       <Collapsible.Content>
-        <ul class="mt-2 flex flex-col gap-1.5 p-0">
+        <ul
+          class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
+        >
           {#each assumptions as assumption (assumption)}
-            <li class="text-secondary flex items-start gap-2 text-[0.8125rem] leading-snug">
-              <span
-                class="bg-accent-default mt-[0.55em] block size-1.5 shrink-0 rounded-full opacity-70"
-                aria-hidden="true"
-              ></span>
-              <span>{assumption}</span>
+            <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
+              {assumption}
             </li>
           {/each}
         </ul>
@@ -243,9 +241,9 @@
   }
 
   .definition-grid dt {
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 0.8125rem;
-    font-weight: 500;
+    font-weight: 400;
   }
 
   .definition-grid dd {

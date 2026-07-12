@@ -22,13 +22,21 @@
   interface Props {
     question: StructuredQuestion;
     answered?: boolean;
+    /** The user's chosen answer, shown in the collapsed answered state. */
+    answerLabel?: string | null;
     /** Interaction lock projected from the service (e.g. while a flow is
      *  being created) — controls must LOOK disabled, not silently no-op. */
     disabled?: boolean;
     onanswer?: (payload: StructuredQuestionAnswerPayload) => void;
   }
 
-  let { question, answered = false, disabled = false, onanswer }: Props = $props();
+  let {
+    question,
+    answered = false,
+    answerLabel = null,
+    disabled = false,
+    onanswer
+  }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
@@ -61,6 +69,10 @@
     const optionKey = getStructuredQuestionOptionKey(option);
 
     if (isSingle && !requiresConfirm) {
+      // Fill the radio before dispatching so the choice is visibly
+      // registered even for the frames before the card collapses.
+      selectedOptionKeys.clear();
+      selectedOptionKeys.add(optionKey);
       onanswer?.(buildStructuredQuestionSelection(question, [option]));
       return;
     }
@@ -116,11 +128,15 @@
       <span class="answered-check" aria-hidden="true">
         <CheckIcon class="size-3" />
       </span>
-      <span>{question.question}</span>
+      <span class="min-w-0">
+        {question.question}
+        {#if answerLabel}
+          <span class="text-primary font-medium">— {answerLabel}</span>
+        {/if}
+      </span>
     </div>
   {:else}
     <p id={questionLabelId} class="question-title">
-      <span class="question-dot" aria-hidden="true"></span>
       {question.question}
     </p>
 
@@ -129,14 +145,13 @@
       role={isSingle ? "radiogroup" : "group"}
       aria-labelledby={questionLabelId}
     >
-      {#each question.options as option, i (getStructuredQuestionOptionKey(option))}
+      {#each question.options as option (getStructuredQuestionOptionKey(option))}
         {@const optionKey = getStructuredQuestionOptionKey(option)}
         {@const isSelected = selectedOptionKeys.has(optionKey)}
         <button
           type="button"
           class="option-row"
           class:is-selected={isSelected}
-          style="--i: {i}"
           onclick={() => selectOption(option)}
           role={isSingle ? "radio" : "checkbox"}
           aria-checked={isSelected}
@@ -170,7 +185,6 @@
           type="button"
           class="option-row option-row-custom"
           class:is-selected={customSelected}
-          style="--i: {question.options.length}"
           onclick={selectCustom}
           role={isSingle ? "radio" : "checkbox"}
           aria-checked={customSelected}
@@ -258,14 +272,13 @@
     color: var(--text-primary);
   }
 
-  .question-dot {
-    @apply mt-[0.5em] size-1.5 shrink-0 rounded-full;
-    background: var(--accent-default);
-    opacity: 0.7;
+  /* One surface with hairline dividers; never one border per option. */
+  .options-stack {
+    @apply flex flex-col;
   }
 
-  .options-stack {
-    @apply flex flex-col gap-1.5;
+  .options-stack > .option-row + .option-row {
+    border-top: 1px solid var(--border-dimmer);
   }
 
   .answered-prompt {
@@ -280,26 +293,19 @@
   }
 
   .option-row {
-    @apply relative flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left;
-    border-color: var(--border-default);
-    background: var(--bg-primary);
+    @apply relative flex min-h-11 w-full items-start gap-3 rounded-md px-2 py-3 text-left;
     color: var(--text-primary);
     cursor: pointer;
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease,
-      box-shadow 0.15s ease;
+    transition: background 0.15s ease;
   }
 
   .option-row:not(:disabled):hover {
-    border-color: var(--border-stronger);
     background: oklch(from var(--bg-secondary) l c h / 0.55);
   }
 
   .option-row:focus-visible {
-    outline: none;
-    border-color: var(--accent-default);
-    box-shadow: 0 0 0 3px oklch(from var(--accent-default) l c h / 0.18);
+    outline: 2px solid var(--accent-default);
+    outline-offset: -2px;
   }
 
   .option-row:disabled {
@@ -307,20 +313,11 @@
   }
 
   .option-row.is-selected {
-    border-color: oklch(from var(--accent-default) l c h / 0.45);
     background: oklch(from var(--accent-default) l c h / 0.06);
   }
 
   .option-row.is-selected:hover {
     background: oklch(from var(--accent-default) l c h / 0.08);
-  }
-
-  .option-row-custom {
-    border-style: dashed;
-  }
-
-  .option-row-custom.is-selected {
-    border-style: solid;
   }
 
   .option-indicator {
@@ -381,40 +378,22 @@
     @apply mt-3 flex items-center justify-end gap-2;
   }
 
+  /* One quiet fade, no slides, no staggered entrances. */
   .question-panel {
-    animation: questionReveal 260ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .option-row {
-    animation: optionSlideIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    animation-delay: calc(70ms + var(--i, 0) * 55ms);
+    animation: questionReveal 200ms ease-out;
   }
 
   @keyframes questionReveal {
     from {
       opacity: 0;
-      transform: translateY(4px);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes optionSlideIn {
-    from {
-      opacity: 0;
-      transform: translateY(3px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .question-panel,
-    .option-row {
+    .question-panel {
       animation: none;
     }
   }
