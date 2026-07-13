@@ -811,6 +811,7 @@ class Container(containers.DeclarativeContainer):
         CompletionService,
         context_builder=context_builder,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,

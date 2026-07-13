@@ -32,6 +32,7 @@
   let http_auth_type = $state<"none" | "bearer">("none");
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
+  let forward_identity = $state(false);
 
   // Authentication credentials
   let bearer_token = $state("");
@@ -48,6 +49,7 @@
       http_auth_type = (mcpServer.http_auth_type as "none" | "bearer") || "none";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
+      forward_identity = mcpServer.forward_identity ?? false;
     } else {
       name = "";
       description = "";
@@ -55,6 +57,7 @@
       http_auth_type = "none";
       documentation_url = "";
       security_classification = null;
+      forward_identity = false;
     }
     // Always clear auth credentials (they're stored securely, not shown)
     bearer_token = "";
@@ -80,6 +83,7 @@
       // Add optional fields with actual values
       if (description) data.description = description;
       if (documentation_url) data.documentation_url = documentation_url;
+      data.forward_identity = forward_identity;
 
       // Security classification — send id or null
       data.security_classification = security_classification
@@ -102,6 +106,7 @@
         documentation_url = "";
         bearer_token = "";
         security_classification = null;
+        forward_identity = false;
       }
 
       $openController = false;
@@ -360,6 +365,22 @@
               placeholder={m.mcp_docs_url_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             />
+          </div>
+
+          <div class="mt-4">
+            <label for="mcp-forward_identity" class="flex items-start gap-2.5">
+              <input
+                id="mcp-forward_identity"
+                type="checkbox"
+                bind:checked={forward_identity}
+                aria-describedby="forward-identity-hint"
+                class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
+              />
+              <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
+            </label>
+            <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
+              {m.mcp_forward_identity_hint()}
+            </p>
           </div>
         </fieldset>
 

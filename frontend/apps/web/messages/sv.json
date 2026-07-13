@@ -3303,6 +3303,8 @@
   "mcp_url_placeholder": "https://example.com/mcp",
   "mcp_authentication_legend": "Autentisering",
   "mcp_optional_details_legend": "Tillvalsuppgifter",
+  "mcp_forward_identity": "Vidarebefordra användaridentitet",
+  "mcp_forward_identity_hint": "Skicka den inloggade användarens namn, e-post, roll och organisation till den här servern vid varje anrop. Aktivera endast för servrar du litar på med denna information.",
   "mcp_docs_url_placeholder": "https://docs.example.com",
   "mcp_auth_type_aria": "Autentiseringstyp: {label}",
   "mcp_server_url_aria": "Server-URL",

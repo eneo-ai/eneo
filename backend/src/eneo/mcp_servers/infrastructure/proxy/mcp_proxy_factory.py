@@ -57,6 +57,7 @@ class MCPProxySessionFactory:
         mcp_servers: list["MCPServer"],
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        identity_headers: dict[str, str] | None = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -97,6 +98,7 @@ class MCPProxySessionFactory:
             auth_credentials_map=auth_map,
             chat_session_id=chat_session_id,
             db_session=db_session,
+            identity_headers=identity_headers,
         )
 
     async def terminate(

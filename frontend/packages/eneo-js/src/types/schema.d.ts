@@ -11994,6 +11994,11 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -12032,6 +12037,11 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12097,6 +12107,11 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12244,6 +12259,8 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Forward Identity */
+      forward_identity?: boolean | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */

@@ -39,6 +39,12 @@ class MCPServers(BasePublic):
     is_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default="True", nullable=False
     )
+    # When true, the acting user/tenant identity is forwarded to this server as
+    # X-Eneo-* headers on every request. Off by default: identity is PII egress
+    # to a third party, opted into per server.
+    forward_identity: Mapped[bool] = mapped_column(
+        Boolean, server_default="False", nullable=False
+    )
     env_vars: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB
     )  # Encrypted tenant credentials

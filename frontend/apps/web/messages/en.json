@@ -3270,6 +3270,8 @@
   "mcp_url_placeholder": "https://example.com/mcp",
   "mcp_authentication_legend": "Authentication",
   "mcp_optional_details_legend": "Optional details",
+  "mcp_forward_identity": "Forward user identity",
+  "mcp_forward_identity_hint": "Send the signed-in user's name, email, role and tenant to this server on every request. Only enable for servers you trust with this information.",
   "mcp_docs_url_placeholder": "https://docs.example.com",
   "mcp_auth_type_aria": "Authentication type: {label}",
   "mcp_server_url_aria": "Server URL",
