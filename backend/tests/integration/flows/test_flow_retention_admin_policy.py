@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -13,6 +14,9 @@ from eneo.data_retention.infrastructure.data_retention_service import (
 )
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_classification_retention_policy_table import (
+    FlowClassificationRetentionPolicies,
+)
 from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRuntimeUploadedFiles,
@@ -311,6 +315,123 @@ async def test_preview_has_constant_read_only_statement_cardinality(
     assert "ix_flow_runs_tenant_created_at" in plans[0]
     assert "ix_flow_runtime_uploaded_files_tenant_id" in plans[1]
     assert all("Buffers:" in plan for plan in plans)
+
+
+async def test_concurrent_same_organization_preview_allows_one_mutation_and_audit(
+    client,
+    admin_token,
+    retention_existing_data,
+    db_container,
+    admin_user,
+) -> None:
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    proposal = {
+        "flow_run_history_retention_days": 30,
+        "flow_runtime_upload_abandonment_days": 30,
+    }
+    preview_response = await client.post(
+        "/api/v1/settings/flow-retention-policy/preview",
+        headers=headers,
+        json=proposal,
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    confirmed_proposal = {
+        **proposal,
+        "confirmation": _confirmation(preview_response.json()),
+    }
+
+    responses = await asyncio.gather(
+        client.patch(
+            "/api/v1/settings/flow-retention-policy",
+            headers=headers,
+            json=confirmed_proposal,
+        ),
+        client.patch(
+            "/api/v1/settings/flow-retention-policy",
+            headers=headers,
+            json=confirmed_proposal,
+        ),
+    )
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    stale_response = next(
+        response for response in responses if response.status_code == 409
+    )
+    assert stale_response.json()["code"] == "flow_retention_preview_stale"
+
+    current = await client.get(
+        "/api/v1/settings/flow-retention-policy",
+        headers=headers,
+    )
+    assert current.status_code == 200, current.text
+    assert current.json()["flow_run_history_retention_days"] == 30
+    assert current.json()["flow_runtime_upload_abandonment_days"] == 30
+
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLog.id)).where(
+                AuditLog.tenant_id == admin_user.tenant_id,
+                AuditLog.description == "Updated flow retention policy",
+            )
+        )
+    assert audit_count == 1
+
+
+async def test_concurrent_same_classification_preview_allows_one_mutation_and_audit(
+    client,
+    admin_token,
+    retention_existing_data,
+    db_container,
+    admin_user,
+) -> None:
+    _flow_id, classification_id = retention_existing_data
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    path = (
+        f"/api/v1/settings/flow-classification-retention-policies/{classification_id}"
+    )
+    preview_response = await client.post(
+        f"{path}/preview",
+        headers=headers,
+        json={"data_retention_days": 10},
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    confirmed_proposal = {
+        "data_retention_days": 10,
+        "confirmation": _confirmation(preview_response.json()),
+    }
+
+    responses = await asyncio.gather(
+        client.put(path, headers=headers, json=confirmed_proposal),
+        client.put(path, headers=headers, json=confirmed_proposal),
+    )
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    stale_response = next(
+        response for response in responses if response.status_code == 409
+    )
+    assert stale_response.json()["code"] == "flow_retention_preview_stale"
+
+    async with db_container() as container:
+        policy_days = (
+            await container.session().scalars(
+                sa.select(
+                    FlowClassificationRetentionPolicies.data_retention_days
+                ).where(
+                    FlowClassificationRetentionPolicies.tenant_id
+                    == admin_user.tenant_id,
+                    FlowClassificationRetentionPolicies.security_classification_id
+                    == classification_id,
+                )
+            )
+        ).all()
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLog.id)).where(
+                AuditLog.tenant_id == admin_user.tenant_id,
+                AuditLog.description == "Updated Flow classification retention policy",
+            )
+        )
+    assert policy_days == [10]
+    assert audit_count == 1
 
 
 async def test_admin_organization_and_classification_policy_journeys_use_exact_preview(

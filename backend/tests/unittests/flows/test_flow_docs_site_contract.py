@@ -3669,5 +3669,20 @@ def test_flow_docs_distinguish_existing_runtime_from_gated_retention_control_pla
     assert "canonical run-history purge selector adopts" in guide
     assert "do not themselves delete data" in guide
     assert "upload sweeping" in guide
-    assert "never overrides preservation duties" in guide
+    assert "does not enforce records or legal holds" in guide
     assert "There is no API for raw per-step deletion intervals yet." in guide
+
+
+def test_flow_api_guide_does_not_claim_records_hold_enforcement() -> None:
+    guide = _read(FLOW_API_GUIDE)
+
+    assert "does not enforce records or legal holds" in guide
+    assert "Automatic deletion must not be enabled" in guide
+    assert "separately governed blocker exists" in guide
+    for implemented_blocker in (
+        "undelivered audit delivery",
+        "unresolved webhook delivery",
+        "active rerun work",
+    ):
+        assert implemented_blocker in guide
+    assert "legal or operational holds" not in guide

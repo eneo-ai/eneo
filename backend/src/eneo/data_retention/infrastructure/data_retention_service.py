@@ -503,7 +503,7 @@ class DataRetentionService:
             new_days=new_policy.flow_runtime_upload_abandonment_days,
         )
         preview = None
-        if destructive_change:
+        if destructive_change or confirmation is not None:
             preview = await self._confirm_flow_retention_change(
                 tenant_id=tenant_id,
                 state=state,
@@ -557,7 +557,7 @@ class DataRetentionService:
             new_days=proposal.data_retention_days,
         )
         preview = None
-        if destructive_change:
+        if destructive_change or confirmation is not None:
             preview = await self._confirm_flow_retention_change(
                 tenant_id=tenant_id,
                 state=state,

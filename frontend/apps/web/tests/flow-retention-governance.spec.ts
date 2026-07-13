@@ -47,7 +47,13 @@ test("tenant admin confirms organization and classification retention through th
   await expect(dialog).toContainText("Livscykelhinder och vilande värden");
   await expect(dialog).toContainText("Klockfält: finished_at_or_created_at");
   await expect(dialog).toContainText("Klockfält: created_at");
-  await expect(dialog).toContainText("Bevarande och rättsliga spärrar");
+  await expect(dialog).toContainText("Arkivspärrar och rättsliga spärrar tillämpas inte");
+  await expect(dialog).toContainText(
+    "Den här versionen tillämpar inte arkivspärrar eller rättsliga spärrar."
+  );
+  await expect(dialog).toContainText("Ej levererad granskning");
+  await expect(dialog).toContainText("Olöst webhook");
+  await expect(dialog).toContainText("Aktiv omkörning");
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
   await expect(dialog).not.toBeVisible();
@@ -73,18 +79,20 @@ test("tenant admin confirms organization and classification retention through th
   await expect(dialog).not.toBeVisible();
   await expect(classificationRow).toContainText("20 dagar");
 
-  await page.context().addCookies([
-    {
-      name: "PARAGLIDE_LOCALE",
-      value: "en",
-      url: new URL(page.url()).origin
-    }
-  ]);
-  await page.goto("/admin/flow-data-retention");
+  await page.goto("/account");
+  await page.getByRole("combobox", { name: "Språk" }).click();
+  await page.getByRole("option", { name: "English" }).click();
+  await expect(page.getByRole("combobox", { name: "Language" })).toBeVisible();
+
+  await page.goto("/en/admin/flow-data-retention");
   await expect(page.getByRole("heading", { name: "Flow data retention" })).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "Never-attached uploads" })).toHaveAttribute(
     "placeholder",
     "Off"
   );
-  await expect(page.getByText("Preservation and legal holds take precedence")).toBeVisible();
+  await expect(page.getByText("Records and legal holds are not enforced")).toBeVisible();
+  await expect(
+    page.getByText(/This release does not enforce records or legal holds/)
+  ).toBeVisible();
+  await expect(page.getByText(/Automatic deletion must not be enabled/)).toBeVisible();
 });

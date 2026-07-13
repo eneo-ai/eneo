@@ -237,7 +237,7 @@ Organization or classification policy activates run-history deletion. Once activ
 
 Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference, which can loosen future dynamic retention back to the Flow/space policy. Use this deliberately when retiring a classification.
 
-Purge remains deferred while lifecycle or preservation requirements block deletion, including undelivered audit events, unresolved webhook delivery, active rerun work, and legal or operational holds. The preview reports the known lifecycle blockers but never overrides preservation duties.
+This release does not enforce records or legal holds. Automatic deletion must not be enabled for material under an active hold or preservation obligation until a separately governed blocker exists. The preview reports only three implemented lifecycle blockers: undelivered audit delivery, unresolved webhook delivery, and active rerun work.
 
 Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. For classification-3 or other sensitive workflows, use a stricter Flow/space `data_retention_days` window or a classification retention policy for full run-history purge, and use tenant evidence policy for export controls.
 
