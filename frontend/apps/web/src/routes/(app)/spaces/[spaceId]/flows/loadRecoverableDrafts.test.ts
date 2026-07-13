@@ -26,7 +26,9 @@ function makeSession(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeEneo(fetchImpl: (...args: unknown[]) => Promise<unknown>) {
+function makeEneo(
+  fetchImpl: (endpoint: unknown, init?: { signal?: AbortSignal }) => Promise<unknown>
+) {
   return { client: { fetch: fetchImpl } } as unknown as Parameters<
     typeof loadRecoverableDrafts
   >[0]["eneo"];
@@ -79,15 +81,23 @@ describe("loadRecoverableDrafts", () => {
     expect(drafts).toEqual([]);
   });
 
-  it("gives up after the latency budget instead of delaying the page", async () => {
+  it("aborts the request at the latency budget instead of delaying the page", async () => {
     vi.useFakeTimers();
-    const never = new Promise<never>(() => {});
+    let receivedSignal: AbortSignal | undefined;
+    const fetch = vi.fn((_endpoint: unknown, init?: { signal?: AbortSignal }) => {
+      receivedSignal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
     const pending = loadRecoverableDrafts({
-      eneo: makeEneo(() => never),
+      eneo: makeEneo(fetch),
       currentSpace: { id: SPACE_ID },
       user: builderUser
     });
     await vi.advanceTimersByTimeAsync(AI_DRAFTS_TIMEOUT_MS + 1);
     await expect(pending).resolves.toEqual([]);
+    // The deadline must CANCEL the request, not orphan it server-side.
+    expect(receivedSignal?.aborted).toBe(true);
   });
 });

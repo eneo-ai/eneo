@@ -3,10 +3,13 @@ import { backendFetch, expectOk } from "./helpers";
 
 // Motion contract for the opted-in collapsible height animation
 // (collapsible-content.svelte `.collapsible-animate`). The wrapper leans on
-// bits-ui internals — mount-animation prevention, the presence lifecycle, and
-// the measured-height CSS variable — so this spec pins that behavior against
-// dependency upgrades: no initial-mount animation, both directions animate,
-// settled states are correct, and reduced motion disables the keyframes.
+// bits-ui internals — the presence lifecycle and the measured-height CSS
+// variable — so this spec pins that behavior against dependency upgrades:
+// both directions animate, settled states are correct, and reduced motion
+// disables the keyframes. (The rationale's wide-container default opens
+// POST-mount via a ResizeObserver, so a true mount-suppression case does not
+// exist on this surface; the spec asserts the settled open state instead.)
+// A second block pins the coarse-pointer 44px floor on disclosure triggers.
 
 function makeFixtures(spaceId: string) {
   const draft = {
@@ -28,6 +31,21 @@ function makeFixtures(spaceId: string) {
         role: "user",
         content: "Sammanfatta rapporter till en PDF",
         timestamp: "2026-07-11T09:00:00Z"
+      },
+      {
+        message_id: "m-2",
+        role: "assistant",
+        content: "Här är mitt förslag:",
+        timestamp: "2026-07-11T09:05:00Z",
+        requirements_summary: {
+          requirements_version: "v1",
+          summary: "Skapa en sammanfattning av inskickade rapporter som PDF.",
+          key_decisions: [{ topic: "Slutresultat", decision: "PDF-dokument" }],
+          input_description: "Text vid körning",
+          output_description: "PDF med samlad översikt",
+          assumptions: ["Underlaget är på svenska."],
+          manual_setup_notes: []
+        }
       }
     ],
     latest_turn: null
@@ -96,10 +114,7 @@ function rationaleContent(page: Page) {
 }
 
 test.describe("collapsible-animate motion contract", () => {
-  test("no mount animation, both directions animate, settled states correct", async ({
-    page,
-    request
-  }) => {
+  test("both directions animate and settled states are correct", async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openPlanReview(page, request);
 
@@ -184,5 +199,35 @@ test.describe("collapsible-animate motion contract", () => {
       return { animationName: getComputedStyle(content).animationName };
     }, RATIONALE_TRIGGER);
     expect(sample.animationName).toBe("none");
+  });
+});
+
+test.describe("coarse-pointer touch targets", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("touch devices get a 44px floor on disclosure triggers", async ({ page, request }) => {
+    // Covers both CSS-class implementations (.section-heading-trigger in the
+    // plan pane, .section-trigger in the task pane); the requirements-summary
+    // toggles use the Tailwind pointer-coarse variant, which compiles to the
+    // same media query. Physical px matter: the app's 15px root font would
+    // shrink a rem-based floor to 41.25px.
+    await openPlanReview(page, request);
+
+    const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    expect(coarse).toBe(true);
+
+    await page.getByRole("button", { name: "Plan", exact: true }).click();
+    const rationale = page.getByRole("button", { name: RATIONALE_TRIGGER });
+    await rationale.scrollIntoViewIfNeeded();
+    expect(
+      await rationale.evaluate((el) => el.getBoundingClientRect().height)
+    ).toBeGreaterThanOrEqual(44);
+
+    await page.getByRole("button", { name: "Uppgift", exact: true }).click();
+    const assumptions = page.getByRole("button", { name: /^Antaganden \(1\)$/ });
+    await assumptions.scrollIntoViewIfNeeded();
+    expect(
+      await assumptions.evaluate((el) => el.getBoundingClientRect().height)
+    ).toBeGreaterThanOrEqual(44);
   });
 });
