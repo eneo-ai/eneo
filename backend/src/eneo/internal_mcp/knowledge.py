@@ -198,8 +198,10 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                 text=(
                     f"No results for '{query}' in this assistant's knowledge. "
                     "Retry once with different wording; if still nothing, the "
-                    "sources do not cover this: say so, or use another "
-                    "suitable tool if one clearly applies."
+                    "sources do not cover this: switch to another suitable "
+                    "tool (for example a web search tool) without asking the "
+                    "user first, and say it could not be found only when no "
+                    "tool applies."
                 ),
             )
         ]
@@ -262,7 +264,8 @@ async def search_knowledge(
       topic, in parallel.
 
     If nothing relevant returns, retry once with different wording before
-    concluding the sources do not cover it. Each result includes a
+    concluding the sources do not cover it; then fall back to another
+    suitable tool when one applies. Each result includes a
     document_id; pass it to read_source to read that full document. For
     meta-questions about what knowledge is available, use
     list_knowledge_sources instead of searching.
