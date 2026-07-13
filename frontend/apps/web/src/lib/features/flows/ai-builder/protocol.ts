@@ -73,6 +73,35 @@ export type RecoverableAIBuilderDraftSession = AIBuilderDraftSession & {
   status: Extract<SessionStatus, "chatting" | "awaiting_approval">;
 };
 
+function isRecoverableDraftStatus(
+  status: SessionStatus
+): status is RecoverableAIBuilderDraftSession["status"] {
+  switch (status) {
+    case "chatting":
+    case "awaiting_approval":
+      return true;
+    case "applied":
+    case "cancelled":
+      return false;
+  }
+  const unhandledStatus: never = status;
+  throw new Error(`Unhandled AI Builder session status: ${unhandledStatus}`);
+}
+
+/** Shared by the builder's recovery flow and the flows page's resume strip so
+ *  both surfaces agree on what counts as an in-progress create draft. */
+export function isRecoverableCreateDraft(
+  session: AIBuilderDraftSession,
+  spaceId: string
+): session is RecoverableAIBuilderDraftSession {
+  return (
+    session.space_id === spaceId &&
+    session.target_kind === "create" &&
+    session.flow_id === null &&
+    isRecoverableDraftStatus(session.status)
+  );
+}
+
 export type StepSpec = GeneratedAIBuilderStepSpec;
 
 export type FlowDraftSpecCore = GeneratedAIBuilderFlowDraftSpecCore;

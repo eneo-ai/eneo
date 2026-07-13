@@ -3656,6 +3656,8 @@
   "ai_builder_draft_updated_at": "Updated {value}",
   "ai_builder_draft_yesterday": "Yesterday",
   "ai_builder_drafts_new": "Start new flow",
+  "ai_builder_drafts_strip_continue": "Continue where you left off",
+  "ai_builder_drafts_strip_label": "AI drafts in progress ({count})",
   "ai_builder_drafts_subtitle": "Choose a draft to continue working on",
   "ai_builder_drafts_title": "AI Builder — Drafts",
   "ai_builder_draft_pill": "AI draft",

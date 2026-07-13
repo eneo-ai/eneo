@@ -12,7 +12,7 @@ import {
   isStaleApplyError,
   parseAIBuilderError
 } from "./aiBuilderError";
-import { parseAIBuilderStreamEvent } from "./protocol";
+import { isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
@@ -36,7 +36,6 @@ import type {
   ProposedPlan,
   RequirementsSummary,
   RecoverableAIBuilderDraftSession,
-  SessionStatus,
   TargetKind
 } from "./protocol";
 
@@ -154,33 +153,6 @@ function supersededSessionOperation(): DOMException {
   return new DOMException(
     "The AI Builder session changed before the operation completed.",
     "AbortError"
-  );
-}
-
-function isRecoverableDraftStatus(
-  status: SessionStatus
-): status is RecoverableAIBuilderDraftSession["status"] {
-  switch (status) {
-    case "chatting":
-    case "awaiting_approval":
-      return true;
-    case "applied":
-    case "cancelled":
-      return false;
-  }
-  const unhandledStatus: never = status;
-  throw new Error(`Unhandled AI Builder session status: ${unhandledStatus}`);
-}
-
-function isRecoverableCreateDraft(
-  session: AIBuilderDraftSession,
-  spaceId: string
-): session is RecoverableAIBuilderDraftSession {
-  return (
-    session.space_id === spaceId &&
-    session.target_kind === "create" &&
-    session.flow_id === null &&
-    isRecoverableDraftStatus(session.status)
   );
 }
 
