@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,7 @@ class CompletionService:
         self,
         context_builder: ContextBuilder,
         tenant: Optional["TenantInDB"] = None,
+        user: Optional["UserInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
@@ -67,6 +69,7 @@ class CompletionService:
     ):
         self.context_builder = context_builder
         self.tenant = tenant
+        self.user = user
         self.audit_service = audit_service
         self.config = config or SETTINGS
         if encryption_service is None:
