@@ -187,7 +187,7 @@ The OTel FastAPI instrumentation creates a server span for each request. If the 
 
 `TraceIdResponseMiddleware` sets `X-Trace-Id` (and `X-Correlation-ID`) on `http.response.start`, which guarantees the headers are present on every status code including 4xx and 5xx. The middleware is pure-ASGI rather than `BaseHTTPMiddleware`, which would create a context-copy boundary that loses the active server span.
 
-CORS exposes both headers via `Access-Control-Expose-Headers`. The list of exposed trace headers is defined once in [backend/src/eneo/server/main.py](../backend/src/eneo/server/main.py) as `_TRACE_EXPOSE_HEADERS` and reused in the normal CORS configuration and in the manual CORS blocks used by 500-error responses.
+CORS exposes public response headers via `Access-Control-Expose-Headers`. The shared `_CORS_EXPOSE_HEADERS` tuple in [backend/src/eneo/server/main.py](../backend/src/eneo/server/main.py) owns the trace headers and conditional public package headers. Normal CORS handling and the manual CORS blocks for 500 responses reuse this tuple.
 
 ### Outbound backend-to-backend calls
 
