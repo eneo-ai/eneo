@@ -407,39 +407,25 @@ class FlowRepository:
             if assistant_id in snapshots
         }
 
-    async def has_assistant_mcp_configuration(
+    async def count_flow_step_assistants_with_mcp_configuration(
         self,
         *,
-        assistant_ids: list[UUID],
+        flow_id: UUID,
         tenant_id: UUID,
-    ) -> bool:
-        if not assistant_ids:
-            return False
-
-        server_membership = (
-            sa.select(AssistantMCPServers.assistant_id)
-            .join(Assistants, Assistants.id == AssistantMCPServers.assistant_id)
-            .join(Users, Users.id == Assistants.user_id)
-            .where(AssistantMCPServers.assistant_id.in_(assistant_ids))
-            .where(Users.tenant_id == tenant_id)
+    ) -> int:
+        server_membership = sa.exists().where(
+            AssistantMCPServers.assistant_id == FlowSteps.assistant_id
         )
-        tool_membership = (
-            sa.select(AssistantMCPServerTools.assistant_id)
-            .join(Assistants, Assistants.id == AssistantMCPServerTools.assistant_id)
-            .join(Users, Users.id == Assistants.user_id)
-            .where(AssistantMCPServerTools.assistant_id.in_(assistant_ids))
-            .where(Users.tenant_id == tenant_id)
+        tool_membership = sa.exists().where(
+            AssistantMCPServerTools.assistant_id == FlowSteps.assistant_id
         )
-        return bool(
-            await self.session.scalar(
-                sa.select(
-                    sa.or_(
-                        sa.exists(server_membership),
-                        sa.exists(tool_membership),
-                    )
-                )
-            )
+        count = await self.session.scalar(
+            sa.select(sa.func.count(sa.distinct(FlowSteps.assistant_id)))
+            .where(FlowSteps.flow_id == flow_id)
+            .where(FlowSteps.tenant_id == tenant_id)
+            .where(sa.or_(server_membership, tool_membership))
         )
+        return int(count or 0)
 
     async def get_assistant_scope_rows(
         self,

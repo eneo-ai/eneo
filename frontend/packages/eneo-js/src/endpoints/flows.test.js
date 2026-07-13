@@ -204,11 +204,13 @@ describe("flows templates endpoint", () => {
       blob: new Blob(["pkg"]),
       contentType: "application/octet-stream",
       filename: "report.eneopkg",
-      headers: new Headers()
+      headers: new Headers({
+        "Eneo-Package-Omitted-Mcp-Assistant-Count": "2"
+      })
     }));
     const flows = initFlows({ fetch, binaryFetch });
 
-    await flows.packages.export({
+    const response = await flows.packages.export({
       id: "flow-1",
       packageId: "se.demo.report",
       packageVersion: "1.0.0",
@@ -232,6 +234,49 @@ describe("flows templates endpoint", () => {
       },
       signal: undefined
     });
+    expect(response.omissions).toEqual([{ kind: "mcp_attachment", count: 2 }]);
+  });
+
+  it("returns no package omissions when the binary response omits the header", async () => {
+    const binaryFetch = vi.fn(async () => ({
+      blob: new Blob(["pkg"]),
+      contentType: "application/octet-stream",
+      filename: "report.eneopkg",
+      headers: new Headers()
+    }));
+    const flows = initFlows({ fetch: vi.fn(), binaryFetch });
+
+    const response = await flows.packages.export({
+      id: "flow-1",
+      packageId: "se.demo.report",
+      packageVersion: "1.0.0",
+      name: "Report"
+    });
+
+    expect(binaryFetch).toHaveBeenCalledTimes(1);
+    expect(response.omissions).toEqual([]);
+  });
+
+  it("rejects an invalid package omission header after one binary request", async () => {
+    const binaryFetch = vi.fn(async () => ({
+      blob: new Blob(["pkg"]),
+      contentType: "application/octet-stream",
+      filename: "report.eneopkg",
+      headers: new Headers({
+        "Eneo-Package-Omitted-Mcp-Assistant-Count": "0"
+      })
+    }));
+    const flows = initFlows({ fetch: vi.fn(), binaryFetch });
+
+    await expect(
+      flows.packages.export({
+        id: "flow-1",
+        packageId: "se.demo.report",
+        packageVersion: "1.0.0",
+        name: "Report"
+      })
+    ).rejects.toThrow("invalid MCP omission count");
+    expect(binaryFetch).toHaveBeenCalledTimes(1);
   });
 
   it("generates template signed url from flow route", async () => {

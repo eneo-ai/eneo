@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { EneoError, type Flow, type Eneo } from "@eneo/eneo-js";
+  import { EneoError, type Eneo, type Flow, type FlowPackageExportResponse } from "@eneo/eneo-js";
   import {
     AlertTriangle,
     CheckCircle2,
@@ -12,6 +12,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -19,6 +20,7 @@
   import {
     defaultFlowPackageId,
     downloadFlowPackageFile,
+    getFlowPackageMcpOmissionCount,
     mapFlowPackageExportError
   } from "$lib/features/flows/flowPackageTransfer";
   import { m } from "$lib/paraglide/messages";
@@ -41,14 +43,24 @@
   let packageIdManuallyEdited = $state(false);
   let exportError = $state<string | null>(null);
   let exporting = $state(false);
+  let pendingExport = $state<FlowPackageExportResponse | null>(null);
+  let omissionsAcknowledged = $state(false);
 
   const trimmedId = $derived(packageId.trim());
   const trimmedVersion = $derived(packageVersion.trim());
   const trimmedName = $derived(packageName.trim());
 
   const stepCount = $derived(flow.steps?.length ?? 0);
+  const omittedMcpAssistantCount = $derived(
+    pendingExport ? getFlowPackageMcpOmissionCount(pendingExport.omissions) : 0
+  );
+  const formLocked = $derived(exporting || pendingExport !== null);
   const canSubmit = $derived(
-    trimmedId.length > 0 && trimmedVersion.length > 0 && trimmedName.length > 0 && !exporting
+    trimmedId.length > 0 &&
+      trimmedVersion.length > 0 &&
+      trimmedName.length > 0 &&
+      !exporting &&
+      pendingExport === null
   );
 
   function handleOpenChange(next: boolean) {
@@ -59,6 +71,11 @@
       packageDescription = flow.description ?? "";
       packageIdManuallyEdited = false;
       exportError = null;
+      pendingExport = null;
+      omissionsAcknowledged = false;
+    } else {
+      pendingExport = null;
+      omissionsAcknowledged = false;
     }
     open = next;
   }
@@ -81,6 +98,11 @@
     return m.flow_package_export_step_count({ count: String(count) });
   }
 
+  function mcpOmissionDescription(count: number): string {
+    if (count === 1) return m.flow_package_export_mcp_omission_description_singular();
+    return m.flow_package_export_mcp_omission_description({ count: String(count) });
+  }
+
   async function exportPackage() {
     exporting = true;
     exportError = null;
@@ -93,9 +115,11 @@
         name: trimmedName,
         description: packageDescription.trim()
       });
-      downloadFlowPackageFile(response, "flow-package.eneopkg");
-      toast.success(m.flow_package_export_success());
-      open = false;
+      if (getFlowPackageMcpOmissionCount(response.omissions) > 0) {
+        pendingExport = response;
+      } else {
+        savePackage(response);
+      }
     } catch (error) {
       const message =
         mapFlowPackageExportError(error) ??
@@ -104,6 +128,17 @@
     } finally {
       exporting = false;
     }
+  }
+
+  function savePackage(response: FlowPackageExportResponse) {
+    downloadFlowPackageFile(response, "flow-package.eneopkg");
+    toast.success(m.flow_package_export_success());
+    open = false;
+  }
+
+  function savePendingPackage() {
+    if (!pendingExport || !omissionsAcknowledged) return;
+    savePackage(pendingExport);
   }
 </script>
 
@@ -149,7 +184,7 @@
                 id="flow-package-export-id"
                 value={packageId}
                 oninput={onPackageIdInput}
-                disabled={exporting}
+                disabled={formLocked}
                 autocomplete="off"
                 spellcheck={false}
               />
@@ -163,7 +198,7 @@
               <Input
                 id="flow-package-export-version"
                 bind:value={packageVersion}
-                disabled={exporting}
+                disabled={formLocked}
                 autocomplete="off"
                 spellcheck={false}
               />
@@ -182,7 +217,7 @@
                 id="flow-package-export-name"
                 value={packageName}
                 oninput={onNameInput}
-                disabled={exporting}
+                disabled={formLocked}
               />
             </Field.Field>
 
@@ -193,7 +228,7 @@
               <Textarea
                 id="flow-package-export-description"
                 bind:value={packageDescription}
-                disabled={exporting}
+                disabled={formLocked}
                 rows={4}
               />
             </Field.Field>
@@ -232,6 +267,30 @@
           </Card.Content>
         </Card.Root>
 
+        {#if pendingExport && omittedMcpAssistantCount > 0}
+          <Alert.Root>
+            <AlertTriangle class="size-4" />
+            <Alert.Title>{m.flow_package_export_mcp_omission_title()}</Alert.Title>
+            <Alert.Description class="grid gap-3">
+              <p>
+                {mcpOmissionDescription(omittedMcpAssistantCount)}
+              </p>
+              <Field.Field orientation="horizontal">
+                <Checkbox
+                  id="flow-package-export-mcp-acknowledgement"
+                  bind:checked={omissionsAcknowledged}
+                />
+                <Field.Label
+                  for="flow-package-export-mcp-acknowledgement"
+                  class="cursor-pointer leading-relaxed"
+                >
+                  {m.flow_package_export_mcp_omission_acknowledgement()}
+                </Field.Label>
+              </Field.Field>
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
+
         {#if exportError}
           <Alert.Root variant="destructive">
             <AlertTriangle class="size-4" />
@@ -248,8 +307,14 @@
       <Button variant="outline" onclick={() => handleOpenChange(false)} disabled={exporting}>
         {m.cancel()}
       </Button>
-      <Button onclick={exportPackage} disabled={!canSubmit}>
-        {#if exporting}
+      <Button
+        onclick={pendingExport ? savePendingPackage : exportPackage}
+        disabled={pendingExport ? !omissionsAcknowledged : !canSubmit}
+      >
+        {#if pendingExport}
+          <Download class="size-4" />
+          {m.flow_package_save_package()}
+        {:else if exporting}
           <Loader2 class="size-4 animate-spin" />
           {m.flow_package_exporting()}
         {:else}

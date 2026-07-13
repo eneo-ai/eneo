@@ -14301,6 +14301,8 @@ export interface components {
       payload_schema: string;
       /** Content Checksum */
       content_checksum: string;
+      /** Omissions */
+      omissions: components["schemas"]["FlowPackageOmission"][];
       package_summary: components["schemas"]["FlowPackageImportPlanSummary"];
       target_state: components["schemas"]["FlowPackageImportTargetState"];
       /** Dependency Resolutions */
@@ -14640,6 +14642,16 @@ export interface components {
       /** Publisher Suggested */
       publisher_suggested?: components["schemas"]["FlowPackageModelIdentity"][];
     };
+    /** FlowPackageOmission */
+    FlowPackageOmission: {
+      /**
+       * Kind
+       * @constant
+       */
+      kind: "mcp_attachment";
+      /** Count */
+      count: number;
+    };
     /**
      * FlowPackagePolicyStatus
      * @enum {string}
@@ -14727,6 +14739,12 @@ export interface components {
      *       "description": "Creates a structured case report from approved local material.",
      *       "kind": "flow",
      *       "name": "Case Report",
+     *       "omissions": [
+     *         {
+     *           "count": 2,
+     *           "kind": "mcp_attachment"
+     *         }
+     *       ],
      *       "package_id": "se.demo.case-report",
      *       "package_version": "1.0.0",
      *       "payload_schema": "eneo.flow_package.v1",
@@ -14794,6 +14812,11 @@ export interface components {
       requirements_by_kind: {
         [key: string]: number;
       };
+      /**
+       * Omissions
+       * @description Source-local package dependencies deliberately omitted from the portable archive.
+       */
+      omissions: components["schemas"]["FlowPackageOmission"][];
     };
     /**
      * FlowPublic
@@ -46602,6 +46625,8 @@ export interface operations {
       /** @description Portable Flow package bundle. */
       200: {
         headers: {
+          /** @description Number of distinct Flow step assistants whose source-local MCP associations were omitted. Absent for ordinary exports. */
+          "Eneo-Package-Omitted-Mcp-Assistant-Count"?: number;
           [name: string]: unknown;
         };
         content: {

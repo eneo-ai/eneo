@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, TypeAdapter
 
 from eneo.flow_packages.api.flow_package_models import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
     FlowPackageExportRequest,
     FlowPackageImportPublic,
     FlowPackageImportRequest,
@@ -173,12 +174,12 @@ def test_openapi_flow_package_import_request_uses_typed_json_bindings(
 def test_openapi_flow_package_export_returns_binary_package(
     openapi_spec: dict,
 ) -> None:
-    response_content = (
+    response = (
         _operation(openapi_spec, "/api/v1/flows/{id}/package-exports/", "post")
         .get("responses", {})
         .get("200", {})
-        .get("content", {})
     )
+    response_content = response.get("content", {})
     package_schema = response_content.get(
         "application/vnd.eneo.package+zip",
         {},
@@ -186,6 +187,57 @@ def test_openapi_flow_package_export_returns_binary_package(
 
     assert package_schema == {"type": "string", "format": "binary"}
     assert "application/vnd.eneo.flow-package+zip" not in response_content
+    omission_header = response.get("headers", {}).get(
+        FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+        {},
+    )
+    assert omission_header.get("required") is False
+    assert omission_header.get("schema") == {"type": "integer", "minimum": 1}
+
+
+def test_openapi_package_advisories_use_one_closed_omission_type(
+    openapi_spec: dict,
+) -> None:
+    validation_schema = _response_schema(
+        openapi_spec,
+        "/api/v1/flow-packages/validate/",
+        "post",
+    )
+    import_plan_schema = _response_schema(
+        openapi_spec,
+        "/api/v1/spaces/{id}/flow-packages/import-plan/",
+        "post",
+    )
+
+    for response_schema in (validation_schema, import_plan_schema):
+        assert "omissions" in response_schema.get("required", [])
+        omissions = response_schema.get("properties", {}).get("omissions", {})
+        assert omissions.get("type") == "array"
+        assert omissions.get("maxItems") == 1
+        omission = _resolve_component_ref(openapi_spec, omissions.get("items", {}))
+        assert set(omission.get("required", [])) == {"kind", "count"}
+        assert omission.get("additionalProperties") is False
+        properties = omission.get("properties", {})
+        assert properties.get("kind", {}).get("const") == "mcp_attachment"
+        assert properties.get("count", {}).get("minimum") == 1
+
+
+def test_openapi_package_knowledge_guidance_is_bounded(
+    openapi_spec: dict,
+) -> None:
+    guidance = openapi_spec["components"]["schemas"]["FlowPackageKnowledgeGuidance"]
+    properties = guidance["properties"]
+
+    for field_name in ("summary", "setup_notes"):
+        text_schema = next(
+            option
+            for option in properties[field_name]["anyOf"]
+            if option.get("type") == "string"
+        )
+        assert text_schema["maxLength"] == 4_000
+    for field_name in ("recommended_sources", "do_not_include"):
+        assert properties[field_name]["maxItems"] == 20
+        assert properties[field_name]["items"]["maxLength"] == 1_000
 
 
 def test_openapi_flow_package_error_responses_are_typed(
@@ -363,6 +415,7 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
         "steps_count",
         "requirements_count",
         "requirements_by_kind",
+        "omissions",
     }
     assert (
         validation_schema.get("example", {})
@@ -377,6 +430,7 @@ def test_openapi_flow_package_response_schemas_are_public_contracts(
         "payload_schema",
         "package_summary",
         "target_state",
+        "omissions",
     } <= set(plan_schema.get("required", []))
     assert "package_kind" not in validation_schema.get("properties", {})
     assert "package_kind" not in plan_schema.get("properties", {})
@@ -490,6 +544,22 @@ def _operation(openapi_spec: dict, path: str, method: str) -> dict:
     operation = openapi_spec.get("paths", {}).get(path, {}).get(method)
     assert isinstance(operation, dict), f"Missing OpenAPI operation {method} {path}"
     return operation
+
+
+def _response_schema(
+    openapi_spec: dict,
+    path: str,
+    method: str,
+) -> dict:
+    schema = (
+        _operation(openapi_spec, path, method)
+        .get("responses", {})
+        .get("200", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    return _resolve_component_ref(openapi_spec, schema)
 
 
 def _resolve_component_ref(openapi_spec: dict, schema: dict) -> dict:

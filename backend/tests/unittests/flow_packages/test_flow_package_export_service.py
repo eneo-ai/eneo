@@ -136,36 +136,33 @@ async def test_export_service_rejects_oversized_package_bytes() -> None:
 
 
 @pytest.mark.anyio
-async def test_export_service_rejects_persisted_flow_mcp_before_writing() -> None:
+async def test_export_service_records_persisted_flow_mcp_as_one_typed_omission() -> (
+    None
+):
     assistant_id = uuid4()
     flow = _flow(steps=[_step(1, assistant_id=assistant_id)])
     dependency_service = _FakeFlowPackageExportFlowService(
         assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
         resource_bindings=tuple(),
-        flow_mcp_configured=True,
+        omitted_mcp_assistant_count=2,
     )
-    writer_called = False
-
-    def package_writer(_: object) -> bytes:
-        nonlocal writer_called
-        writer_called = True
-        return b"not-a-package"
-
     export_service = FlowPackageExportService(
         flow_service=dependency_service,
-        package_writer=package_writer,
+        package_writer=write_flow_package,
     )
 
-    with pytest.raises(FlowPackageExportError) as exc_info:
-        await export_service.export_to_bytes(
-            flow_id=flow.id,
-            flow=flow,
-            manifest_metadata=_manifest_metadata(),
-        )
+    result = await export_service.export_to_bytes(
+        flow_id=flow.id,
+        flow=flow,
+        manifest_metadata=_manifest_metadata(),
+    )
 
-    assert exc_info.value.code is FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
-    assert exc_info.value.context == {"reason": "flow_mcp_unsupported"}
-    assert writer_called is False
+    assert result.envelope.provenance.model_dump(mode="json")["omissions"] == [
+        {"kind": "mcp_attachment", "count": 2}
+    ]
+    assert read_flow_package(result.package_bytes).provenance.omissions == (
+        result.envelope.provenance.omissions
+    )
 
 
 @pytest.mark.anyio
@@ -1127,17 +1124,21 @@ class _FakeFlowPackageExportFlowService:
         *,
         assistant_snapshots: AssistantAuthoringSnapshots,
         resource_bindings: tuple[LocalResourceBinding, ...],
-        flow_mcp_configured: bool = False,
+        omitted_mcp_assistant_count: int = 0,
     ) -> None:
         self._assistant_snapshots = assistant_snapshots
         self._resource_bindings = resource_bindings
-        self._flow_mcp_configured = flow_mcp_configured
+        self._omitted_mcp_assistant_count = omitted_mcp_assistant_count
         self.flow: Flow | None = None
         self.flow_id: UUID | None = None
 
-    async def has_flow_mcp_configuration(self, flow: Flow) -> bool:
-        self.flow = flow
-        return self._flow_mcp_configured
+    async def count_flow_step_assistants_with_mcp_configuration(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> int:
+        self.flow_id = flow_id
+        return self._omitted_mcp_assistant_count
 
     async def get_flow_assistant_snapshots(
         self,
@@ -1233,4 +1234,5 @@ def _provenance() -> FlowPackageProvenance:
         schema_version=1,
         exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
         source_instance_id="source-instance",
+        omissions=[],
     )

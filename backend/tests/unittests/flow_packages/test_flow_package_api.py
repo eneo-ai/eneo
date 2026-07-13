@@ -61,7 +61,10 @@ from eneo.flow_packages.domain.flow_package_manifest import (
     EneoPackageKind,
     FlowPackageManifest,
 )
-from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_provenance import (
+    FlowPackageOmission,
+    FlowPackageProvenance,
+)
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelIdentity,
     FlowPackageModelKind,
@@ -124,7 +127,7 @@ async def test_validate_flow_package_returns_tenant_scoped_summary(
     )
 
     summary = await flow_package_router.validate_flow_package(
-        package_file=_upload(_package_bytes()),
+        package_file=_upload(_package_bytes(omitted_mcp_assistant_count=2)),
         container=cast(Container, _FakeContainer()),
     )
 
@@ -135,6 +138,7 @@ async def test_validate_flow_package_returns_tenant_scoped_summary(
     assert summary.steps_count == 1
     assert summary.requirements_count == 1
     assert summary.requirements_by_kind == {FlowPackageRequirementKind.MODEL: 1}
+    assert summary.omissions == [FlowPackageOmission.mcp_attachment(count=2)]
 
 
 @pytest.mark.parametrize(
@@ -331,13 +335,14 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
 
     plan = await flow_package_router.create_flow_package_import_plan(
         id=target_space_id,
-        package_file=_upload(_package_bytes()),
+        package_file=_upload(_package_bytes(omitted_mcp_assistant_count=2)),
         request=cast(Request, object()),
         container=cast(Container, _FakeContainer()),
     )
 
     assert captured_space_id == [target_space_id]
     assert plan.can_publish_after_import is True
+    assert plan.omissions == [FlowPackageOmission.mcp_attachment(count=2)]
     resolution = plan.dependency_resolutions[0]
     assert isinstance(resolution, FlowPackageModelDependencyResolution)
     assert resolution.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
@@ -1064,13 +1069,19 @@ def test_import_request_rejects_invalid_json_resource_binding() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("omitted_mcp_assistant_count", "expected_header"),
+    [(0, None), (2, "2")],
+)
 async def test_export_flow_package_checks_access_before_exporting(
     monkeypatch: pytest.MonkeyPatch,
+    omitted_mcp_assistant_count: int,
+    expected_header: str | None,
 ) -> None:
     access_calls: list[bool] = []
     export_calls: list[UUID] = []
     flow_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-    result = _export_result()
+    result = _export_result(omitted_mcp_assistant_count=omitted_mcp_assistant_count)
 
     async def fake_require_flow_edit_access(
         request: Request,
@@ -1124,6 +1135,10 @@ async def test_export_flow_package_checks_access_before_exporting(
     assert response.headers["content-disposition"] == (
         'attachment; filename="demo.eneopkg"'
     )
+    assert (
+        response.headers.get("eneo-package-omitted-mcp-assistant-count")
+        == expected_header
+    )
     assert len(audit_service.events) == 1
     event = audit_service.events[0]
     assert event["action"] is ActionType.FLOW_PACKAGE_EXPORTED
@@ -1136,6 +1151,16 @@ async def test_export_flow_package_checks_access_before_exporting(
         "content_checksum": result.envelope.content_checksum,
         "requirements_count": 1,
         "payload_size_bytes": len(result.package_bytes),
+        "omissions": (
+            [
+                {
+                    "kind": "mcp_attachment",
+                    "count": omitted_mcp_assistant_count,
+                }
+            ]
+            if omitted_mcp_assistant_count
+            else []
+        ),
     }
 
 
@@ -1411,8 +1436,15 @@ def _export_request() -> FlowPackageExportRequest:
     )
 
 
-def _export_result() -> FlowPackageExportResult:
-    envelope = reader.read_flow_package(_package_bytes())
+def _export_result(
+    *,
+    omitted_mcp_assistant_count: int = 0,
+) -> FlowPackageExportResult:
+    envelope = reader.read_flow_package(
+        _package_bytes(
+            omitted_mcp_assistant_count=omitted_mcp_assistant_count,
+        )
+    )
     return FlowPackageExportResult(
         package_bytes=b"flow package bytes",
         envelope=envelope,
@@ -1446,15 +1478,28 @@ def _request() -> Request:
     return cast(Request, SimpleNamespace(headers={}))
 
 
-def _package_bytes(*, spec: FlowDraftSpecCore | None = None) -> bytes:
-    return _zip_docs(_package_docs(spec=spec))
+def _package_bytes(
+    *,
+    spec: FlowDraftSpecCore | None = None,
+    omitted_mcp_assistant_count: int = 0,
+) -> bytes:
+    return _zip_docs(
+        _package_docs(
+            spec=spec,
+            omitted_mcp_assistant_count=omitted_mcp_assistant_count,
+        )
+    )
 
 
 def _package_base64(*, spec: FlowDraftSpecCore | None = None) -> str:
     return base64.b64encode(_package_bytes(spec=spec)).decode("ascii")
 
 
-def _package_docs(*, spec: FlowDraftSpecCore | None = None) -> dict[str, JsonObject]:
+def _package_docs(
+    *,
+    spec: FlowDraftSpecCore | None = None,
+    omitted_mcp_assistant_count: int = 0,
+) -> dict[str, JsonObject]:
     spec = spec or FlowDraftSpecCore(
         flow_name="Demo",
         steps=[
@@ -1493,6 +1538,11 @@ def _package_docs(*, spec: FlowDraftSpecCore | None = None) -> dict[str, JsonObj
     provenance = FlowPackageProvenance(
         schema_version=1,
         exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+        omissions=(
+            [FlowPackageOmission.mcp_attachment(count=omitted_mcp_assistant_count)]
+            if omitted_mcp_assistant_count
+            else []
+        ),
     )
     manifest = FlowPackageManifest(
         schema_version=1,

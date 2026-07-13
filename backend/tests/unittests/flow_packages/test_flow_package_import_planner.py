@@ -559,6 +559,7 @@ def _envelope(
         provenance=FlowPackageProvenance(
             schema_version=1,
             exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+            omissions=[],
         ),
         spec_hash="0" * 64,
         manifest_hash="0" * 64,

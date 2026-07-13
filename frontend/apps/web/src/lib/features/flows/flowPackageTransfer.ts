@@ -1,11 +1,12 @@
 import type {
   FlowPackageDependencyResolution,
+  FlowPackageExportResponse,
   FlowPackageImportPlan,
   FlowPackageImportResourceBinding,
   FlowPackageLocalCandidate,
   FlowPackageModelCandidate,
-  FlowPackageResourceSlotRef,
-  EneoBinaryResponse
+  FlowPackageOmission,
+  FlowPackageResourceSlotRef
 } from "@eneo/eneo-js";
 import { EneoError } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
@@ -245,8 +246,12 @@ export async function encodeFlowPackageFileToBase64(file: File): Promise<string>
   return btoa(chunks.join(""));
 }
 
+export function getFlowPackageMcpOmissionCount(omissions: readonly FlowPackageOmission[]): number {
+  return omissions.find((omission) => omission.kind === "mcp_attachment")?.count ?? 0;
+}
+
 export function downloadFlowPackageFile(
-  response: EneoBinaryResponse,
+  response: FlowPackageExportResponse,
   fallbackFilename: string,
   deps: {
     document?: Pick<Document, "body" | "createElement">;

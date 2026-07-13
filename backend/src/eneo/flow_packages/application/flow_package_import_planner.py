@@ -140,6 +140,7 @@ def build_flow_package_import_plan(
         kind=envelope.manifest.kind,
         payload_schema=envelope.manifest.payload_schema,
         content_checksum=envelope.content_checksum,
+        omissions=list(envelope.provenance.omissions),
         package_summary=_package_summary(envelope),
         target_state=FlowPackageImportTargetState(
             audio_transcription_required=audio_transcription_required,

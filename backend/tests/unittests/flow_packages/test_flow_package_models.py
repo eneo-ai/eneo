@@ -16,7 +16,11 @@ from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
     flow_package_filename,
 )
-from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_provenance import (
+    FlowPackageOmission,
+    FlowPackageOmissionKind,
+    FlowPackageProvenance,
+)
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeGuidance,
@@ -201,12 +205,64 @@ def test_manifest_rejects_payload_schema_for_wrong_kind() -> None:
 def test_portable_export_provenance_excludes_source_instance_identity() -> None:
     exported_at = datetime(2026, 5, 18, tzinfo=timezone.utc)
 
-    provenance = FlowPackageProvenance.for_portable_export(exported_at=exported_at)
+    provenance = FlowPackageProvenance.for_portable_export(
+        exported_at=exported_at,
+        omissions=[],
+    )
 
     assert provenance.exported_at == exported_at
     assert provenance.source_instance_id is None
     assert provenance.exported_by is None
     assert provenance.lineage == []
+    assert provenance.omissions == []
+
+
+def test_provenance_v1_requires_explicit_omissions() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        FlowPackageProvenance.model_validate(
+            {
+                "schema_version": 1,
+                "exported_at": datetime(2026, 5, 18, tzinfo=timezone.utc),
+            },
+            strict=True,
+        )
+
+    assert {error["loc"] for error in exc_info.value.errors()} == {("omissions",)}
+
+
+def test_provenance_v1_carries_only_typed_mcp_attachment_omissions() -> None:
+    provenance = FlowPackageProvenance(
+        schema_version=1,
+        exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+        omissions=[FlowPackageOmission.mcp_attachment(count=2)],
+    )
+
+    assert provenance.model_dump(mode="json")["omissions"] == [
+        {"kind": FlowPackageOmissionKind.MCP_ATTACHMENT.value, "count": 2}
+    ]
+
+
+@pytest.mark.parametrize(
+    "omission",
+    [
+        {"kind": "mcp_attachment", "count": 0},
+        {"kind": "mcp_attachment", "count": True},
+        {"kind": "unknown", "count": 1},
+        {"kind": "mcp_attachment", "count": 1, "name": "local server"},
+    ],
+)
+def test_provenance_v1_rejects_invalid_omission_shapes(
+    omission: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowPackageProvenance.model_validate(
+            {
+                "schema_version": 1,
+                "exported_at": datetime(2026, 5, 18, tzinfo=timezone.utc),
+                "omissions": [omission],
+            },
+            strict=True,
+        )
 
 
 @pytest.mark.parametrize(
@@ -395,6 +451,60 @@ def test_guidance_lists_normalize_text_entries() -> None:
     assert guidance.setup_notes == "Upload current local policy."
 
 
+@pytest.mark.parametrize("field_name", ["summary", "setup_notes"])
+def test_knowledge_guidance_bounds_normalized_long_text(field_name: str) -> None:
+    accepted = FlowPackageKnowledgeGuidance(
+        **{field_name: f" {'x' * 4000} "},
+    )
+
+    assert getattr(accepted, field_name) == "x" * 4000
+
+    with pytest.raises(ValidationError):
+        FlowPackageKnowledgeGuidance(**{field_name: "x" * 4001})
+
+
+@pytest.mark.parametrize("field_name", ["recommended_sources", "do_not_include"])
+def test_knowledge_guidance_bounds_normalized_source_lists(field_name: str) -> None:
+    accepted = FlowPackageKnowledgeGuidance(
+        **{
+            field_name: [
+                " ",
+                f" {'x' * 1000} ",
+                *(f" source-{index} " for index in range(19)),
+            ]
+        },
+    )
+
+    assert len(getattr(accepted, field_name)) == 20
+    assert getattr(accepted, field_name)[0] == "x" * 1000
+
+    with pytest.raises(ValidationError):
+        FlowPackageKnowledgeGuidance(
+            **{field_name: [f"source-{index}" for index in range(21)]},
+        )
+
+    with pytest.raises(ValidationError):
+        FlowPackageKnowledgeGuidance(**{field_name: [f" {'x' * 1001} "]})
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("summary", 1),
+        ("setup_notes", False),
+        ("recommended_sources", "local handbook"),
+        ("do_not_include", ("old routine",)),
+        ("recommended_sources", [1]),
+    ],
+)
+def test_knowledge_guidance_keeps_strict_input_types(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowPackageKnowledgeGuidance(**{field_name: value})
+
+
 def test_data_sensitivity_normalizes_optional_text() -> None:
     sensitivity = FlowPackageRequirementDataSensitivity(
         publisher_classification_label=" Klass 3 ",
@@ -498,6 +608,7 @@ def test_provenance_structural_validation_normalizes_text() -> None:
         source_instance_id=" source ",
         exported_by=" admin ",
         lineage=[" first ", "", "second"],
+        omissions=[],
     )
 
     assert provenance.source_instance_id == "source"

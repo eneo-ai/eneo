@@ -22,7 +22,10 @@ from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
     flow_package_filename,
 )
-from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_provenance import (
+    FlowPackageOmission,
+    FlowPackageProvenance,
+)
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
     FlowPackageModelKind,
@@ -86,7 +89,11 @@ FlowPackageClock = Callable[[], datetime]
 
 
 class FlowPackageExportFlowService(Protocol):
-    async def has_flow_mcp_configuration(self, flow: Flow) -> bool: ...
+    async def count_flow_step_assistants_with_mcp_configuration(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> int: ...
 
     async def get_flow_assistant_snapshots(
         self,
@@ -128,15 +135,11 @@ class FlowPackageExportService:
         flow: Flow,
         manifest_metadata: FlowPackageManifestMetadata,
     ) -> FlowPackageExportResult:
-        if await self._flow_service.has_flow_mcp_configuration(flow):
-            raise FlowPackageExportError(
-                code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
-                message=(
-                    "Flow package export does not support Flow assistants with MCP configuration. "
-                    "Remove MCP servers and tools before exporting."
-                ),
-                context={"reason": "flow_mcp_unsupported"},
+        omitted_mcp_assistant_count = (
+            await self._flow_service.count_flow_step_assistants_with_mcp_configuration(
+                flow_id=flow_id
             )
+        )
         assistant_snapshots = await self._flow_service.get_flow_assistant_snapshots(
             flow
         )
@@ -149,7 +152,16 @@ class FlowPackageExportService:
             resource_bindings=resource_bindings,
             manifest_metadata=manifest_metadata,
             provenance=FlowPackageProvenance.for_portable_export(
-                exported_at=self._clock()
+                exported_at=self._clock(),
+                omissions=(
+                    [
+                        FlowPackageOmission.mcp_attachment(
+                            count=omitted_mcp_assistant_count
+                        )
+                    ]
+                    if omitted_mcp_assistant_count
+                    else []
+                ),
             ),
         )
         package_bytes = self._package_writer(envelope)

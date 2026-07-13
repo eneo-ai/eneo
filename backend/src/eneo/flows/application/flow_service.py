@@ -309,10 +309,13 @@ class FlowService:
             tenant_id=self.user.tenant_id,
         )
 
-    async def has_flow_mcp_configuration(self, flow: Flow) -> bool:
-        assistant_ids = list(dict.fromkeys(step.assistant_id for step in flow.steps))
-        return await self.flow_repo.has_assistant_mcp_configuration(
-            assistant_ids=assistant_ids,
+    async def count_flow_step_assistants_with_mcp_configuration(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> int:
+        return await self.flow_repo.count_flow_step_assistants_with_mcp_configuration(
+            flow_id=flow_id,
             tenant_id=self.user.tenant_id,
         )
 

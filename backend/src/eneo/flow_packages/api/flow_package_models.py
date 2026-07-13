@@ -17,6 +17,7 @@ from eneo.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifestMetadata,
     FlowPackageManifestMetadataFields,
 )
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageOmission
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementKind,
 )
@@ -25,6 +26,10 @@ from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
+)
+
+FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER = (
+    "Eneo-Package-Omitted-Mcp-Assistant-Count"
 )
 
 
@@ -92,6 +97,9 @@ class FlowPackageValidationPublic(BaseModel):
                     "model": 1,
                     "knowledge": 1,
                 },
+                "omissions": [
+                    {"kind": "mcp_attachment", "count": 2},
+                ],
             }
         },
     )
@@ -127,6 +135,13 @@ class FlowPackageValidationPublic(BaseModel):
     requirements_by_kind: dict[FlowPackageRequirementKind, int] = Field(
         description="Requirement counts keyed by package requirement kind."
     )
+    omissions: list[FlowPackageOmission] = Field(
+        max_length=1,
+        description=(
+            "Source-local package dependencies deliberately omitted from the "
+            "portable archive."
+        ),
+    )
 
     @classmethod
     def from_envelope(
@@ -148,6 +163,7 @@ class FlowPackageValidationPublic(BaseModel):
             steps_count=len(envelope.spec.steps),
             requirements_count=len(envelope.requirements.requirements),
             requirements_by_kind=dict(requirement_counts),
+            omissions=list(envelope.provenance.omissions),
         )
 
 

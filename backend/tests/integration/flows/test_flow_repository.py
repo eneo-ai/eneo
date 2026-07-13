@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import UUID, uuid4
 
 import pytest
@@ -114,7 +115,7 @@ def _resource_binding(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_repository_detects_assistant_mcp_configuration_in_one_batch(
+async def test_flow_repository_counts_distinct_mcp_assistants_once_in_one_query(
     db_container,
     completion_model_factory,
     space_factory,
@@ -169,6 +170,11 @@ async def test_flow_repository_detects_assistant_mcp_configuration_in_one_batch(
                     mcp_server_id=server.id,
                 ),
                 AssistantMCPServerTools(
+                    assistant_id=server_assistant.id,
+                    mcp_server_tool_id=tool.id,
+                    is_enabled=True,
+                ),
+                AssistantMCPServerTools(
                     assistant_id=tool_assistant.id,
                     mcp_server_tool_id=tool.id,
                     is_enabled=True,
@@ -178,20 +184,77 @@ async def test_flow_repository_detects_assistant_mcp_configuration_in_one_batch(
         await session.flush()
 
         repo = FlowRepository(session=session, factory=FlowFactory())
-
-        assert (
-            await repo.has_assistant_mcp_configuration(
-                assistant_ids=[clean_assistant.id],
+        flow = await repo.create(
+            flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=clean_assistant.id,
+                additional_assistant_ids=[
+                    server_assistant.id,
+                    tool_assistant.id,
+                    server_assistant.id,
+                ],
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert flow.id is not None
+
+        captured_selects: list[tuple[str, tuple[object, ...]]] = []
+
+        def count_selects(
+            _conn,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            if statement.lower().lstrip().startswith("select"):
+                assert isinstance(statement, str)
+                assert isinstance(_parameters, tuple)
+                captured_selects.append((statement, _parameters))
+
+        sync_bind = session.sync_session.get_bind()
+        sa.event.listen(sync_bind, "before_cursor_execute", count_selects)
+        try:
+            omitted_assistant_count = (
+                await repo.count_flow_step_assistants_with_mcp_configuration(
+                    flow_id=flow.id,
+                    tenant_id=admin_user.tenant_id,
+                )
             )
-            is False
+        finally:
+            sa.event.remove(sync_bind, "before_cursor_execute", count_selects)
+
+        assert omitted_assistant_count == 2
+        assert len(captured_selects) == 1
+        statement, parameters = captured_selects[0]
+        connection = await session.connection()
+        plan = (
+            await connection.exec_driver_sql(
+                f"EXPLAIN (FORMAT JSON, COSTS OFF) {statement}",
+                parameters,
+            )
+        ).scalar_one()
+        plan_text = json.dumps(plan)
+        assert "Aggregate" in plan_text
+        assert '"Relation Name": "flow_steps"' in plan_text
+        assert '"Relation Name": "assistant_mcp_servers"' in plan_text
+        assert '"Relation Name": "assistant_mcp_server_tools"' in plan_text
+        assert (
+            await repo.count_flow_step_assistants_with_mcp_configuration(
+                flow_id=flow.id,
+                tenant_id=uuid4(),
+            )
+            == 0
         )
         assert (
-            await repo.has_assistant_mcp_configuration(
-                assistant_ids=[server_assistant.id, tool_assistant.id],
+            await repo.count_flow_step_assistants_with_mcp_configuration(
+                flow_id=uuid4(),
                 tenant_id=admin_user.tenant_id,
             )
-            is True
+            == 0
         )
 
 

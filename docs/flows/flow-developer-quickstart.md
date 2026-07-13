@@ -117,9 +117,23 @@ The fields below explain most step behavior.
 value or artifact does the step produce?"
 
 Flow supports HTTP GET as an input source and durable HTTP POST as a terminal
-output mode. Flow does not support HTTP POST input or MCP servers and tools at
-authoring, publish, runtime, Builder, or package boundaries. Standalone
-assistants and conversations keep their separately owned MCP behavior.
+output mode. Flow does not support HTTP POST input or source-local MCP
+configuration at authoring, publish, runtime, Builder, or package boundaries.
+Standalone assistants and conversations keep their separately owned MCP
+behavior. A Flow package export is not blocked when its step assistants have
+persisted MCP server or tool associations: it omits those associations and
+records only the positive distinct-assistant count in strict package provenance.
+Ordinary exports record an empty omissions list. Never add MCP identifiers,
+configuration, credentials, or content to the Flow package.
+
+Package validation and import planning return that same closed omission value.
+The export response also exposes a conditional
+`Eneo-Package-Omitted-Mcp-Assistant-Count` header so the SDK and UI can require
+acknowledgement before saving and warn again before installation. Knowledge
+replacement guidance is bounded metadata: 4,000 characters for summary or
+setup notes, 20 entries per recommendation/exclusion list, and 1,000 normalized
+characters per entry. It must not contain local knowledge content or
+configuration.
 
 ## How data moves between steps
 

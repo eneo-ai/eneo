@@ -138,6 +138,23 @@ graph before a plan can be shown. The import planner then resolves that
 immutable package against current destination resources and exposes the package
 checksum and the load-bearing target state that the importer reviewed.
 
+`FlowPackageProvenance` is the sole durable owner of package omissions. Strict
+v1 packages require its `omissions` list: ordinary exports use `[]`; an export
+that leaves behind source-local MCP server or tool associations uses exactly
+`[{"kind":"mcp_attachment","count":N}]`, where `N` is the positive number of
+distinct affected step assistants. The package never carries MCP identities,
+configuration, credentials, or content. Provenance participates in the content
+checksum, so deleting or changing the advisory invalidates the package. The
+same closed omission value is projected by validation and import planning.
+
+Export obtains the count through one tenant-scoped scalar repository query.
+The binary response includes
+`Eneo-Package-Omitted-Mcp-Assistant-Count` only when the count is positive; the
+normal and error CORS paths expose that header. Knowledge replacement guidance
+is portable metadata rather than knowledge content: `summary` and
+`setup_notes` are limited to 4,000 characters, each source/exclusion list to 20
+entries, and each normalized entry to 1,000 characters.
+
 Installation accepts one resolved package command containing that reviewed
 checksum, target state, and exact local-resource mappings. It revalidates
 mutable destination state before `FlowAuthoringCommandService` creates the

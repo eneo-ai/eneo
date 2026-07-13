@@ -29,6 +29,7 @@
     encodeFlowPackageFileToBase64,
     getFlowPackageCandidateKey,
     getFlowPackageImportReadiness,
+    getFlowPackageMcpOmissionCount,
     getFlowPackageResolutionSlotKey,
     getFlowPackageResolutionSlotLabel,
     mapFlowPackageImportError,
@@ -70,6 +71,9 @@
 
   const readiness = $derived(plan ? getFlowPackageImportReadiness(plan, selections) : null);
   const dependencyResolutions = $derived(plan?.dependency_resolutions ?? []);
+  const omittedMcpAssistantCount = $derived(
+    plan ? getFlowPackageMcpOmissionCount(plan.omissions) : 0
+  );
   const canSubmit = $derived(
     !!selectedFile && !!plan && !!readiness?.canImport && !importing && !loadingPlan
   );
@@ -221,6 +225,11 @@
     if (count === 0) return m.flow_package_requirement_count_zero();
     if (count === 1) return m.flow_package_requirement_count({ count: String(count) });
     return m.flow_package_requirement_count_plural({ count: String(count) });
+  }
+
+  function mcpOmissionDescription(count: number): string {
+    if (count === 1) return m.flow_package_import_mcp_omission_description_singular();
+    return m.flow_package_import_mcp_omission_description({ count: String(count) });
   }
 
   function guidanceText(resolution: FlowPackageDependencyResolution): string | null {
@@ -411,6 +420,16 @@
           {/if}
 
           {#if plan}
+            {#if omittedMcpAssistantCount > 0}
+              <Alert.Root>
+                <AlertTriangle class="size-4" />
+                <Alert.Title>{m.flow_package_import_mcp_omission_title()}</Alert.Title>
+                <Alert.Description>
+                  {mcpOmissionDescription(omittedMcpAssistantCount)}
+                </Alert.Description>
+              </Alert.Root>
+            {/if}
+
             <Card.Root>
               <Card.Content class="grid gap-4 p-4 sm:p-5">
                 <div>

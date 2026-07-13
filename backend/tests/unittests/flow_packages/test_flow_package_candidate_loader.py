@@ -641,6 +641,7 @@ def _envelope(
         provenance=FlowPackageProvenance(
             schema_version=1,
             exported_at=_NOW,
+            omissions=[],
         ),
         spec_hash="0" * 64,
         manifest_hash="0" * 64,

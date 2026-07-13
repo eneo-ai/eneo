@@ -240,6 +240,7 @@ def _import_plan() -> FlowPackageImportPlan:
         kind=EneoPackageKind.FLOW,
         payload_schema=FLOW_PACKAGE_PAYLOAD_SCHEMA,
         content_checksum="0" * 64,
+        omissions=[],
         package_summary=FlowPackageImportPlanSummary(
             name="Demo Flow",
             description="Demo package import plan.",
@@ -425,6 +426,7 @@ def _package_docs(*, require_model: bool = False) -> dict[str, JsonObject]:
     provenance = FlowPackageProvenance(
         schema_version=1,
         exported_at=datetime(2026, 5, 19, tzinfo=timezone.utc),
+        omissions=[],
     )
     manifest = FlowPackageManifest(
         schema_version=1,

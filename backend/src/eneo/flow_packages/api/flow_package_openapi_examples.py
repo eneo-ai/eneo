@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from eneo.flow_packages.api.flow_package_models import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
 from eneo.flow_packages.application.flow_package_export_service import (
     MAX_PACKAGE_EXPORT_BYTES,
 )
@@ -421,6 +424,16 @@ FLOW_PACKAGE_EXPORT_FORBIDDEN_EXAMPLES: dict[str, dict[str, object]] = {
 def flow_package_binary_response(media_type: str) -> dict[str, object]:
     return {
         "description": "Portable Flow package bundle.",
+        "headers": {
+            FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER: {
+                "description": (
+                    "Number of distinct Flow step assistants whose source-local "
+                    "MCP associations were omitted. Absent for ordinary exports."
+                ),
+                "required": False,
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
         "content": {
             media_type: {
                 "schema": {"type": "string", "format": "binary"},

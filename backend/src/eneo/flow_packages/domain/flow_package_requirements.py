@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Final, Literal, TypeAlias
+from typing import Annotated, Final, Literal, TypeAlias, TypeGuard, cast
 
 from pydantic import (
     BaseModel,
@@ -36,6 +36,13 @@ class FlowPackageResourceSlotRefJson(TypedDict):
 
 
 MAX_MODEL_MATCHING_IDENTITIES: Final[int] = 50
+MAX_KNOWLEDGE_GUIDANCE_TEXT_CHARS: Final[int] = 4_000
+MAX_KNOWLEDGE_GUIDANCE_ENTRIES: Final[int] = 20
+MAX_KNOWLEDGE_GUIDANCE_ENTRY_CHARS: Final[int] = 1_000
+FlowPackageKnowledgeGuidanceEntry: TypeAlias = Annotated[
+    str,
+    Field(max_length=MAX_KNOWLEDGE_GUIDANCE_ENTRY_CHARS),
+]
 
 
 def _empty_string_list() -> list[str]:
@@ -55,6 +62,13 @@ def _normalize_optional_text(value: str | None) -> str | None:
 
 def _normalize_text_list(value: list[str]) -> list[str]:
     return [item.strip() for item in value if item.strip()]
+
+
+def _is_string_list(value: object) -> TypeGuard[list[str]]:
+    if not isinstance(value, list):
+        return False
+    items = cast(list[object], value)
+    return all(isinstance(entry, str) for entry in items)
 
 
 class FlowPackageRequirementDataSensitivity(BaseModel):
@@ -138,20 +152,53 @@ class FlowPackageModelGuidance(BaseModel):
 class FlowPackageKnowledgeGuidance(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    summary: str | None = None
-    recommended_sources: list[str] = Field(default_factory=_empty_string_list)
-    do_not_include: list[str] = Field(default_factory=_empty_string_list)
-    setup_notes: str | None = None
+    summary: str | None = Field(
+        default=None,
+        max_length=MAX_KNOWLEDGE_GUIDANCE_TEXT_CHARS,
+    )
+    recommended_sources: list[FlowPackageKnowledgeGuidanceEntry] = Field(
+        default_factory=_empty_string_list,
+        max_length=MAX_KNOWLEDGE_GUIDANCE_ENTRIES,
+    )
+    do_not_include: list[FlowPackageKnowledgeGuidanceEntry] = Field(
+        default_factory=_empty_string_list,
+        max_length=MAX_KNOWLEDGE_GUIDANCE_ENTRIES,
+    )
+    setup_notes: str | None = Field(
+        default=None,
+        max_length=MAX_KNOWLEDGE_GUIDANCE_TEXT_CHARS,
+    )
 
-    @field_validator("summary", "setup_notes")
+    @field_validator("summary", "setup_notes", mode="before")
     @classmethod
-    def normalize_optional_text(cls, value: str | None) -> str | None:
-        return _normalize_optional_text(value)
+    def normalize_optional_text(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = _normalize_optional_text(value)
+        if (
+            normalized is not None
+            and len(normalized) > MAX_KNOWLEDGE_GUIDANCE_TEXT_CHARS
+        ):
+            raise ValueError(
+                "Knowledge guidance text exceeds the portable package limit."
+            )
+        return normalized
 
-    @field_validator("recommended_sources", "do_not_include")
+    @field_validator("recommended_sources", "do_not_include", mode="before")
     @classmethod
-    def normalize_text_entries(cls, value: list[str]) -> list[str]:
-        return _normalize_text_list(value)
+    def normalize_text_entries(cls, value: object) -> object:
+        if not _is_string_list(value):
+            return value
+        normalized = _normalize_text_list(value)
+        if len(normalized) > MAX_KNOWLEDGE_GUIDANCE_ENTRIES:
+            raise ValueError(
+                "Knowledge guidance contains too many source or exclusion entries."
+            )
+        if any(len(entry) > MAX_KNOWLEDGE_GUIDANCE_ENTRY_CHARS for entry in normalized):
+            raise ValueError(
+                "Knowledge guidance source or exclusion entry exceeds the portable package limit."
+            )
+        return normalized
 
 
 class FlowPackageTemplateAssetGuidance(BaseModel):

@@ -98,12 +98,38 @@ declared optional may be omitted; in that case, the imported draft omits only
 that optional reference. Flow endpoints reject Assistant or App package kinds
 before interpreting Flow-specific package entries.
 
+Strict v1 provenance always contains `omissions`. Ordinary packages use an
+empty list. When source-local MCP server or tool associations exist on Flow
+step assistants, export still succeeds but omits those associations and records
+one closed advisory: `{ "kind": "mcp_attachment", "count": N }`, where `N` is
+the positive distinct-assistant count. MCP identities, configuration,
+credentials, and content never enter the package. Because provenance is covered
+by the content checksum, changing or deleting the advisory makes validation
+fail. Validation and import-plan responses project the same required list; do
+not supply a client-side compatibility default for older files.
+
 | Purpose                        | Endpoint                                                    |
 | ------------------------------ | ----------------------------------------------------------- |
 | Validate package bytes         | `POST /api/v1/flow-packages/validate/`                      |
 | Plan destination mappings      | `POST /api/v1/spaces/{space_id}/flow-packages/import-plan/` |
 | Import as an unpublished draft | `POST /api/v1/spaces/{space_id}/flow-packages/imports/`     |
 | Export a draft                 | `POST /api/v1/flows/{flow_id}/package-exports/`             |
+
+An affected export response includes
+`Eneo-Package-Omitted-Mcp-Assistant-Count`; an ordinary export omits the header.
+`@eneo/eneo-js` returns the binary result as `FlowPackageExportResponse` and
+projects the header into its generated `FlowPackageOmission[]` as `omissions`.
+It performs the same single Blob request: no package base64 conversion,
+preflight request, or client cache is required. Require the user to acknowledge
+the omission before saving, and show the import plan's advisory again before
+installation.
+
+Knowledge guidance describes how a destination operator can replace a local
+dependency without carrying source knowledge. `summary` and `setup_notes` are
+limited to 4,000 characters; `recommended_sources` and `do_not_include` are
+limited to 20 entries each; every normalized entry is limited to 1,000
+characters. Do not put local knowledge configuration or content in these
+fields.
 
 When installing, send the plan's `content_checksum`, `target_state`, and the
 exact confirmed mappings as `expected_content_checksum`,

@@ -18,6 +18,14 @@ Allowed target homes:
 - `plugin`: Flow-adjacent plugin boundary.
 - `remove-merge-later`: duplicate or temporary root import surface to delete.
 
+Portable transfer is owned by `eneo.flow_packages`, not by a new root entry
+under `eneo.flows`. Within that package, `FlowPackageProvenance` is the only
+durable omissions owner. `FlowRepository` and `FlowService` contribute one
+tenant-scoped scalar distinct-assistant count for source-local MCP associations;
+they do not copy MCP implementation, identifiers, configuration, credentials,
+or content into Flow package code. Public adapters project the closed
+provenance value instead of creating another omission model.
+
 | Entry | Kind | Target home | Rationale |
 | --- | --- | --- | --- |
 | ai_builder | package | plugin | Flow AI Builder plugin boundary; only shared contracts should cross into Flow proper. |

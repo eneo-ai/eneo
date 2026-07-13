@@ -5,6 +5,29 @@
 /** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["responses"][202]["content"]["application/json"]} FlowRunStepRerunResponse */
 import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys.js";
 
+const FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER = "Eneo-Package-Omitted-Mcp-Assistant-Count";
+
+/**
+ * @param {import('../types/fetch').EneoBinaryResponse} response
+ * @returns {import('../types/resources').FlowPackageExportResponse}
+ */
+function withFlowPackageOmissions(response) {
+  const headerValue = response.headers.get(FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER);
+  if (headerValue === null) return { ...response, omissions: [] };
+
+  if (!/^[1-9]\d*$/.test(headerValue)) {
+    throw new Error("Flow package export returned an invalid MCP omission count.");
+  }
+  const count = Number(headerValue);
+  if (!Number.isSafeInteger(count)) {
+    throw new Error("Flow package export returned an invalid MCP omission count.");
+  }
+  return {
+    ...response,
+    omissions: [{ kind: "mcp_attachment", count }]
+  };
+}
+
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
@@ -363,11 +386,11 @@ export function initFlows(client) {
       /**
        * Export a draft Flow as a portable package bundle.
        * @param {{id: string, packageId: string, packageVersion: string, name: string, description?: string, signal?: AbortSignal}} params
-       * @returns {Promise<import('../types/fetch').EneoBinaryResponse>}
+       * @returns {Promise<import('../types/resources').FlowPackageExportResponse>}
        * @throws {EneoError}
        */
       export: async ({ id, packageId, packageVersion, name, description = "", signal }) => {
-        return _binaryFetch("/api/v1/flows/{id}/package-exports/", {
+        const response = await _binaryFetch("/api/v1/flows/{id}/package-exports/", {
           method: "post",
           params: { path: { id } },
           requestBody: {
@@ -380,6 +403,7 @@ export function initFlows(client) {
           },
           signal
         });
+        return withFlowPackageOmissions(response);
       }
     },
 

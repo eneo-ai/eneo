@@ -16,6 +16,11 @@ which is left for a follow-up test paired with a fault-injection route.
 from __future__ import annotations
 
 import pytest
+from fastapi import Response
+
+from eneo.flow_packages.api.flow_package_models import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
 
 
 @pytest.mark.integration
@@ -54,6 +59,29 @@ async def test_cors_exposes_both_trace_headers(client, admin_user_api_key):
     assert "x-correlation-id" in expose, (
         f"Access-Control-Expose-Headers missing X-Correlation-ID: {expose!r}"
     )
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cors_exposes_positive_package_omission_header(app):
+    from httpx import ASGITransport, AsyncClient
+
+    @app.get("/api/v1/_test_package_omission_header")
+    async def _package_omission_header() -> Response:
+        return Response(headers={FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER: "2"})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test.local") as client:
+        response = await client.get(
+            "/api/v1/_test_package_omission_header",
+            headers={"Origin": "http://example.com"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers[FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER] == "2"
+    expose = response.headers.get("access-control-expose-headers", "").lower()
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose
 
 
 @pytest.mark.integration
@@ -61,7 +89,7 @@ async def test_cors_exposes_both_trace_headers(client, admin_user_api_key):
 async def test_500_exposes_trace_headers(app):
     """An unhandled 500 must still expose the trace headers via CORS and carry
     error_id, exercising the manual CORS block in the Exception handler that
-    reuses _TRACE_EXPOSE_HEADERS (server/main.py).
+    reuses _CORS_EXPOSE_HEADERS (server/main.py).
 
     A throwaway route raises so the catch-all Exception handler runs. We use a
     client with raise_app_exceptions=False because Starlette's
@@ -91,3 +119,4 @@ async def test_500_exposes_trace_headers(app):
     assert "x-correlation-id" in expose, (
         f"500 response missing X-Correlation-ID in Access-Control-Expose-Headers: {expose!r}"
     )
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose

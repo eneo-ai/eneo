@@ -15,6 +15,7 @@ import type {
   FlowHttpTransportError,
   FlowInputLimits,
   FlowPackageDependencyResolution,
+  FlowPackageExportResponse,
   FlowPackageExportRequest,
   FlowPackageImportPlan,
   FlowPackageImportPlanStatus,
@@ -24,6 +25,7 @@ import type {
   FlowPackageImportTargetState,
   FlowPackageLocalCandidate,
   FlowPackageModelCandidate,
+  FlowPackageOmission,
   FlowPackageRequirementDataSensitivity,
   FlowPackageResourceSlotRef,
   FlowPackageValidation,
@@ -116,6 +118,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowHttpTransportError: FlowHttpTransportError;
   FlowInputLimits: FlowInputLimits;
   FlowPackageDependencyResolution: FlowPackageDependencyResolution;
+  FlowPackageExportResponse: FlowPackageExportResponse;
   FlowPackageExportRequest: FlowPackageExportRequest;
   FlowPackageImportPlan: FlowPackageImportPlan;
   FlowPackageImportPlanStatus: FlowPackageImportPlanStatus;
@@ -125,6 +128,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowPackageImportTargetState: FlowPackageImportTargetState;
   FlowPackageLocalCandidate: FlowPackageLocalCandidate;
   FlowPackageModelCandidate: FlowPackageModelCandidate;
+  FlowPackageOmission: FlowPackageOmission;
   FlowPackageRequirementDataSensitivity: FlowPackageRequirementDataSensitivity;
   FlowPackageResourceSlotRef: FlowPackageResourceSlotRef;
   FlowPackageValidation: FlowPackageValidation;

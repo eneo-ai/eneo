@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from eneo.flow_packages.domain.flow_package_manifest import EneoPackageKind
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageOmission
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageKnowledgeGuidance,
@@ -291,6 +292,7 @@ class FlowPackageImportPlan(BaseModel):
     kind: EneoPackageKind
     payload_schema: str
     content_checksum: str
+    omissions: list[FlowPackageOmission] = Field(max_length=1)
     package_summary: FlowPackageImportPlanSummary
     target_state: FlowPackageImportTargetState
     dependency_resolutions: list[FlowPackageDependencyResolutionEntry] = Field(

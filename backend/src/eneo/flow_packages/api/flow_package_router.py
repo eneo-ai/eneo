@@ -25,6 +25,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.flow_packages.api import flow_package_openapi_examples as openapi_examples
 from eneo.flow_packages.api.flow_package_models import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
     FlowPackageExportRequest,
     FlowPackageImportPublic,
     FlowPackageImportRequest,
@@ -505,10 +506,18 @@ async def export_flow_package(
         flow=access_context.flow,
         result=result,
     )
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="{result.filename}"'
+    }
+    omitted_mcp_assistant_count = result.envelope.provenance.omitted_mcp_assistant_count
+    if omitted_mcp_assistant_count is not None:
+        response_headers[FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER] = str(
+            omitted_mcp_assistant_count
+        )
     return Response(
         content=result.package_bytes,
         media_type=ENEO_PACKAGE_MEDIA_TYPE,
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+        headers=response_headers,
     )
 
 
@@ -761,6 +770,10 @@ async def _log_flow_package_export(
                 "content_checksum": result.envelope.content_checksum,
                 "requirements_count": len(result.envelope.requirements.requirements),
                 "payload_size_bytes": len(result.package_bytes),
+                "omissions": [
+                    omission.model_dump(mode="json")
+                    for omission in result.envelope.provenance.omissions
+                ],
             },
         ),
     )

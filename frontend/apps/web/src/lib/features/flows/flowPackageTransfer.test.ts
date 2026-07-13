@@ -13,6 +13,7 @@ import {
   defaultFlowPackageId,
   downloadFlowPackageFile,
   encodeFlowPackageFileToBase64,
+  getFlowPackageMcpOmissionCount,
   getFlowPackageImportReadiness,
   mapFlowPackageExportError,
   mapFlowPackageImportError
@@ -292,6 +293,11 @@ describe("flowPackageTransfer", () => {
     await expect(encodeFlowPackageFileToBase64(file)).resolves.toBe("aGVsbG8=");
   });
 
+  it("projects the typed MCP omission count for export and import notices", () => {
+    expect(getFlowPackageMcpOmissionCount([])).toBe(0);
+    expect(getFlowPackageMcpOmissionCount([{ kind: "mcp_attachment", count: 3 }])).toBe(3);
+  });
+
   it("downloads binary package responses with the server filename when available", () => {
     const { link, body, documentRef, urlRef } = flowPackageDownloadDeps();
 
@@ -300,7 +306,8 @@ describe("flowPackageTransfer", () => {
         blob: new Blob(["pkg"]),
         contentType: "application/octet-stream",
         filename: "se.demo.case-report-1.0.0.eneopkg",
-        headers: new Headers()
+        headers: new Headers(),
+        omissions: []
       },
       "fallback.eneopkg",
       { document: documentRef, url: urlRef }
@@ -322,7 +329,8 @@ describe("flowPackageTransfer", () => {
       {
         blob: new Blob(["pkg"]),
         contentType: "application/octet-stream",
-        headers: new Headers()
+        headers: new Headers(),
+        omissions: []
       },
       "flow-package.eneopkg",
       { document: documentRef, url: urlRef }
@@ -378,6 +386,7 @@ function flowPackageImportPlan(
     kind: "flow",
     payload_schema: "eneo.flow_package.v1",
     content_checksum: "abc123",
+    omissions: [],
     package_summary: {
       name: "Demo report",
       description: "Creates a report from imported material.",

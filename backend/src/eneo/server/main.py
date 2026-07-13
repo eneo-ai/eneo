@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.flow_packages.api.flow_package_models import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
 from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
@@ -49,10 +52,13 @@ from eneo.server.routers import router as api_router
 
 logger = get_logger(__name__)
 
-# Single source of truth for trace headers exposed to cross-origin callers.
-# Used in both the normal CORSMiddleware config and the manual CORS block in
-# 500 error handlers so they stay in sync.
-_TRACE_EXPOSE_HEADERS = ("X-Trace-Id", "X-Correlation-ID")
+# Used in normal middleware and manual error responses so browser clients see
+# the same public response headers on every path.
+_CORS_EXPOSE_HEADERS = (
+    "X-Trace-Id",
+    "X-Correlation-ID",
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
 _GENERAL_ERROR_SCHEMA_REF = "#/components/schemas/GeneralError"
 _HTTP_VALIDATION_ERROR_SCHEMA_REF = "#/components/schemas/HTTPValidationError"
 _FASTAPI_VALIDATION_ERROR_SCHEMA_NAMES = frozenset(
@@ -373,7 +379,7 @@ def get_application():
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=list(_TRACE_EXPOSE_HEADERS),
+        expose_headers=list(_CORS_EXPOSE_HEADERS),
         callback=get_origin,
     )
 
@@ -560,7 +566,7 @@ def get_application():
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
-                expose_headers=list(_TRACE_EXPOSE_HEADERS),
+                expose_headers=list(_CORS_EXPOSE_HEADERS),
                 callback=get_origin,
             )
 
@@ -637,7 +643,7 @@ def get_application():
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
-                expose_headers=list(_TRACE_EXPOSE_HEADERS),
+                expose_headers=list(_CORS_EXPOSE_HEADERS),
                 callback=get_origin,
             )
             response.headers.update(cors.simple_headers)

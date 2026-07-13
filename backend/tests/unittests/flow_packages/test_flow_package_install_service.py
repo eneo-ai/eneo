@@ -800,6 +800,7 @@ def _envelope(
         provenance=FlowPackageProvenance(
             schema_version=1,
             exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+            omissions=[],
         ),
     )
 

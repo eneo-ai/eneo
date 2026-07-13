@@ -170,6 +170,7 @@ def _mutated_envelope(
                     schema_version=1,
                     exported_at=base.provenance.exported_at,
                     source_instance_id="changed-source",
+                    omissions=[],
                 ),
             )
         case _:
@@ -213,6 +214,7 @@ def _envelope(
             exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
             source_instance_id="source-instance",
             lineage=["first export"],
+            omissions=[],
         ),
     )
 

@@ -105,6 +105,41 @@ def test_tampered_checksum_is_rejected() -> None:
     assert exc_info.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
 
 
+def test_tampered_provenance_omission_is_rejected_by_content_checksum() -> None:
+    docs = _package_docs()
+    provenance = cast(JsonObject, docs[reader.PROVENANCE_PATH])
+    provenance["omissions"] = [{"kind": "mcp_attachment", "count": 1}]
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda provenance: provenance.pop("omissions"),
+        lambda provenance: provenance.update(
+            {"omissions": [{"kind": "unknown", "count": 1}]}
+        ),
+        lambda provenance: provenance.update(
+            {"omissions": [{"kind": "mcp_attachment", "count": 1, "url": "x"}]}
+        ),
+    ],
+)
+def test_strict_v1_reader_rejects_invalid_provenance_omissions(
+    mutation: Callable[[JsonObject], object],
+) -> None:
+    docs = _package_docs()
+    mutation(cast(JsonObject, docs[reader.PROVENANCE_PATH]))
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+
+    assert exc_info.value.code is FlowPackageErrorCode.PROVENANCE_INVALID
+
+
 def test_legacy_http_post_input_is_rejected_before_package_install() -> None:
     docs = _package_docs()
     flow_draft = cast(JsonObject, docs[reader.FLOW_DRAFT_PATH])
@@ -584,6 +619,7 @@ def _package_docs(
         schema_version=1,
         exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
         source_instance_id="source-instance",
+        omissions=[],
     )
     manifest = FlowPackageManifest(
         schema_version=1,

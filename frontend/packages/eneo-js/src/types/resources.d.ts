@@ -1,4 +1,5 @@
 import { components } from "./schema";
+import type { EneoBinaryResponse } from "./fetch";
 
 export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
@@ -162,6 +163,10 @@ export type FlowTemplatePlaceholder = components["schemas"]["FlowTemplatePlaceho
 export type FlowTemplateInspection = components["schemas"]["FlowTemplateInspectionPublic"];
 export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"];
 export type FlowPackageExportRequest = components["schemas"]["FlowPackageExportRequest"];
+export type FlowPackageOmission = components["schemas"]["FlowPackageOmission"];
+export type FlowPackageExportResponse = EneoBinaryResponse & {
+  omissions: FlowPackageOmission[];
+};
 export type FlowPackageImportPlan = components["schemas"]["FlowPackageImportPlan"];
 export type FlowPackageImportPlanSummary = components["schemas"]["FlowPackageImportPlanSummary"];
 export type FlowPackageImportPlanStatus = components["schemas"]["FlowPackageImportPlanStatus"];
