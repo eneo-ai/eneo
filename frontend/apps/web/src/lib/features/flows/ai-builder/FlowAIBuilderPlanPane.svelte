@@ -1317,6 +1317,14 @@
     border-radius: var(--radius-sm);
   }
 
+  /* Touch devices get the 44px target the pointer can't make up for.
+     Physical px on purpose: the app's 15px root would shrink a rem floor. */
+  @media (pointer: coarse) {
+    :global(.section-heading-trigger) {
+      min-height: 44px;
+    }
+  }
+
   .progress-ring {
     border-color: var(--border-default);
     border-top-color: var(--accent-default);

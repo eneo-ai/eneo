@@ -270,6 +270,14 @@
     cursor: pointer;
   }
 
+  /* Touch devices get the 44px target the pointer can't make up for.
+     Physical px on purpose: the app's 15px root would shrink a rem floor. */
+  @media (pointer: coarse) {
+    .task-pane :global(.section-trigger) {
+      min-height: 44px;
+    }
+  }
+
   .task-pane :global(.section-trigger:focus-visible) {
     outline: 2px solid var(--accent-default);
     outline-offset: 2px;

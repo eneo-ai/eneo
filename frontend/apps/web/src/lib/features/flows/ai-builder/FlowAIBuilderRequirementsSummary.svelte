@@ -77,7 +77,7 @@
     {#if confirmed || !active}
       <button
         type="button"
-        class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/30 ml-auto cursor-pointer rounded-md px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="text-accent-default hover:text-accent-stronger focus-visible:ring-accent-default/30 pointer-coarse:min-h-[44px] ml-auto cursor-pointer rounded-md px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
         onclick={toggleExpanded}
       >
         {expanded ? m.ai_builder_requirements_collapse() : m.ai_builder_requirements_expand()}
@@ -140,7 +140,7 @@
         <section class="flex flex-col gap-1.5">
           <button
             type="button"
-            class="text-primary focus-visible:ring-accent-default/30 flex w-fit items-center gap-1.5 rounded text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            class="text-primary focus-visible:ring-accent-default/30 pointer-coarse:min-h-[44px] flex w-fit items-center gap-1.5 rounded text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
             aria-expanded={assumptionsExpanded}
             onclick={() => (assumptionsExpanded = !assumptionsExpanded)}
           >

@@ -69,6 +69,8 @@ export type AIBuilderSession = Omit<GeneratedAIBuilderSessionResponse, "telemetr
 
 export type AIBuilderDraftSession = GeneratedAIBuilderDraftSession;
 
+export type AIBuilderSessionListResponse = components["schemas"]["SessionListResponse"];
+
 export type RecoverableAIBuilderDraftSession = AIBuilderDraftSession & {
   status: Extract<SessionStatus, "chatting" | "awaiting_approval">;
 };
