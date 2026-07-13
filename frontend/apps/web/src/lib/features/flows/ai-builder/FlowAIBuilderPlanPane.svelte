@@ -489,7 +489,7 @@
                 </svg>
               </Collapsible.Trigger>
 
-              <Collapsible.Content>
+              <Collapsible.Content class="collapsible-animate">
                 <div class="border-default border-t">
                   <ul class="divide-default flex flex-col divide-y">
                     {#each attachments as file (file.id)}
@@ -633,7 +633,7 @@
                     </svg>
                   </Collapsible.Trigger>
                 </h3>
-                <Collapsible.Content>
+                <Collapsible.Content class="collapsible-animate">
                   <p class="text-secondary mt-2 text-[0.8125rem] leading-relaxed">
                     {plan.proposal.plan_rationale}
                   </p>
@@ -668,7 +668,7 @@
                     </svg>
                   </Collapsible.Trigger>
                 </h3>
-                <Collapsible.Content>
+                <Collapsible.Content class="collapsible-animate">
                   <ul
                     class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
                   >

@@ -5,6 +5,7 @@
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { SvelteSet } from "svelte/reactivity";
@@ -40,6 +41,8 @@
 
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
+
+  const reducedMotion = prefersReducedMotion();
 
   const selectedOptionKeys = new SvelteSet<string>();
   let customSelected = $state(false);
@@ -217,7 +220,7 @@
           <div
             class="custom-input-wrap"
             id="{questionLabelId}-custom"
-            transition:slide={{ duration: 180, easing: cubicOut }}
+            transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
           >
             <Textarea
               bind:ref={textareaRef}
@@ -284,6 +287,7 @@
   .answered-prompt {
     @apply flex min-w-0 items-start gap-2 text-[0.8125rem] leading-relaxed;
     color: var(--text-secondary);
+    animation: questionReveal 150ms ease-out;
   }
 
   .answered-check {
@@ -393,7 +397,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .question-panel {
+    .question-panel,
+    .answered-prompt {
       animation: none;
     }
   }

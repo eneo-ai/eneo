@@ -149,7 +149,7 @@
           </svg>
         </Collapsible.Trigger>
       </h2>
-      <Collapsible.Content>
+      <Collapsible.Content class="collapsible-animate">
         <ul
           class="bg-secondary/40 divide-default mt-2 flex flex-col divide-y rounded-lg px-3 py-0.5"
         >
@@ -192,7 +192,7 @@
           </svg>
         </Collapsible.Trigger>
       </h2>
-      <Collapsible.Content>
+      <Collapsible.Content class="collapsible-animate">
         <div class="mt-2">
           <FlowAIBuilderBoundedLog messages={logMessages} {newSinceIndex} />
         </div>

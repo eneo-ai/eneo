@@ -251,7 +251,7 @@
       </Collapsible.Trigger>
 
       {#if hasAnyDetails}
-        <Collapsible.Content>
+        <Collapsible.Content class="collapsible-animate">
           <div class="border-default border-t">
             <div class="bg-secondary/25 flex flex-col gap-5 px-4 py-4 sm:px-5 sm:py-5">
               {#if hasInstructions}

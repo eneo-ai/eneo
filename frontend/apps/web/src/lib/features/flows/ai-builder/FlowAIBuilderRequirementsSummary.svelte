@@ -1,7 +1,12 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { slide } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
   import type { RequirementsSummary } from "./protocol";
+
+  const reducedMotion = prefersReducedMotion();
 
   interface Props {
     summary: RequirementsSummary;
@@ -157,7 +162,10 @@
             </svg>
           </button>
           {#if assumptionsExpanded}
-            <ul class="divide-dimmer flex flex-col divide-y p-0">
+            <ul
+              class="divide-dimmer flex flex-col divide-y p-0"
+              transition:slide={{ duration: reducedMotion ? 0 : 200, easing: cubicOut }}
+            >
               {#each summary.assumptions ?? [] as assumption (assumption)}
                 <li class="text-secondary py-2 text-[0.8125rem] leading-relaxed">
                   {assumption}
