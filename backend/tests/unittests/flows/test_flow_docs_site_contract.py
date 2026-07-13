@@ -1318,7 +1318,10 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
     ) in page
     assert 'flows }o--o| users : "created_by_user_id ondelete=SET NULL"' in page
     assert 'flows }o--o| users : "owner_user_id ondelete=SET NULL"' in page
-    assert 'flow_package_imports }o--o| flows : "flow_id ondelete=CASCADE"' in page
+    assert (
+        "flow_package_imports }o--o| flows : "
+        '"flow_id, tenant_id, space_id ondelete=CASCADE"'
+    ) in page
     assert (
         'flow_step_dependencies }o--|| flow_steps : "child_step_id ondelete=CASCADE"'
         in page

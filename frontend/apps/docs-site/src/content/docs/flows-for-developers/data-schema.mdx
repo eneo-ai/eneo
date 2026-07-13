@@ -774,7 +774,7 @@ erDiagram
   builder_sessions }o--|| spaces : "space_id ondelete=CASCADE"
   builder_sessions }o--|| tenants : "tenant_id ondelete=CASCADE"
   builder_sessions }o--|| users : "actor_user_id ondelete=CASCADE"
-  flow_package_imports }o--o| flows : "flow_id ondelete=CASCADE"
+  flow_package_imports }o--o| flows : "flow_id, tenant_id, space_id ondelete=CASCADE"
   flow_package_imports }o--|| spaces : "space_id ondelete=CASCADE"
   flow_package_imports }o--|| tenants : "tenant_id ondelete=CASCADE"
   flow_package_imports }o--o| users : "created_by_user_id ondelete=SET NULL"

@@ -66,7 +66,14 @@ class FlowPackageImportRepository:
                     FlowPackageImports.flow_id,
                     Flows.name,
                 )
-                .join(Flows, FlowPackageImports.flow_id == Flows.id)
+                .join(
+                    Flows,
+                    sa.and_(
+                        FlowPackageImports.flow_id == Flows.id,
+                        FlowPackageImports.tenant_id == Flows.tenant_id,
+                        FlowPackageImports.space_id == Flows.space_id,
+                    ),
+                )
                 .where(Flows.deleted_at.is_(None))
                 .where(FlowPackageImports.tenant_id == tenant_id)
                 .where(FlowPackageImports.space_id == space_id)

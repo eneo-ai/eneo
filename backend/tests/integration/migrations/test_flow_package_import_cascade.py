@@ -95,6 +95,7 @@ def test_fresh_chain_cascades_operational_import_rows_and_replays(
     )
     assert retained_audit_graph.failed_import is not None
     assert retained_audit_graph.audit is not None
+    _assert_flow_identity_mismatches_are_rejected(conn, retained_audit_graph)
 
     with conn.cursor() as cursor:
         cursor.execute(
@@ -169,6 +170,11 @@ def test_fresh_chain_cascades_operational_import_rows_and_replays(
     command.downgrade(cfg, PRE_PACKAGE_REVISION)
     assert PRE_PACKAGE_REVISION in current_revisions(conn)
     assert not _table_exists(conn, "flow_package_imports")
+    assert not _constraint_exists(
+        conn,
+        table_name="flows",
+        constraint_name="uq_flows_id_tenant_id_space_id",
+    )
 
     command.upgrade(cfg, "head")
     assert current_revisions(conn) == {CURRENT_HEAD}
@@ -340,8 +346,33 @@ def _assert_flow_import_fk_and_index(conn: PsycopgConnection) -> None:
             """
             SELECT
                 constraint_row.confdeltype,
+                constraint_row.confupdtype,
+                constraint_row.confmatchtype,
                 constraint_row.convalidated,
                 pg_get_constraintdef(constraint_row.oid)
+            FROM pg_constraint AS constraint_row
+            JOIN pg_class AS table_row
+              ON table_row.oid = constraint_row.conrelid
+            WHERE table_row.relname = 'flow_package_imports'
+              AND constraint_row.conname =
+                  'fk_flow_package_imports_flow_tenant_space'
+            """
+        )
+        constraint = cursor.fetchone()
+        assert constraint is not None
+        assert constraint[0] == "c"
+        assert constraint[1] == "a"
+        assert constraint[2] == "s"
+        assert constraint[3] is True
+        assert (
+            "FOREIGN KEY (flow_id, tenant_id, space_id) "
+            "REFERENCES flows(id, tenant_id, space_id) ON DELETE CASCADE"
+            in constraint[4]
+        )
+
+        cursor.execute(
+            """
+            SELECT count(*)
             FROM pg_constraint AS constraint_row
             JOIN pg_class AS table_row
               ON table_row.oid = constraint_row.conrelid
@@ -349,11 +380,42 @@ def _assert_flow_import_fk_and_index(conn: PsycopgConnection) -> None:
               AND constraint_row.conname = 'fk_flow_package_imports_flow_id_flows'
             """
         )
-        constraint = cursor.fetchone()
-        assert constraint is not None
-        assert constraint[0] == "c"
-        assert constraint[1] is True
-        assert "ON DELETE CASCADE" in constraint[2]
+        assert cursor.fetchone() == (0,)
+
+        cursor.execute(
+            """
+            SELECT
+                constraint_row.convalidated,
+                pg_get_constraintdef(constraint_row.oid)
+            FROM pg_constraint AS constraint_row
+            JOIN pg_class AS table_row
+              ON table_row.oid = constraint_row.conrelid
+            WHERE table_row.relname = 'flows'
+              AND constraint_row.conname = 'uq_flows_id_tenant_id_space_id'
+            """
+        )
+        unique_constraint = cursor.fetchone()
+        assert unique_constraint == (
+            True,
+            "UNIQUE (id, tenant_id, space_id)",
+        )
+
+        cursor.execute(
+            """
+            SELECT
+                index_meta.indisvalid,
+                index_meta.indisready,
+                pg_get_indexdef(index_meta.indexrelid)
+            FROM pg_index AS index_meta
+            JOIN pg_class AS index_row
+              ON index_row.oid = index_meta.indexrelid
+            WHERE index_row.relname = 'uq_flows_id_tenant_id_space_id'
+            """
+        )
+        unique_index = cursor.fetchone()
+        assert unique_index is not None
+        assert unique_index[0:2] == (True, True)
+        assert "(id, tenant_id, space_id)" in unique_index[2]
 
         cursor.execute(
             """
@@ -365,6 +427,129 @@ def _assert_flow_import_fk_and_index(conn: PsycopgConnection) -> None:
             """
         )
         assert cursor.fetchone() == (True, True)
+
+
+def _assert_flow_identity_mismatches_are_rejected(
+    conn: PsycopgConnection,
+    graph: _GraphIds,
+) -> None:
+    other_space_id = uuid4()
+    other_tenant_id = uuid4()
+    other_tenant_space_id = uuid4()
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO spaces (id, name, tenant_id, user_id)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                other_space_id,
+                f"Flow package other space {other_space_id}",
+                graph.tenant,
+                graph.user,
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO tenants (id, name, quota_limit, state)
+            VALUES (%s, %s, 1000000, 'active')
+            """,
+            (other_tenant_id, f"flow-package-other-tenant-{other_tenant_id}"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO spaces (id, name, tenant_id, user_id)
+            VALUES (%s, %s, %s, NULL)
+            """,
+            (
+                other_tenant_space_id,
+                f"Flow package other tenant space {other_tenant_space_id}",
+                other_tenant_id,
+            ),
+        )
+
+    with pytest.raises(psycopg2.errors.ForeignKeyViolation) as space_error:
+        _insert_successful_import(
+            conn,
+            tenant_id=graph.tenant,
+            space_id=other_space_id,
+            flow_id=graph.flow,
+            created_by_user_id=graph.user,
+            package_id="se.test.cross-space",
+        )
+    assert (
+        space_error.value.diag.constraint_name
+        == "fk_flow_package_imports_flow_tenant_space"
+    )
+
+    with pytest.raises(psycopg2.errors.ForeignKeyViolation) as tenant_error:
+        _insert_successful_import(
+            conn,
+            tenant_id=other_tenant_id,
+            space_id=other_tenant_space_id,
+            flow_id=graph.flow,
+            created_by_user_id=graph.user,
+            package_id="se.test.cross-tenant",
+        )
+    assert (
+        tenant_error.value.diag.constraint_name
+        == "fk_flow_package_imports_flow_tenant_space"
+    )
+
+    with pytest.raises(psycopg2.errors.ForeignKeyViolation) as move_error:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE flows SET space_id = %s WHERE id = %s",
+                (other_space_id, graph.flow),
+            )
+    assert (
+        move_error.value.diag.constraint_name
+        == "fk_flow_package_imports_flow_tenant_space"
+    )
+
+
+def _insert_successful_import(
+    conn: PsycopgConnection,
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    flow_id: UUID,
+    created_by_user_id: UUID,
+    package_id: str,
+) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO flow_package_imports (
+                id,
+                tenant_id,
+                space_id,
+                flow_id,
+                created_by_user_id,
+                package_id,
+                package_version,
+                content_checksum,
+                source,
+                status,
+                import_plan_json,
+                selected_mappings_json,
+                failure_json
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, '1.0.0', %s,
+                'file_upload', 'draft_created', '{}'::jsonb, '{}'::jsonb, NULL
+            )
+            """,
+            (
+                uuid4(),
+                tenant_id,
+                space_id,
+                flow_id,
+                created_by_user_id,
+                package_id,
+                "b" * 64,
+            ),
+        )
 
 
 def _table_exists(conn: PsycopgConnection, table_name: str) -> bool:
@@ -379,6 +564,28 @@ def _table_exists(conn: PsycopgConnection, table_name: str) -> bool:
             )
             """,
             (table_name,),
+        )
+        row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _constraint_exists(
+    conn: PsycopgConnection,
+    *,
+    table_name: str,
+    constraint_name: str,
+) -> bool:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_constraint AS constraint_row
+                WHERE constraint_row.conrelid = %s::regclass
+                  AND constraint_row.conname = %s
+            )
+            """,
+            (table_name, constraint_name),
         )
         row = cursor.fetchone()
     return bool(row and row[0])

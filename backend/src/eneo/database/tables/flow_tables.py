@@ -188,6 +188,12 @@ class Flows(BasePublic):
             name="ck_flows_data_retention_days_range",
         ),
         UniqueConstraint("id", "tenant_id", name="uq_flows_id_tenant_id"),
+        UniqueConstraint(
+            "id",
+            "tenant_id",
+            "space_id",
+            name="uq_flows_id_tenant_id_space_id",
+        ),
         ForeignKeyConstraint(
             ["id", "published_version"],
             ["flow_versions.flow_id", "flow_versions.version"],
@@ -628,7 +634,6 @@ class FlowPackageImports(BasePublic):
         index=True,
     )
     flow_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Flows.id, ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -668,6 +673,13 @@ class FlowPackageImports(BasePublic):
             "status = 'failed' AND flow_id IS NULL AND failure_json IS NOT NULL"
             ")",
             name="ck_flow_package_imports_terminal_shape",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id", "space_id"],
+            ["flows.id", "flows.tenant_id", "flows.space_id"],
+            ondelete="CASCADE",
+            onupdate="NO ACTION",
+            name="fk_flow_package_imports_flow_tenant_space",
         ),
         Index(
             "ix_flow_package_imports_tenant_space_created",

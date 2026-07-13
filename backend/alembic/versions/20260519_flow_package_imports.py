@@ -19,6 +19,8 @@ depends_on = None
 
 SOURCE_VALUES = ("file_upload",)
 STATUS_VALUES = ("draft_created", "failed")
+FLOW_IDENTITY_UNIQUE = "uq_flows_id_tenant_id_space_id"
+FLOW_IDENTITY_INDEX = "ix_flows_id_tenant_id_space_id_unique"
 
 
 def _check_values(values: tuple[str, ...]) -> str:
@@ -26,6 +28,24 @@ def _check_values(values: tuple[str, ...]) -> str:
 
 
 def upgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.create_index(
+            FLOW_IDENTITY_INDEX,
+            "flows",
+            ["id", "tenant_id", "space_id"],
+            unique=True,
+            postgresql_concurrently=True,
+        )
+    op.execute(
+        sa.text(
+            f"""
+            ALTER TABLE flows
+            ADD CONSTRAINT {FLOW_IDENTITY_UNIQUE}
+            UNIQUE USING INDEX {FLOW_IDENTITY_INDEX}
+            """
+        )
+    )
+
     op.create_table(
         "flow_package_imports",
         sa.Column(
@@ -97,10 +117,11 @@ def upgrade() -> None:
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
-            ["flow_id"],
-            ["flows.id"],
-            name=op.f("fk_flow_package_imports_flow_id_flows"),
+            ["flow_id", "tenant_id", "space_id"],
+            ["flows.id", "flows.tenant_id", "flows.space_id"],
+            name="fk_flow_package_imports_flow_tenant_space",
             ondelete="CASCADE",
+            onupdate="NO ACTION",
         ),
         sa.ForeignKeyConstraint(
             ["space_id"],
@@ -150,3 +171,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("flow_package_imports")
+    op.drop_constraint(
+        FLOW_IDENTITY_UNIQUE,
+        "flows",
+        type_="unique",
+    )

@@ -15,7 +15,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
@@ -31,6 +31,7 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowSteps,
 )
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flow_packages.api import flow_package_router
 from eneo.flow_packages.api.flow_package_models import (
     FlowPackageExportRequest,
@@ -147,18 +148,27 @@ def _index_by_name(table: object, index_name: str) -> Index:
     raise AssertionError(f"Index {index_name} was not found.")
 
 
-def _foreign_key_for_column(
+def _foreign_key_by_name(
     table: object,
-    column_name: str,
+    constraint_name: str,
 ) -> ForeignKeyConstraint:
-    matches: list[ForeignKeyConstraint] = []
     for constraint in table.__table__.constraints:
-        if isinstance(constraint, ForeignKeyConstraint) and tuple(
-            column.name for column in constraint.columns
-        ) == (column_name,):
-            matches.append(constraint)
-    assert len(matches) == 1
-    return matches[0]
+        if (
+            isinstance(constraint, ForeignKeyConstraint)
+            and constraint.name == constraint_name
+        ):
+            return constraint
+    raise AssertionError(f"Foreign key {constraint_name} was not found.")
+
+
+def _unique_constraint_columns(table: object, constraint_name: str) -> tuple[str, ...]:
+    for constraint in table.__table__.constraints:
+        if (
+            isinstance(constraint, UniqueConstraint)
+            and constraint.name == constraint_name
+        ):
+            return tuple(column.name for column in constraint.columns)
+    raise AssertionError(f"Unique constraint {constraint_name} was not found.")
 
 
 async def _create_space(*, session, completion_model_factory, space_factory) -> object:
@@ -262,6 +272,84 @@ async def _assert_integrity_error(session, row: FlowPackageImports) -> None:
         async with session.begin_nested():
             session.add(row)
             await session.flush()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_successful_import_rejects_flow_identity_mismatches(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            f"flow-package-scope-model-{uuid4()}",
+        )
+        receipt_space = await space_factory(
+            session,
+            f"Flow package receipt space {uuid4()}",
+            [model.id],
+        )
+        flow_space = await space_factory(
+            session,
+            f"Flow package Flow space {uuid4()}",
+            [model.id],
+        )
+        flow = Flows(
+            name="Cross-space Flow",
+            tenant_id=admin_user.tenant_id,
+            space_id=flow_space.id,
+            created_by_user_id=admin_user.id,
+            owner_user_id=admin_user.id,
+        )
+        session.add(flow)
+        await session.flush()
+
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=receipt_space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.cross-space",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+            ),
+        )
+
+        other_tenant = Tenants(
+            name=f"flow_package_import_tenant_{uuid4()}",
+            display_name=None,
+            slug=f"flow-package-import-{uuid4()}",
+            quota_limit=1024**3,
+        )
+        session.add(other_tenant)
+        await session.flush()
+
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=other_tenant.id,
+                space_id=flow_space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.cross-tenant",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+            ),
+        )
 
 
 class _FakeSpaceActor:
@@ -585,6 +673,13 @@ async def test_flow_package_import_route_persists_failed_install_record(
                 FlowPackageImports.package_id == "se.demo.route-import",
             )
         )
+        retry = await FlowPackageImportRepository(session).get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=import_request.expected_content_checksum,
+            target_state=_import_plan().target_state,
+            selection=_selection(),
+        )
 
         assert isinstance(response, JSONResponse)
         assert response.status_code == 400
@@ -597,6 +692,7 @@ async def test_flow_package_import_route_persists_failed_install_record(
             "message": "Selected model is unavailable.",
             "context": {"slot_ref": "model.structured"},
         }
+        assert retry is None
 
 
 @pytest.mark.asyncio
@@ -1116,6 +1212,15 @@ async def test_flow_package_import_rejects_invalid_terminal_shapes(
             completion_model_factory=completion_model_factory,
             space_factory=space_factory,
         )
+        flow = Flows(
+            name="Terminal-shape Flow",
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            created_by_user_id=admin_user.id,
+            owner_user_id=admin_user.id,
+        )
+        session.add(flow)
+        await session.flush()
 
         await _assert_integrity_error(
             session,
@@ -1133,7 +1238,55 @@ async def test_flow_package_import_rejects_invalid_terminal_shapes(
                     exclude={"can_publish_after_import"},
                 ),
                 selected_mappings_json=_selection().model_dump(mode="json"),
-                failure_json=None,
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+                failure_json=_failure().model_dump(mode="json"),
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.FAILED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+                failure_json=_failure().model_dump(mode="json"),
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.FAILED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
             ),
         )
 
@@ -1166,11 +1319,43 @@ def test_flow_package_import_metadata_matches_import_record_contract() -> None:
     assert "ck_flow_package_imports_terminal_shape" in _constraint_names(
         FlowPackageImports
     )
-    flow_foreign_key = _foreign_key_for_column(FlowPackageImports, "flow_id")
+    assert _unique_constraint_columns(Flows, "uq_flows_id_tenant_id") == (
+        "id",
+        "tenant_id",
+    )
+    assert _unique_constraint_columns(
+        Flows,
+        "uq_flows_id_tenant_id_space_id",
+    ) == ("id", "tenant_id", "space_id")
+
+    flow_foreign_key = _foreign_key_by_name(
+        FlowPackageImports,
+        "fk_flow_package_imports_flow_tenant_space",
+    )
+    assert tuple(column.name for column in flow_foreign_key.columns) == (
+        "flow_id",
+        "tenant_id",
+        "space_id",
+    )
     assert flow_foreign_key.ondelete == "CASCADE"
+    assert flow_foreign_key.onupdate == "NO ACTION"
+    assert flow_foreign_key.match is None
     assert tuple(element.target_fullname for element in flow_foreign_key.elements) == (
         "flows.id",
+        "flows.tenant_id",
+        "flows.space_id",
     )
+    assert [
+        constraint.name
+        for constraint in FlowPackageImports.__table__.foreign_key_constraints
+        if constraint.referred_table.name == "flows"
+    ] == ["fk_flow_package_imports_flow_tenant_space"]
+
+    flow_id_index = _index_by_name(
+        FlowPackageImports,
+        "ix_flow_package_imports_flow_id",
+    )
+    assert tuple(column.name for column in flow_id_index.columns) == ("flow_id",)
 
     tenant_space_index = _index_by_name(
         FlowPackageImports,
