@@ -114,7 +114,8 @@
       if (!message || message.role !== "user") continue;
       const metadata = message.metadata ?? {};
       // Control replies confirm the builder state; edit-context messages are still user intent.
-      if (metadata.requirements_confirmed === true || "question_answer" in metadata) continue;
+      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
+        continue;
       const content = message.content.trim();
       if (content.length > 0) return content;
     }
@@ -140,7 +141,8 @@
     for (const message of service.messages) {
       if (message.role !== "user") continue;
       const metadata = message.metadata ?? {};
-      if (metadata.requirements_confirmed === true || "question_answer" in metadata) continue;
+      if (metadata.requirements_confirmed === true || message.questionAnswer !== undefined)
+        continue;
       const content = message.content.trim();
       if (content.length > 0) return content;
     }

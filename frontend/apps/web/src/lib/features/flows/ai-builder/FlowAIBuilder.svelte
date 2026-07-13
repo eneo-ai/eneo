@@ -91,18 +91,8 @@
   const answeredQuestionCount = $derived.by(() => {
     const ids = new SvelteSet<string>();
     for (const msg of service.messages) {
-      const qa =
-        msg.metadata && typeof msg.metadata === "object" && "question_answer" in msg.metadata
-          ? msg.metadata.question_answer
-          : null;
-      if (
-        qa &&
-        typeof qa === "object" &&
-        "question_id" in qa &&
-        typeof qa.question_id === "string"
-      ) {
-        ids.add(qa.question_id);
-      }
+      const questionId = msg.questionAnswer?.question_id;
+      if (questionId) ids.add(questionId);
     }
     return ids.size;
   });

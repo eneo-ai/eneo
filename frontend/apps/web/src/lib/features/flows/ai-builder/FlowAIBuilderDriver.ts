@@ -123,19 +123,6 @@ interface SessionOperationOwner {
   abortController: AbortController | null;
 }
 
-function extractQuestionAnswer(
-  metadata: ChatMessage["metadata"] | undefined
-): PersistedStructuredQuestionAnswerMetadata | null {
-  if (!metadata || typeof metadata !== "object" || !("question_answer" in metadata)) {
-    return null;
-  }
-  const questionAnswer = metadata.question_answer;
-  if (!questionAnswer || typeof questionAnswer !== "object") {
-    return null;
-  }
-  return questionAnswer as PersistedStructuredQuestionAnswerMetadata;
-}
-
 function toPersistedQuestionAnswerMetadata(
   questionAnswer:
     StructuredQuestionAnswerMetadata | NonNullable<AIBuilderConversationMessage["question_answer"]>
@@ -536,9 +523,7 @@ export class FlowAIBuilderDriver {
           requirements_version: questionAnswer.requirements_version
         };
       } else {
-        const persisted = toPersistedQuestionAnswerMetadata(questionAnswer);
-        userMsg.metadata = { question_answer: persisted };
-        userMsg.questionAnswer = persisted ?? undefined;
+        userMsg.questionAnswer = toPersistedQuestionAnswerMetadata(questionAnswer) ?? undefined;
       }
     }
     if (editContext) {
@@ -1169,8 +1154,7 @@ export class FlowAIBuilderDriver {
 
   isQuestionAnswered(questionId: string): boolean {
     for (let index = this.#state.messages.length - 1; index >= 0; index -= 1) {
-      const questionAnswer = extractQuestionAnswer(this.#state.messages[index]?.metadata);
-      if (questionAnswer?.question_id === questionId) {
+      if (this.#state.messages[index]?.questionAnswer?.question_id === questionId) {
         return true;
       }
     }
@@ -1348,13 +1332,6 @@ export class FlowAIBuilderDriver {
     message: AIBuilderConversationMessage
   ): ChatMessage["metadata"] | undefined {
     const metadata: Record<string, unknown> = {};
-
-    if (message.question_answer?.kind === "structured_question_answer") {
-      const questionAnswer = toPersistedQuestionAnswerMetadata(message.question_answer);
-      if (questionAnswer) {
-        metadata.question_answer = questionAnswer;
-      }
-    }
 
     if (message.requirements_confirmation?.requirements_confirmed === true) {
       metadata.requirements_confirmed = true;

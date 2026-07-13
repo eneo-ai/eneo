@@ -242,11 +242,9 @@ describe("FlowAIBuilderDriver", () => {
         {
           role: "user",
           content: "Documents",
-          metadata: {
-            question_answer: {
-              question_id: "input_mode",
-              selected_option_ids: ["documents"]
-            }
+          questionAnswer: {
+            question_id: "input_mode",
+            selected_option_ids: ["documents"]
           },
           timestamp: 2
         }
@@ -2483,12 +2481,11 @@ describe("FlowAIBuilderDriver", () => {
     await driver.resumeSession("session-public-conversation");
 
     expect(driver.state.messages[0]?.question?.question_id).toBe("terminal_output");
-    expect(driver.state.messages[1]?.metadata).toEqual({
-      question_answer: {
-        question_id: "terminal_output",
-        selected_option_ids: ["pdf"]
-      }
+    expect(driver.state.messages[1]?.questionAnswer).toEqual({
+      question_id: "terminal_output",
+      selected_option_ids: ["pdf"]
     });
+    expect(driver.state.messages[1]?.metadata).toBeUndefined();
     expect(driver.state.messages[2]?.requirementsSummary?.summary).toBe("Bygg ett PDF-flöde.");
     expect(driver.state.messages[3]?.metadata).toEqual({
       requirements_confirmed: true,
@@ -2527,7 +2524,8 @@ describe("FlowAIBuilderDriver conversation hydration", () => {
       question_id: "report_layout",
       selected_option_ids: ["per_source"]
     });
-    expect(hydrated?.metadata?.question_answer).toEqual(hydrated?.questionAnswer);
+    // Single owner: structured answers never appear in the metadata dict.
+    expect(hydrated?.metadata?.question_answer).toBeUndefined();
   });
 });
 
