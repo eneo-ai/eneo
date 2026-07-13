@@ -1,4 +1,8 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {NonNullable<import('../types/schema').operations["list_flow_runs"]["parameters"]["query"]>} FlowRunListQuery */
+/** @typedef {NonNullable<import('../types/schema').operations["export_flow_run_evidence"]["parameters"]["query"]>} FlowRunEvidenceExportQuery */
+/** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["requestBody"]["content"]["application/json"]} FlowRunStepRerunRequest */
+/** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["responses"][202]["content"]["application/json"]} FlowRunStepRerunResponse */
 import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys.js";
 
 /**
@@ -665,13 +669,13 @@ export function initFlows(client) {
 
       /**
        * List runs for a flow
-       * @param {{flowId: string, limit?: number, offset?: number}} params
+       * @param {{flowId: string, limit?: FlowRunListQuery["limit"], offset?: FlowRunListQuery["offset"], status?: FlowRunListQuery["status"]}} params
        * @throws {EneoError}
        */
-      list: async ({ flowId, limit = 50, offset = 0 }) => {
+      list: async ({ flowId, limit = 50, offset = 0, status }) => {
         return _fetch(`/api/v1/flows/${flowId}/runs/`, {
           method: "get",
-          params: { query: { limit, offset } }
+          params: { query: { limit, offset, status } }
         });
       },
 
@@ -711,6 +715,19 @@ export function initFlows(client) {
       },
 
       /**
+       * Rerun one completed step and its downstream dependents.
+       * @param {{flowId: string, runId: string, stepId: string} & FlowRunStepRerunRequest} params
+       * @returns {Promise<FlowRunStepRerunResponse>}
+       * @throws {EneoError}
+       */
+      rerunStep: async ({ flowId, runId, stepId, ...requestBody }) => {
+        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/steps/${stepId}/rerun/`, {
+          method: "post",
+          requestBody: { "application/json": requestBody }
+        });
+      },
+
+      /**
        * Redispatch a stale queued flow run
        * @param {{id: string, flowId: string, flow_id?: string}} run
        * @returns {Promise<import('../types/resources').FlowRunRedispatchResult>}
@@ -737,7 +754,7 @@ export function initFlows(client) {
 
       /**
        * Export canonical evidence bundle for a flow run.
-       * @param {{id: string, flowId: string, flow_id?: string, format?: "json"}} run
+       * @param {{id: string, flowId: string, flow_id?: string, format?: FlowRunEvidenceExportQuery["format"], detail?: FlowRunEvidenceExportQuery["detail"], reason?: FlowRunEvidenceExportQuery["reason"]}} run
        * @returns {Promise<import('../types/resources').FlowRunEvidenceExport>}
        * @throws {EneoError}
        */
@@ -746,7 +763,11 @@ export function initFlows(client) {
         return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/export`, {
           method: "get",
           params: {
-            query: { format: run.format ?? "json" }
+            query: {
+              format: run.format ?? "json",
+              detail: run.detail,
+              reason: run.reason
+            }
           }
         });
       },

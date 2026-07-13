@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createClient } from "../client/client";
 import { initFlows } from "./flows";
 
 describe("flows templates endpoint", () => {
@@ -93,6 +94,23 @@ describe("flows templates endpoint", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/runs/status-capabilities/");
     expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
+  it("lists runs with repeated status filters in caller order", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ items: [], count: 0, has_more: false }))
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+    /** @type {NonNullable<NonNullable<import("../types/schema").operations["list_flow_runs"]["parameters"]["query"]>["status"]>} */
+    const status = ["completed", "queued", "completed"];
+
+    await flows.runs.list({ flowId: "flow-1", limit: 25, offset: 5, status });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=25&offset=5&status=completed&status=queued&status=completed"
+    );
+    expect(status).toEqual(["completed", "queued", "completed"]);
   });
 
   it("validates portable flow packages through multipart upload", async () => {
@@ -310,6 +328,108 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1]).toMatchObject({
       method: "get",
       params: { query: { format: "json" } }
+    });
+  });
+
+  it("serializes evidence export detail and reason options", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ schema_version: "flow-evidence-export.v8", content_hash: "abc123" })
+        )
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.runs.exportEvidence({
+      id: "run-1",
+      flowId: "flow-1",
+      detail: "raw",
+      reason: "incident review"
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/evidence/export?format=json&detail=raw&reason=incident+review"
+    );
+  });
+
+  it("reruns a step with the generated operation body", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ status: "queued", rerun_step_id: "step-1" }), {
+          status: 202
+        })
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.runs.rerunStep({
+      flowId: "flow-1",
+      runId: "run-1",
+      stepId: "step-1",
+      expected_run_revision: 7,
+      reason: "Reviewer accepted the corrected source.",
+      input_payload_json: { reviewer_note: "Use the corrected source." },
+      step_inputs: { "step-1": { file_ids: ["file-2", "file-1"] } }
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/steps/step-1/rerun/"
+    );
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expected_run_revision: 7,
+      reason: "Reviewer accepted the corrected source.",
+      input_payload_json: { reviewer_note: "Use the corrected source." },
+      step_inputs: { "step-1": { file_ids: ["file-2", "file-1"] } }
+    });
+  });
+
+  it("serializes existing create and review-resume idempotency headers", async () => {
+    let requestCount = 0;
+    const fetch = vi.fn(async () => {
+      requestCount += 1;
+      return new Response(JSON.stringify({ id: requestCount === 1 ? "run-1" : "checkpoint-1" }), {
+        status: requestCount === 1 ? 201 : 202
+      });
+    });
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.runs.create({
+      flow: { id: "flow-1" },
+      expected_flow_version: 7,
+      idempotencyKey: "flow-run:client-request-1",
+      input_payload_json: { case_id: "CASE-1" }
+    });
+    await flows.runs.reviewCheckpoints.resume({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 3,
+      idempotencyKey: "flow-review-resume:checkpoint-1:3"
+    });
+
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.example.test/api/v1/flows/flow-1/runs/",
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/resume/"
+    ]);
+    expect(fetch.mock.calls[0][1].headers).toMatchObject({
+      "Content-Type": "application/json",
+      "Idempotency-Key": "flow-run:client-request-1"
+    });
+    expect(fetch.mock.calls[1][1].headers).toMatchObject({
+      "Content-Type": "application/json",
+      "Idempotency-Key": "flow-review-resume:checkpoint-1:3"
+    });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expected_flow_version: 7,
+      input_payload_json: { case_id: "CASE-1" }
+    });
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      expected_checkpoint_revision: 3
     });
   });
 

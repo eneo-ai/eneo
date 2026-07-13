@@ -21,6 +21,7 @@ def _flow_run_status_capabilities_public_example() -> JsonDict:
                 "is_cancellable": capability.is_cancellable,
                 "is_awaiting_review": capability.is_awaiting_review,
                 "can_request_redispatch": capability.can_request_redispatch,
+                "is_rerun_eligible": capability.is_rerun_eligible,
             }
             for capability in FLOW_RUN_STATUS_CAPABILITIES.values()
         ],
@@ -74,6 +75,13 @@ class FlowRunStatusCapabilityPublic(BaseModel):
             "True when clients may show a redispatch action for this status. "
             "Redispatch is still server-gated by staleness; a queued run that is "
             "not stale returns `redispatched_count: 0`."
+        )
+    )
+    is_rerun_eligible: bool = Field(
+        description=(
+            "True when a completed or failed run may enter step-rerun validation. "
+            "The rerun endpoint still validates the target step, run revision, "
+            "permissions, and any replacement inputs."
         )
     )
 

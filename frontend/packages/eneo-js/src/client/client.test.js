@@ -48,6 +48,21 @@ describe("createClient path parameters", () => {
     expect(fetch.mock.calls[0][0]).toBe("https://api.example.test/api/v1/apps/app-1/");
   });
 
+  it("authenticates apiKey clients with the canonical X-API-Key header", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ statuses: [] }), { status: 200 })
+    );
+    const apiKey = "synthetic-auth-value";
+    const client = createClient({ baseUrl: "https://api.example.test", apiKey, fetch });
+
+    await client.fetch("/api/v1/flows/runs/status-capabilities/", { method: "get" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const requestHeaders = new Headers(fetch.mock.calls[0][1].headers);
+    expect(requestHeaders.get("X-API-Key")).toBe(apiKey);
+    expect(requestHeaders.has("api-key")).toBe(false);
+  });
+
   it("forwards typed header parameters and caller headers", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ id: "run-1" }), { status: 200 }));
     const client = createClient({ baseUrl: "https://api.example.test", fetch });
@@ -104,6 +119,55 @@ describe("createClient path parameters", () => {
       stage: "CONNECTION",
       status: 0
     });
+  });
+});
+
+describe("createClient query parameters", () => {
+  it("keeps scalar query behavior and repeats array values in caller order", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+    /** @type {NonNullable<NonNullable<import("../types/schema").operations["list_flow_runs"]["parameters"]["query"]>["status"]>} */
+    const statuses = ["completed", "queued", "completed"];
+    const originalStatuses = [...statuses];
+
+    await client.fetch("/api/v1/flows/{id}/runs/", {
+      method: "get",
+      params: {
+        path: { id: "flow-1" },
+        query: { limit: 25, offset: 0, status: statuses }
+      }
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=25&offset=0&status=completed&status=queued&status=completed"
+    );
+    expect(statuses).toEqual(originalStatuses);
+  });
+
+  it("preserves scalar null, omits undefined, and emits nothing for an empty array", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+
+    await client.fetch("/api/v1/flows/{id}/runs/", {
+      method: "get",
+      params: {
+        path: { id: "flow-1" },
+        query: { limit: 0, offset: undefined, status: null }
+      }
+    });
+    await client.fetch("/api/v1/flows/{id}/runs/", {
+      method: "get",
+      params: {
+        path: { id: "flow-1" },
+        query: { status: [] }
+      }
+    });
+
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.example.test/api/v1/flows/flow-1/runs/?limit=0&status=null",
+      "https://api.example.test/api/v1/flows/flow-1/runs/"
+    ]);
   });
 });
 

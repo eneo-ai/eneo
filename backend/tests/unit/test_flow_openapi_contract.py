@@ -27,7 +27,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FlowRuntimePathsPublic,
     build_flow_runtime_paths,
 )
-from eneo.flows.enums import RerunDependencyKind
+from eneo.flows.enums import FLOW_RUN_STATUS_CAPABILITIES, RerunDependencyKind
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
@@ -1429,6 +1429,12 @@ def test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle(
         "server-gated by staleness"
         in row_schema["can_request_redispatch"]["description"]
     )
+    assert "completed or failed" in row_schema["is_rerun_eligible"]["description"]
+    public_rows = flow_run_status_capabilities_public().statuses
+    assert {row.status: row.is_rerun_eligible for row in public_rows} == {
+        status: capability.is_rerun_eligible
+        for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    }
 
 
 def test_openapi_flow_step_review_policy_documents_authoring_contract(

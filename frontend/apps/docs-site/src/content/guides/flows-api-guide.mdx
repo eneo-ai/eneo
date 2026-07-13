@@ -19,10 +19,13 @@ A few rules matter up front:
 
 ### Authentication
 
-Runtime examples in this guide use `Authorization: Bearer ...`. In practice that bearer token can be:
+Runtime examples in this guide use `Authorization: Bearer ...` for a user token. API keys use the API-key header instead:
 
-- a user token for a user principal
-- an API key for a backend or integration
+```http
+X-API-Key: $ENEO_API_KEY
+```
+
+Do not put an API key in the bearer-token header. Both user-owned and service-owned API keys authenticate through `X-API-Key`; their ownership, scope, top-level permission, and resource permissions determine which Flow operations are allowed.
 
 For the underlying auth model, see:
 
@@ -31,8 +34,8 @@ For the underlying auth model, see:
 
 <Callout type="warning">
   Service keys do not get broad operator access. If a service key needs access
-  to its own run evidence, it must have explicit <code>flow_evidence</code>{" "}
-  capability on the key.
+  to its own run evidence, it needs <code>flows &gt;= read</code> plus the
+  appropriate explicit <code>flow_evidence</code> capability on the key.
 </Callout>
 
 ## Authentication and principal model
@@ -586,6 +589,22 @@ Key endpoints:
 | Redispatch a run        | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/`            |
 | Rerun a completed step  | `POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/` |
 
+Repeat the `status` query key to filter by more than one run status. The SDK
+keeps caller order and duplicates instead of comma-encoding the array:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/?status=completed&status=failed&status=completed
+```
+
+```js
+const page = await client.flows.runs.list({
+  flowId,
+  status: ["completed", "failed", "completed"],
+  limit: 50,
+  offset: 0,
+});
+```
+
 Typical polling loop:
 
 - create the run
@@ -598,8 +617,10 @@ The runtime API is asynchronous: create the run first, then poll for completion.
 Use `GET /api/v1/flows/runs/status-capabilities/` when building run-history,
 polling, cancellation, redispatch, and review UI logic. It returns canonical
 booleans such as `should_poll`, `is_terminal`, `is_cancellable`,
-`is_awaiting_review`, and `can_request_redispatch`, so your client does not need
-to hard-code lifecycle groups.
+`is_awaiting_review`, `can_request_redispatch`, and `is_rerun_eligible`, so your
+client does not need to hard-code lifecycle groups. Rerun eligibility means the
+run status can enter rerun validation; the endpoint still checks the step,
+revision, caller permission, and replacement inputs.
 
 Current run status values:
 
@@ -766,6 +787,18 @@ Minimal request:
 }
 ```
 
+The eneo-js helper accepts the generated rerun request fields directly:
+
+```js
+const rerun = await client.flows.runs.rerunStep({
+  flowId,
+  runId,
+  stepId,
+  expected_run_revision: latestRun.revision,
+  reason: "The reviewer corrected the transcription for step 1.",
+});
+```
+
 `expected_run_revision` comes from the latest run response. `reason` is required
 and stored with the rerun operation. You may also send `input_payload_json` and
 `step_inputs`, but file overrides must be keyed by the rerun root step id. Upload
@@ -775,6 +808,14 @@ rerun.
 Rerun returns `202 Accepted` with the rerun operation and current run. Redispatch
 is only for stale queued runs that have not started; rerun is for deliberate
 post-result correction.
+
+An exact replay of the same accepted rerun request is an idempotent replay and
+also returns `202`; use the returned operation status rather than starting
+another correction. For `flow_run_rerun_stale_revision`, reload the run and
+decide whether the correction still applies before submitting its current
+revision. For `flow_run_rerun_invalid_transition`, wait for a terminal eligible
+status or stop offering rerun. Step/input validation errors require correcting
+the target step or replacement inputs before retrying.
 
 ### 5) Read results
 
@@ -914,6 +955,19 @@ GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=raw
 
 You can also pass a `reason` query parameter if you want the audit trail to capture why the export was performed.
 
+The default export is `detail=redacted` with reason `support_debug`. A raw export
+requires an explicit non-default reason between 3 and 500 characters. The
+eneo-js wrapper exposes both generated options:
+
+```js
+const evidence = await client.flows.runs.exportEvidence({
+  id: runId,
+  flowId,
+  detail: "raw",
+  reason: "Investigate incident 42",
+});
+```
+
 For the full evidence and classification policy model, see <a href="/docs/flows">Flows</a>. The short version is:
 
 - `evidence/` is the inline inspection surface
@@ -922,11 +976,13 @@ For the full evidence and classification policy model, see <a href="/docs/flows"
 
 #### Service keys and evidence
 
-A service key can access evidence only for **its own runs**, and only if the key has explicit `resource_permissions.flow_evidence` capability. Those capability levels are conventional permission tiers for the evidence surface:
+A service key can access evidence only for **its own runs**. It needs
+`resource_permissions.flows >= read` before `resource_permissions.flow_evidence`
+is evaluated. The evidence capability levels are:
 
-- `read` → evidence view
-- `write` → redacted export
-- `admin` → raw export, still subject to classification-3 tenant policy
+- `flow_evidence >= read` → evidence view
+- `flow_evidence >= write` → redacted export
+- `flow_evidence = admin` → raw export, still subject to classification-3 tenant policy
 
 #### RAG trace and highlighted segments
 
@@ -950,8 +1006,9 @@ Use this table as the canonical quick-reference for runtime access decisions.
 | `GET /api/v1/flows/{id}/published/`            | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | `GET /api/v1/flows/{id}/`                      | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
 | Run contract / runtime-safe graph              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Runtime uploads / orphan cleanup               | Own uploads for published Flows                             | Yes                                 | No                                   | Yes                         | Yes                       |
 | Create run                                     | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
-| List / get / cancel / redispatch runs          | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| List / get / cancel / redispatch / rerun runs  | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Step outputs / artifacts                       | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Evidence view / export                         | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
 
@@ -1071,12 +1128,12 @@ For template-fill document output, treat the DOCX template asset path as an **ac
 
 For short capability answers and operational choices, see [Flows FAQ](/guides/flows/flows-faq). For Flow-specific codes, use [Flow error reference](/guides/flows/reference/errors) and branch on `code`, not message text.
 
-| Status    | What it usually means                                                           | What to do                                                                                  |
-| --------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `400`     | The request shape, state precondition, or Flow contract is invalid.             | Read the Flow error `code`, fix the request, and retry with idempotency.                    |
-| `401/403` | Authentication, space scope, ownership, or evidence policy blocked the request. | Fix the principal or policy before retrying; platform auth may return `insufficient_scope`. |
-| `409`     | The run, checkpoint, file, or idempotency key changed before this request.      | Reload the run or checkpoint and retry with the current revision.                           |
-| `429`     | The tenant or flow has too many active runs.                                    | Back off and poll existing runs before creating more work.                                  |
+| Status    | What it usually means                                                           | What to do                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `400`     | The request shape, state precondition, or Flow contract is invalid.             | Read the Flow error `code` and follow its recovery; reuse a key only for the idempotent create/resume request it belongs to. |
+| `401/403` | Authentication, space scope, ownership, or evidence policy blocked the request. | Fix the principal or policy before retrying; platform auth may return `insufficient_scope`.                                  |
+| `409`     | The run, checkpoint, file, or idempotency key changed before this request.      | Reload the run or checkpoint and retry with the current revision.                                                            |
+| `429`     | The tenant or flow has too many active runs.                                    | Back off and poll existing runs before creating more work.                                                                   |
 
 ## Practical takeaway
 

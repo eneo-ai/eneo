@@ -650,6 +650,27 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert published_response.status_code == 200, published_response.text
     published_payload = published_response.json()
     assert published_payload["id"] == flow_id
+
+    status_capabilities_response = await client.get(
+        "/api/v1/flows/runs/status-capabilities/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert status_capabilities_response.status_code == 200, (
+        status_capabilities_response.text
+    )
+    rerun_eligibility = {
+        row["status"]: row["is_rerun_eligible"]
+        for row in status_capabilities_response.json()["statuses"]
+    }
+    assert rerun_eligibility == {
+        "queued": False,
+        "running": False,
+        "awaiting_review": False,
+        "completed": True,
+        "failed": True,
+        "cancelled": False,
+    }
+
     assert published_payload["runtime_paths"]["create_run"].endswith(
         f"/flows/{flow_id}/runs/"
     )

@@ -11,6 +11,8 @@
 import { readEvents } from "./stream.js";
 import { xhr } from "./xhr.js";
 
+/** @typedef {string | number | boolean | null | undefined} QueryParameterValue */
+
 /**
  * @param {unknown} value
  * @returns {value is { message: string }}
@@ -41,10 +43,10 @@ export function createClient(args) {
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
 
-  /** @type {{"api-key": string} | {Authorization: string} | {}} */
+  /** @type {{"X-API-Key": string} | {Authorization: string} | {}} */
   const auth =
     args.apiKey !== undefined
-      ? { "api-key": args.apiKey }
+      ? { "X-API-Key": args.apiKey }
       : args.token !== undefined
         ? { Authorization: `Bearer ${args.token}` }
         : {};
@@ -177,7 +179,7 @@ export function createClient(args) {
  * Expand parameters and endpoint into a full url
  * @param baseUrl {string} Base Url of the eneo instance
  * @param endpoint {string} An endpoint with {param} placeholdes
- * @param params {{query?: Record<string, string>, path?: Record<string, string>} | undefined} A dictionary of {params} to replace with their respective values
+ * @param params {{query?: Record<string, QueryParameterValue | readonly QueryParameterValue[]>, path?: Record<string, string>} | undefined} A dictionary of {params} to replace with their respective values
  * @returns {string} Returns the fully expanded url
  */
 function parseUrl(baseUrl, endpoint, params) {
@@ -196,9 +198,12 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.query) {
     Object.entries(params.query).forEach(([param, value]) => {
-      if (value !== undefined) {
-        url.searchParams.append(param, value);
-      }
+      const values = Array.isArray(value) ? value : [value];
+      values.forEach((queryValue) => {
+        if (queryValue !== undefined) {
+          url.searchParams.append(param, String(queryValue));
+        }
+      });
     });
   }
 

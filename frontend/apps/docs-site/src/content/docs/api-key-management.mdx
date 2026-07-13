@@ -2,7 +2,7 @@
 
 Eneo provides a comprehensive API key system for programmatic access. Keys support two ownership models (user and service), four scope levels (tenant, space, assistant, app), three permission tiers (read, write, admin), and layered security enforcement including rate limiting, IP/origin restrictions, and scope-based access control.
 
-import { Callout } from 'nextra/components'
+import { Callout } from "nextra/components";
 
 ---
 
@@ -10,17 +10,19 @@ import { Callout } from 'nextra/components'
 
 Every API key has a type prefix that determines its intended use and security constraints.
 
-| Aspect | `sk_` (Secret Key) | `pk_` (Public Key) |
-|--------|--------------------|--------------------|
-| **Use case** | Server-to-server, backend integrations | Browser-based, frontend apps |
-| **Access restriction** | IP allowlist (CIDR notation) | Origin allowlist (scheme required) |
-| **Max permission** | `admin` | `read` |
-| **Resource permissions** | Supported | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
-| **Origin restrictions** | Not allowed | Required for creation (at least one) |
-| **IP restrictions** | Optional | Not allowed |
+| Aspect                   | `sk_` (Secret Key)                     | `pk_` (Public Key)                                                        |
+| ------------------------ | -------------------------------------- | ------------------------------------------------------------------------- |
+| **Use case**             | Server-to-server, backend integrations | Browser-based, frontend apps                                              |
+| **Access restriction**   | IP allowlist (CIDR notation)           | Origin allowlist (scheme required)                                        |
+| **Max permission**       | `admin`                                | `read`                                                                    |
+| **Resource permissions** | Supported                              | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
+| **Origin restrictions**  | Not allowed                            | Required for creation (at least one)                                      |
+| **IP restrictions**      | Optional                               | Not allowed                                                               |
 
 <Callout type="info">
-The key prefix (`sk_` or `pk_`) is embedded in the key string itself and validated on every request. A `pk_` key that requests write or admin permission is rejected by policy validation.
+  The key prefix (`sk_` or `pk_`) is embedded in the key string itself and
+  validated on every request. A `pk_` key that requests write or admin
+  permission is rejected by policy validation.
 </Callout>
 
 ---
@@ -51,14 +53,18 @@ When a service key is used, the system constructs a **synthetic user** instead o
 - **No real roles**: Space access is derived from the key's permission level, not from membership
 
 <Callout type="warning">
-Only tenant administrators can create service keys. Service keys with write or admin permission require either an **IP allowlist** or an **expiration date** as a guardrail against misuse, regardless of scope.
+  Only tenant administrators can create service keys. Service keys with write or
+  admin permission require either an **IP allowlist** or an **expiration date**
+  as a guardrail against misuse, regardless of scope.
 </Callout>
 
 #### What service keys cannot do
 
 Service keys are automation principals, not service accounts. They can read, update, and delete supported existing resources within their scope, but they **cannot create new user-owned resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on supported endpoints once the resource exists.
 
-Files are the important exception to "delete existing resources": files are user-owned today. Service keys cannot upload files and cannot delete files. File upload returns `403` with `code: "service_key_cannot_create_resources"`, and file delete returns `403` with `code: "service_key_cannot_delete_files"`. Use a user key for workflows that upload runtime files and clean them up after a run.
+The ordinary file API is the important exception to "delete existing resources": files are user-owned today. Service keys cannot use the general file upload or delete endpoints. General file upload returns `403` with `code: "service_key_cannot_create_resources"`, and general file delete returns `403` with `code: "service_key_cannot_delete_files"`.
+
+Flow runtime input routes are a separate, Flow-scoped exception. A service key with `resource_permissions.flows = write`—or an equivalent top-level write grant on a key without resource permissions—can upload runtime inputs to a published Flow through `POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/`. It can delete only its own unattached upload through `DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/`. Once a runtime file is attached to persisted run or rerun state, cleanup returns `409` with `code: "flow_runtime_file_attached"` instead of deleting it.
 
 Two related guardrails come from the same principle:
 
@@ -120,12 +126,12 @@ Based on the `ownership` field:
 
 Redis-based rate limiting with scope-aware defaults:
 
-| Scope | Default Limit |
-|-------|--------------|
-| Tenant | 10,000 req/hour |
-| Space | 5,000 req/hour |
-| Assistant | 1,000 req/hour |
-| App | 1,000 req/hour |
+| Scope     | Default Limit   |
+| --------- | --------------- |
+| Tenant    | 10,000 req/hour |
+| Space     | 5,000 req/hour  |
+| Assistant | 1,000 req/hour  |
+| App       | 1,000 req/hour  |
 
 Per-key overrides are possible via the `rate_limit` field. The tenant policy `max_rate_limit_override` acts as an absolute ceiling.
 
@@ -133,11 +139,11 @@ Per-key overrides are possible via the `rate_limit` field. The tenant policy `ma
 
 **Method-level** (always enforced): HTTP methods are mapped to permission levels:
 
-| HTTP Method | Required Permission |
-|-------------|-------------------|
-| `GET`, `HEAD`, `OPTIONS` | `read` |
-| `POST`, `PUT`, `PATCH` | `write` |
-| `DELETE` | `admin` |
+| HTTP Method              | Required Permission |
+| ------------------------ | ------------------- |
+| `GET`, `HEAD`, `OPTIONS` | `read`              |
+| `POST`, `PUT`, `PATCH`   | `write`             |
+| `DELETE`                 | `admin`             |
 
 Some endpoints override this mapping. For example, certain POST endpoints that are semantically read operations (like search) accept `read` permission.
 
@@ -159,12 +165,12 @@ The authenticated user (real or synthetic) is injected into the request context.
 
 Scopes define the boundary of what a key can access, from broadest to narrowest:
 
-| Scope | Access | `scope_id` |
-|-------|--------|-----------|
-| `tenant` | All resources in the tenant | `NULL` |
-| `space` | Single space and its contents | Space UUID |
+| Scope       | Access                                 | `scope_id`     |
+| ----------- | -------------------------------------- | -------------- |
+| `tenant`    | All resources in the tenant            | `NULL`         |
+| `space`     | Single space and its contents          | Space UUID     |
 | `assistant` | Single assistant and its conversations | Assistant UUID |
-| `app` | Single app and its runs | App UUID |
+| `app`       | Single app and its runs                | App UUID       |
 
 Files are user-owned rather than space-owned. A scoped user key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user.
 
@@ -172,13 +178,13 @@ Files are user-owned rather than space-owned. A scoped user key can access the f
 
 Permissions define what operations a key can perform within its scope:
 
-| Permission | Space Role | User keys can do | Service keys can do |
-|-----------|-----------|------------------|---------------------|
-| `read` | VIEWER | Read resources, list items | Same |
-| `write` | EDITOR | Create and update resources | Update supported existing resources (creation is gated) |
-| `admin` | ADMIN | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
+| Permission | Space Role | User keys can do                        | Service keys can do                                                      |
+| ---------- | ---------- | --------------------------------------- | ------------------------------------------------------------------------ |
+| `read`     | VIEWER     | Read resources, list items              | Same                                                                     |
+| `write`    | EDITOR     | Create and update resources             | Update supported existing resources (creation is gated)                  |
+| `admin`    | ADMIN      | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
 
-For files, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot upload or delete files.
+For the ordinary file API, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot use those ordinary upload/delete routes. The published-Flow runtime input routes described above are the narrow exception for service-owned pre-run uploads and orphan cleanup.
 
 ### How Service Keys Derive Space Roles
 
@@ -195,11 +201,13 @@ This means a service key with `scope: space, permission: write` gets `EDITOR` ac
 Scope enforcement distinguishes between **list endpoints** (no resource ID in URL) and **single-resource endpoints** (resource ID in URL):
 
 **List endpoints**:
+
 - Tenant-scoped keys: always pass
 - Space-scoped keys: pass (service layer filters by space)
 - Assistant/app-scoped keys: pass only for their resource type (e.g., an assistant-scoped key can list conversations but not apps)
 
 **Single-resource endpoints**:
+
 - The system resolves the target resource's parent space
 - Compares the resolved space against the key's `scope_id`
 - Denies access if the resource is outside the key's scope
@@ -277,15 +285,15 @@ A key that is both suspended and expired is treated as expired. A key that is bo
 
 Tenant administrators can configure API key policies that apply to all keys in their tenant:
 
-| Policy | Default | Description |
-|--------|---------|-------------|
-| `max_delegation_depth` | 3 | Reserved for delegated-key support |
-| `revocation_cascade_enabled` | false | Reserved for delegated-key cascade support |
-| `require_expiration` | false | All new keys must have an expiry date |
-| `max_expiration_days` | null | Maximum days until expiry (null = unlimited) |
-| `auto_expire_unused_days` | null | Auto-revoke after N days of inactivity |
-| `max_rate_limit_override` | null | Absolute ceiling on per-key rate limits |
-| `rotation_grace_hours` | 24 | Grace period for old keys during rotation |
+| Policy                       | Default | Description                                  |
+| ---------------------------- | ------- | -------------------------------------------- |
+| `max_delegation_depth`       | 3       | Reserved for delegated-key support           |
+| `revocation_cascade_enabled` | false   | Reserved for delegated-key cascade support   |
+| `require_expiration`         | false   | All new keys must have an expiry date        |
+| `max_expiration_days`        | null    | Maximum days until expiry (null = unlimited) |
+| `auto_expire_unused_days`    | null    | Auto-revoke after N days of inactivity       |
+| `max_rate_limit_override`    | null    | Absolute ceiling on per-key rate limits      |
+| `rotation_grace_hours`       | 24      | Grace period for old keys during rotation    |
 
 ---
 
@@ -332,7 +340,7 @@ No. API-key management endpoints require a session login. API-key callers, inclu
 
 No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
 
-Create assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are more restricted than most existing resources: service keys cannot upload files and cannot delete files because files are user-owned today.
+Create assistants, apps, spaces, group chats, prompts, collections, websites, ordinary files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. The general file API remains user-owned; the narrow exception is published-Flow runtime input upload and cleanup for the same service principal, using the Flow-scoped runtime routes documented above.
 
 ### What happens to our old keys?
 
@@ -373,7 +381,7 @@ API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA
 Allowed origins for `pk_` keys are validated **per key** — there is no central tenant-wide allowlist that overrides or constrains what individual keys may list. This is a deliberate design choice:
 
 - **Authority**: the user who creates the key chooses which origins it accepts. Any space editor with permission to create `pk_` keys can list arbitrary external origins (e.g. `https://my-integration.example.com`).
-- **Tenant admins do not gate per-key origin lists**. Tenant-level policy controls *whether* a user may mint `pk_` keys (via roles and quotas) and may enforce rate limits, but does not vet the origins on each key.
+- **Tenant admins do not gate per-key origin lists**. Tenant-level policy controls _whether_ a user may mint `pk_` keys (via roles and quotas) and may enforce rate limits, but does not vet the origins on each key.
 - **Implication**: a leaked `pk_` key is only as constrained as the origin list its creator chose. Treat key creation as a security-relevant action and review key listings in audit logs.
 - **Fail-closed**: a `pk_` key with `allowed_origins` unset (NULL) or empty cannot authenticate at all — the origin check rejects every request rather than silently passing them through.
 

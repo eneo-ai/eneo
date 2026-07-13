@@ -140,6 +140,7 @@ FLOW_CONSUMER_DELETED_FLAT_HREFS = (
     "/guides/flows-faq",
 )
 FLOW_OVERVIEW = DOCS_SITE_CONTENT_ROOT / "docs" / "flows.mdx"
+API_KEY_MANAGEMENT = DOCS_SITE_CONTENT_ROOT / "docs" / "api-key-management.mdx"
 FLOW_DEVELOPER_DOCS_DIR = DOCS_SITE_CONTENT_ROOT / "docs" / "flows-for-developers"
 FLOW_DEVELOPER_DOCS_DATA_SCHEMA = FLOW_DEVELOPER_DOCS_DIR / "data-schema.mdx"
 FLOW_DEVELOPER_DOCS_HOW_BUILT = FLOW_DEVELOPER_DOCS_DIR / "how-built.mdx"
@@ -3489,8 +3490,31 @@ def test_flow_api_guide_documents_run_statuses_and_capabilities_endpoint() -> No
         "is_cancellable",
         "is_awaiting_review",
         "can_request_redispatch",
+        "is_rerun_eligible",
     ):
         assert capability in guide
+
+
+def test_flow_consumer_docs_match_sdk_and_service_key_runtime_contract() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    key_management = _read(API_KEY_MANAGEMENT)
+
+    assert "X-API-Key: $ENEO_API_KEY" in guide
+    assert "status=completed&status=failed&status=completed" in guide
+    assert 'status: ["completed", "failed", "completed"]' in guide
+    assert "flows.runs.rerunStep" in guide
+    assert 'detail: "raw"' in guide
+    assert "flow_run_rerun_stale_revision" in guide
+    assert "idempotent replay" in guide
+    assert "`resource_permissions.flows >= read`" in guide
+    assert "`flow_evidence >= write`" in guide
+    assert "ordinary file API" in key_management
+    assert "Flow runtime input routes are a separate" in key_management
+    assert "/steps/{step_id}/runtime-files/" in key_management
+    assert "/runtime-files/{file_id}/" in key_management
+    assert "Service keys cannot upload files and cannot delete files." not in (
+        key_management
+    )
 
 
 def test_flow_consumer_error_reference_is_generated_from_taxonomy() -> None:

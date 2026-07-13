@@ -1,20 +1,75 @@
 import type {
   components,
   Flow,
+  FlowClassificationRetentionPolicies,
+  FlowClassificationRetentionPolicy,
+  FlowClassificationRetentionPolicyUpdate,
+  FlowDocumentRenderLimits,
+  FlowEvidencePolicy,
   FlowGraph,
+  FlowGraphEdge,
+  FlowGraphNode,
+  FlowHttpRequestPreview,
+  FlowHttpTestRequest,
+  FlowHttpTestResponse,
+  FlowHttpTransportError,
+  FlowInputLimits,
+  FlowPackageDependencyResolution,
+  FlowPackageExportRequest,
+  FlowPackageImportPlan,
+  FlowPackageImportPlanStatus,
+  FlowPackageImportPlanSummary,
+  FlowPackageImportResourceBinding,
+  FlowPackageImportResult,
+  FlowPackageImportTargetState,
+  FlowPackageLocalCandidate,
+  FlowPackageModelCandidate,
+  FlowPackageRequirementDataSensitivity,
+  FlowPackageResourceSlotRef,
+  FlowPackageValidation,
+  FlowRetentionPolicy,
   FlowRun,
   FlowRunContract,
+  FlowRunContractStepInput,
+  FlowRunContractTemplateReadiness,
+  FlowRunDebugAttempt,
+  FlowRunDebugExport,
+  FlowRunDebugInput,
+  FlowRunDebugIoTypes,
+  FlowRunDebugOutput,
+  FlowRunDebugRag,
+  FlowRunDebugRagReference,
+  FlowRunDebugRagReferenceChunk,
+  FlowRunDebugStep,
+  FlowRunError,
+  FlowRunEvidence,
   FlowRunEvidenceExport,
   FlowRunEvidenceWithTypedSteps,
+  FlowRunOutputPayload,
+  FlowRunRedispatchResult,
   FlowRunRerunInvalidatedStep,
   FlowRunRerunOperation,
   FlowRunReviewCheckpoint,
+  FlowRunReviewCheckpointResumeResponse,
+  FlowRunReviewCheckpointState,
   FlowRunResultFile,
+  FlowRunStatusCapabilities,
+  FlowRunStatusCapability,
   FlowRunStep,
+  FlowRunStepInput,
   FlowRunStepInputs,
+  FlowRunTokenUsage,
+  FlowRuntimePolicy,
+  FlowRuntimePolicyUpdate,
   FlowRuntimeUploadPolicy,
+  FlowSparse,
   FlowStep,
   FlowTemplateAsset,
+  FlowTemplateInspection,
+  FlowTemplatePlaceholder,
+  LocalResourceBinding,
+  LocalResourceKind,
+  UploadedFile,
   operations
 } from "@eneo/eneo-js";
 import { resolveFlowRuntimeUploadInitialTimeoutMs } from "@eneo/eneo-js";
@@ -22,12 +77,100 @@ import type { FlowRuntimeUploadTimeoutEvent } from "@eneo/eneo-js";
 
 type FlowRunCreateRequest = components["schemas"]["FlowRunCreateRequest"];
 type FlowRunPublic = components["schemas"]["FlowRunPublic"];
+type CreateFlowRunHeaders = NonNullable<operations["create_flow_run"]["parameters"]["header"]>;
 type CreateFlowRunResponse =
   operations["create_flow_run"]["responses"][201]["content"]["application/json"];
 type GetFlowRunResponse =
   operations["get_flow_run"]["responses"][200]["content"]["application/json"];
+type ListFlowRunsResponse =
+  operations["list_flow_runs"]["responses"][200]["content"]["application/json"];
+type GetFlowRunStatusCapabilitiesResponse =
+  operations["get_flow_run_status_capabilities"]["responses"][200]["content"]["application/json"];
+type RerunFlowRunStepResponse =
+  operations["rerun_flow_run_step"]["responses"][202]["content"]["application/json"];
+type RerunFlowRunStepError =
+  operations["rerun_flow_run_step"]["responses"][400]["content"]["application/json"];
+type ExportFlowRunEvidenceResponse =
+  operations["export_flow_run_evidence"]["responses"][200]["content"]["application/json"];
+type ExportFlowRunEvidenceError =
+  operations["export_flow_run_evidence"]["responses"][400]["content"]["application/json"];
+type ResumeFlowRunReviewCheckpointHeaders =
+  operations["resume_flow_run_review_checkpoint"]["parameters"]["header"];
 type FlowRunReviewCheckpointEvidence =
   components["schemas"]["FlowRunReviewCheckpointEvidencePublic"];
+
+type PublicFlowLaunchAliasSmoke = {
+  Flow: Flow;
+  FlowClassificationRetentionPolicies: FlowClassificationRetentionPolicies;
+  FlowClassificationRetentionPolicy: FlowClassificationRetentionPolicy;
+  FlowClassificationRetentionPolicyUpdate: FlowClassificationRetentionPolicyUpdate;
+  FlowDocumentRenderLimits: FlowDocumentRenderLimits;
+  FlowEvidencePolicy: FlowEvidencePolicy;
+  FlowGraph: FlowGraph;
+  FlowGraphEdge: FlowGraphEdge;
+  FlowGraphNode: FlowGraphNode;
+  FlowHttpRequestPreview: FlowHttpRequestPreview;
+  FlowHttpTestRequest: FlowHttpTestRequest;
+  FlowHttpTestResponse: FlowHttpTestResponse;
+  FlowHttpTransportError: FlowHttpTransportError;
+  FlowInputLimits: FlowInputLimits;
+  FlowPackageDependencyResolution: FlowPackageDependencyResolution;
+  FlowPackageExportRequest: FlowPackageExportRequest;
+  FlowPackageImportPlan: FlowPackageImportPlan;
+  FlowPackageImportPlanStatus: FlowPackageImportPlanStatus;
+  FlowPackageImportPlanSummary: FlowPackageImportPlanSummary;
+  FlowPackageImportResourceBinding: FlowPackageImportResourceBinding;
+  FlowPackageImportResult: FlowPackageImportResult;
+  FlowPackageImportTargetState: FlowPackageImportTargetState;
+  FlowPackageLocalCandidate: FlowPackageLocalCandidate;
+  FlowPackageModelCandidate: FlowPackageModelCandidate;
+  FlowPackageRequirementDataSensitivity: FlowPackageRequirementDataSensitivity;
+  FlowPackageResourceSlotRef: FlowPackageResourceSlotRef;
+  FlowPackageValidation: FlowPackageValidation;
+  FlowRetentionPolicy: FlowRetentionPolicy;
+  FlowRun: FlowRun;
+  FlowRunContract: FlowRunContract;
+  FlowRunContractStepInput: FlowRunContractStepInput;
+  FlowRunContractTemplateReadiness: FlowRunContractTemplateReadiness;
+  FlowRunDebugAttempt: FlowRunDebugAttempt;
+  FlowRunDebugExport: FlowRunDebugExport;
+  FlowRunDebugInput: FlowRunDebugInput;
+  FlowRunDebugIoTypes: FlowRunDebugIoTypes;
+  FlowRunDebugOutput: FlowRunDebugOutput;
+  FlowRunDebugRag: FlowRunDebugRag;
+  FlowRunDebugRagReference: FlowRunDebugRagReference;
+  FlowRunDebugRagReferenceChunk: FlowRunDebugRagReferenceChunk;
+  FlowRunDebugStep: FlowRunDebugStep;
+  FlowRunError: FlowRunError;
+  FlowRunEvidence: FlowRunEvidence;
+  FlowRunEvidenceExport: FlowRunEvidenceExport;
+  FlowRunEvidenceWithTypedSteps: FlowRunEvidenceWithTypedSteps;
+  FlowRunOutputPayload: FlowRunOutputPayload;
+  FlowRunRedispatchResult: FlowRunRedispatchResult;
+  FlowRunRerunInvalidatedStep: FlowRunRerunInvalidatedStep;
+  FlowRunRerunOperation: FlowRunRerunOperation;
+  FlowRunResultFile: FlowRunResultFile;
+  FlowRunReviewCheckpoint: FlowRunReviewCheckpoint;
+  FlowRunReviewCheckpointResumeResponse: FlowRunReviewCheckpointResumeResponse;
+  FlowRunReviewCheckpointState: FlowRunReviewCheckpointState;
+  FlowRunStatusCapabilities: FlowRunStatusCapabilities;
+  FlowRunStatusCapability: FlowRunStatusCapability;
+  FlowRunStep: FlowRunStep;
+  FlowRunStepInput: FlowRunStepInput;
+  FlowRunStepInputs: FlowRunStepInputs;
+  FlowRunTokenUsage: FlowRunTokenUsage;
+  FlowRuntimePolicy: FlowRuntimePolicy;
+  FlowRuntimePolicyUpdate: FlowRuntimePolicyUpdate;
+  FlowRuntimeUploadPolicy: FlowRuntimeUploadPolicy;
+  FlowSparse: FlowSparse;
+  FlowStep: FlowStep;
+  FlowTemplateAsset: FlowTemplateAsset;
+  FlowTemplateInspection: FlowTemplateInspection;
+  FlowTemplatePlaceholder: FlowTemplatePlaceholder;
+  LocalResourceBinding: LocalResourceBinding;
+  LocalResourceKind: LocalResourceKind;
+  UploadedFile: UploadedFile;
+};
 
 const isoTimestamp = "2026-03-17T10:05:00Z";
 const flowId = "00000000-0000-0000-0000-000000000001";
@@ -38,6 +181,37 @@ const stepResultId = "00000000-0000-0000-0000-000000000501";
 const resultFileId = "00000000-0000-0000-0000-000000000801";
 const rerunOperationId = "00000000-0000-0000-0000-000000000901";
 const reviewCheckpointId = "00000000-0000-0000-0000-000000000905";
+
+const validRuntimeUpload: UploadedFile = {
+  id: "00000000-0000-0000-0000-000000000701",
+  name: "review-audio.mp3",
+  mimetype: "audio/mpeg",
+  size: 1843200,
+  created_at: isoTimestamp,
+  updated_at: isoTimestamp
+};
+
+const validFlowPackageResourceSlotRef: FlowPackageResourceSlotRef = {
+  kind: "model",
+  slot: "structured",
+  label: "Structured completion model"
+};
+
+const validFlowRunStatusCapability: FlowRunStatusCapability = {
+  status: "completed",
+  is_active: false,
+  should_poll: false,
+  is_terminal: true,
+  is_cancellable: false,
+  is_awaiting_review: false,
+  can_request_redispatch: false,
+  is_rerun_eligible: true
+};
+
+const validFlowRunStatusCapabilities: FlowRunStatusCapabilities = {
+  statuses: [validFlowRunStatusCapability],
+  filter_order: ["completed", "failed", "running", "queued", "awaiting_review", "cancelled"]
+};
 
 const validFlowStep: FlowStep = {
   id: stepId,
@@ -62,6 +236,26 @@ const validFlow: Flow = {
   updated_at: isoTimestamp
 };
 
+const validRunContractStepInput: FlowRunContractStepInput = {
+  step_id: stepId,
+  step_order: 1,
+  required: true,
+  input_format: "document",
+  accepted_mimetypes: ["application/pdf"]
+};
+
+const validRunContractTemplateReadiness: FlowRunContractTemplateReadiness = {
+  step_id: stepId,
+  status: "ready",
+  can_edit: true,
+  can_download: true,
+  template_asset_id: "00000000-0000-0000-0000-000000000601",
+  template_file_id: "00000000-0000-0000-0000-000000000602",
+  template_name: "decision-template.docx",
+  checksum: "sha256:template",
+  published_flow_version: 3
+};
+
 const validRunContract: FlowRunContract = {
   flow_id: flowId,
   published_flow_version: 3,
@@ -72,28 +266,8 @@ const validRunContract: FlowRunContract = {
     max_timeout_seconds: 600,
     idle_timeout_seconds: 120
   },
-  steps_requiring_input: [
-    {
-      step_id: stepId,
-      step_order: 1,
-      required: true,
-      input_format: "document",
-      accepted_mimetypes: ["application/pdf"]
-    }
-  ],
-  template_readiness: [
-    {
-      step_id: stepId,
-      status: "ready",
-      can_edit: true,
-      can_download: true,
-      template_asset_id: "00000000-0000-0000-0000-000000000601",
-      template_file_id: "00000000-0000-0000-0000-000000000602",
-      template_name: "decision-template.docx",
-      checksum: "sha256:template",
-      published_flow_version: 3
-    }
-  ]
+  steps_requiring_input: [validRunContractStepInput],
+  template_readiness: [validRunContractTemplateReadiness]
 };
 
 const validStepInputs: FlowRunStepInputs = {
@@ -101,6 +275,7 @@ const validStepInputs: FlowRunStepInputs = {
     file_ids: ["00000000-0000-0000-0000-000000000701"]
   }
 };
+const validFlowRunStepInput: FlowRunStepInput = validStepInputs[stepId];
 
 const validRuntimeUploadPolicy: FlowRuntimeUploadPolicy = {
   min_timeout_seconds: 120,
@@ -152,8 +327,32 @@ const validFlowRun = {
   updated_at: isoTimestamp
 } satisfies FlowRun & FlowRunPublic;
 
+const validFlowRunOutputPayload: FlowRunOutputPayload = {
+  text: "Decision support generated."
+};
+const validFlowRunTokenUsage: FlowRunTokenUsage = {
+  num_tokens_input: 120,
+  num_tokens_output: 30,
+  num_tokens_total: 150
+};
+const validFlowRunError: FlowRunError = {
+  schema_version: 1,
+  code: "flow_step_execution_failed",
+  message: "Step execution failed."
+};
+const validFlowRunRedispatchResult: FlowRunRedispatchResult = {
+  run: validFlowRun,
+  redispatched_count: 1
+};
+
 const validCreateFlowRunResponse: CreateFlowRunResponse = validFlowRun;
 const validGetFlowRunResponse: GetFlowRunResponse = validFlowRun;
+const validCreateFlowRunHeaders: CreateFlowRunHeaders = {
+  "Idempotency-Key": "flow-run:client-request-1"
+};
+const validResumeFlowRunReviewCheckpointHeaders: ResumeFlowRunReviewCheckpointHeaders = {
+  "Idempotency-Key": "flow-review-resume:checkpoint-1:3"
+};
 
 const validFlowRunStep: FlowRunStep = {
   id: stepResultId,
@@ -252,6 +451,11 @@ const validReviewCheckpoint: FlowRunReviewCheckpoint = {
   created_at: isoTimestamp,
   updated_at: isoTimestamp
 };
+const validReviewCheckpointState: FlowRunReviewCheckpointState = validReviewCheckpoint.state;
+const validReviewCheckpointResumeResponse: FlowRunReviewCheckpointResumeResponse = {
+  checkpoint: validReviewCheckpoint,
+  run: validFlowRun
+};
 
 const validReviewCheckpointEvidence: FlowRunReviewCheckpointEvidence = {
   ...validReviewCheckpoint,
@@ -269,6 +473,12 @@ const validFlowGraph: FlowGraph = {
     }
   ],
   edges: []
+};
+const validFlowGraphNode: FlowGraphNode = validFlowGraph.nodes[0];
+const validFlowGraphEdge: FlowGraphEdge = {
+  source: stepId,
+  target: "00000000-0000-0000-0000-000000000102",
+  kind: "execution"
 };
 
 const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
@@ -309,6 +519,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
     }
   }
 };
+const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
   schema_version: "flow-evidence-export.v8",
@@ -477,6 +688,35 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
   bundle: validFlowEvidence
 };
 
+const validListFlowRunsResponse: ListFlowRunsResponse = {
+  items: [validFlowRun],
+  count: 1,
+  has_more: false
+};
+const validStatusCapabilitiesResponse: GetFlowRunStatusCapabilitiesResponse =
+  validFlowRunStatusCapabilities;
+const validRerunFlowRunStepResponse: RerunFlowRunStepResponse = {
+  operation_id: rerunOperationId,
+  run: validFlowRun,
+  rerun_step_id: stepId,
+  new_attempt_no: 2,
+  invalidated_step_ids: [stepId],
+  status: "queued"
+};
+const validRerunFlowRunStepError: RerunFlowRunStepError = {
+  message: "Flow run revision is stale.",
+  eneo_error_code: 9007,
+  code: "flow_run_rerun_stale_revision",
+  context: { expected_run_revision: 4, current_run_revision: 5 }
+};
+const validExportFlowRunEvidenceResponse: ExportFlowRunEvidenceResponse = validFlowEvidenceExport;
+const validExportFlowRunEvidenceError: ExportFlowRunEvidenceError = {
+  message: "Raw evidence export requires an explicit non-default reason.",
+  eneo_error_code: 9007,
+  code: "flow_evidence_export_reason_required",
+  context: { detail: "raw", default_reason: "support_debug" }
+};
+
 const invalidRunCreateRequest: FlowRunCreateRequest = {
   // @ts-expect-error top-level file_ids is not part of the generated create-run contract.
   file_ids: ["00000000-0000-0000-0000-000000000701"]
@@ -505,11 +745,35 @@ const invalidStepInputs: FlowRunStepInputs = {
 validRerunOperation.input_payload_json = { case_id: "CASE-2" };
 
 void validFlow;
+void validRuntimeUpload;
+void validFlowPackageResourceSlotRef;
 void validRunContract;
+void validRunContractStepInput;
+void validRunContractTemplateReadiness;
+void validFlowRunStepInput;
+void validFlowRunStatusCapability;
+void validFlowRunStatusCapabilities;
+void validFlowRunOutputPayload;
+void validFlowRunTokenUsage;
+void validFlowRunError;
+void validFlowRunRedispatchResult;
 void validCreateFlowRunResponse;
 void validGetFlowRunResponse;
+void validCreateFlowRunHeaders;
+void validResumeFlowRunReviewCheckpointHeaders;
+void validListFlowRunsResponse;
+void validStatusCapabilitiesResponse;
+void validRerunFlowRunStepResponse;
+void validRerunFlowRunStepError;
+void validExportFlowRunEvidenceResponse;
+void validExportFlowRunEvidenceError;
 void validFlowGraph;
+void validFlowGraphNode;
+void validFlowGraphEdge;
+void validReviewCheckpointState;
+void validReviewCheckpointResumeResponse;
 void validFlowEvidence;
+void validUntypedFlowEvidence;
 void validFlowEvidenceExport;
 void invalidRunCreateRequest;
 void invalidFlowStep;

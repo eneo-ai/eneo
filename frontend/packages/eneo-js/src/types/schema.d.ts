@@ -17474,6 +17474,7 @@ export interface components {
      *           "is_active": true,
      *           "is_awaiting_review": false,
      *           "is_cancellable": true,
+     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "queued"
@@ -17483,6 +17484,7 @@ export interface components {
      *           "is_active": true,
      *           "is_awaiting_review": false,
      *           "is_cancellable": true,
+     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "running"
@@ -17492,6 +17494,7 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": true,
      *           "is_cancellable": true,
+     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "awaiting_review"
@@ -17501,6 +17504,7 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
+     *           "is_rerun_eligible": true,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "completed"
@@ -17510,6 +17514,7 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
+     *           "is_rerun_eligible": true,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "failed"
@@ -17519,6 +17524,7 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
+     *           "is_rerun_eligible": false,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "cancelled"
@@ -17572,6 +17578,11 @@ export interface components {
        * @description True when clients may show a redispatch action for this status. Redispatch is still server-gated by staleness; a queued run that is not stale returns `redispatched_count: 0`.
        */
       can_request_redispatch: boolean;
+      /**
+       * Is Rerun Eligible
+       * @description True when a completed or failed run may enter step-rerun validation. The rerun endpoint still validates the target step, run revision, permissions, and any replacement inputs.
+       */
+      is_rerun_eligible: boolean;
     };
     /**
      * FlowRunStepPublic
