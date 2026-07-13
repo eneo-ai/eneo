@@ -2,10 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-07-12
+- **Last revised:** 2026-07-13
 - **Decision owners:** Product, security, and architecture
-- **Scope:** Flow and Flow AI Builder launch behavior and the portable-package
-  platform boundary
+- **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
+  activation, and the portable-package platform boundary
 
 ## Context
 
@@ -456,6 +456,90 @@ WI-MKT-02.
 - **Revision rule:** Never extend retention accidentally through incomplete cascade
   or weaken it by deleting shared files without the global fence.
 
+### 14. Tenant administration activates automatic Flow deletion
+
+- **Decision:** Automatic Flow run-content deletion is off unless an optional
+  tenant organization policy (`T`) or the optional policy for the Space's
+  matching tenant security classification (`C`) applies. Let `A` be the minimum
+  configured value of `T` and `C`; if both are absent, `A` is off. When `A` is
+  active, effective Flow run days are the minimum configured value of `A`, Space
+  days, and Flow days. Space and Flow values can tighten but cannot activate,
+  lengthen, or disable the admin envelope. Classification-only activation is
+  deliberate and affects only matching classified Spaces.
+- **Persistence:** Add nullable, `1..2555` CHECK-constrained tenant columns
+  `flow_run_history_retention_days` and
+  `flow_runtime_upload_abandonment_days`. Keep matching classification days in
+  the existing relational policy table. Do not put either destructive selector
+  input in `tenant.flow_settings` JSONB. Keep
+  `run_debug_evidence_days` in that existing versioned JSONB owner because its
+  cleanup is already Python-resolved. Reuse the typed ADMIN-only settings,
+  classification, and audit surfaces as control-plane adapters;
+  `DataRetentionService` remains the sole deletion decision-maker and owns one
+  SQL envelope expression reused by purge, preview, and effective-policy reads.
+- **Safe activation:** Every organization or classification change that enables
+  or shortens Flow deletion uses the same preview/confirm gate. Preview and purge
+  share predicates and clock anchor and expose counts, bytes, existing-data
+  impact, latent Space/Flow values, and lifecycle blockers. Confirmation is bound
+  to exact proposed values, current policy revision or expected state, and the
+  exact preview result; a concurrent admin change fails compare-and-set. Audit
+  records actor, old/new values, preview summary, and activation time without
+  payloads or secrets. Disabling or lengthening needs no destructive
+  confirmation. No pending-policy table is introduced.
+- **Space and Flow behavior:** `Spaces.data_retention_days` continues to control
+  conversation and App-run retention. Space UI shows that behavior separately
+  from Flow behavior: the same value is inert for Flow while `A` is off and
+  tighten-only while `A` is active. Activation preview includes all latent Space
+  and Flow values. Release one keeps Flow overrides pre-publish-only; a published
+  Flow displays configured/effective values read-only and gains no hidden
+  retention-only mutation path. A dedicated Space Flow-retention column is
+  deferred until a customer needs conversation and Flow horizons to differ.
+- **Never-attached uploads:** WI-19 runs only when
+  `flow_runtime_upload_abandonment_days` is present for the tenant and anchors age
+  to persisted upload `created_at`. Absence produces no abandonment candidates or
+  deletion I/O. No Space, Flow, step, classification, or global grace contributes.
+  Attached sources follow run-history policy and WI-03's final-reference fence.
+  Reuse the daily worker, ordered bounded batches, bind-versus-sweep lock, final
+  reference recheck, retry convergence, and one transaction owner.
+- **Deployment and UX:** Preflight is bidirectional on representative PostgreSQL:
+  count runs newly eligible under the envelope and runs eligible today only
+  through Space/Flow values that become inert. The local zero-row database is not
+  representative evidence. Release notes and admin UI state both changes. Add
+  **Admin > Governance > Flow data retention**, not an Audit logs panel, with
+  organization Flow history and unattached-upload Off/N days, classification
+  links, anchors, affected data, preview/confirm, audit actor, and preservation/
+  hold caveat. Classification edits remain under Security classifications and
+  call the shared gate; Space and Flow show configured values, effective off/days,
+  and all contributors. Copy says “Automatic deletion is off” in Swedish and
+  English, not “no limit,” and makes no compliance claim.
+- **Retained surface:** Information classification selects an admin policy but
+  does not hard-code a clock. Audit and AI-log retention remain separately owned.
+  Legal/records holds remain a future purge blocker. A dedicated Flow with a
+  one-day policy is the honest first-release stricter option.
+- **Removed or unavailable surface:** Numeric or seven-day defaults, class-3
+  defaults, silent grace periods, Space/Flow-only activation, global upload
+  abandonment, automatic Builder attachment deletion, day-zero finalization,
+  pre-launch step retention, and claims that deletion is immediate.
+- **Implementation owner:** WI-19A owns relational tenant policy, typed admin
+  control plane, preview/confirm/CAS/audit, generated contract, and admin UI.
+  WI-19B owns the canonical envelope/effective projection, Space/Flow behavior,
+  copy, docs, and bidirectional rollout preflight. WI-19 then owns only the
+  never-attached-upload sweep. WI-24 follows the final retention/finalization
+  ownership.
+- **Deferred triggers:** A real customer or contractual requirement for sub-daily
+  erasure earns a separate typed mode with bounded sub-daily cadence, terminal
+  blockers, recovery and backup/PITR limits, and real-process proof. Step-level
+  deletion requires a concrete mixed-sensitivity Flow plus typed partial-run
+  provenance, redaction, retry, export, and audit semantics. A legal/records hold
+  requires its own authority and purge-blocker contract.
+- **Cadence consequence:** The current daily 03:00 worker would make a
+  finalization-anchored mode approximately `0..24h` and a one-day policy
+  approximately `24..48h`. They are not interchangeable. Launch keeps the
+  honest one-day option instead of adding a mode, constraint, index, and cadence
+  contract without a customer trigger.
+- **Revision rule:** No adapter, child setting, classification label, or fallback
+  may activate destructive Flow retention outside this envelope. Revise this
+  record before adding another activator, clock, hold, or deletion mode.
+
 ## Delivery order and gates
 
 This record defines dependency order, not current execution status; accepted
@@ -467,14 +551,16 @@ precede WI-03 retention selection. The lifecycle/package dependency order is:
 3. WI-22B
 4. WI-23
 5. WI-03
-6. WI-19
-7. WI-24
-8. WI-13
-9. WI-13B
-10. WI-14 and WI-13C after WI-13B, in parallel when file and migration
+6. WI-19A
+7. WI-19B
+8. WI-19
+9. WI-24
+10. WI-13
+11. WI-13B
+12. WI-14 and WI-13C after WI-13B, in parallel when file and migration
     ownership allow
-11. WI-15
-12. WI-21 as the final cleanup slice
+13. WI-15
+14. WI-21 as the final cleanup slice
 
 Additional gates:
 
@@ -484,13 +570,15 @@ Additional gates:
 - Package-lane launch completion requires both WI-13B and WI-13C. WI-13C enters
   the serialized migration queue from the then-current accepted Alembic head;
   it does not share a migration with unrelated work.
-- This amendment adds only WI-13B and WI-13C to the current full-schema
-  work-item sections. The roadmap has 35 current sections, but WI-12 remains
-  five independently accepted execution identities with separate receipts and
-  commits; the current execution denominator is therefore 39. The eight
-  trigger-gated future sections are also eight future execution identities and
-  remain excluded until their recorded trigger activates.
-- WI-19 and WI-24 coordinate so Flow finalization collects runtime-upload
+- Package-platform amendment added WI-13B and WI-13C; this retention decision
+  adds WI-19A and WI-19B. The roadmap has 45 full-schema sections: 37 current
+  and eight trigger-gated future. WI-12 remains five independently accepted
+  execution identities with separate receipts and commits; the current execution
+  denominator is therefore 41 and the total visible execution count is 49. The
+  eight trigger-gated future sections are also eight future execution identities
+  and remain excluded until their recorded trigger activates.
+- WI-19A → WI-19B → WI-19 is the serial retention-policy path. WI-19 and WI-24
+  coordinate so Flow finalization collects runtime-upload
   candidates before cascade removes their bindings.
 - WI-22A records persisted HTTP POST input and Flow MCP counts and whether real
   stored data requires a migration. Every migration-bearing work item starts from
