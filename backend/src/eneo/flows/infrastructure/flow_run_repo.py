@@ -899,12 +899,21 @@ class FlowRunRepository:
         stmt = (
             sa.select(FlowRunStepResultFiles, Files)
             .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.id == FlowRunStepResultFiles.step_result_id,
+                    FlowStepResults.flow_run_id == FlowRunStepResultFiles.flow_run_id,
+                    FlowStepResults.step_id == FlowRunStepResultFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepResultFiles.attempt_no,
+                ),
+            )
             .where(FlowRunStepResultFiles.flow_run_id.in_(unique_run_ids))
             .where(FlowRunStepResultFiles.tenant_id == tenant_id)
             .order_by(
                 FlowRunStepResultFiles.flow_run_id.asc(),
                 FlowRunStepResultFiles.step_order.asc(),
-                FlowRunStepResultFiles.attempt_no.asc(),
                 FlowRunStepResultFiles.ordinal.asc(),
             )
         )

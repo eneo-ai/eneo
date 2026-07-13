@@ -657,7 +657,7 @@ Example run response:
   "started_at": null,
   "finished_at": null,
   "input_payload_json": { "employee_name": "Alex Example" },
-  "output_payload_json": null,
+  "result": null,
   "result_files": [],
   "token_usage": null,
   "error": null,
@@ -819,13 +819,61 @@ the target step or replacement inputs before retrying.
 
 ### 5) Read results
 
+#### Final run result
+
+Use the run endpoint as the canonical final-result read model:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/
+```
+
+`result` is `null` while a run is incomplete or when it did not complete
+successfully. A completed run returns exactly one closed result shape:
+
+- `inline_text` contains the final `text`.
+- `structured` contains the authored `value` and the `output_contract` from
+  that run's published `flow_version`. Treat `value` as opaque application data;
+  do not infer another Eneo envelope inside it.
+- `artifact` contains current-attempt file metadata. Request a signed URL with
+  the authorized artifact endpoint before downloading a file.
+- `outbound_http` contains only `delivery_status: "delivered"`. It is a delivery
+  receipt and never exposes destination URLs, headers, credentials, or the sent
+  payload.
+
+Every historical list item is projected from its own `flow_version`, so do not
+interpret old structured results with the currently published contract. The
+generated `FlowRunResult` type supports an exhaustive switch:
+
+```ts
+import type { FlowRunResult } from "@eneo/eneo-js";
+
+function renderResult(result: FlowRunResult): string {
+  switch (result.kind) {
+    case "inline_text":
+      return result.text;
+    case "structured":
+      return JSON.stringify(result.value);
+    case "artifact":
+      return `${result.files.length} file(s)`;
+    case "outbound_http":
+      return result.delivery_status;
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+}
+```
+
 #### Step outputs
 
 ```http
 GET /api/v1/flows/{flow_id}/runs/{run_id}/steps/
 ```
 
-This is the main endpoint for consumer UIs that want intermediate outputs, diagnostics, token counts, prompts, and structured payloads without depending on the heavier debug export.
+Use this endpoint when a consumer UI needs intermediate outputs, diagnostics,
+token counts, prompts, or step progress without depending on the heavier debug
+export. For the stable final result, use the run-level `result` above.
 
 Important runtime rule: initial execution creates one run for the whole published flow. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, awaiting review, completed, or failed.
 

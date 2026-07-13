@@ -1961,6 +1961,81 @@ async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
 
 
 @pytest.mark.asyncio
+async def test_list_runs_bulk_loads_each_historical_completed_version_once(user):
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user, published_version=2)
+    version_one = _runtime_version(user, flow, version=1)
+    text_flow = flow.model_copy(
+        update={
+            "steps": [
+                flow.steps[0],
+                flow.steps[1].model_copy(
+                    update={"output_type": "text", "output_contract": None}
+                ),
+            ]
+        },
+        deep=True,
+    )
+    version_two = _runtime_version(user, text_flow, version=2)
+    structured_run = _run(user=user, flow_id=flow.id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "flow_version": 1,
+            "output_payload_json": {"structured": {"answer": "first"}},
+        }
+    )
+    duplicate_version_run = _run(user=user, flow_id=flow.id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "flow_version": 1,
+            "output_payload_json": {"structured": {"answer": "second"}},
+        }
+    )
+    text_run = _run(user=user, flow_id=flow.id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "flow_version": 2,
+            "output_payload_json": {"text": "current text"},
+        }
+    )
+    flow_run_repo.list_runs.return_value = [
+        structured_run,
+        duplicate_version_run,
+        text_run,
+    ]
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.list_token_usage_for_runs.return_value = {}
+    flow_version_repo.get_many.return_value = {
+        (flow.id, 1): version_one,
+        (flow.id, 2): version_two,
+    }
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    page = await service.list_runs_with_result_files_and_token_usage(
+        flow_id=flow.id,
+        limit=3,
+        offset=0,
+    )
+
+    assert [item.final_output.output_type for item in page.items] == [
+        "json",
+        "json",
+        "text",
+    ]
+    flow_version_repo.get_many.assert_awaited_once_with(
+        version_refs=((flow.id, 1), (flow.id, 2)),
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_runs_with_result_files_and_token_usage_exact_limit_has_no_more(
     user,
 ):

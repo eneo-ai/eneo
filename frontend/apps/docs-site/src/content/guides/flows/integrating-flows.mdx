@@ -18,7 +18,7 @@ Use this table to choose the right runtime journey before you read the detailed 
 | Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
 | Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
 | Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
-| Results                             | Drive the UI from run status, step results, result files, and status capabilities.                                        | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
+| Results                             | Drive the UI from the typed final result, step details, artifact links, and status capabilities.                          | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
 | Reruns                              | Reruns invalidate downstream work and preserve lineage so clients can explain what changed.                               | `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` (`rerun_flow_run_step`)                           |
 | Robustness                          | Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
 | Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                                 | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
@@ -42,6 +42,7 @@ Endpoint order:
 | Edit review payload         | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/`         | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint`       |
 | Approve review              | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/` | `POST`  | `200 OK`       | `approve_flow_run_review_checkpoint`    |
 | Resume run                  | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/`  | `POST`  | `202 Accepted` | `resume_flow_run_review_checkpoint`     |
+| Read final run result       | `/api/v1/flows/{id}/runs/{run_id}/`                                            | `GET`   | `200 OK`       | `get_flow_run`                          |
 | List and filter step output | `/api/v1/flows/{id}/runs/{run_id}/steps/`                                      | `GET`   | `200 OK`       | `list_flow_run_steps`                   |
 | Fetch final artifact        | `/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`             | `POST`  | `200 OK`       | `generate_flow_run_artifact_signed_url` |
 
@@ -218,7 +219,7 @@ Response:
   "input_payload_json": {
     "employee_name": "Alex Example"
   },
-  "output_payload_json": null,
+  "result": null,
   "result_files": [],
   "token_usage": null,
   "error": null,
@@ -265,7 +266,7 @@ Response:
   "input_payload_json": {
     "employee_name": "Alex Example"
   },
-  "output_payload_json": null,
+  "result": null,
   "result_files": [],
   "token_usage": null,
   "error": null,
@@ -561,7 +562,7 @@ Response:
     "input_payload_json": {
       "employee_name": "Alex Example"
     },
-    "output_payload_json": null,
+    "result": null,
     "result_files": [],
     "token_usage": null,
     "error": null,
@@ -572,7 +573,95 @@ Response:
 }
 ```
 
-### 9. List and filter step output
+### 9. Read final run result
+
+Poll the resumed run until it completes, then branch on the closed `result.kind` discriminator.
+
+Request:
+
+```text
+GET /api/v1/flows/{id}/runs/{run_id}/
+```
+
+This artifact result contains only current-attempt file metadata; use its file id for the authorized signed-URL request.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000301",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_version": 3,
+  "principal_type": null,
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "trace_id": "00000000-0000-0000-0000-000000000302",
+  "revision": 3,
+  "status": "completed",
+  "dispatch_pending_since": null,
+  "dispatch_attempt_count": 0,
+  "dispatch_last_attempt_at": null,
+  "dispatch_last_error": null,
+  "dispatch_next_attempt_at": null,
+  "dispatched_at": "2026-03-17T10:05:01Z",
+  "dispatch_exhausted_at": null,
+  "cancelled_at": null,
+  "started_at": "2026-03-17T10:05:02Z",
+  "finished_at": "2026-03-17T10:06:15Z",
+  "input_payload_json": {
+    "employee_name": "Alex Example"
+  },
+  "result": {
+    "kind": "artifact",
+    "files": [
+      {
+        "flow_run_id": "00000000-0000-0000-0000-000000000301",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "00000000-0000-0000-0000-000000000010",
+        "step_result_id": "00000000-0000-0000-0000-000000000504",
+        "step_id": "00000000-0000-0000-0000-000000000104",
+        "step_order": 3,
+        "attempt_no": 1,
+        "file_id": "00000000-0000-0000-0000-000000000702",
+        "ordinal": 0,
+        "source": "generated_output",
+        "name": "annual-review-report.docx",
+        "checksum": "sha256:annual-review-report",
+        "size": 24576,
+        "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "file_type": "document",
+        "availability": "available"
+      }
+    ]
+  },
+  "result_files": [
+    {
+      "flow_run_id": "00000000-0000-0000-0000-000000000301",
+      "flow_id": "00000000-0000-0000-0000-000000000001",
+      "tenant_id": "00000000-0000-0000-0000-000000000010",
+      "step_result_id": "00000000-0000-0000-0000-000000000504",
+      "step_id": "00000000-0000-0000-0000-000000000104",
+      "step_order": 3,
+      "attempt_no": 1,
+      "file_id": "00000000-0000-0000-0000-000000000702",
+      "ordinal": 0,
+      "source": "generated_output",
+      "name": "annual-review-report.docx",
+      "checksum": "sha256:annual-review-report",
+      "size": 24576,
+      "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "file_type": "document",
+      "availability": "available"
+    }
+  ],
+  "token_usage": null,
+  "error": null,
+  "job_id": "00000000-0000-0000-0000-000000000401",
+  "created_at": "2026-03-17T10:05:00Z",
+  "updated_at": "2026-03-17T10:06:15Z"
+}
+```
+
+### 10. List and filter step output
 
 There is no single-step GET for run steps. Call the list endpoint and filter the list by `step_id` for the final DOCX step.
 
@@ -636,7 +725,7 @@ Response:
 ]
 ```
 
-### 10. Fetch final artifact
+### 11. Fetch final artifact
 
 Request a short-lived signed URL for the artifact file id from the final step result.
 
@@ -758,16 +847,18 @@ Contract coverage: These endpoints are contract-tested.
 
 Errors you must handle: `flow_review_not_active`, `flow_run_rerun_step_inputs_invalid`.
 
-Once review is resolved, drive the result screen from run status, step results, and artifact links.
+Once review is resolved, drive the result screen from the run's typed final result and open step details only when needed.
 
 ### Results
 
-Drive the UI from run status, step results, result files, and status capabilities.
+Drive the UI from the typed final result, step details, artifact links, and status capabilities.
 
-1. Call `runtime_paths.get_run_template` to get run status and final output when ready.
-2. Call `runtime_paths.list_steps_template` to get each step result as it completes.
-3. Use the file id from run or step `result_files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.
-4. Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.
+1. Call `runtime_paths.get_run_template` and switch exhaustively on `result.kind` after the run completes; `result` is null before a successful terminal result exists.
+2. Treat `structured.value` as authored data governed by that run's `flow_version` and `structured.output_contract`; do not infer another envelope inside it.
+3. For `artifact`, use the file id from `result.files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.
+4. Use `inline_text` directly and treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.
+5. Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.
+6. Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.
 
 Endpoint facts:
 

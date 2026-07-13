@@ -4434,6 +4434,10 @@ export interface paths {
      *         current page, not the total number of matching runs across all pages. `has_more` reports
      *         whether another page exists after this offset window.
      *
+     *         Each item uses the same typed `result` projection as the single-run endpoint. Historical
+     *         completed runs are interpreted with their own pinned `flow_version`; incomplete runs return
+     *         `result: null`.
+     *
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
      *         in their space, and service-key principals can list only their own runs.
@@ -4456,7 +4460,8 @@ export interface paths {
      *            the same Flow.
      *         3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
      *            together with any structured `input_payload_json` fields in this run request.
-     *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+     *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` for the typed terminal `result`,
+     *            and use `.../steps/` for detailed step progress and evidence.
      *
      *         Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
      *         `400` with code `flow_run_top_level_file_ids_not_supported`; use
@@ -4492,7 +4497,10 @@ export interface paths {
      * Get flow run
      * @description Get one run for a specific flow.
      *
-     *         Use this endpoint for run status and top-level output payload when building consumer apps.
+     *         Use this endpoint for run status and the typed top-level `result` when building consumer apps.
+     *         `result` is null until the run completes successfully, then discriminates inline text,
+     *         authored structured JSON, current artifact metadata, or successful outbound delivery.
+     *         Structured values and contracts are interpreted with this run's pinned `flow_version`.
      *         Current runtime visibility is policy-based: callers always see their own runs, tenant admins
      *         can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
      *         flows in their space, and service-key principals can inspect only their own runs.
@@ -14971,6 +14979,19 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
+    /** FlowRunArtifactResultPublic */
+    FlowRunArtifactResultPublic: {
+      /**
+       * @description Discriminator for a terminal file-artifact result. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "artifact";
+      /**
+       * Files
+       * @description Current-attempt artifacts produced by the published final step. File content remains behind the authorized run-artifact download endpoint.
+       */
+      files: components["schemas"]["FlowRunStepResultFile"][];
+    };
     /**
      * FlowRunContractPublic
      * @example {
@@ -16603,6 +16624,19 @@ export interface components {
       review_checkpoints: components["schemas"]["FlowRunReviewCheckpointEvidencePublic"][];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
+    /** FlowRunInlineTextResultPublic */
+    FlowRunInlineTextResultPublic: {
+      /**
+       * @description Discriminator for an inline terminal text result. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "inline_text";
+      /**
+       * Text
+       * @description Exact terminal text produced by the published final step.
+       */
+      text: string;
+    };
     /**
      * FlowRunLifecycleSource
      * @enum {string}
@@ -16630,6 +16664,20 @@ export interface components {
       | "review_checkpoint_cancelled"
       | "review_expired"
       | "review_checkpoint_expired";
+    /** FlowRunOutboundHttpResultPublic */
+    FlowRunOutboundHttpResultPublic: {
+      /**
+       * @description Discriminator for a completed outbound HTTP delivery. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "outbound_http";
+      /**
+       * Delivery Status
+       * @description Stable delivery receipt for a successfully completed outbound step. Destination configuration and request payload are never exposed.
+       * @constant
+       */
+      delivery_status: "delivered";
+    };
     /**
      * FlowRunPublic
      * @example {
@@ -16724,10 +16772,18 @@ export interface components {
       input_payload_json?: {
         [key: string]: unknown;
       } | null;
-      /** Output Payload Json */
-      output_payload_json?: {
-        [key: string]: unknown;
-      } | null;
+      /**
+       * Result
+       * @description Typed successful final result. Null while the run is incomplete or when it ended without a successful final result.
+       */
+      result?:
+        | (
+            | components["schemas"]["FlowRunInlineTextResultPublic"]
+            | components["schemas"]["FlowRunStructuredResultPublic"]
+            | components["schemas"]["FlowRunArtifactResultPublic"]
+            | components["schemas"]["FlowRunOutboundHttpResultPublic"]
+          )
+        | null;
       /** Result Files */
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
@@ -17934,6 +17990,23 @@ export interface components {
        * @enum {string}
        */
       availability: "available" | "content_purged";
+    };
+    /** FlowRunStructuredResultPublic */
+    FlowRunStructuredResultPublic: {
+      /**
+       * @description Discriminator for an authored structured terminal result. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "structured";
+      /** @description Opaque authored JSON value produced by the published final step. Interpret it with `output_contract` and the enclosing run's `flow_version`. */
+      value: components["schemas"]["JsonValue"];
+      /**
+       * Output Contract
+       * @description Historical published output contract for this run version. Null when the published structured step did not declare a contract.
+       */
+      output_contract: {
+        [key: string]: components["schemas"]["JsonValue"];
+      } | null;
     };
     /** FlowRunTokenUsagePublic */
     FlowRunTokenUsagePublic: {

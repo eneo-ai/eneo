@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -15,8 +16,10 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.api import flow_run_execution_router
-from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.enums import FlowRunReviewCheckpointState, FlowStepResultStatus
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.roles.permissions import Permission
@@ -131,6 +134,10 @@ async def _create_published_flow(
     token: str,
     space_id: str,
     review_output_contract: dict[str, object] | None = None,
+    output_mode: str = "pass_through",
+    output_type: str = "json",
+    output_contract: dict[str, object] | None = None,
+    output_config: dict[str, object] | None = None,
 ) -> dict:
     create_response = await client.post(
         "/api/v1/flows/",
@@ -159,9 +166,13 @@ async def _create_published_flow(
         "user_description": "Produce the consumer-visible result",
         "input_source": "flow_input",
         "input_type": "text",
-        "output_mode": "pass_through",
-        "output_type": "json",
+        "output_mode": output_mode,
+        "output_type": output_type,
     }
+    if output_contract is not None:
+        step_payload["output_contract"] = output_contract
+    if output_config is not None:
+        step_payload["output_config"] = output_config
     if review_output_contract is not None:
         step_payload["review_policy"] = {"mode": "view"}
         step_payload["output_contract"] = review_output_contract
@@ -169,7 +180,7 @@ async def _create_published_flow(
     update_response = await client.patch(
         f"/api/v1/flows/{flow_id}/",
         json={
-            "name": "Consumer API Flow",
+            "name": f"Consumer API Flow {flow_id[:8]}",
             "description": "Runtime API consumer contract flow",
             "steps": [step_payload],
         },
@@ -328,14 +339,107 @@ async def _mark_run_completed(
     *,
     db_container,
     run_id: str,
+    output_payload_json: dict[str, object] | None = None,
 ) -> None:
+    terminal_payload = (
+        output_payload_json
+        if output_payload_json is not None
+        else {
+            "text": '{"answer":"consumer-visible"}',
+            "structured": {"answer": "consumer-visible"},
+        }
+    )
     async with db_container() as container:
         session = container.session()
         await session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == UUID(run_id))
-            .values(status="completed")
+            .values(
+                status="completed",
+                output_payload_json=terminal_payload,
+            )
         )
+
+
+async def _mark_run_completed_with_artifact(
+    *,
+    db_container,
+    run: dict,
+    flow: dict,
+) -> UUID:
+    step = flow["steps"][-1]
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        run_row = await session.get(FlowRuns, UUID(run["id"]))
+        assert run_row is not None
+        assert run_row.principal_user_id is not None
+        artifact = Files(
+            name="consumer-report.pdf",
+            text=None,
+            blob=b"representative-pdf",
+            checksum="consumer-artifact-checksum",
+            size=18,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+            owner_type="user",
+            owner_user_id=run_row.principal_user_id,
+            owner_service_id=None,
+            tenant_id=run_row.tenant_id,
+        )
+        session.add(artifact)
+        await session.flush()
+
+        run_repo = container.flow_run_repo()
+        await run_repo.create_or_get_attempt_started(
+            run_id=run_row.id,
+            flow_id=run_row.flow_id,
+            tenant_id=run_row.tenant_id,
+            step_id=UUID(step["id"]),
+            step_order=int(step["step_order"]),
+            attempt_no=1,
+            celery_task_id=f"consumer-artifact-{run['id']}",
+        )
+        result = FlowStepResult(
+            id=uuid4(),
+            flow_run_id=run_row.id,
+            flow_id=run_row.flow_id,
+            tenant_id=run_row.tenant_id,
+            step_id=UUID(step["id"]),
+            step_order=int(step["step_order"]),
+            assistant_id=UUID(step["assistant_id"]),
+            input_payload_json={"text": "create report"},
+            effective_prompt="Create the report",
+            output_payload_json=None,
+            model_parameters_json=None,
+            num_tokens_input=2,
+            num_tokens_output=4,
+            status=FlowStepResultStatus.COMPLETED,
+            error_message=None,
+            flow_step_execution_hash="consumer-artifact-step",
+            created_at=now,
+            updated_at=now,
+        )
+        persisted = await run_repo.save_step_result(
+            run_row.id,
+            result,
+            tenant_id=run_row.tenant_id,
+            attempt_no=1,
+            result_file_references=(
+                FlowStepResultFileReference(
+                    file_id=artifact.id,
+                    source="generated_output",
+                ),
+            ),
+        )
+        assert persisted is not None
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_row.id)
+            .values(status="completed", output_payload_json=None)
+        )
+        return artifact.id
 
 
 async def _create_completed_runtime_input_run(
@@ -721,6 +825,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     immediate_poll = immediate_poll_response.json()
     assert immediate_poll["id"] == first_run["id"]
     assert immediate_poll["input_payload_json"] == {"text": "hello"}
+    assert immediate_poll["result"] is None
 
     replay_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
@@ -797,7 +902,14 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert steps[0]["status"] == "completed"
     assert steps[0]["output_payload_json"] == {"answer": "consumer-visible"}
 
-    await _mark_run_completed(db_container=db_container, run_id=first_run["id"])
+    await _mark_run_completed(
+        db_container=db_container,
+        run_id=first_run["id"],
+        output_payload_json={
+            "text": '{"answer":"consumer-visible"}',
+            "structured": {"answer": "consumer-visible"},
+        },
+    )
 
     completed_runs_response = await client.get(
         f"/api/v1/flows/{flow_id}/runs/?status=completed",
@@ -806,6 +918,21 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert completed_runs_response.status_code == 200, completed_runs_response.text
     completed_runs = completed_runs_response.json()["items"]
     assert [run["id"] for run in completed_runs] == [first_run["id"]]
+    assert completed_runs[0]["result"] == {
+        "kind": "structured",
+        "value": {"answer": "consumer-visible"},
+        "output_contract": None,
+    }
+    completed_replay_response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json=run_payload,
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Idempotency-Key": idempotency_key,
+        },
+    )
+    assert completed_replay_response.status_code == 201, completed_replay_response.text
+    assert completed_replay_response.json()["result"] == completed_runs[0]["result"]
 
     queued_runs_response = await client.get(
         f"/api/v1/flows/{flow_id}/runs/?status=queued",
@@ -839,6 +966,259 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert evidence["run"]["id"] == first_run["id"]
     assert evidence["step_results"][0]["output_payload_json"] == {
         "answer": "consumer-visible"
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_public_projects_text_artifact_and_outbound_results(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_execution_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    text_flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        output_type="text",
+    )
+    artifact_flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        output_mode="render_verbatim",
+        output_type="pdf",
+    )
+    outbound_flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        output_mode="http_post",
+        output_type="json",
+        output_config={
+            "url": "https://example.org/hook",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 25,
+            "body": {
+                "mode": "text_template",
+                "template": '{"message":"{{flow_input.text}}"}',
+            },
+        },
+    )
+
+    async def create_run(flow: dict) -> dict:
+        response = await client.post(
+            f"/api/v1/flows/{flow['id']}/runs/",
+            json={
+                "expected_flow_version": flow["published_version"],
+                "input_payload_json": {"text": "produce result"},
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    text_run = await create_run(text_flow)
+    artifact_run = await create_run(artifact_flow)
+    outbound_run = await create_run(outbound_flow)
+    await _mark_run_completed(
+        db_container=db_container,
+        run_id=text_run["id"],
+        output_payload_json={"text": "Finished public report"},
+    )
+    artifact_file_id = await _mark_run_completed_with_artifact(
+        db_container=db_container,
+        run=artifact_run,
+        flow=artifact_flow,
+    )
+    await _mark_run_completed(
+        db_container=db_container,
+        run_id=outbound_run["id"],
+        output_payload_json={},
+    )
+
+    async def poll(flow: dict, run: dict) -> dict:
+        response = await client.get(
+            f"/api/v1/flows/{flow['id']}/runs/{run['id']}/",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    text_public = await poll(text_flow, text_run)
+    artifact_public = await poll(artifact_flow, artifact_run)
+    outbound_public = await poll(outbound_flow, outbound_run)
+
+    assert text_public["result"] == {
+        "kind": "inline_text",
+        "text": "Finished public report",
+    }
+    assert "output_payload_json" not in text_public
+    assert artifact_public["result"]["kind"] == "artifact"
+    assert [item["file_id"] for item in artifact_public["result"]["files"]] == [
+        str(artifact_file_id)
+    ]
+    assert artifact_public["result"]["files"] == artifact_public["result_files"]
+    assert outbound_public["result"] == {
+        "kind": "outbound_http",
+        "delivery_status": "delivered",
+    }
+    assert set(outbound_public["result"]) == {"kind", "delivery_status"}
+
+    wrong_flow_response = await client.get(
+        f"/api/v1/flows/{text_flow['id']}/runs/{artifact_run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert wrong_flow_response.status_code == 404, wrong_flow_response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_execution_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    structured_contract = {
+        "type": "object",
+        "required": ["answer"],
+        "properties": {"answer": {"type": "string"}},
+    }
+    flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        output_contract=structured_contract,
+    )
+    version_one = flow["published_version"]
+    create_version_one = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": version_one,
+            "input_payload_json": {"text": "version one"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert create_version_one.status_code == 201, create_version_one.text
+    version_one_run = create_version_one.json()
+    await _mark_run_completed(
+        db_container=db_container,
+        run_id=version_one_run["id"],
+        output_payload_json={"structured": {"answer": "historical"}},
+    )
+
+    unpublish_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/unpublish/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert unpublish_response.status_code == 200, unpublish_response.text
+    step = flow["steps"][0]
+    update_response = await client.patch(
+        f"/api/v1/flows/{flow['id']}/",
+        json={
+            "steps": [
+                {
+                    "id": step["id"],
+                    "assistant_id": step["assistant_id"],
+                    "step_order": step["step_order"],
+                    "user_description": step["user_description"],
+                    "input_source": step["input_source"],
+                    "input_type": step["input_type"],
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert update_response.status_code == 200, update_response.text
+    publish_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/publish/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert publish_response.status_code == 200, publish_response.text
+    version_two = publish_response.json()["published_version"]
+    assert version_two == version_one + 1
+
+    create_version_two = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": version_two,
+            "input_payload_json": {"text": "version two"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert create_version_two.status_code == 201, create_version_two.text
+    version_two_run = create_version_two.json()
+    await _mark_run_completed(
+        db_container=db_container,
+        run_id=version_two_run["id"],
+        output_payload_json={"text": "current"},
+    )
+
+    selected_table_counts = {
+        "flow_versions": 0,
+        "flow_run_step_result_files": 0,
+        "flow_step_attempts": 0,
+    }
+
+    def count_bulk_selects(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        normalized = statement.lower().lstrip()
+        if not normalized.startswith("select"):
+            return
+        for table_name in selected_table_counts:
+            if table_name in normalized:
+                selected_table_counts[table_name] += 1
+
+    async with db_container() as container:
+        sync_bind = container.session().sync_session.get_bind()
+        sa.event.listen(sync_bind, "before_cursor_execute", count_bulk_selects)
+        try:
+            list_response = await client.get(
+                f"/api/v1/flows/{flow['id']}/runs/?limit=200",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        finally:
+            sa.event.remove(sync_bind, "before_cursor_execute", count_bulk_selects)
+
+    assert list_response.status_code == 200, list_response.text
+    runs_by_id = {item["id"]: item for item in list_response.json()["items"]}
+    assert runs_by_id[version_one_run["id"]]["flow_version"] == version_one
+    assert runs_by_id[version_one_run["id"]]["result"] == {
+        "kind": "structured",
+        "value": {"answer": "historical"},
+        "output_contract": structured_contract,
+    }
+    assert runs_by_id[version_two_run["id"]]["flow_version"] == version_two
+    assert runs_by_id[version_two_run["id"]]["result"] == {
+        "kind": "inline_text",
+        "text": "current",
+    }
+    assert selected_table_counts == {
+        "flow_versions": 1,
+        "flow_run_step_result_files": 1,
+        "flow_step_attempts": 1,
     }
 
 

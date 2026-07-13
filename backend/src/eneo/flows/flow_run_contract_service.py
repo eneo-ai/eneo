@@ -64,7 +64,7 @@ class FlowRunContractService:
         return FlowRunContractPublic(
             flow_id=published.flow_id,
             published_flow_version=published.published_version,
-            final_output=_build_final_output(runtime_inputs.steps),
+            final_output=build_final_output_contract(runtime_inputs.steps),
             form_fields=_published_form_fields(runtime_inputs.definition),
             steps_requiring_input=_runtime_input_contracts(runtime_inputs.input_specs),
             runtime_upload_policy=default_runtime_upload_policy_public(),
@@ -168,7 +168,7 @@ class FlowRunContractService:
         )
 
 
-def _build_final_output(
+def build_final_output_contract(
     steps: Sequence[RuntimeStep],
 ) -> FlowFinalOutputContractPublic | None:
     final_step = steps[-1] if steps else None

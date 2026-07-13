@@ -3017,7 +3017,7 @@ def test_flow_consumer_guides_answer_fresh_reader_edge_cases() -> None:
     integrating = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
 
     assert "DOCX artifact (`template_fill`)" in designing
-    assert "file id from run or step `result_files`" in integrating
+    assert "file id from `result.files`" in integrating
     assert "not direct post-run output edits" in integrating
 
 
@@ -3277,6 +3277,7 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
         "edit_flow_run_review_checkpoint",
         "approve_flow_run_review_checkpoint",
         "resume_flow_run_review_checkpoint",
+        "get_flow_run",
         "list_flow_run_steps",
         "generate_flow_run_artifact_signed_url",
     )
@@ -3329,6 +3330,7 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     FlowRunReviewCheckpointResumeResponse.model_validate(
         generator.WORKED_EXAMPLE_CHECKPOINT_RESUME_RESPONSE
     )
+    FlowRunPublic.model_validate(generator.WORKED_EXAMPLE_COMPLETED_RUN_RESPONSE)
     FlowRunStepPublic.model_validate(generator.WORKED_EXAMPLE_FINAL_STEP_RESULT)
     FlowRunStepResultFile.model_validate(generator.WORKED_EXAMPLE_ARTIFACT_RESULT_FILE)
     SignedURLResponse.model_validate(generator.WORKED_EXAMPLE_SIGNED_URL_RESPONSE)
@@ -3397,6 +3399,13 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     ) == [generator.WORKED_EXAMPLE_FINAL_STEP_RESULT]
     final_step_result = generator.WORKED_EXAMPLE_FINAL_STEP_RESULT
     artifact_file = generator.WORKED_EXAMPLE_ARTIFACT_RESULT_FILE
+    completed_run = generator.WORKED_EXAMPLE_COMPLETED_RUN_RESPONSE
+    assert completed_run["status"] == "completed"
+    assert completed_run["result"] == {
+        "kind": "artifact",
+        "files": [artifact_file],
+    }
+    assert completed_run["result_files"] == [artifact_file]
     assert final_step_result["step_id"] == final_output["step_id"]
     assert final_step_result["step_order"] == final_output["step_order"]
     final_step_input_payload = cast(
@@ -3457,6 +3466,22 @@ def test_flow_api_guide_documents_run_contract_public_fields() -> None:
     missing_fields = sorted(field for field in required_fields if field not in guide)
 
     assert missing_fields == []
+
+
+def test_flow_api_guide_documents_closed_final_result_without_raw_run_payload() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    run_example = guide.split("Example run response:", maxsplit=1)[1].split(
+        "#### What redispatch does",
+        maxsplit=1,
+    )[0]
+
+    assert '"result": null' in run_example
+    assert '"output_payload_json"' not in run_example
+    for result_kind in ("inline_text", "structured", "artifact", "outbound_http"):
+        assert f"`{result_kind}`" in guide
+    assert "const unreachable: never = result" in guide
+    assert "that run's published `flow_version`" in guide
+    assert "URLs, headers, credentials, or the sent" in guide
 
 
 def test_flow_api_guide_documents_runtime_path_fields() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -143,6 +144,31 @@ class FlowVersionRepository:
         if version_in_db is None:
             raise NotFoundException("Flow version not found.")
         return self.factory.from_flow_version_db(version_in_db)
+
+    async def get_many(
+        self,
+        *,
+        version_refs: Sequence[tuple[UUID, int]],
+        tenant_id: UUID,
+    ) -> dict[tuple[UUID, int], FlowVersion]:
+        unique_refs = tuple(dict.fromkeys(version_refs))
+        if not unique_refs:
+            return {}
+        stmt = (
+            sa.select(FlowVersions)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(
+                sa.tuple_(FlowVersions.flow_id, FlowVersions.version).in_(unique_refs)
+            )
+        )
+        versions = (await self.session.execute(stmt)).scalars().all()
+        versions_by_ref = {
+            (item.flow_id, item.version): self.factory.from_flow_version_db(item)
+            for item in versions
+        }
+        if any(ref not in versions_by_ref for ref in unique_refs):
+            raise NotFoundException("Flow version not found.")
+        return versions_by_ref
 
     async def get_latest(self, flow_id: UUID, tenant_id: UUID) -> FlowVersion | None:
         stmt = (

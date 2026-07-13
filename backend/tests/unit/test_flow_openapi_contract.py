@@ -1838,6 +1838,59 @@ def test_openapi_flow_public_run_and_step_expose_result_files(
     assert "result_files" in evidence_properties
 
 
+def test_openapi_flow_run_result_is_closed_and_exhaustively_discriminated(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_properties = schemas.get("FlowRunPublic", {}).get("properties", {})
+    assert "output_payload_json" not in run_properties
+
+    result_schema = run_properties.get("result", {})
+    result_options = result_schema.get("anyOf", [])
+    discriminated = next(
+        option
+        for option in result_options
+        if isinstance(option, dict) and isinstance(option.get("oneOf"), list)
+    )
+    expected_variants = {
+        "artifact": "FlowRunArtifactResultPublic",
+        "inline_text": "FlowRunInlineTextResultPublic",
+        "outbound_http": "FlowRunOutboundHttpResultPublic",
+        "structured": "FlowRunStructuredResultPublic",
+    }
+    discriminator = discriminated.get("discriminator", {})
+    assert discriminator.get("propertyName") == "kind"
+    assert discriminator.get("mapping") == {
+        kind: f"#/components/schemas/{component}"
+        for kind, component in expected_variants.items()
+    }
+    assert {
+        str(option.get("$ref", "")).removeprefix("#/components/schemas/")
+        for option in discriminated["oneOf"]
+        if isinstance(option, dict)
+    } == set(expected_variants.values())
+
+    for kind, component_name in expected_variants.items():
+        component = schemas.get(component_name, {})
+        assert component.get("additionalProperties") is False
+        assert "kind" in component.get("required", [])
+        assert _extract_enum_values(
+            openapi_spec,
+            component.get("properties", {}).get("kind", {}),
+        ) == {kind}
+
+    structured_properties = schemas["FlowRunStructuredResultPublic"]["properties"]
+    assert structured_properties["value"].get("$ref") == (
+        "#/components/schemas/JsonValue"
+    )
+    outbound_properties = schemas["FlowRunOutboundHttpResultPublic"]["properties"]
+    assert set(outbound_properties) == {"kind", "delivery_status"}
+    assert _extract_enum_values(
+        openapi_spec,
+        outbound_properties["delivery_status"],
+    ) == {"delivered"}
+
+
 def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     run_properties = schemas.get("FlowRunPublic", {}).get("properties", {})

@@ -35,6 +35,16 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.enums import FlowOutputType, FlowRunStatus
+from eneo.flows.flow_run_contract_models import (
+    FlowFinalOutputContractPublic,
+    FlowOutputDelivery,
+    FlowRunArtifactResultPublic,
+    FlowRunInlineTextResultPublic,
+    FlowRunOutboundHttpResultPublic,
+    FlowRunResultPublic,
+    FlowRunStructuredResultPublic,
+)
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.http_transport import (
@@ -109,6 +119,7 @@ class FlowAssembler:
         *,
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
+        final_output: FlowFinalOutputContractPublic | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
             FlowRunTokenUsagePublic.model_validate(token_usage)
@@ -119,6 +130,11 @@ class FlowAssembler:
             update={
                 "input_payload_json": read_semantic_flow_input_payload(
                     run.input_payload_json
+                ),
+                "result": _project_run_result(
+                    run=run,
+                    final_output=final_output,
+                    result_files=result_files,
                 ),
                 "result_files": list(result_files),
                 "token_usage": public_token_usage,
@@ -191,6 +207,64 @@ class FlowAssembler:
             for step in flow.steps
         ]
         return flow.model_copy(update={"steps": redacted_steps}, deep=True)
+
+
+class FlowRunResultProjectionError(RuntimeError):
+    """Persisted completed-run data does not satisfy its published result contract."""
+
+
+def _project_run_result(
+    *,
+    run: FlowRun,
+    final_output: FlowFinalOutputContractPublic | None,
+    result_files: Sequence[FlowRunStepResultFile],
+) -> FlowRunResultPublic | None:
+    if run.status is not FlowRunStatus.COMPLETED or final_output is None:
+        return None
+
+    if final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP:
+        return FlowRunOutboundHttpResultPublic(
+            kind="outbound_http",
+            delivery_status="delivered",
+        )
+
+    if final_output.delivery is FlowOutputDelivery.ARTIFACT:
+        final_files = [
+            result_file
+            for result_file in result_files
+            if result_file.step_id == final_output.step_id
+        ]
+        if not final_files:
+            raise FlowRunResultProjectionError(
+                "Completed artifact run has no current final-step artifact metadata."
+            )
+        return FlowRunArtifactResultPublic(kind="artifact", files=final_files)
+
+    payload = run.output_payload_json
+    if payload is None:
+        raise FlowRunResultProjectionError(
+            "Completed payload run has no terminal output payload."
+        )
+    if final_output.output_type is FlowOutputType.JSON:
+        if "structured" not in payload:
+            raise FlowRunResultProjectionError(
+                "Completed structured run has no structured terminal value."
+            )
+        return FlowRunStructuredResultPublic(
+            kind="structured",
+            value=payload["structured"],
+            output_contract=final_output.output_contract,
+        )
+    if final_output.output_type is FlowOutputType.TEXT:
+        text = payload.get("text")
+        if not isinstance(text, str):
+            raise FlowRunResultProjectionError(
+                "Completed text run has no text terminal value."
+            )
+        return FlowRunInlineTextResultPublic(kind="inline_text", text=text)
+    raise FlowRunResultProjectionError(
+        "Completed payload run has an unsupported published output type."
+    )
 
 
 def _redact_config(config: dict[str, Any] | None) -> dict[str, Any] | None:

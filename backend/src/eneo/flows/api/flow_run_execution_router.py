@@ -158,7 +158,8 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
        the same Flow.
     3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
        together with any structured `input_payload_json` fields in this run request.
-    4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
+    4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` for the typed terminal `result`,
+       and use `.../steps/` for detailed step progress and evidence.
 
     Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
     `400` with code `flow_run_top_level_file_ids_not_supported`; use
@@ -183,7 +184,10 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
 _FLOW_RUN_STATUS_DESCRIPTION = """
     Get one run for a specific flow.
 
-    Use this endpoint for run status and top-level output payload when building consumer apps.
+    Use this endpoint for run status and the typed top-level `result` when building consumer apps.
+    `result` is null until the run completes successfully, then discriminates inline text,
+    authored structured JSON, current artifact metadata, or successful outbound delivery.
+    Structured values and contracts are interpreted with this run's pinned `flow_version`.
     Current runtime visibility is policy-based: callers always see their own runs, tenant admins
     can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
     flows in their space, and service-key principals can inspect only their own runs.
@@ -196,6 +200,10 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     The `count` field in the paginated response reports the number of items returned in the
     current page, not the total number of matching runs across all pages. `has_more` reports
     whether another page exists after this offset window.
+
+    Each item uses the same typed `result` projection as the single-run endpoint. Historical
+    completed runs are interpreted with their own pinned `flow_version`; incomplete runs return
+    `result: null`.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -721,6 +729,7 @@ async def create_flow_run(
 ) -> FlowRunPublic:
     assembler = FlowAssembler()
     dispatch_run: FlowRun | None = None
+    completed_replay_view = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -761,6 +770,13 @@ async def create_flow_run(
                 metadata=AuditMetadata.standard(actor=user, target=run),
             )
             dispatch_run = run
+        elif run.status is FlowRunStatus.COMPLETED:
+            completed_replay_view = (
+                await run_service.get_run_with_result_files_and_token_usage(
+                    flow_id=id,
+                    run_id=run.id,
+                )
+            )
 
     if dispatch_run is not None:
         background_tasks.add_task(
@@ -768,6 +784,13 @@ async def create_flow_run(
             run_id=dispatch_run.id,
             tenant_id=dispatch_run.tenant_id,
             expected_revision=dispatch_run.revision,
+        )
+    if completed_replay_view is not None:
+        return assembler.to_run_public(
+            completed_replay_view.run,
+            result_files=completed_replay_view.result_files,
+            token_usage=completed_replay_view.token_usage,
+            final_output=completed_replay_view.final_output,
         )
     return assembler.to_run_public(run)
 
@@ -852,6 +875,7 @@ async def list_flow_runs(
                 item.run,
                 result_files=item.result_files,
                 token_usage=item.token_usage,
+                final_output=item.final_output,
             )
             for item in page.items
         ],
@@ -906,6 +930,7 @@ async def get_flow_run(
         run_view.run,
         result_files=run_view.result_files,
         token_usage=run_view.token_usage,
+        final_output=run_view.final_output,
     )
 
 

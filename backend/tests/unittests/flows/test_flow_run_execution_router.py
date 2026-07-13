@@ -260,7 +260,9 @@ async def test_create_flow_run_schedules_background_dispatch():
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     flow_run_service.create_run.return_value = CreateRunResult(run=run, created=True)
     events: list[str] = []
 
@@ -313,7 +315,9 @@ async def test_create_flow_run_replay_skips_creation_audit_and_dispatch():
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     flow_run_service.create_run.return_value = CreateRunResult(run=run, created=False)
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()

@@ -8,7 +8,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.files.file_models import FileType
+from eneo.flows.api.flow_assembler import FlowAssembler, FlowRunResultProjectionError
 from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowCreateRequest,
@@ -53,6 +54,7 @@ from eneo.flows.flow_run_error import (
     FlowRunError,
     parse_flow_run_dispatch_error,
 )
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.exceptions import BadRequestException
 
 _MISSING = object()
@@ -539,6 +541,151 @@ def test_run_public_exposes_only_semantic_input_payload() -> None:
 
     assert public.input_payload_json == {"employee_name": "Alex Example"}
     assert "expected_flow_version" in (run.input_payload_json or {})
+
+
+def _completed_run(*, output_payload_json: dict[str, object] | None) -> FlowRun:
+    now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
+    return FlowRun(
+        id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=3,
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
+        tenant_id=uuid4(),
+        trace_id=uuid4(),
+        status=FlowRunStatus.COMPLETED,
+        input_payload_json=None,
+        output_payload_json=output_payload_json,
+        job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _final_output(
+    *,
+    step_id=None,
+    output_type: FlowOutputType,
+    delivery: FlowOutputDelivery,
+    output_contract: dict[str, object] | None = None,
+) -> FlowFinalOutputContractPublic:
+    return FlowFinalOutputContractPublic(
+        step_id=step_id or uuid4(),
+        step_order=1,
+        output_type=output_type,
+        output_mode=FlowOutputMode.PASS_THROUGH,
+        delivery=delivery,
+        output_contract=output_contract,
+    )
+
+
+def test_run_public_projects_text_and_opaque_structured_results() -> None:
+    assembler = FlowAssembler()
+    text_run = _completed_run(output_payload_json={"text": "Finished report"})
+    structured_value = {
+        "summary": "Finished report",
+        "authored_extension": {"version": 7, "items": [True, None]},
+    }
+    structured_contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+    }
+    structured_run = _completed_run(
+        output_payload_json={
+            "text": "ignored serialized representation",
+            "structured": structured_value,
+        }
+    )
+
+    text_public = assembler.to_run_public(
+        text_run,
+        final_output=_final_output(
+            output_type=FlowOutputType.TEXT,
+            delivery=FlowOutputDelivery.PAYLOAD,
+        ),
+    )
+    structured_public = assembler.to_run_public(
+        structured_run,
+        final_output=_final_output(
+            output_type=FlowOutputType.JSON,
+            delivery=FlowOutputDelivery.PAYLOAD,
+            output_contract=structured_contract,
+        ),
+    )
+
+    assert text_public.model_dump(mode="json")["result"] == {
+        "kind": "inline_text",
+        "text": "Finished report",
+    }
+    assert structured_public.model_dump(mode="json")["result"] == {
+        "kind": "structured",
+        "value": structured_value,
+        "output_contract": structured_contract,
+    }
+
+
+def test_run_public_projects_current_artifact_metadata_and_outbound_receipt() -> None:
+    assembler = FlowAssembler()
+    artifact_run = _completed_run(output_payload_json=None)
+    final_step_id = uuid4()
+    result_file = FlowRunStepResultFile(
+        flow_run_id=artifact_run.id,
+        flow_id=artifact_run.flow_id,
+        tenant_id=artifact_run.tenant_id,
+        step_result_id=uuid4(),
+        step_id=final_step_id,
+        step_order=1,
+        attempt_no=2,
+        file_id=uuid4(),
+        ordinal=0,
+        source="generated_output",
+        name="report.pdf",
+        checksum="artifact-checksum",
+        size=4096,
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+        availability="available",
+    )
+
+    artifact_public = assembler.to_run_public(
+        artifact_run,
+        result_files=(result_file,),
+        final_output=_final_output(
+            step_id=final_step_id,
+            output_type=FlowOutputType.PDF,
+            delivery=FlowOutputDelivery.ARTIFACT,
+        ),
+    )
+    outbound_public = assembler.to_run_public(
+        _completed_run(output_payload_json=None),
+        final_output=_final_output(
+            output_type=FlowOutputType.JSON,
+            delivery=FlowOutputDelivery.OUTBOUND_HTTP,
+        ),
+    )
+
+    artifact_result = artifact_public.model_dump(mode="json")["result"]
+    assert artifact_result["kind"] == "artifact"
+    assert artifact_result["files"] == [result_file.model_dump(mode="json")]
+    assert outbound_public.model_dump(mode="json")["result"] == {
+        "kind": "outbound_http",
+        "delivery_status": "delivered",
+    }
+
+
+def test_run_public_fails_explicitly_when_completed_artifact_is_missing() -> None:
+    with pytest.raises(
+        FlowRunResultProjectionError,
+        match="no current final-step artifact metadata",
+    ):
+        FlowAssembler().to_run_public(
+            _completed_run(output_payload_json=None),
+            final_output=_final_output(
+                output_type=FlowOutputType.DOCX,
+                delivery=FlowOutputDelivery.ARTIFACT,
+            ),
+        )
 
 
 def _review_checkpoint_payload() -> dict[str, object]:

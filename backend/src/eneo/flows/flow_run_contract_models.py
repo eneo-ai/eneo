@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, cast
+from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +19,8 @@ from eneo.flows.flow_input_limits import (
 from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.json_types import JsonObject, JsonValue
 
 FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -235,6 +237,75 @@ class FlowFinalOutputContractPublic(BaseModel):
             "Null means the final output is unstructured text or a generated document."
         ),
     )
+
+
+class FlowRunInlineTextResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["inline_text"] = Field(
+        description="Discriminator for an inline terminal text result."
+    )
+    text: str = Field(
+        description="Exact terminal text produced by the published final step."
+    )
+
+
+class FlowRunStructuredResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["structured"] = Field(
+        description="Discriminator for an authored structured terminal result."
+    )
+    value: JsonValue = Field(
+        description=(
+            "Opaque authored JSON value produced by the published final step. "
+            "Interpret it with `output_contract` and the enclosing run's `flow_version`."
+        )
+    )
+    output_contract: JsonObject | None = Field(
+        description=(
+            "Historical published output contract for this run version. Null when "
+            "the published structured step did not declare a contract."
+        )
+    )
+
+
+class FlowRunArtifactResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["artifact"] = Field(
+        description="Discriminator for a terminal file-artifact result."
+    )
+    files: list[FlowRunStepResultFile] = Field(
+        min_length=1,
+        description=(
+            "Current-attempt artifacts produced by the published final step. File "
+            "content remains behind the authorized run-artifact download endpoint."
+        ),
+    )
+
+
+class FlowRunOutboundHttpResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["outbound_http"] = Field(
+        description="Discriminator for a completed outbound HTTP delivery."
+    )
+    delivery_status: Literal["delivered"] = Field(
+        description=(
+            "Stable delivery receipt for a successfully completed outbound step. "
+            "Destination configuration and request payload are never exposed."
+        ),
+    )
+
+
+FlowRunResultPublic: TypeAlias = Annotated[
+    FlowRunInlineTextResultPublic
+    | FlowRunStructuredResultPublic
+    | FlowRunArtifactResultPublic
+    | FlowRunOutboundHttpResultPublic,
+    Field(discriminator="kind"),
+]
 
 
 class FlowTemplateReadinessPublic(BaseModel):

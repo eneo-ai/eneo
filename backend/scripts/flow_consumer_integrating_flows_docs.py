@@ -226,11 +226,13 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
     EndpointSequence(
         slug="results",
         title="Results",
-        summary="Drive the UI from run status, step results, result files, and status capabilities.",
+        summary="Drive the UI from the typed final result, step details, artifact links, and status capabilities.",
         steps=(
-            "Call `runtime_paths.get_run_template` to get run status and final output when ready.",
-            "Call `runtime_paths.list_steps_template` to get each step result as it completes.",
-            "Use the file id from run or step `result_files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.",
+            "Call `runtime_paths.get_run_template` and switch exhaustively on `result.kind` after the run completes; `result` is null before a successful terminal result exists.",
+            "Treat `structured.value` as authored data governed by that run's `flow_version` and `structured.output_contract`; do not infer another envelope inside it.",
+            "For `artifact`, use the file id from `result.files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.",
+            "Use `inline_text` directly and treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.",
+            "Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.",
             "Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.",
         ),
         runtime_path_fields=(
@@ -243,7 +245,15 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
         receipts=(
             TestReceipt(
                 OPENAPI_TEST_FILE,
-                "test_openapi_flow_public_run_and_step_expose_result_files",
+                "test_openapi_flow_run_result_is_closed_and_exhaustively_discriminated",
+            ),
+            TestReceipt(
+                CONSUMER_API_TEST_FILE,
+                "test_flow_run_public_projects_text_artifact_and_outbound_results",
+            ),
+            TestReceipt(
+                CONSUMER_API_TEST_FILE,
+                "test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries",
             ),
             TestReceipt(
                 OPENAPI_TEST_FILE,
@@ -410,7 +420,7 @@ ENDPOINT_SEQUENCE_INTROS: dict[str, str] = {
     "files": "When the contract names file inputs, handle uploads before you create the run.",
     "human-in-the-loop": "After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.",
     "mid-run-files": "If a user asks for files during execution, route the product design through review or rerun instead of inventing an unsupported upload path.",
-    "results": "Once review is resolved, drive the result screen from run status, step results, and artifact links.",
+    "results": "Once review is resolved, drive the result screen from the run's typed final result and open step details only when needed.",
     "reruns": "When a user needs to correct completed work, use reruns so lineage and invalidation stay visible.",
     "robustness": "After the happy path works, add retries and polling rules so the integration behaves well under load.",
     "failures": "When a run or step fails, branch on typed codes and show the user the next action.",
@@ -521,6 +531,22 @@ WORKED_EXAMPLE_FINAL_STEP_RESULT: dict[str, object] = {
     "result_files": [WORKED_EXAMPLE_ARTIFACT_RESULT_FILE],
     "diagnostics": [],
 }
+WORKED_EXAMPLE_COMPLETED_RUN_RESPONSE: dict[str, object] = {
+    **FLOW_RUN_PUBLIC_EXAMPLE,
+    "revision": 3,
+    "status": "completed",
+    "dispatch_pending_since": None,
+    "dispatch_next_attempt_at": None,
+    "dispatched_at": "2026-03-17T10:05:01Z",
+    "started_at": "2026-03-17T10:05:02Z",
+    "finished_at": "2026-03-17T10:06:15Z",
+    "result": {
+        "kind": "artifact",
+        "files": [WORKED_EXAMPLE_ARTIFACT_RESULT_FILE],
+    },
+    "result_files": [WORKED_EXAMPLE_ARTIFACT_RESULT_FILE],
+    "updated_at": "2026-03-17T10:06:15Z",
+}
 WORKED_EXAMPLE_SIGNED_URL_RESPONSE: dict[str, object] = {
     **SIGNED_URL_RESPONSE_EXAMPLE,
     "url": (
@@ -613,6 +639,15 @@ WORKED_EXAMPLE_HOPS: tuple[WorkedExampleHop, ...] = (
                 f"review-resume-{WORKED_EXAMPLE_CHECKPOINT['id']}",
             ),
         ),
+    ),
+    WorkedExampleHop(
+        title="Read final run result",
+        operation_id="get_flow_run",
+        request_intro="Poll the resumed run until it completes, then branch on the closed `result.kind` discriminator.",
+        request_language="text",
+        request_body="GET /api/v1/flows/{id}/runs/{run_id}/",
+        response_intro="This artifact result contains only current-attempt file metadata; use its file id for the authorized signed-URL request.",
+        response_json=WORKED_EXAMPLE_COMPLETED_RUN_RESPONSE,
     ),
     WorkedExampleHop(
         title="List and filter step output",

@@ -202,6 +202,7 @@ export type AIBuilderApplyResult = components["schemas"]["ApplyResultResponse"];
 export type AIBuilderModel = components["schemas"]["SessionModelOption"];
 export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTelemetrySummary"];
 export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
+export type FlowRunResult = NonNullable<components["schemas"]["FlowRunPublic"]["result"]>;
 export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];
 export type FlowRunError = components["schemas"]["FlowRunError"];
 
@@ -212,17 +213,17 @@ export type FlowRunOutputPayload = {
   template_provenance?: Record<string, unknown>;
 };
 
-type WithTypedRunOutput<T extends { output_payload_json?: unknown }> = Omit<
+type WithTypedStepOutput<T extends { output_payload_json?: unknown }> = Omit<
   T,
   "output_payload_json"
 > & {
   output_payload_json?: FlowRunOutputPayload | null;
 };
 
-export type FlowRun = WithTypedRunOutput<components["schemas"]["FlowRunPublic"]>;
+export type FlowRun = components["schemas"]["FlowRunPublic"];
 export type FlowRunStepInput = components["schemas"]["StepRunInput"] & { file_ids: string[] };
 export type FlowRunStepInputs = Record<string, FlowRunStepInput>;
-export type FlowRunStep = WithTypedRunOutput<components["schemas"]["FlowRunStepPublic"]>;
+export type FlowRunStep = WithTypedStepOutput<components["schemas"]["FlowRunStepPublic"]>;
 export type FlowGraphNode = components["schemas"]["GraphNode"];
 export type FlowGraphEdge = components["schemas"]["GraphEdge"];
 export type FlowGraph = components["schemas"]["GraphResponse"];

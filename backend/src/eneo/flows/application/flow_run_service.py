@@ -27,6 +27,9 @@ from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
+from eneo.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
 from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -34,6 +37,8 @@ from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
 )
+from eneo.flows.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
@@ -95,6 +100,7 @@ class FlowRunWithResultFilesAndTokenUsage:
     run: FlowRun
     result_files: Sequence[FlowRunStepResultFile]
     token_usage: FlowRunTokenUsage | None
+    final_output: FlowFinalOutputContractPublic | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -622,14 +628,50 @@ class FlowRunService:
             tenant_id=self.user.tenant_id,
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
+        final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
         return tuple(
             FlowRunWithResultFilesAndTokenUsage(
                 run=run,
                 result_files=tuple(result_files_by_run_id.get(run.id, ())),
                 token_usage=token_usage_by_run_id.get(run.id),
+                final_output=final_output_by_version_ref.get(
+                    (run.flow_id, run.flow_version)
+                ),
             )
             for run in runs
         )
+
+    async def _final_outputs_for_runs(
+        self, *, runs: Sequence[FlowRun]
+    ) -> dict[tuple[UUID, int], FlowFinalOutputContractPublic]:
+        version_refs = tuple(
+            dict.fromkeys(
+                (run.flow_id, run.flow_version)
+                for run in runs
+                if run.status is FlowRunStatus.COMPLETED
+            )
+        )
+        if not version_refs:
+            return {}
+        versions_by_ref = await self.flow_version_repo.get_many(
+            version_refs=version_refs,
+            tenant_id=self.user.tenant_id,
+        )
+        final_outputs: dict[tuple[UUID, int], FlowFinalOutputContractPublic] = {}
+        for version_ref, flow_version in versions_by_ref.items():
+            definition = parse_verified_published_definition(
+                flow_version.definition_json,
+                expected_checksum=flow_version.definition_checksum,
+                flow_version=flow_version.version,
+            )
+            final_output = build_final_output_contract(definition.runtime_steps())
+            if final_output is None:
+                raise FlowPublishedDefinitionWithoutExecutableStepsError(
+                    flow_id=flow_version.flow_id,
+                    flow_version=flow_version.version,
+                )
+            final_outputs[version_ref] = final_output
+        return final_outputs
 
     async def list_step_results_with_files(
         self,

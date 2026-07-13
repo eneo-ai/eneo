@@ -854,7 +854,7 @@ async def test_step_result_file_requires_matching_step_attempt(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_step_result_files_are_attempt_scoped_and_deduplicated(
+async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_attempt(
     db_container,
     completion_model_factory,
     space_factory,
@@ -1059,9 +1059,7 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
         result_rows[1][0],
         purged_file_id,
     ]
-    assert [item.file_id for item in listed_files_for_runs] == [
-        item.file_id for item in listed_files
-    ]
+    assert [item.file_id for item in listed_files_for_runs] == [purged_file_id]
     assert artifact_projection is not None
     assert artifact_projection.availability == "available"
     assert artifact_projection.checksum == "checksum-artifact.pdf"

@@ -52,6 +52,7 @@ import type {
   FlowRunReviewCheckpoint,
   FlowRunReviewCheckpointResumeResponse,
   FlowRunReviewCheckpointState,
+  FlowRunResult,
   FlowRunResultFile,
   FlowRunStatusCapabilities,
   FlowRunStatusCapability,
@@ -149,6 +150,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowRunRedispatchResult: FlowRunRedispatchResult;
   FlowRunRerunInvalidatedStep: FlowRunRerunInvalidatedStep;
   FlowRunRerunOperation: FlowRunRerunOperation;
+  FlowRunResult: FlowRunResult;
   FlowRunResultFile: FlowRunResultFile;
   FlowRunReviewCheckpoint: FlowRunReviewCheckpoint;
   FlowRunReviewCheckpointResumeResponse: FlowRunReviewCheckpointResumeResponse;
@@ -309,6 +311,47 @@ const validFlowRunResultFile: FlowRunResultFile = {
   availability: "available"
 };
 
+const validInlineTextResult: FlowRunResult = {
+  kind: "inline_text",
+  text: "Decision support generated."
+};
+const validStructuredResult: FlowRunResult = {
+  kind: "structured",
+  value: {
+    decision: "approve",
+    authored_extension: { confidence: 0.9 }
+  },
+  output_contract: {
+    type: "object",
+    required: ["decision"]
+  }
+};
+const validArtifactResult: FlowRunResult = {
+  kind: "artifact",
+  files: [validFlowRunResultFile]
+};
+const validOutboundResult: FlowRunResult = {
+  kind: "outbound_http",
+  delivery_status: "delivered"
+};
+
+function describeFlowRunResult(result: FlowRunResult): string {
+  switch (result.kind) {
+    case "inline_text":
+      return result.text;
+    case "structured":
+      return JSON.stringify(result.value);
+    case "artifact":
+      return result.files.map((file) => file.name).join(", ");
+    case "outbound_http":
+      return result.delivery_status;
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+}
+
 const validFlowRun = {
   id: runId,
   flow_id: flowId,
@@ -319,9 +362,7 @@ const validFlowRun = {
   status: "completed",
   dispatch_attempt_count: 1,
   input_payload_json: { case_id: "CASE-1" },
-  output_payload_json: {
-    text: "Decision support generated."
-  },
+  result: validInlineTextResult,
   result_files: [validFlowRunResultFile],
   created_at: isoTimestamp,
   updated_at: isoTimestamp
@@ -754,6 +795,10 @@ void validFlowRunStepInput;
 void validFlowRunStatusCapability;
 void validFlowRunStatusCapabilities;
 void validFlowRunOutputPayload;
+void describeFlowRunResult(validInlineTextResult);
+void describeFlowRunResult(validStructuredResult);
+void describeFlowRunResult(validArtifactResult);
+void describeFlowRunResult(validOutboundResult);
 void validFlowRunTokenUsage;
 void validFlowRunError;
 void validFlowRunRedispatchResult;

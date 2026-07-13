@@ -55,6 +55,9 @@ from eneo.flows.flow_run_contract_models import (
     FlowRunContractPublic as FlowRunContractPublic,
 )
 from eneo.flows.flow_run_contract_models import (
+    FlowRunResultPublic as FlowRunResultPublic,
+)
+from eneo.flows.flow_run_contract_models import (
     FlowRuntimeInputContractPublic as FlowRuntimeInputContractPublic,
 )
 from eneo.flows.flow_run_contract_models import (
@@ -224,7 +227,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "started_at": None,
     "finished_at": None,
     "input_payload_json": {"employee_name": "Alex Example"},
-    "output_payload_json": None,
+    "result": None,
     "result_files": [],
     "token_usage": None,
     "error": None,
@@ -303,7 +306,7 @@ FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE: dict[str, Any] = {
         **FLOW_RUN_PUBLIC_EXAMPLE,
         "revision": 8,
         "status": "queued",
-        "output_payload_json": None,
+        "result": None,
     },
     "rerun_step_id": "00000000-0000-0000-0000-000000000101",
     "new_attempt_no": 2,
@@ -843,7 +846,13 @@ class FlowRunPublic(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     input_payload_json: dict[str, Any] | None = None
-    output_payload_json: dict[str, Any] | None = None
+    result: FlowRunResultPublic | None = Field(
+        default=None,
+        description=(
+            "Typed successful final result. Null while the run is incomplete or "
+            "when it ended without a successful final result."
+        ),
+    )
     result_files: list[FlowRunStepResultFile] = Field(
         default_factory=lambda: cast(list[FlowRunStepResultFile], [])
     )
