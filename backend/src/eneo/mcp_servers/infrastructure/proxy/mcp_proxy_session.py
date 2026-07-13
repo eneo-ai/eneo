@@ -391,27 +391,51 @@ class MCPProxySession:
         self._failed_server_ids.add(server_id)
 
     def _truncate_tool_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Trim an oversized tool result to the budget instead of failing it.
+
+        Leading content blocks are kept whole until the budget runs out; the
+        text block that crosses it is cut mid-text and everything after it is
+        dropped. A trailing notice tells the model the output was truncated,
+        so e.g. a large page extraction still yields its head as usable,
+        citable content rather than an error.
+        """
         max_chars = _settings.mcp_tool_output_max_chars
         serialized = json.dumps(result, ensure_ascii=False, default=str)
         if len(serialized) <= max_chars:
             return result
 
-        preview = serialized[: max_chars // 2]
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {
-                            "error": f"Tool output exceeded maximum size of {max_chars} characters",
-                            "partial_data_preview": preview,
-                        },
-                        ensure_ascii=False,
-                    ),
-                }
-            ],
-            "is_error": True,
-        }
+        remaining = max_chars
+        kept: list[dict[str, Any]] = []
+        dropped = 0
+        blocks: list[dict[str, Any]] = result.get("content") or []
+        for block in blocks:
+            if remaining <= 0:
+                dropped += 1
+                continue
+            size = len(json.dumps(block, ensure_ascii=False, default=str))
+            if size <= remaining:
+                kept.append(block)
+                remaining -= size
+            elif block.get("type") == "text":
+                text = block.get("text") or ""
+                # Serialization overhead (escaping, keys) counts toward the
+                # budget, so cut the text to what remains after it.
+                overhead = size - len(text)
+                kept.append({**block, "text": text[: max(0, remaining - overhead)]})
+                remaining = 0
+            else:
+                # Non-text blocks (images, resources) cannot be kept partially.
+                dropped += 1
+                remaining = 0
+        notice = f"[Tool output truncated at {max_chars} characters"
+        if dropped:
+            notice += f"; {dropped} content block(s) dropped"
+        notice += (
+            ". Narrow the request (e.g. fewer URLs or a more specific query) "
+            "to fit the limit.]"
+        )
+        kept.append({"type": "text", "text": notice})
+        return {**result, "content": kept}
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         """
