@@ -39,8 +39,9 @@ existing owners described in the
   trigger and contract recorded below before it can ship.
 - **Implementation owner:** Accepted WI-13 owns strict Flow planning and
   installation. WI-13B owns the final external container contract. WI-13C owns
-  package-import tenant/space/Flow integrity. Future Assistant, App, and
-  marketplace work remains trigger-gated.
+  package-import tenant/space/Flow integrity. WI-13D owns explicit, bounded
+  provenance for source-local dependencies omitted from a package. Future
+  Assistant, App, and marketplace work remains trigger-gated.
 - **Deferred trigger:** A named product owner may propose an excluded capability
   only with its authorization, integrity, lifecycle, recovery, and consumer
   contract.
@@ -58,21 +59,73 @@ the exact Flow entry profile and payload parser. No Flow-specific extension,
 `package_kind` alias, Assistant/App payload, planner, installer, receipt, or
 marketplace exists.
 
-One focused slice remains mandatory for the current package lane:
+Accepted WI-13C hardens the successful-retry query so the joined Flow matches
+the receipt's tenant and space. Its read-only mismatch preflight and explicit
+Flow-between-space update decision support the narrow Flow-side unique target
+and composite foreign key over `(id, tenant_id, space_id)`; the existing
+`uq_flows_id_tenant_id` tenant pair remains intact. The relation preserves
+`ON DELETE CASCADE` and the terminal-shape constraint. Failed receipts remain
+space-owned display/audit rows and never become retry candidates. The accepted
+slice adds no Spaces `(id, tenant_id)` constraint, imaginary-production repair,
+package registry, tombstone, or generic integrity framework.
 
-- **WI-13C — Enforce package-import tenant/space/Flow integrity.** Harden the
-  successful-retry query so the joined Flow must match the receipt's tenant and
-  space. After a read-only mismatch preflight and an explicit decision on
-  Flow-between-space updates, enforce the successful receipt's Flow/tenant/space
-  relation with the narrow Flow-side unique target and composite foreign key.
-  `uq_flows_id_tenant_id` already covers the tenant pair; add or prove only the
-  needed `(id, tenant_id, space_id)` target rather than a generic integrity
-  framework.
-  Preserve `ON DELETE CASCADE` and the terminal-shape constraint. Defer a Spaces
-  `(id, tenant_id)` constraint unless the shared Spaces owner approves it;
-  failed receipts remain space-owned display/audit rows and are not retry
-  candidates. This slice follows the then-current serialized Alembic head and
-  adds no imaginary-production repair path.
+One additional slice remains mandatory for the current package lane:
+
+- **WI-13D — Make omitted local dependencies explicit and bounded.** A Flow
+  package must not fail merely because unreachable source-local MCP association
+  rows remain, and it must not discard those associations silently. Export
+  counts distinct affected Flow step assistants once, records only a strict
+  `mcp_attachment` kind and positive count in package provenance, and derives
+  every validation, import-plan, response-header, audit, SDK, and UI advisory
+  from that value. Ordinary exports carry a required empty omission list and no
+  advisory header. The omission participates in `content_checksum`; strict v1
+  readers reject a missing field, unknown field, or unknown omission kind.
+  Re-export replaces an obsolete local archive. This is provenance for omitted
+  source-local state, not portable MCP support.
+
+#### Portable knowledge and local-integration boundary
+
+Flow, Assistant, and App packages never carry knowledge documents, extracted
+text, chunks, embeddings, vectors, vector indexes, retrieval caches,
+vector-database or embedding-provider configuration, credentials, or
+destination-local knowledge identifiers. A package may carry only bounded
+logical knowledge requirements and safe setup guidance for explicit local
+rebinding. `FlowPackageKnowledgeGuidance` limits `summary` and `setup_notes` to
+4,000 characters, each `recommended_sources` and `do_not_include` collection to
+20 entries, and every normalized entry to 1,000 characters. A separately
+governed immutable content release may be considered later; WI-13D adds no
+content-release coordinate, ingestion, or portable vector state.
+
+Packages also never carry MCP URLs or configuration, transports, commands,
+tool catalogs as trusted truth, headers, credentials, environment values,
+certificates, approvals, trust material, or local server identifiers. Flow MCP
+remains hard-disabled at authoring, publish, verified-definition, import, and
+runtime boundaries. WI-13D removes only the blanket export failure caused by
+unreachable source-local association rows. It counts distinct affected step
+assistants in one tenant-scoped scalar query and writes one strict provenance
+omission with fields `kind` and `count >= 1`; a server row plus tool rows for
+one assistant still counts once.
+
+`FlowPackageProvenance.omissions` is the sole durable omission owner. The field
+is required in strict provenance v1, empty for an ordinary export, and covered
+by the provenance hash and `content_checksum`. Unknown omission fields or kinds
+require a provenance schema-version decision rather than permissive parsing.
+The binary export remains one `.eneopkg` response. A positive omission adds the
+conditional `Eneo-Package-Omitted-Mcp-Assistant-Count` header; zero is represented
+only by an absent header. The canonical CORS expose-header owner covers normal
+middleware and manual error responses. The generated SDK parses the header
+into the strict omission type. Localized Swedish/English export UI presents the
+advisory before the existing save helper runs; import UI presents
+package-carried omissions before installation. Package bytes, responses, audit,
+and logs contain no names,
+URLs, credentials, headers, local identifiers, prompts, or source content.
+
+A future executable Assistant or App may declare a bounded abstract local
+integration requirement only in its own strict vertical contract. An authorized
+destination administrator then maps an independently configured local server,
+and installation cannot claim ready while a required integration remains
+unresolved. WI-13D adds neither that type nor capability matching, server
+export, marketplace state, or a generic integration registry.
 
 #### Portable container and module ownership
 
@@ -559,24 +612,29 @@ precede WI-03 retention selection. The lifecycle/package dependency order is:
 11. WI-13B
 12. WI-14 and WI-13C after WI-13B, in parallel when file and migration
     ownership allow
-13. WI-15
-14. WI-21 as the final cleanup slice
+13. WI-13D after WI-13B and WI-22B, when package model/schema, generated
+    SDK/docs, CORS, and locale ownership are available
+14. WI-15
+15. WI-21 as the final cleanup slice
 
 Additional gates:
 
 - WI-14 waits for the WI-22A/WI-22B capability shape and WI-13B's final public
   package shape. WI-13C does not change that public shape, so it need not block
-  WI-14.
-- Package-lane launch completion requires both WI-13B and WI-13C. WI-13C enters
-  the serialized migration queue from the then-current accepted Alembic head;
-  it does not share a migration with unrelated work.
-- Package-platform amendment added WI-13B and WI-13C; this retention decision
-  adds WI-19A and WI-19B. The roadmap has 45 full-schema sections: 37 current
-  and eight trigger-gated future. WI-12 remains five independently accepted
-  execution identities with separate receipts and commits; the current execution
-  denominator is therefore 41 and the total visible execution count is 49. The
-  eight trigger-gated future sections are also eight future execution identities
-  and remain excluded until their recorded trigger activates.
+  WI-14. WI-13D consumes the accepted generated-client boundary and reruns its
+  own schema/docs parity gates; it does not reopen WI-13B, WI-13C, WI-14,
+  WI-22B, or WI-23.
+- Package-lane launch completion requires WI-13B, WI-13C, and WI-13D. WI-13C
+  used the serialized migration queue; WI-13D is migration-free unless current
+  PostgreSQL plan evidence proves a separately reviewed schema need.
+- Package-platform amendment added WI-13B and WI-13C; the omission decision adds
+  WI-13D; this retention decision adds WI-19A and WI-19B. The roadmap has 46
+  full-schema sections: 38 current and eight trigger-gated future. WI-12 remains
+  five independently accepted execution identities with separate receipts and
+  commits; the current execution denominator is therefore 42 and the total
+  visible execution count is 50. The eight trigger-gated future sections are
+  also eight future execution identities and remain excluded until their
+  recorded trigger activates.
 - WI-19A → WI-19B → WI-19 is the serial retention-policy path. WI-19 and WI-24
   coordinate so Flow finalization collects runtime-upload
   candidates before cascade removes their bindings.
@@ -585,6 +643,8 @@ Additional gates:
   the then-current accepted Alembic head.
 - WI-22A and WI-22B may both affect generated schema and documentation. Reconfirm
   exact frontend ownership, regenerate once after WI-22B, and stop on overlap.
+  WI-13D later serializes package model/schema, generated SDK/docs, CORS, and
+  Swedish/English locale ownership for its one omission projection.
 - WI-D0 plus accepted WI-02A permits WI-08; WI-09 follows WI-08. WI-02B gates
   WI-12 heuristic-deletion families and other explicitly named live-evidence gates,
   not all semantic construction. WI-08 and WI-09 remain operationally deferred
