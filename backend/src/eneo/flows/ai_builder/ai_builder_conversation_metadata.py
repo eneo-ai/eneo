@@ -1102,20 +1102,6 @@ def make_persisted_assistant_tool_call(
     )
 
 
-def persisted_assistant_tool_call_from_runtime(
-    tool_call: RuntimeToolCall | PersistedAssistantToolCall,
-    *,
-    arguments: Mapping[str, Any],
-) -> PersistedAssistantToolCall:
-    if isinstance(tool_call, PersistedAssistantToolCall):
-        return tool_call.model_copy(update={"arguments": dict(arguments)})
-    return make_persisted_assistant_tool_call(
-        tool_call_id=str(tool_call.id),
-        tool_name=str(tool_call.function.name),
-        arguments=arguments,
-    )
-
-
 def persisted_assistant_tool_call_from_raw(
     value: object,
 ) -> PersistedAssistantToolCall | None:

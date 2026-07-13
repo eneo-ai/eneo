@@ -536,10 +536,6 @@ class AIBuilderService:
         ):
             yield event
 
-    async def list_session_attachments(self, *, session_id: UUID) -> list[File]:
-        snapshot = await self.get_session_attachment_snapshot(session_id=session_id)
-        return snapshot.files
-
     async def get_session_attachment_snapshot(
         self,
         *,

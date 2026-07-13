@@ -334,7 +334,6 @@ def _make_container(
 
     # Services
     service = AsyncMock()
-    service.list_session_attachments.return_value = []
     service.get_session_attachment_snapshot.return_value = SimpleNamespace(
         files=[],
         warnings=[],
@@ -801,7 +800,6 @@ class TestGetSessionEndpoint:
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
-        service.list_session_attachments.return_value = []
 
         result = await get_session(
             request=MagicMock(),
