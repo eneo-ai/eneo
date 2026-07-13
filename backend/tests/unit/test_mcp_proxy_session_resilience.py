@@ -132,3 +132,75 @@ async def test_circuit_breaker_open_returns_generic_message_without_internal_det
     assert "circuit" not in message.lower()
     assert "open_until" not in message.lower()
     assert str(server.id) not in message
+
+
+class TestTruncateToolResult:
+    """Oversized tool results are trimmed to the budget, never failed."""
+
+    def _truncate(self, result):
+        return MCPProxySession([])._truncate_tool_result(  # pyright: ignore[reportPrivateUsage]
+            result
+        )
+
+    def test_small_result_passes_through_untouched(self):
+        result = {"content": [{"type": "text", "text": "short"}], "is_error": False}
+
+        assert self._truncate(result) is result
+
+    def test_oversized_text_is_cut_not_errored(self):
+        from eneo.main.config import get_settings
+
+        max_chars = get_settings().mcp_tool_output_max_chars
+        result = {
+            "content": [{"type": "text", "text": "x" * (max_chars * 2)}],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        assert truncated["is_error"] is False
+        head, notice = truncated["content"]
+        assert head["text"].startswith("x")
+        assert len(head["text"]) < max_chars
+        assert "truncated" in notice["text"]
+
+    def test_leading_blocks_kept_whole_and_tail_dropped(self):
+        from eneo.main.config import get_settings
+
+        max_chars = get_settings().mcp_tool_output_max_chars
+        result = {
+            "content": [
+                {"type": "text", "text": "first block"},
+                {"type": "text", "text": "y" * (max_chars * 2)},
+                {"type": "image", "data": "AAAA", "mime_type": "image/png"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        first, cut, notice = truncated["content"]
+        assert first == {"type": "text", "text": "first block"}
+        assert cut["text"].startswith("y") and len(cut["text"]) < max_chars
+        assert "1 content block(s) dropped" in notice["text"]
+
+    def test_total_size_respects_budget(self):
+        import json
+
+        from eneo.main.config import get_settings
+
+        max_chars = get_settings().mcp_tool_output_max_chars
+        result = {
+            "content": [
+                {"type": "text", "text": "z\\" * max_chars},
+                {"type": "text", "text": "tail"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        # The notice block is the only allowance beyond the budget.
+        without_notice = {**truncated, "content": truncated["content"][:-1]}
+        serialized = json.dumps(without_notice, ensure_ascii=False, default=str)
+        assert len(serialized) <= max_chars + 200

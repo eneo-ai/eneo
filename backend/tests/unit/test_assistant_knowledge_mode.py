@@ -171,6 +171,15 @@ class TestKnowledgeCatalog:
         assert "take precedence over every other tool" in catalog
         assert "clearly for live data" in catalog
 
+    def test_catalog_makes_tool_fallback_proactive(self):
+        # Empty or thin knowledge results flow directly into another
+        # available tool; the model must not stop to ask permission to use
+        # a tool the user already enabled.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "only partly answered" in catalog
+        assert "never ask the user for permission" in catalog
+
     def test_catalog_states_knowledge_tools_win_ties(self):
         # When another server exposes a similarly named search tool, the
         # catalog must resolve the tie toward the built-in knowledge tools.

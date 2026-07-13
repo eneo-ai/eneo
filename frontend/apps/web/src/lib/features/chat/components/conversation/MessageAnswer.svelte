@@ -142,26 +142,35 @@
   );
   // Built-in loopback tools render as slim thinking-style lines in the message
   // flow; only external MCP calls keep their cards in the reasoning trace.
-  const externalSteps = $derived(tracedSteps.filter((step) => !step.internal));
-  const internalSteps = $derived(tracedSteps.filter((step) => step.internal));
-
-  // Internal steps take up a single line: while the assistant works, only the
-  // latest step shows and each new call replaces the previous one in place;
-  // once the turn completes they fold into a one-line summary that expands to
-  // the full list. A single step never folds — the summary would be no
-  // smaller than the step itself.
-  let internalStepsOpen = $state(false);
-  const internalStepsWorking = $derived(
-    toolsStillExecuting ||
-      internalSteps.some((step) => step.status === "preparing" || step.status === "running")
-  );
-  const internalStepsFailed = $derived(
-    internalSteps.some((step) => step.status === "failed" || step.status === "denied")
-  );
-  const internalStepsSummary = $derived.by(() => {
-    const servers = [...new Set(internalSteps.map((step) => step.serverName))].join(" · ");
-    return `${servers} · ${m.internal_tool_steps_count({ count: internalSteps.length })}`;
+  // Contiguous steps of the same kind group into runs that render in call
+  // order, so the trace stays chronological when a turn mixes both kinds
+  // (e.g. a knowledge search followed by web tools).
+  const stepRuns = $derived.by(() => {
+    const runs: { internal: boolean; steps: typeof tracedSteps }[] = [];
+    for (const step of tracedSteps) {
+      const last = runs[runs.length - 1];
+      if (last && last.internal === step.internal) last.steps.push(step);
+      else runs.push({ internal: step.internal, steps: [step] });
+    }
+    return runs;
   });
+
+  // Internal steps take up a single line per run: while the assistant works,
+  // only the run's latest step shows and each new call replaces the previous
+  // one in place; once the run completes it folds into a one-line summary
+  // that expands to the full list. A single step never folds — the summary
+  // would be no smaller than the step itself. Runs only ever append during a
+  // turn, so the run index is a stable key for the expanded state.
+  const openInternalRuns = new SvelteSet<number>();
+  const runWorking = (run: (typeof stepRuns)[number], runIndex: number) =>
+    (toolsStillExecuting && runIndex === stepRuns.length - 1) ||
+    run.steps.some((step) => step.status === "preparing" || step.status === "running");
+  const runFailed = (run: (typeof stepRuns)[number]) =>
+    run.steps.some((step) => step.status === "failed" || step.status === "denied");
+  const runSummary = (run: (typeof stepRuns)[number]) => {
+    const servers = [...new Set(run.steps.map((step) => step.serverName))].join(" · ");
+    return `${servers} · ${m.internal_tool_steps_count({ count: run.steps.length })}`;
+  };
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -246,74 +255,88 @@
     {/each}
   {/if}
 
-  {#if externalSteps.length > 0 || reasoningText.trim().length > 0}
+  <!-- Reasoning text belongs at the top of the trace: it rides in the first
+       run's box when that run is external, otherwise it gets its own box so
+       it never renders below tool activity it preceded. -->
+  {#if reasoningText.trim().length > 0 && (stepRuns.length === 0 || stepRuns[0].internal)}
     <div class="mb-4">
-      <ReasoningTrace
-        steps={externalSteps}
-        reasoning={reasoningText}
-        working={toolsStillExecuting}
-        loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
-      />
+      <ReasoningTrace reasoning={reasoningText} working={toolsStillExecuting} />
     </div>
   {/if}
 
-  {#if internalSteps.length > 0}
-    {#snippet internalStepLines()}
-      {#each internalSteps as step, i (step.toolCallId ?? i)}
-        <InternalToolStep
-          runningLabel={step.toolName}
-          doneLabel={step.doneLabel}
-          serverName={step.serverName}
-          detail={step.detail}
-          args={step.args}
-          toolCallId={step.toolCallId}
-          status={step.status}
-          onLoadResult={step.toolCallId
-            ? () => chat.getToolCallResult(step.toolCallId!)
-            : undefined}
+  {#each stepRuns as run, runIndex (runIndex)}
+    {#if !run.internal}
+      <div class="mb-4">
+        <ReasoningTrace
+          steps={run.steps}
+          reasoning={runIndex === 0 ? reasoningText : ""}
+          working={toolsStillExecuting && runIndex === stepRuns.length - 1}
+          loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
         />
-      {/each}
-    {/snippet}
-    <div class="mb-4 flex flex-col gap-0.5">
-      {#if internalStepsWorking}
-        {@const currentStep = internalSteps[internalSteps.length - 1]}
-        <InternalToolStep
-          runningLabel={currentStep.toolName}
-          doneLabel={currentStep.doneLabel}
-          serverName={currentStep.serverName}
-          detail={currentStep.detail}
-          args={currentStep.args}
-          toolCallId={currentStep.toolCallId}
-          status={currentStep.status}
-          onLoadResult={currentStep.toolCallId
-            ? () => chat.getToolCallResult(currentStep.toolCallId!)
-            : undefined}
-        />
-      {:else if internalSteps.length > 1}
-        <button
-          type="button"
-          class="text-muted hover:text-secondary flex w-fit max-w-full items-center gap-1.5 text-sm leading-tight transition-colors"
-          onclick={() => (internalStepsOpen = !internalStepsOpen)}
-          aria-expanded={internalStepsOpen}
-        >
-          <ChevronRight
-            class="h-3.5 w-3.5 shrink-0 transition-transform {internalStepsOpen ? 'rotate-90' : ''}"
+      </div>
+    {:else}
+      {#snippet internalStepLines()}
+        {#each run.steps as step, i (step.toolCallId ?? i)}
+          <InternalToolStep
+            runningLabel={step.toolName}
+            doneLabel={step.doneLabel}
+            serverName={step.serverName}
+            detail={step.detail}
+            args={step.args}
+            toolCallId={step.toolCallId}
+            status={step.status}
+            onLoadResult={step.toolCallId
+              ? () => chat.getToolCallResult(step.toolCallId!)
+              : undefined}
           />
-          {#if internalStepsFailed}
-            <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
+        {/each}
+      {/snippet}
+      <div class="mb-4 flex flex-col gap-0.5">
+        {#if runWorking(run, runIndex)}
+          {@const currentStep = run.steps[run.steps.length - 1]}
+          <InternalToolStep
+            runningLabel={currentStep.toolName}
+            doneLabel={currentStep.doneLabel}
+            serverName={currentStep.serverName}
+            detail={currentStep.detail}
+            args={currentStep.args}
+            toolCallId={currentStep.toolCallId}
+            status={currentStep.status}
+            onLoadResult={currentStep.toolCallId
+              ? () => chat.getToolCallResult(currentStep.toolCallId!)
+              : undefined}
+          />
+        {:else if run.steps.length > 1}
+          <button
+            type="button"
+            class="text-muted hover:text-secondary flex w-fit max-w-full items-center gap-1.5 text-sm leading-tight transition-colors"
+            onclick={() =>
+              openInternalRuns.has(runIndex)
+                ? openInternalRuns.delete(runIndex)
+                : openInternalRuns.add(runIndex)}
+            aria-expanded={openInternalRuns.has(runIndex)}
+          >
+            <ChevronRight
+              class="h-3.5 w-3.5 shrink-0 transition-transform {openInternalRuns.has(runIndex)
+                ? 'rotate-90'
+                : ''}"
+            />
+            {#if runFailed(run)}
+              <X class="text-negative-default h-3.5 w-3.5 shrink-0" />
+            {/if}
+            <span class="truncate font-medium">{runSummary(run)}</span>
+          </button>
+          {#if openInternalRuns.has(runIndex)}
+            <div class="flex flex-col gap-0.5 pl-7">
+              {@render internalStepLines()}
+            </div>
           {/if}
-          <span class="truncate font-medium">{internalStepsSummary}</span>
-        </button>
-        {#if internalStepsOpen}
-          <div class="flex flex-col gap-0.5 pl-7">
-            {@render internalStepLines()}
-          </div>
+        {:else}
+          {@render internalStepLines()}
         {/if}
-      {:else}
-        {@render internalStepLines()}
-      {/if}
-    </div>
-  {/if}
+      </div>
+    {/if}
+  {/each}
 
   {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
