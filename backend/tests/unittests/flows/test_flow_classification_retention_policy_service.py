@@ -4,6 +4,10 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.data_retention.infrastructure.data_retention_service import (
+    FlowRetentionClassificationChangeDecision,
+    FlowRetentionClassificationProposal,
+)
 from eneo.flows.application.flow_classification_retention_policy_service import (
     FlowClassificationRetentionPolicyService,
 )
@@ -22,11 +26,16 @@ def _user() -> SimpleNamespace:
     )
 
 
-def _service(repo: AsyncMock, audit_service: AsyncMock):
+def _service(
+    repo: AsyncMock,
+    audit_service: AsyncMock,
+    data_retention_service: AsyncMock | None = None,
+):
     return FlowClassificationRetentionPolicyService(
         user=_user(),
         repo=repo,
         audit_service=audit_service,
+        data_retention_service=data_retention_service or AsyncMock(),
     )
 
 
@@ -41,10 +50,11 @@ async def test_set_policy_requires_tenant_security_classification() -> None:
         await service.set_policy(
             security_classification_id=uuid4(),
             data_retention_days=7,
+            confirmation=None,
         )
 
     repo.upsert.assert_not_awaited()
-    audit_service.log_async.assert_not_awaited()
+    audit_service.log.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -63,23 +73,37 @@ async def test_set_policy_upserts_and_audits_change() -> None:
         data_retention_days=7,
     )
     audit_service = AsyncMock()
-    service = _service(repo, audit_service)
+    data_retention_service = AsyncMock()
+    data_retention_service.prepare_flow_retention_classification_change.return_value = (
+        FlowRetentionClassificationChangeDecision(
+            old_policy=FlowRetentionClassificationProposal(
+                security_classification_id=classification_id,
+                data_retention_days=30,
+            ),
+            new_policy=FlowRetentionClassificationProposal(
+                security_classification_id=classification_id,
+                data_retention_days=7,
+            ),
+            destructive_change=True,
+            preview=None,
+        )
+    )
+    service = _service(repo, audit_service, data_retention_service)
 
     updated = await service.set_policy(
         security_classification_id=classification_id,
         data_retention_days=7,
+        confirmation=None,
     )
 
     assert updated.data_retention_days == 7
     repo.upsert.assert_awaited_once()
-    audit_service.log_async.assert_awaited_once()
-    metadata = audit_service.log_async.await_args.kwargs["metadata"]
-    assert metadata["setting"] == "flow_classification_retention_policy"
-    assert metadata["security_classification_id"] == str(classification_id)
-    assert metadata["changes"]["data_retention_days"] == {
-        "old": 30,
-        "new": 7,
-    }
+    audit_service.log.assert_awaited_once()
+    metadata = audit_service.log.await_args.kwargs["metadata"]
+    assert set(metadata) == {"old_policy", "new_policy", "preview", "activation"}
+    assert metadata["old_policy"]["data_retention_days"] == 30
+    assert metadata["new_policy"]["data_retention_days"] == 7
+    assert metadata["preview"] is None
 
 
 @pytest.mark.asyncio
@@ -95,8 +119,11 @@ async def test_delete_policy_is_idempotent_for_existing_classification() -> None
     await service.delete_policy(security_classification_id=classification_id)
 
     repo.delete.assert_awaited_once()
-    audit_service.log_async.assert_awaited_once()
-    metadata = audit_service.log_async.await_args.kwargs["metadata"]
-    assert metadata["security_classification_id"] == str(classification_id)
-    assert metadata["deleted"] is False
-    assert metadata["old_data_retention_days"] is None
+    audit_service.log.assert_awaited_once()
+    metadata = audit_service.log.await_args.kwargs["metadata"]
+    assert set(metadata) == {"old_policy", "new_policy", "preview", "activation"}
+    assert metadata["old_policy"]["security_classification_id"] == str(
+        classification_id
+    )
+    assert metadata["new_policy"] is None
+    assert metadata["activation"]["deleted"] is False

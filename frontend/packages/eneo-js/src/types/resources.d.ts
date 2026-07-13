@@ -66,12 +66,20 @@ export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"]
 export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+export type FlowRetentionPolicyUpdate = components["schemas"]["FlowRetentionPolicyUpdate"];
+export type FlowRetentionOrganizationPreviewRequest =
+  components["schemas"]["FlowRetentionOrganizationPreviewRequest"];
+export type FlowRetentionImpactPreview = components["schemas"]["FlowRetentionImpactPreviewPublic"];
+export type FlowRetentionChangeConfirmation =
+  components["schemas"]["FlowRetentionChangeConfirmationPublic"];
 export type FlowClassificationRetentionPolicies =
   components["schemas"]["FlowClassificationRetentionPoliciesPublic"];
 export type FlowClassificationRetentionPolicy =
   components["schemas"]["FlowClassificationRetentionPolicyPublic"];
 export type FlowClassificationRetentionPolicyUpdate =
   components["schemas"]["FlowClassificationRetentionPolicyUpdate"];
+export type FlowClassificationRetentionPolicyPreviewRequest =
+  components["schemas"]["FlowClassificationRetentionPolicyPreviewRequest"];
 export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
 export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.

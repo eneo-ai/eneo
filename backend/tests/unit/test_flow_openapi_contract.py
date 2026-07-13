@@ -331,10 +331,14 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/settings/flow-runtime-policy": {"get", "patch"},
     "/api/v1/settings/flow-evidence-policy": {"get", "patch"},
     "/api/v1/settings/flow-retention-policy": {"get", "patch"},
+    "/api/v1/settings/flow-retention-policy/preview": {"post"},
     "/api/v1/settings/flow-classification-retention-policies": {"get"},
     "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}": {
         "put",
         "delete",
+    },
+    "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview": {
+        "post",
     },
 }
 
@@ -394,6 +398,12 @@ REQUIRED_SCHEMAS = {
     "FlowRunStatusCapabilitiesPublic",
     "FlowRunStatusCapabilityPublic",
     "FlowInputLimitsPublic",
+    "FlowRetentionChangeConfirmationPublic",
+    "FlowRetentionDataImpactPublic",
+    "FlowRetentionImpactPreviewPublic",
+    "FlowRetentionOrganizationPreviewRequest",
+    "FlowRetentionPolicyPublic",
+    "FlowRetentionPolicyUpdate",
     "FlowTemplateAssetPublic",
     "FlowTemplateReadinessPublic",
     "FlowTemplateInspectionPublic",
@@ -446,6 +456,10 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "patch",
     ): "update_flow_retention_policy",
     (
+        "/api/v1/settings/flow-retention-policy/preview",
+        "post",
+    ): "preview_flow_retention_policy",
+    (
         "/api/v1/settings/flow-classification-retention-policies",
         "get",
     ): "list_flow_classification_retention_policies",
@@ -457,6 +471,10 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "delete",
     ): "delete_flow_classification_retention_policy",
+    (
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+        "post",
+    ): "preview_flow_classification_retention_policy",
 }
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
@@ -598,7 +616,11 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-retention-policy",
         "patch",
-    ): {"400", "403", "422"},
+    ): {"400", "403", "409", "422"},
+    (
+        "/api/v1/settings/flow-retention-policy/preview",
+        "post",
+    ): {"403", "422"},
     (
         "/api/v1/settings/flow-classification-retention-policies",
         "get",
@@ -606,10 +628,14 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "put",
-    ): {"403", "404", "422"},
+    ): {"403", "404", "409", "422"},
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "delete",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+        "post",
     ): {"403", "404", "422"},
 }
 
@@ -728,7 +754,8 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("/api/v1/settings/flow-evidence-policy", "get"): {"403"},
     ("/api/v1/settings/flow-evidence-policy", "patch"): {"400", "403"},
     ("/api/v1/settings/flow-retention-policy", "get"): {"403"},
-    ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403"},
+    ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403", "409"},
+    ("/api/v1/settings/flow-retention-policy/preview", "post"): {"403"},
     (
         "/api/v1/settings/flow-classification-retention-policies",
         "get",
@@ -736,10 +763,14 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "put",
-    ): {"403", "404"},
+    ): {"403", "404", "409"},
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "delete",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+        "post",
     ): {"403", "404"},
 }
 
@@ -974,34 +1005,92 @@ def test_openapi_flow_evidence_policy_update_rejects_null_flags(
     assert all(value is not None for value in example.values())
 
 
-def test_openapi_flow_retention_policy_exposes_implemented_field_only(
+def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
+    public_schema = schemas["FlowRetentionPolicyPublic"]
+    update_schema = schemas["FlowRetentionPolicyUpdate"]
+    public_properties = public_schema["properties"]
+    update_properties = update_schema["properties"]
 
-    for component_name in ("FlowRetentionPolicyPublic", "FlowRetentionPolicyUpdate"):
-        component = schemas.get(component_name, {})
-        assert set(component.get("properties", {})) == {"run_debug_evidence_days"}
+    assert set(public_properties) == {
+        "run_debug_evidence_days",
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+        "effective_state",
+    }
+    assert set(update_properties) == {
+        "run_debug_evidence_days",
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+        "confirmation",
+    }
+    assert set(public_schema["required"]) == set(public_properties)
+    assert update_schema.get("additionalProperties") is False
+    assert update_schema.get("required", []) == []
 
-    assert schemas["FlowRetentionPolicyUpdate"].get("additionalProperties") is False
+    for field_name in (
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+    ):
+        for properties in (public_properties, update_properties):
+            property_schema = properties[field_name]
+            integer_schema = next(
+                option
+                for option in property_schema["anyOf"]
+                if option.get("type") == "integer"
+            )
+            assert integer_schema["minimum"] == 1
+            assert integer_schema["maximum"] == 2555
+            assert _schema_allows_null(property_schema)
+            assert "default" not in property_schema
+
+
+def test_openapi_flow_retention_preview_and_confirmation_are_exact_contracts(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    preview_request = schemas["FlowRetentionOrganizationPreviewRequest"]
+    confirmation = schemas["FlowRetentionChangeConfirmationPublic"]
+    preview = schemas["FlowRetentionImpactPreviewPublic"]
+
+    assert set(preview_request["required"]) == {
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+    }
+    assert preview_request.get("additionalProperties") is False
+    assert set(confirmation["required"]) == {
+        "expected_control_plane_version",
+        "expected_preview_hash",
+        "previewed_at",
+    }
+    assert set(preview["required"]) == set(preview["properties"])
+    assert preview["properties"]["run_history_anchor"]["const"] == (
+        "finished_at_or_created_at"
+    )
+    assert preview["properties"]["runtime_upload_anchor"]["const"] == "created_at"
 
 
 def test_openapi_flow_retention_surfaces_are_disambiguated(
     openapi_spec: dict,
 ) -> None:
     paths = openapi_spec.get("paths", {})
-    debug_retention = paths["/api/v1/settings/flow-retention-policy"]["get"]
+    organization_retention = paths["/api/v1/settings/flow-retention-policy"]["get"]
     classification_retention = paths[
         "/api/v1/settings/flow-classification-retention-policies"
     ]["get"]
 
-    debug_description = str(debug_retention.get("description", "")).lower()
+    organization_description = str(
+        organization_retention.get("description", "")
+    ).lower()
     classification_description = str(
         classification_retention.get("description", "")
     ).lower()
 
-    assert "debug-evidence" in debug_description
-    assert "full run history" not in debug_description
+    assert "debug-evidence" in organization_description
+    assert "deletion envelope" in organization_description
+    assert "wi-19b" in organization_description
     assert "full run history" in classification_description
     assert "step history" in classification_description
     assert "debug-evidence" in classification_description
@@ -1027,7 +1116,10 @@ def test_openapi_flow_classification_retention_policy_contract(
     assert set(list_schema.get("properties", {})) == {"policies"}
 
     update_schema = schemas.get("FlowClassificationRetentionPolicyUpdate", {})
-    assert set(update_schema.get("properties", {})) == {"data_retention_days"}
+    assert set(update_schema.get("properties", {})) == {
+        "data_retention_days",
+        "confirmation",
+    }
     assert update_schema.get("additionalProperties") is False
     assert update_schema["properties"]["data_retention_days"]["minimum"] == 1
     assert update_schema["properties"]["data_retention_days"]["maximum"] == 2555

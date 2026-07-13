@@ -34,6 +34,23 @@ describe("settings flow policy endpoints", () => {
     });
   });
 
+  it("previews exact flow retention impact on the canonical settings route", async () => {
+    const preview = { preview_hash: "b".repeat(64) };
+    const fetch = vi.fn(async () => preview);
+    const settings = initSettings({ fetch });
+    const proposal = {
+      flow_run_history_retention_days: 30,
+      flow_runtime_upload_abandonment_days: null
+    };
+
+    await expect(settings.previewFlowRetentionPolicy(proposal)).resolves.toBe(preview);
+
+    expect(fetch).toHaveBeenCalledWith("/api/v1/settings/flow-retention-policy/preview", {
+      method: "post",
+      requestBody: { "application/json": proposal }
+    });
+  });
+
   it("lists flow classification retention policies from canonical settings route", async () => {
     const fetch = vi.fn(async () => ({
       policies: [
@@ -80,6 +97,25 @@ describe("settings flow policy endpoints", () => {
         }
       }
     });
+  });
+
+  it("previews exact classification retention impact by classification id", async () => {
+    const fetch = vi.fn(async () => ({ preview_hash: "b".repeat(64) }));
+    const settings = initSettings({ fetch });
+    const classificationId = "6f982fa9-8f74-451f-b6fc-773f937af7ef";
+
+    await settings.previewFlowClassificationRetentionPolicy(classificationId, {
+      data_retention_days: 14
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+      {
+        method: "post",
+        params: { path: { security_classification_id: classificationId } },
+        requestBody: { "application/json": { data_retention_days: 14 } }
+      }
+    );
   });
 
   it("deletes flow classification retention policy by classification id", async () => {

@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.main.config import (
     validate_redirect_path,
     validate_redirect_uri,
@@ -70,6 +71,18 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
     flow_settings: dict[str, Any] = Field(default_factory=dict)
+    flow_run_history_retention_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    flow_runtime_upload_abandonment_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
     favorite_providers: list[str] = Field(default_factory=list)
 
     @field_validator("favorite_providers")
@@ -280,6 +293,18 @@ class TenantUpdatePublic(BaseModel):
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
     flow_settings: Optional[dict[str, Any]] = None
+    flow_run_history_retention_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    flow_runtime_upload_abandonment_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
 
     @field_validator("flow_settings", mode="before")
     @classmethod

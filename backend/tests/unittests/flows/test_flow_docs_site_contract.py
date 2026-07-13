@@ -3637,7 +3637,9 @@ def test_flow_api_guide_does_not_teach_stale_run_response_shape() -> None:
     assert "flow as a whole, not one step at a time" not in guide
 
 
-def test_flow_overview_matches_implemented_runtime_retention_scope() -> None:
+def test_flow_docs_distinguish_existing_runtime_from_gated_retention_control_plane() -> (
+    None
+):
     overview = _read(FLOW_OVERVIEW)
     guide = _read(FLOW_API_GUIDE)
 
@@ -3649,12 +3651,23 @@ def test_flow_overview_matches_implemented_runtime_retention_scope() -> None:
     assert "/api/v1/settings/flow-classification-retention-policies" in overview
     assert "/api/v1/settings/flow-classification-retention-policies" in guide
     assert "security_enabled" in overview
-    assert "Classification policies tighten" in guide
     assert "earlier debug-evidence redaction window" in overview
     assert "unreferenced generated result files" in overview
     assert "Reusable runtime uploads" in overview
     assert "Purge is deferred while a run still has undelivered audit events" in (
         overview
     )
-    assert "Purge is deferred while a run still has undelivered audit events" in guide
+    assert "flow_run_history_retention_days" in guide
+    assert "flow_runtime_upload_abandonment_days" in guide
+    assert "/flow-retention-policy/preview" in guide
+    assert "/{security_classification_id}/preview" in guide
+    assert "control-plane version" in guide
+    assert "preview hash" in guide
+    assert "produces `409`" in guide
+    assert "null` means **Off**" in guide
+    assert "cannot be deployed or described as launch-complete" in guide
+    assert "canonical run-history purge selector adopts" in guide
+    assert "do not themselves delete data" in guide
+    assert "upload sweeping" in guide
+    assert "never overrides preservation duties" in guide
     assert "There is no API for raw per-step deletion intervals yet." in guide

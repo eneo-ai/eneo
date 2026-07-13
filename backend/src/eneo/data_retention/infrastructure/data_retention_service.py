@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -5,6 +7,7 @@ from typing import Any, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.constants import (
@@ -16,6 +19,7 @@ from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_classification_retention_policy_table import (
     FlowClassificationRetentionPolicies,
 )
@@ -24,6 +28,9 @@ from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRunStepResultFiles,
+    FlowRuntimeUploadedFiles,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
@@ -56,6 +63,7 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
 )
+from eneo.main.exceptions import ConflictException, NotFoundException
 
 logger = logging.getLogger(__name__)
 
@@ -159,12 +167,803 @@ class FlowDebugRedactionCounts:
     debug_step_attempts: int = 0
 
 
+FLOW_RETENTION_PREVIEW_MAX_AGE = timedelta(minutes=15)
+FLOW_RETENTION_PREVIEW_FUTURE_TOLERANCE = timedelta(seconds=30)
+FLOW_RETENTION_CONFIRMATION_REQUIRED_CODE = "flow_retention_confirmation_required"
+FLOW_RETENTION_PREVIEW_STALE_CODE = "flow_retention_preview_stale"
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionClassificationPolicyState:
+    security_classification_id: UUID
+    data_retention_days: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionControlPlaneState:
+    organization_run_history_days: int | None
+    runtime_upload_abandonment_days: int | None
+    classification_policies: tuple[FlowRetentionClassificationPolicyState, ...]
+    latent_space_retention_days: tuple[int, ...]
+    latent_flow_retention_days: tuple[int, ...]
+
+    @property
+    def version(self) -> str:
+        payload = {
+            "organization_run_history_days": self.organization_run_history_days,
+            "runtime_upload_abandonment_days": (self.runtime_upload_abandonment_days),
+            "classification_policies": [
+                [str(policy.security_classification_id), policy.data_retention_days]
+                for policy in self.classification_policies
+            ],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionOrganizationProposal:
+    flow_run_history_retention_days: int | None
+    flow_runtime_upload_abandonment_days: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionClassificationProposal:
+    security_classification_id: UUID
+    data_retention_days: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionValuePatch:
+    is_set: bool
+    value: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionChangeConfirmation:
+    expected_control_plane_version: str
+    expected_preview_hash: str
+    previewed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionDataImpact:
+    current_eligible_count: int
+    proposed_eligible_count: int
+    newly_eligible_count: int
+    no_longer_eligible_count: int
+    proposed_eligible_bytes: int
+    newly_eligible_bytes: int
+    earliest_proposed_anchor: datetime | None
+    latest_proposed_anchor: datetime | None
+
+    def hash_payload(self) -> dict[str, object]:
+        return {
+            "current_eligible_count": self.current_eligible_count,
+            "proposed_eligible_count": self.proposed_eligible_count,
+            "newly_eligible_count": self.newly_eligible_count,
+            "no_longer_eligible_count": self.no_longer_eligible_count,
+            "proposed_eligible_bytes": self.proposed_eligible_bytes,
+            "newly_eligible_bytes": self.newly_eligible_bytes,
+            "earliest_proposed_anchor": _datetime_hash_value(
+                self.earliest_proposed_anchor
+            ),
+            "latest_proposed_anchor": _datetime_hash_value(self.latest_proposed_anchor),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionLifecycleBlockers:
+    undelivered_audit_count: int
+    unresolved_webhook_count: int
+    active_rerun_count: int
+
+    def hash_payload(self) -> dict[str, int]:
+        return {
+            "undelivered_audit_count": self.undelivered_audit_count,
+            "unresolved_webhook_count": self.unresolved_webhook_count,
+            "active_rerun_count": self.active_rerun_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionImpactPreview:
+    destructive_change: bool
+    control_plane_version: str
+    preview_hash: str
+    previewed_at: datetime
+    run_history: FlowRetentionDataImpact
+    runtime_uploads: FlowRetentionDataImpact
+    lifecycle_blockers: FlowRetentionLifecycleBlockers
+    latent_space_retention_days: tuple[int, ...]
+    latent_flow_retention_days: tuple[int, ...]
+
+    def audit_summary(self) -> dict[str, object]:
+        return {
+            "run_history": self.run_history.hash_payload(),
+            "runtime_uploads": self.runtime_uploads.hash_payload(),
+            "lifecycle_blockers": self.lifecycle_blockers.hash_payload(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionOrganizationChangeDecision:
+    old_policy: FlowRetentionOrganizationProposal
+    new_policy: FlowRetentionOrganizationProposal
+    destructive_change: bool
+    preview: FlowRetentionImpactPreview | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionClassificationChangeDecision:
+    old_policy: FlowRetentionClassificationProposal | None
+    new_policy: FlowRetentionClassificationProposal
+    destructive_change: bool
+    preview: FlowRetentionImpactPreview | None
+
+
+@dataclass(frozen=True, slots=True)
+class _FlowRetentionSqlProposal:
+    organization_run_history_days: int | None
+    runtime_upload_abandonment_days: int | None
+    classification_id: UUID | None = None
+    classification_days: int | None = None
+
+
+def _datetime_hash_value(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _retention_change_is_destructive(
+    *, old_days: int | None, new_days: int | None
+) -> bool:
+    return new_days is not None and (old_days is None or new_days < old_days)
+
+
 class DataRetentionService:
     """Service for managing data retention and deletion based on hierarchical policies."""
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.session = session
+
+    async def get_flow_retention_control_plane_state(
+        self,
+        *,
+        tenant_id: UUID,
+        lock: bool = False,
+    ) -> FlowRetentionControlPlaneState:
+        tenant_stmt = sa.select(
+            Tenants.flow_run_history_retention_days,
+            Tenants.flow_runtime_upload_abandonment_days,
+        ).where(Tenants.id == tenant_id)
+        if lock:
+            tenant_stmt = tenant_stmt.with_for_update(of=Tenants)
+        tenant_row = (await self.session.execute(tenant_stmt)).one_or_none()
+        if tenant_row is None:
+            raise NotFoundException("Tenant not found.")
+
+        policy_rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowClassificationRetentionPolicies.security_classification_id,
+                    FlowClassificationRetentionPolicies.data_retention_days,
+                )
+                .where(FlowClassificationRetentionPolicies.tenant_id == tenant_id)
+                .order_by(
+                    FlowClassificationRetentionPolicies.security_classification_id
+                )
+            )
+        ).all()
+        space_days = tuple(
+            day
+            for day in (
+                await self.session.scalars(
+                    sa.select(Spaces.data_retention_days)
+                    .where(
+                        Spaces.tenant_id == tenant_id,
+                        Spaces.data_retention_days.is_not(None),
+                    )
+                    .distinct()
+                    .order_by(Spaces.data_retention_days)
+                )
+            ).all()
+            if day is not None
+        )
+        flow_days = tuple(
+            day
+            for day in (
+                await self.session.scalars(
+                    sa.select(Flows.data_retention_days)
+                    .where(
+                        Flows.tenant_id == tenant_id,
+                        Flows.data_retention_days.is_not(None),
+                    )
+                    .distinct()
+                    .order_by(Flows.data_retention_days)
+                )
+            ).all()
+            if day is not None
+        )
+        organization_days, upload_days = tenant_row
+        return FlowRetentionControlPlaneState(
+            organization_run_history_days=organization_days,
+            runtime_upload_abandonment_days=upload_days,
+            classification_policies=tuple(
+                FlowRetentionClassificationPolicyState(
+                    security_classification_id=classification_id,
+                    data_retention_days=retention_days,
+                )
+                for classification_id, retention_days in policy_rows
+            ),
+            latent_space_retention_days=space_days,
+            latent_flow_retention_days=flow_days,
+        )
+
+    async def preview_flow_retention_organization_change(
+        self,
+        *,
+        tenant_id: UUID,
+        proposal: FlowRetentionOrganizationProposal,
+        previewed_at: datetime | None = None,
+    ) -> FlowRetentionImpactPreview:
+        state = await self.get_flow_retention_control_plane_state(tenant_id=tenant_id)
+        sql_proposal = _FlowRetentionSqlProposal(
+            organization_run_history_days=(proposal.flow_run_history_retention_days),
+            runtime_upload_abandonment_days=(
+                proposal.flow_runtime_upload_abandonment_days
+            ),
+        )
+        destructive_change = _retention_change_is_destructive(
+            old_days=state.organization_run_history_days,
+            new_days=proposal.flow_run_history_retention_days,
+        ) or _retention_change_is_destructive(
+            old_days=state.runtime_upload_abandonment_days,
+            new_days=proposal.flow_runtime_upload_abandonment_days,
+        )
+        return await self._preview_flow_retention_change(
+            tenant_id=tenant_id,
+            state=state,
+            proposal=sql_proposal,
+            destructive_change=destructive_change,
+            previewed_at=previewed_at or datetime.now(timezone.utc),
+        )
+
+    async def preview_flow_retention_classification_change(
+        self,
+        *,
+        tenant_id: UUID,
+        proposal: FlowRetentionClassificationProposal,
+        previewed_at: datetime | None = None,
+    ) -> FlowRetentionImpactPreview:
+        state = await self.get_flow_retention_control_plane_state(tenant_id=tenant_id)
+        old_days = next(
+            (
+                policy.data_retention_days
+                for policy in state.classification_policies
+                if policy.security_classification_id
+                == proposal.security_classification_id
+            ),
+            None,
+        )
+        return await self._preview_flow_retention_change(
+            tenant_id=tenant_id,
+            state=state,
+            proposal=_FlowRetentionSqlProposal(
+                organization_run_history_days=(state.organization_run_history_days),
+                runtime_upload_abandonment_days=(state.runtime_upload_abandonment_days),
+                classification_id=proposal.security_classification_id,
+                classification_days=proposal.data_retention_days,
+            ),
+            destructive_change=_retention_change_is_destructive(
+                old_days=old_days,
+                new_days=proposal.data_retention_days,
+            ),
+            previewed_at=previewed_at or datetime.now(timezone.utc),
+        )
+
+    async def prepare_flow_retention_organization_change(
+        self,
+        *,
+        tenant_id: UUID,
+        run_history_patch: FlowRetentionValuePatch,
+        upload_abandonment_patch: FlowRetentionValuePatch,
+        confirmation: FlowRetentionChangeConfirmation | None,
+    ) -> FlowRetentionOrganizationChangeDecision:
+        state = await self.get_flow_retention_control_plane_state(
+            tenant_id=tenant_id,
+            lock=True,
+        )
+        old_policy = FlowRetentionOrganizationProposal(
+            flow_run_history_retention_days=(state.organization_run_history_days),
+            flow_runtime_upload_abandonment_days=(
+                state.runtime_upload_abandonment_days
+            ),
+        )
+        new_policy = FlowRetentionOrganizationProposal(
+            flow_run_history_retention_days=(
+                run_history_patch.value
+                if run_history_patch.is_set
+                else state.organization_run_history_days
+            ),
+            flow_runtime_upload_abandonment_days=(
+                upload_abandonment_patch.value
+                if upload_abandonment_patch.is_set
+                else state.runtime_upload_abandonment_days
+            ),
+        )
+        destructive_change = _retention_change_is_destructive(
+            old_days=old_policy.flow_run_history_retention_days,
+            new_days=new_policy.flow_run_history_retention_days,
+        ) or _retention_change_is_destructive(
+            old_days=old_policy.flow_runtime_upload_abandonment_days,
+            new_days=new_policy.flow_runtime_upload_abandonment_days,
+        )
+        preview = None
+        if destructive_change:
+            preview = await self._confirm_flow_retention_change(
+                tenant_id=tenant_id,
+                state=state,
+                proposal=_FlowRetentionSqlProposal(
+                    organization_run_history_days=(
+                        new_policy.flow_run_history_retention_days
+                    ),
+                    runtime_upload_abandonment_days=(
+                        new_policy.flow_runtime_upload_abandonment_days
+                    ),
+                ),
+                confirmation=confirmation,
+            )
+        return FlowRetentionOrganizationChangeDecision(
+            old_policy=old_policy,
+            new_policy=new_policy,
+            destructive_change=destructive_change,
+            preview=preview,
+        )
+
+    async def prepare_flow_retention_classification_change(
+        self,
+        *,
+        tenant_id: UUID,
+        proposal: FlowRetentionClassificationProposal,
+        confirmation: FlowRetentionChangeConfirmation | None,
+    ) -> FlowRetentionClassificationChangeDecision:
+        state = await self.get_flow_retention_control_plane_state(
+            tenant_id=tenant_id,
+            lock=True,
+        )
+        old_days = next(
+            (
+                policy.data_retention_days
+                for policy in state.classification_policies
+                if policy.security_classification_id
+                == proposal.security_classification_id
+            ),
+            None,
+        )
+        old_policy = (
+            FlowRetentionClassificationProposal(
+                security_classification_id=proposal.security_classification_id,
+                data_retention_days=old_days,
+            )
+            if old_days is not None
+            else None
+        )
+        destructive_change = _retention_change_is_destructive(
+            old_days=old_days,
+            new_days=proposal.data_retention_days,
+        )
+        preview = None
+        if destructive_change:
+            preview = await self._confirm_flow_retention_change(
+                tenant_id=tenant_id,
+                state=state,
+                proposal=_FlowRetentionSqlProposal(
+                    organization_run_history_days=(state.organization_run_history_days),
+                    runtime_upload_abandonment_days=(
+                        state.runtime_upload_abandonment_days
+                    ),
+                    classification_id=proposal.security_classification_id,
+                    classification_days=proposal.data_retention_days,
+                ),
+                confirmation=confirmation,
+            )
+        return FlowRetentionClassificationChangeDecision(
+            old_policy=old_policy,
+            new_policy=proposal,
+            destructive_change=destructive_change,
+            preview=preview,
+        )
+
+    async def _confirm_flow_retention_change(
+        self,
+        *,
+        tenant_id: UUID,
+        state: FlowRetentionControlPlaneState,
+        proposal: _FlowRetentionSqlProposal,
+        confirmation: FlowRetentionChangeConfirmation | None,
+    ) -> FlowRetentionImpactPreview:
+        if confirmation is None:
+            raise ConflictException(
+                "Preview and confirm this destructive Flow retention change.",
+                code=FLOW_RETENTION_CONFIRMATION_REQUIRED_CODE,
+            )
+        now = datetime.now(timezone.utc)
+        previewed_at = confirmation.previewed_at
+        if previewed_at.tzinfo is None:
+            raise ConflictException(
+                "Flow retention preview timestamp must include a timezone.",
+                code=FLOW_RETENTION_PREVIEW_STALE_CODE,
+            )
+        previewed_at = previewed_at.astimezone(timezone.utc)
+        if (
+            previewed_at < now - FLOW_RETENTION_PREVIEW_MAX_AGE
+            or previewed_at > now + FLOW_RETENTION_PREVIEW_FUTURE_TOLERANCE
+        ):
+            raise ConflictException(
+                "Flow retention preview expired; request a new preview.",
+                code=FLOW_RETENTION_PREVIEW_STALE_CODE,
+            )
+        if confirmation.expected_control_plane_version != state.version:
+            raise ConflictException(
+                "Flow retention policy changed; request a new preview.",
+                code=FLOW_RETENTION_PREVIEW_STALE_CODE,
+            )
+        preview = await self._preview_flow_retention_change(
+            tenant_id=tenant_id,
+            state=state,
+            proposal=proposal,
+            destructive_change=True,
+            previewed_at=previewed_at,
+        )
+        if confirmation.expected_preview_hash != preview.preview_hash:
+            raise ConflictException(
+                "Flow retention impact changed; request a new preview.",
+                code=FLOW_RETENTION_PREVIEW_STALE_CODE,
+            )
+        return preview
+
+    async def _preview_flow_retention_change(
+        self,
+        *,
+        tenant_id: UUID,
+        state: FlowRetentionControlPlaneState,
+        proposal: _FlowRetentionSqlProposal,
+        destructive_change: bool,
+        previewed_at: datetime,
+    ) -> FlowRetentionImpactPreview:
+        normalized_previewed_at = previewed_at.astimezone(timezone.utc)
+        run_row = (
+            (
+                await self.session.execute(
+                    self._build_flow_retention_run_impact_query(
+                        tenant_id=tenant_id,
+                        state=state,
+                        proposal=proposal,
+                        previewed_at=normalized_previewed_at,
+                    )
+                )
+            )
+            .mappings()
+            .one()
+        )
+        upload_row = (
+            (
+                await self.session.execute(
+                    self._build_flow_retention_upload_impact_query(
+                        tenant_id=tenant_id,
+                        state=state,
+                        proposal=proposal,
+                        previewed_at=normalized_previewed_at,
+                    )
+                )
+            )
+            .mappings()
+            .one()
+        )
+        run_history = _flow_retention_data_impact_from_row(run_row)
+        runtime_uploads = _flow_retention_data_impact_from_row(upload_row)
+        blockers = FlowRetentionLifecycleBlockers(
+            undelivered_audit_count=_retention_row_int(
+                run_row, "undelivered_audit_count"
+            ),
+            unresolved_webhook_count=_retention_row_int(
+                run_row, "unresolved_webhook_count"
+            ),
+            active_rerun_count=_retention_row_int(run_row, "active_rerun_count"),
+        )
+        hash_payload = {
+            "control_plane_version": state.version,
+            "previewed_at": normalized_previewed_at.isoformat(),
+            "proposal": {
+                "organization_run_history_days": (
+                    proposal.organization_run_history_days
+                ),
+                "runtime_upload_abandonment_days": (
+                    proposal.runtime_upload_abandonment_days
+                ),
+                "classification_id": (
+                    str(proposal.classification_id)
+                    if proposal.classification_id is not None
+                    else None
+                ),
+                "classification_days": proposal.classification_days,
+            },
+            "run_history": run_history.hash_payload(),
+            "runtime_uploads": runtime_uploads.hash_payload(),
+            "lifecycle_blockers": blockers.hash_payload(),
+            "latent_space_retention_days": state.latent_space_retention_days,
+            "latent_flow_retention_days": state.latent_flow_retention_days,
+        }
+        preview_hash = hashlib.sha256(
+            json.dumps(
+                hash_payload,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        return FlowRetentionImpactPreview(
+            destructive_change=destructive_change,
+            control_plane_version=state.version,
+            preview_hash=preview_hash,
+            previewed_at=normalized_previewed_at,
+            run_history=run_history,
+            runtime_uploads=runtime_uploads,
+            lifecycle_blockers=blockers,
+            latent_space_retention_days=state.latent_space_retention_days,
+            latent_flow_retention_days=state.latent_flow_retention_days,
+        )
+
+    def _build_flow_retention_run_impact_query(
+        self,
+        *,
+        tenant_id: UUID,
+        state: FlowRetentionControlPlaneState,
+        proposal: _FlowRetentionSqlProposal,
+        previewed_at: datetime,
+    ) -> sa.Select[
+        tuple[int, int, int, int, int, int, datetime, datetime, int, int, int]
+    ]:
+        anchor = self._flow_run_history_retention_anchor()
+        current_classification_days = (
+            FlowClassificationRetentionPolicies.data_retention_days.__clause_element__()
+        )
+        proposed_classification_days = current_classification_days
+        if proposal.classification_id is not None:
+            proposed_classification_days = sa.case(
+                (
+                    Spaces.security_classification_id == proposal.classification_id,
+                    sa.literal(proposal.classification_days, type_=sa.Integer()),
+                ),
+                else_=current_classification_days,
+            )
+
+        current_activation_days = (
+            current_classification_days
+            if state.organization_run_history_days is None
+            else sa.func.least(
+                sa.literal(
+                    state.organization_run_history_days,
+                    type_=sa.Integer(),
+                ),
+                current_classification_days,
+            )
+        )
+        proposed_activation_days = (
+            proposed_classification_days
+            if proposal.organization_run_history_days is None
+            else sa.func.least(
+                sa.literal(
+                    proposal.organization_run_history_days,
+                    type_=sa.Integer(),
+                ),
+                proposed_classification_days,
+            )
+        )
+        current_effective_days = sa.func.least(
+            current_activation_days,
+            Spaces.data_retention_days,
+            Flows.data_retention_days,
+        )
+        proposed_effective_days = sa.func.least(
+            proposed_activation_days,
+            Spaces.data_retention_days,
+            Flows.data_retention_days,
+        )
+        current_due = sa.and_(
+            current_activation_days.is_not(None),
+            anchor
+            <= sa.literal(previewed_at)
+            - sa.func.make_interval(0, 0, 0, current_effective_days),
+        )
+        proposed_due = sa.and_(
+            proposed_activation_days.is_not(None),
+            anchor
+            <= sa.literal(previewed_at)
+            - sa.func.make_interval(0, 0, 0, proposed_effective_days),
+        )
+        candidates = (
+            sa.select(
+                FlowRuns.id.label("run_id"),
+                FlowRuns.tenant_id.label("tenant_id"),
+                anchor.label("retention_anchor"),
+                current_due.label("current_due"),
+                proposed_due.label("proposed_due"),
+            )
+            .join(Flows, FlowRuns.flow_id == Flows.id)
+            .join(Spaces, Flows.space_id == Spaces.id)
+            .outerjoin(
+                FlowClassificationRetentionPolicies,
+                sa.and_(
+                    FlowClassificationRetentionPolicies.security_classification_id
+                    == Spaces.security_classification_id,
+                    FlowClassificationRetentionPolicies.tenant_id == Spaces.tenant_id,
+                ),
+            )
+            .where(
+                FlowRuns.tenant_id == tenant_id,
+                FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
+                anchor
+                <= sa.literal(previewed_at)
+                - sa.func.make_interval(0, 0, 0, MIN_RETENTION_DAYS),
+            )
+            .cte("flow_retention_preview_candidates")
+        )
+        input_file_refs = sa.select(
+            FlowRunStepInputFiles.flow_run_id.label("run_id"),
+            FlowRunStepInputFiles.tenant_id.label("tenant_id"),
+            FlowRunStepInputFiles.file_id.label("file_id"),
+        ).join(
+            candidates,
+            FlowRunStepInputFiles.flow_run_id == candidates.c.run_id,
+        )
+        result_file_refs = sa.select(
+            FlowRunStepResultFiles.flow_run_id.label("run_id"),
+            FlowRunStepResultFiles.tenant_id.label("tenant_id"),
+            FlowRunStepResultFiles.file_id.label("file_id"),
+        ).join(
+            candidates,
+            FlowRunStepResultFiles.flow_run_id == candidates.c.run_id,
+        )
+        file_refs = input_file_refs.union(result_file_refs).cte(
+            "flow_retention_preview_file_refs"
+        )
+        file_bytes = (
+            sa.select(
+                file_refs.c.run_id,
+                sa.func.coalesce(sa.func.sum(Files.size), 0).label("file_bytes"),
+            )
+            .join(
+                Files,
+                sa.and_(
+                    Files.id == file_refs.c.file_id,
+                    Files.tenant_id == file_refs.c.tenant_id,
+                ),
+            )
+            .group_by(file_refs.c.run_id)
+            .cte("flow_retention_preview_file_bytes")
+        )
+        undelivered_audit = flow_run_undelivered_audit_exists(candidates.c.run_id)
+        unresolved_webhook = flow_run_unresolved_webhook_exists(candidates.c.run_id)
+        active_rerun = flow_run_active_rerun_exists(candidates.c.run_id)
+        newly_due = sa.and_(
+            candidates.c.proposed_due,
+            sa.not_(candidates.c.current_due),
+        )
+        no_longer_due = sa.and_(
+            candidates.c.current_due,
+            sa.not_(candidates.c.proposed_due),
+        )
+        return (
+            sa.select(
+                sa.func.count()
+                .filter(candidates.c.current_due)
+                .label("current_eligible_count"),
+                sa.func.count()
+                .filter(candidates.c.proposed_due)
+                .label("proposed_eligible_count"),
+                sa.func.count().filter(newly_due).label("newly_eligible_count"),
+                sa.func.count().filter(no_longer_due).label("no_longer_eligible_count"),
+                sa.func.coalesce(
+                    sa.func.sum(file_bytes.c.file_bytes).filter(
+                        candidates.c.proposed_due
+                    ),
+                    0,
+                ).label("proposed_eligible_bytes"),
+                sa.func.coalesce(
+                    sa.func.sum(file_bytes.c.file_bytes).filter(newly_due),
+                    0,
+                ).label("newly_eligible_bytes"),
+                sa.func.min(candidates.c.retention_anchor)
+                .filter(candidates.c.proposed_due)
+                .label("earliest_proposed_anchor"),
+                sa.func.max(candidates.c.retention_anchor)
+                .filter(candidates.c.proposed_due)
+                .label("latest_proposed_anchor"),
+                sa.func.count()
+                .filter(candidates.c.proposed_due, undelivered_audit)
+                .label("undelivered_audit_count"),
+                sa.func.count()
+                .filter(
+                    candidates.c.proposed_due,
+                    sa.not_(undelivered_audit),
+                    unresolved_webhook,
+                )
+                .label("unresolved_webhook_count"),
+                sa.func.count()
+                .filter(
+                    candidates.c.proposed_due,
+                    sa.not_(undelivered_audit),
+                    sa.not_(unresolved_webhook),
+                    active_rerun,
+                )
+                .label("active_rerun_count"),
+            )
+            .select_from(candidates)
+            .outerjoin(file_bytes, file_bytes.c.run_id == candidates.c.run_id)
+        )
+
+    def _build_flow_retention_upload_impact_query(
+        self,
+        *,
+        tenant_id: UUID,
+        state: FlowRetentionControlPlaneState,
+        proposal: _FlowRetentionSqlProposal,
+        previewed_at: datetime,
+    ) -> sa.Select[tuple[int, int, int, int, int, int, datetime, datetime]]:
+        current_due = _retention_anchor_due(
+            anchor=FlowRuntimeUploadedFiles.created_at,
+            retention_days=state.runtime_upload_abandonment_days,
+            previewed_at=previewed_at,
+        )
+        proposed_due = _retention_anchor_due(
+            anchor=FlowRuntimeUploadedFiles.created_at,
+            retention_days=proposal.runtime_upload_abandonment_days,
+            previewed_at=previewed_at,
+        )
+        newly_due = sa.and_(proposed_due, sa.not_(current_due))
+        no_longer_due = sa.and_(current_due, sa.not_(proposed_due))
+        attached_to_run = sa.exists(
+            sa.select(1).where(
+                FlowRunStepInputFiles.file_id == FlowRuntimeUploadedFiles.file_id,
+                FlowRunStepInputFiles.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+            )
+        )
+        return (
+            sa.select(
+                sa.func.count().filter(current_due).label("current_eligible_count"),
+                sa.func.count().filter(proposed_due).label("proposed_eligible_count"),
+                sa.func.count().filter(newly_due).label("newly_eligible_count"),
+                sa.func.count().filter(no_longer_due).label("no_longer_eligible_count"),
+                sa.func.coalesce(sa.func.sum(Files.size).filter(proposed_due), 0).label(
+                    "proposed_eligible_bytes"
+                ),
+                sa.func.coalesce(sa.func.sum(Files.size).filter(newly_due), 0).label(
+                    "newly_eligible_bytes"
+                ),
+                sa.func.min(FlowRuntimeUploadedFiles.created_at)
+                .filter(proposed_due)
+                .label("earliest_proposed_anchor"),
+                sa.func.max(FlowRuntimeUploadedFiles.created_at)
+                .filter(proposed_due)
+                .label("latest_proposed_anchor"),
+            )
+            .select_from(FlowRuntimeUploadedFiles)
+            .join(
+                Files,
+                sa.and_(
+                    Files.id == FlowRuntimeUploadedFiles.file_id,
+                    Files.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+                ),
+            )
+            .where(
+                FlowRuntimeUploadedFiles.tenant_id == tenant_id,
+                sa.not_(attached_to_run),
+            )
+        )
 
     async def cleanup_old_flow_runtime_data(self) -> FlowRuntimeCleanupCounts:
         now = datetime.now(timezone.utc)
@@ -1064,6 +1863,51 @@ class DataRetentionService:
             "app_runs": app_runs_count,
             "total": questions_count + app_runs_count,
         }
+
+
+def _retention_anchor_due(
+    *,
+    anchor: sa.ColumnExpressionArgument[datetime],
+    retention_days: int | None,
+    previewed_at: datetime,
+) -> sa.ColumnElement[bool]:
+    if retention_days is None:
+        return sa.false()
+    return anchor <= sa.literal(previewed_at) - sa.func.make_interval(
+        0,
+        0,
+        0,
+        retention_days,
+    )
+
+
+def _flow_retention_data_impact_from_row(
+    row: RowMapping,
+) -> FlowRetentionDataImpact:
+    earliest_anchor = row["earliest_proposed_anchor"]
+    latest_anchor = row["latest_proposed_anchor"]
+    return FlowRetentionDataImpact(
+        current_eligible_count=_retention_row_int(row, "current_eligible_count"),
+        proposed_eligible_count=_retention_row_int(row, "proposed_eligible_count"),
+        newly_eligible_count=_retention_row_int(row, "newly_eligible_count"),
+        no_longer_eligible_count=_retention_row_int(
+            row,
+            "no_longer_eligible_count",
+        ),
+        proposed_eligible_bytes=_retention_row_int(row, "proposed_eligible_bytes"),
+        newly_eligible_bytes=_retention_row_int(row, "newly_eligible_bytes"),
+        earliest_proposed_anchor=(
+            earliest_anchor if isinstance(earliest_anchor, datetime) else None
+        ),
+        latest_proposed_anchor=(
+            latest_anchor if isinstance(latest_anchor, datetime) else None
+        ),
+    )
+
+
+def _retention_row_int(row: RowMapping, key: str) -> int:
+    value = row[key]
+    return value if isinstance(value, int) else 0
 
 
 def _prune_debug_payload(payload: Any) -> Any:

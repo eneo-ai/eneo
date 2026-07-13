@@ -1,4 +1,6 @@
 from dataclasses import asdict
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -17,6 +19,13 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.main.models import InDB
+
+if TYPE_CHECKING:
+    from eneo.data_retention.infrastructure.data_retention_service import (
+        FlowRetentionControlPlaneState,
+        FlowRetentionDataImpact,
+        FlowRetentionImpactPreview,
+    )
 
 
 class SettingsBase(BaseModel):
@@ -113,10 +122,53 @@ FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
 
 FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
     "run_debug_evidence_days": 7,
+    "flow_run_history_retention_days": 30,
+    "flow_runtime_upload_abandonment_days": 14,
+    "effective_state": {
+        "run_history_deletion_active": True,
+        "runtime_upload_abandonment_active": True,
+        "classification_policy_count": 0,
+    },
 }
 
 FLOW_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
-    "run_debug_evidence_days": 14,
+    "flow_run_history_retention_days": 30,
+}
+
+FLOW_RETENTION_PREVIEW_EXAMPLE: JsonDict = {
+    "destructive_change": True,
+    "control_plane_version": "a" * 64,
+    "preview_hash": "b" * 64,
+    "previewed_at": "2026-07-13T12:00:00Z",
+    "run_history_anchor": "finished_at_or_created_at",
+    "runtime_upload_anchor": "created_at",
+    "run_history": {
+        "current_eligible_count": 0,
+        "proposed_eligible_count": 12,
+        "newly_eligible_count": 12,
+        "no_longer_eligible_count": 0,
+        "proposed_eligible_bytes": 4096,
+        "newly_eligible_bytes": 4096,
+        "earliest_proposed_anchor": "2025-01-01T12:00:00Z",
+        "latest_proposed_anchor": "2026-01-01T12:00:00Z",
+    },
+    "runtime_uploads": {
+        "current_eligible_count": 0,
+        "proposed_eligible_count": 3,
+        "newly_eligible_count": 3,
+        "no_longer_eligible_count": 0,
+        "proposed_eligible_bytes": 1024,
+        "newly_eligible_bytes": 1024,
+        "earliest_proposed_anchor": "2025-06-01T12:00:00Z",
+        "latest_proposed_anchor": "2025-12-01T12:00:00Z",
+    },
+    "lifecycle_blockers": {
+        "undelivered_audit_count": 1,
+        "unresolved_webhook_count": 0,
+        "active_rerun_count": 0,
+    },
+    "latent_space_retention_days": [7, 30],
+    "latent_flow_retention_days": [1, 14],
 }
 
 FLOW_CLASSIFICATION_RETENTION_POLICY_EXAMPLE: JsonDict = {
@@ -406,12 +458,189 @@ class FlowEvidencePolicyUpdate(BaseModel):
         return value
 
 
+class FlowRetentionEffectiveStatePublic(BaseModel):
+    run_history_deletion_active: bool
+    runtime_upload_abandonment_active: bool
+    classification_policy_count: int = Field(ge=0)
+
+    @classmethod
+    def from_domain(
+        cls,
+        state: "FlowRetentionControlPlaneState",
+    ) -> "FlowRetentionEffectiveStatePublic":
+        return cls(
+            run_history_deletion_active=(
+                state.organization_run_history_days is not None
+                or bool(state.classification_policies)
+            ),
+            runtime_upload_abandonment_active=(
+                state.runtime_upload_abandonment_days is not None
+            ),
+            classification_policy_count=len(state.classification_policies),
+        )
+
+
+class FlowRetentionChangeConfirmationPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_control_plane_version: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    expected_preview_hash: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    previewed_at: datetime
+
+
+class FlowRetentionDataImpactPublic(BaseModel):
+    current_eligible_count: int = Field(ge=0)
+    proposed_eligible_count: int = Field(ge=0)
+    newly_eligible_count: int = Field(ge=0)
+    no_longer_eligible_count: int = Field(ge=0)
+    proposed_eligible_bytes: int = Field(ge=0)
+    newly_eligible_bytes: int = Field(ge=0)
+    earliest_proposed_anchor: datetime | None
+    latest_proposed_anchor: datetime | None
+
+    @classmethod
+    def from_domain(
+        cls,
+        impact: "FlowRetentionDataImpact",
+    ) -> "FlowRetentionDataImpactPublic":
+        return cls(
+            current_eligible_count=impact.current_eligible_count,
+            proposed_eligible_count=impact.proposed_eligible_count,
+            newly_eligible_count=impact.newly_eligible_count,
+            no_longer_eligible_count=impact.no_longer_eligible_count,
+            proposed_eligible_bytes=impact.proposed_eligible_bytes,
+            newly_eligible_bytes=impact.newly_eligible_bytes,
+            earliest_proposed_anchor=impact.earliest_proposed_anchor,
+            latest_proposed_anchor=impact.latest_proposed_anchor,
+        )
+
+
+class FlowRetentionLifecycleBlockersPublic(BaseModel):
+    undelivered_audit_count: int = Field(ge=0)
+    unresolved_webhook_count: int = Field(ge=0)
+    active_rerun_count: int = Field(ge=0)
+
+
+class FlowRetentionImpactPreviewPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RETENTION_PREVIEW_EXAMPLE}
+    )
+
+    destructive_change: bool
+    control_plane_version: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    preview_hash: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    previewed_at: datetime
+    run_history_anchor: Literal["finished_at_or_created_at"]
+    runtime_upload_anchor: Literal["created_at"]
+    run_history: FlowRetentionDataImpactPublic
+    runtime_uploads: FlowRetentionDataImpactPublic
+    lifecycle_blockers: FlowRetentionLifecycleBlockersPublic
+    latent_space_retention_days: list[int]
+    latent_flow_retention_days: list[int]
+
+    @classmethod
+    def from_domain(
+        cls,
+        preview: "FlowRetentionImpactPreview",
+    ) -> "FlowRetentionImpactPreviewPublic":
+        return cls(
+            destructive_change=preview.destructive_change,
+            control_plane_version=preview.control_plane_version,
+            preview_hash=preview.preview_hash,
+            previewed_at=preview.previewed_at,
+            run_history_anchor="finished_at_or_created_at",
+            runtime_upload_anchor="created_at",
+            run_history=FlowRetentionDataImpactPublic.from_domain(preview.run_history),
+            runtime_uploads=FlowRetentionDataImpactPublic.from_domain(
+                preview.runtime_uploads
+            ),
+            lifecycle_blockers=FlowRetentionLifecycleBlockersPublic(
+                undelivered_audit_count=(
+                    preview.lifecycle_blockers.undelivered_audit_count
+                ),
+                unresolved_webhook_count=(
+                    preview.lifecycle_blockers.unresolved_webhook_count
+                ),
+                active_rerun_count=preview.lifecycle_blockers.active_rerun_count,
+            ),
+            latent_space_retention_days=list(preview.latent_space_retention_days),
+            latent_flow_retention_days=list(preview.latent_flow_retention_days),
+        )
+
+
+class FlowRetentionOrganizationPreviewRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "flow_run_history_retention_days": 30,
+                "flow_runtime_upload_abandonment_days": 14,
+            }
+        },
+    )
+
+    flow_run_history_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    flow_runtime_upload_abandonment_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+
+
+class FlowClassificationRetentionPolicyPreviewRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"data_retention_days": 14}},
+    )
+
+    data_retention_days: int = Field(
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+
+
 class FlowRetentionPolicyPublic(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": FLOW_RETENTION_POLICY_EXAMPLE}
     )
 
-    run_debug_evidence_days: int | None = None
+    run_debug_evidence_days: int | None = Field(...)
+    flow_run_history_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    flow_runtime_upload_abandonment_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    effective_state: FlowRetentionEffectiveStatePublic
 
 
 class FlowRetentionPolicyUpdate(BaseModel):
@@ -420,7 +649,28 @@ class FlowRetentionPolicyUpdate(BaseModel):
         json_schema_extra={"example": FLOW_RETENTION_POLICY_UPDATE_EXAMPLE},
     )
 
-    run_debug_evidence_days: int | None = None
+    run_debug_evidence_days: int | None = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    flow_run_history_retention_days: int | None = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    flow_runtime_upload_abandonment_days: int | None = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    confirmation: FlowRetentionChangeConfirmationPublic | None = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
 
 
 class FlowClassificationRetentionPolicyPublic(BaseModel):
@@ -458,4 +708,8 @@ class FlowClassificationRetentionPolicyUpdate(BaseModel):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
         description="Full Flow run and step history retention window in days.",
+    )
+    confirmation: FlowRetentionChangeConfirmationPublic | None = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
     )

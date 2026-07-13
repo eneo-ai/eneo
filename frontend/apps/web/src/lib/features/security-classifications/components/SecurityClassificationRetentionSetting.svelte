@@ -11,12 +11,18 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "@eneo/ui";
-  import type { FlowClassificationRetentionPolicies } from "@eneo/eneo-js";
+  import type {
+    FlowClassificationRetentionPolicies,
+    FlowRetentionImpactPreview
+  } from "@eneo/eneo-js";
+  import FlowRetentionImpactDialog from "$lib/features/flows/components/FlowRetentionImpactDialog.svelte";
+  import { confirmationFromFlowRetentionPreview } from "$lib/features/flows/flowRetentionPolicy";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
   import {
     buildFlowClassificationRetentionRows,
     clearFlowClassificationRetentionPolicyDraft,
     createFlowClassificationRetentionDrafts,
+    flowClassificationRetentionChangeIsDestructive,
     FLOW_CLASSIFICATION_RETENTION_MAX_DAYS,
     FLOW_CLASSIFICATION_RETENTION_MIN_DAYS,
     parseFlowClassificationRetentionDays,
@@ -34,13 +40,14 @@
   const eneo = getEneo();
   const security = getSecurityClassificationService();
 
-  let drafts = $state<FlowClassificationRetentionDrafts>({});
+  let drafts = $derived<FlowClassificationRetentionDrafts>(
+    createFlowClassificationRetentionDrafts(initialPolicies.policies)
+  );
   let savingById = $state<Record<string, boolean>>({});
   let clearingById = $state<Record<string, boolean>>({});
-
-  $effect.pre(() => {
-    drafts = createFlowClassificationRetentionDrafts(initialPolicies.policies);
-  });
+  let preview = $state<FlowRetentionImpactPreview | null>(null);
+  let pendingRow = $state<FlowClassificationRetentionRow | null>(null);
+  let previewOpen = $state(false);
 
   let rows = $derived(buildFlowClassificationRetentionRows(security.classifications, drafts));
   let isSecurityEnabled = $derived(security.isSecurityEnabled);
@@ -92,6 +99,14 @@
 
     savingById = setBusy(savingById, row.id, true);
     try {
+      if (flowClassificationRetentionChangeIsDestructive(row.configuredDays, parsed.days)) {
+        preview = await eneo.settings.previewFlowClassificationRetentionPolicy(row.id, {
+          data_retention_days: parsed.days
+        });
+        pendingRow = row;
+        previewOpen = true;
+        return;
+      }
       const policy = await eneo.settings.putFlowClassificationRetentionPolicy(row.id, {
         data_retention_days: parsed.days
       });
@@ -101,6 +116,30 @@
       toastError(error);
     } finally {
       savingById = setBusy(savingById, row.id, false);
+    }
+  }
+
+  async function confirmPolicy() {
+    if (!preview || !pendingRow) return;
+    const parsed = parseFlowClassificationRetentionDays(pendingRow.draftDays);
+    if (!parsed.ok) return;
+    const rowId = pendingRow.id;
+
+    savingById = setBusy(savingById, rowId, true);
+    try {
+      const policy = await eneo.settings.putFlowClassificationRetentionPolicy(rowId, {
+        data_retention_days: parsed.days,
+        confirmation: confirmationFromFlowRetentionPreview(preview)
+      });
+      drafts = setFlowClassificationRetentionPolicyDraft(drafts, policy);
+      previewOpen = false;
+      preview = null;
+      pendingRow = null;
+      toast.success(m.saved_successfully());
+    } catch (error) {
+      toastError(error);
+    } finally {
+      savingById = setBusy(savingById, rowId, false);
     }
   }
 
@@ -129,6 +168,7 @@
     <div class="text-secondary flex flex-col gap-2 text-sm leading-relaxed">
       <p>{m.flow_classification_retention_full_history_hint()}</p>
       <p>{m.flow_classification_retention_tighten_hint()}</p>
+      <p>{m.flow_retention_preservation_hold_caveat()}</p>
       {#if !isSecurityEnabled}
         <p class="border-default bg-secondary rounded-md border px-3 py-2">
           {m.flow_classification_retention_security_disabled_hint()}
@@ -239,3 +279,12 @@
     {/if}
   </div>
 </Settings.Row>
+
+{#if preview}
+  <FlowRetentionImpactDialog
+    bind:open={previewOpen}
+    {preview}
+    confirming={pendingRow ? Boolean(savingById[pendingRow.id]) : false}
+    onConfirm={confirmPolicy}
+  />
+{/if}

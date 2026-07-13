@@ -996,7 +996,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant Flow retention policy for implemented runtime debug-evidence cleanup. The policy exposes run_debug_evidence_days; runtime uploaded or generated blob retention is configured by a future file-lifecycle owner, not this endpoint.
+     * @description Return the tenant-admin Flow deletion envelope and the independent debug-evidence cleanup value. Null organization run-history and runtime-upload values mean Off. Classification policies can also activate the run-history envelope. This control plane must not be deployed without the canonical WI-19B selector adoption; this endpoint does not itself delete data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -1006,9 +1006,29 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update the tenant Flow retention policy for implemented runtime debug-evidence cleanup. Omitted fields are unchanged; send an integer day count to set run_debug_evidence_days or null to remove the tenant debug-evidence override. Flow and space data_retention_days purge full run history; they do not act as debug-evidence redaction fallbacks.
+     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Enabling or shortening organization run-history or never-attached upload retention requires the exact fresh preview confirmation returned by /flow-retention-policy/preview. Disabling or lengthening does not require confirmation. run_debug_evidence_days remains independent JSONB cleanup.
      */
     patch: operations["update_flow_retention_policy"];
+    trace?: never;
+  };
+  "/api/v1/settings/flow-retention-policy/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview a flow retention policy change
+     * @description Read a bounded, set-based impact preview for exact proposed organization run-history and never-attached runtime-upload values. The preview includes counts, distinct file bytes, fixed clock anchors, latent Flow/Space values, and lifecycle blockers. It changes no policy and deletes no data.
+     */
+    post: operations["preview_flow_retention_policy"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/settings/flow-classification-retention-policies": {
@@ -1020,7 +1040,7 @@ export interface paths {
     };
     /**
      * List flow classification retention policies
-     * @description List tenant Flow classification retention policies. Each row tightens full run history and step history purge eligibility for spaces assigned to the security_classification_id. This is separate from debug-evidence redaction at /settings/flow-retention-policy; debug-evidence cleanup can redact retained troubleshooting payloads before the full run is purged. Policies remain enforced while tenant security_enabled is false if spaces still store the classification id.
+     * @description List tenant Flow classification retention control-plane inputs. A row can activate the full run history and step history envelope for spaces carrying its classification id, including while security_enabled is false. Debug-evidence cleanup is independent. These inputs must not be deployed without WI-19B selector adoption; listing policies does not delete data.
      */
     get: operations["list_flow_classification_retention_policies"];
     put?: never;
@@ -1041,15 +1061,35 @@ export interface paths {
     get?: never;
     /**
      * Set flow classification retention policy
-     * @description Create or replace the full Flow run history and step history retention window for one tenant security classification. The value can only tighten the effective Flow/space retention window used by the purge worker; a classification policy with a longer window never loosens a shorter Flow or space policy. This endpoint does not configure debug-evidence redaction, which remains under /settings/flow-retention-policy.
+     * @description Create or replace the run-history envelope input for one tenant security classification. Enabling or shortening requires the exact fresh evidence from the classification preview endpoint; lengthening does not. Once the WI-19B selector gate is integrated, the shortest active organization, classification, Space, and Flow value wins. This endpoint itself deletes no data and does not configure debug-evidence redaction.
      */
     put: operations["put_flow_classification_retention_policy"];
     post?: never;
     /**
      * Delete flow classification retention policy
-     * @description Delete the Flow classification retention policy for one tenant security classification. The delete is idempotent when the classification exists but has no policy row. If the classification itself is missing or belongs to another tenant, the endpoint returns 404. Removing the policy can loosen future dynamic full run history purge eligibility back to the Flow/space retention policy.
+     * @description Delete the Flow classification retention policy for one tenant security classification. The delete is idempotent when the classification exists but has no policy row. If the classification itself is missing or belongs to another tenant, the endpoint returns 404. Removing an activation input can only disable or lengthen future eligibility, so destructive preview confirmation is not required.
      */
     delete: operations["delete_flow_classification_retention_policy"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview a flow classification retention policy change
+     * @description Use the same exact-state, set-based Flow retention gate as organization policy changes before enabling or shortening a classification policy. This bounded read returns the control-plane version, preview hash, fixed clock anchor, counts, distinct file bytes, latent Flow/Space values, and lifecycle blockers needed to confirm the proposal without deleting data.
+     */
+    post: operations["preview_flow_classification_retention_policy"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -13886,6 +13926,16 @@ export interface components {
       policies: components["schemas"]["FlowClassificationRetentionPolicyPublic"][];
     };
     /**
+     * FlowClassificationRetentionPolicyPreviewRequest
+     * @example {
+     *       "data_retention_days": 14
+     *     }
+     */
+    FlowClassificationRetentionPolicyPreviewRequest: {
+      /** Data Retention Days */
+      data_retention_days: number;
+    };
+    /**
      * FlowClassificationRetentionPolicyPublic
      * @example {
      *       "data_retention_days": 7,
@@ -13916,6 +13966,7 @@ export interface components {
        * @description Full Flow run and step history retention window in days.
        */
       data_retention_days: number;
+      confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
     };
     /**
      * FlowCreateRequest
@@ -14922,25 +14973,178 @@ export interface components {
        */
       current_checksum: string;
     };
+    /** FlowRetentionChangeConfirmationPublic */
+    FlowRetentionChangeConfirmationPublic: {
+      /** Expected Control Plane Version */
+      expected_control_plane_version: string;
+      /** Expected Preview Hash */
+      expected_preview_hash: string;
+      /**
+       * Previewed At
+       * Format: date-time
+       */
+      previewed_at: string;
+    };
+    /** FlowRetentionDataImpactPublic */
+    FlowRetentionDataImpactPublic: {
+      /** Current Eligible Count */
+      current_eligible_count: number;
+      /** Proposed Eligible Count */
+      proposed_eligible_count: number;
+      /** Newly Eligible Count */
+      newly_eligible_count: number;
+      /** No Longer Eligible Count */
+      no_longer_eligible_count: number;
+      /** Proposed Eligible Bytes */
+      proposed_eligible_bytes: number;
+      /** Newly Eligible Bytes */
+      newly_eligible_bytes: number;
+      /** Earliest Proposed Anchor */
+      earliest_proposed_anchor: string | null;
+      /** Latest Proposed Anchor */
+      latest_proposed_anchor: string | null;
+    };
+    /** FlowRetentionEffectiveStatePublic */
+    FlowRetentionEffectiveStatePublic: {
+      /** Run History Deletion Active */
+      run_history_deletion_active: boolean;
+      /** Runtime Upload Abandonment Active */
+      runtime_upload_abandonment_active: boolean;
+      /** Classification Policy Count */
+      classification_policy_count: number;
+    };
+    /**
+     * FlowRetentionImpactPreviewPublic
+     * @example {
+     *       "control_plane_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     *       "destructive_change": true,
+     *       "latent_flow_retention_days": [
+     *         1,
+     *         14
+     *       ],
+     *       "latent_space_retention_days": [
+     *         7,
+     *         30
+     *       ],
+     *       "lifecycle_blockers": {
+     *         "active_rerun_count": 0,
+     *         "undelivered_audit_count": 1,
+     *         "unresolved_webhook_count": 0
+     *       },
+     *       "preview_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     *       "previewed_at": "2026-07-13T12:00:00Z",
+     *       "run_history": {
+     *         "current_eligible_count": 0,
+     *         "earliest_proposed_anchor": "2025-01-01T12:00:00Z",
+     *         "latest_proposed_anchor": "2026-01-01T12:00:00Z",
+     *         "newly_eligible_bytes": 4096,
+     *         "newly_eligible_count": 12,
+     *         "no_longer_eligible_count": 0,
+     *         "proposed_eligible_bytes": 4096,
+     *         "proposed_eligible_count": 12
+     *       },
+     *       "run_history_anchor": "finished_at_or_created_at",
+     *       "runtime_upload_anchor": "created_at",
+     *       "runtime_uploads": {
+     *         "current_eligible_count": 0,
+     *         "earliest_proposed_anchor": "2025-06-01T12:00:00Z",
+     *         "latest_proposed_anchor": "2025-12-01T12:00:00Z",
+     *         "newly_eligible_bytes": 1024,
+     *         "newly_eligible_count": 3,
+     *         "no_longer_eligible_count": 0,
+     *         "proposed_eligible_bytes": 1024,
+     *         "proposed_eligible_count": 3
+     *       }
+     *     }
+     */
+    FlowRetentionImpactPreviewPublic: {
+      /** Destructive Change */
+      destructive_change: boolean;
+      /** Control Plane Version */
+      control_plane_version: string;
+      /** Preview Hash */
+      preview_hash: string;
+      /**
+       * Previewed At
+       * Format: date-time
+       */
+      previewed_at: string;
+      /**
+       * Run History Anchor
+       * @constant
+       */
+      run_history_anchor: "finished_at_or_created_at";
+      /**
+       * Runtime Upload Anchor
+       * @constant
+       */
+      runtime_upload_anchor: "created_at";
+      run_history: components["schemas"]["FlowRetentionDataImpactPublic"];
+      runtime_uploads: components["schemas"]["FlowRetentionDataImpactPublic"];
+      lifecycle_blockers: components["schemas"]["FlowRetentionLifecycleBlockersPublic"];
+      /** Latent Space Retention Days */
+      latent_space_retention_days: number[];
+      /** Latent Flow Retention Days */
+      latent_flow_retention_days: number[];
+    };
+    /** FlowRetentionLifecycleBlockersPublic */
+    FlowRetentionLifecycleBlockersPublic: {
+      /** Undelivered Audit Count */
+      undelivered_audit_count: number;
+      /** Unresolved Webhook Count */
+      unresolved_webhook_count: number;
+      /** Active Rerun Count */
+      active_rerun_count: number;
+    };
+    /**
+     * FlowRetentionOrganizationPreviewRequest
+     * @example {
+     *       "flow_run_history_retention_days": 30,
+     *       "flow_runtime_upload_abandonment_days": 14
+     *     }
+     */
+    FlowRetentionOrganizationPreviewRequest: {
+      /** Flow Run History Retention Days */
+      flow_run_history_retention_days: number | null;
+      /** Flow Runtime Upload Abandonment Days */
+      flow_runtime_upload_abandonment_days: number | null;
+    };
     /**
      * FlowRetentionPolicyPublic
      * @example {
+     *       "effective_state": {
+     *         "classification_policy_count": 0,
+     *         "run_history_deletion_active": true,
+     *         "runtime_upload_abandonment_active": true
+     *       },
+     *       "flow_run_history_retention_days": 30,
+     *       "flow_runtime_upload_abandonment_days": 14,
      *       "run_debug_evidence_days": 7
      *     }
      */
     FlowRetentionPolicyPublic: {
       /** Run Debug Evidence Days */
-      run_debug_evidence_days?: number | null;
+      run_debug_evidence_days: number | null;
+      /** Flow Run History Retention Days */
+      flow_run_history_retention_days: number | null;
+      /** Flow Runtime Upload Abandonment Days */
+      flow_runtime_upload_abandonment_days: number | null;
+      effective_state: components["schemas"]["FlowRetentionEffectiveStatePublic"];
     };
     /**
      * FlowRetentionPolicyUpdate
      * @example {
-     *       "run_debug_evidence_days": 14
+     *       "flow_run_history_retention_days": 30
      *     }
      */
     FlowRetentionPolicyUpdate: {
       /** Run Debug Evidence Days */
       run_debug_evidence_days?: number | null;
+      /** Flow Run History Retention Days */
+      flow_run_history_retention_days?: number | null;
+      /** Flow Runtime Upload Abandonment Days */
+      flow_runtime_upload_abandonment_days?: number | null;
+      confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
     };
     /** FlowReviewCheckpointRuntimePathsPublic */
     FlowReviewCheckpointRuntimePathsPublic: {
@@ -25164,6 +25368,10 @@ export interface components {
       flow_settings?: {
         [key: string]: unknown;
       };
+      /** Flow Run History Retention Days */
+      flow_run_history_retention_days?: number | null;
+      /** Flow Runtime Upload Abandonment Days */
+      flow_runtime_upload_abandonment_days?: number | null;
       /** Favorite Providers */
       favorite_providers?: string[];
     };
@@ -25557,6 +25765,10 @@ export interface components {
       flow_settings?: {
         [key: string]: unknown;
       };
+      /** Flow Run History Retention Days */
+      flow_run_history_retention_days?: number | null;
+      /** Flow Runtime Upload Abandonment Days */
+      flow_runtime_upload_abandonment_days?: number | null;
       /** Favorite Providers */
       favorite_providers?: string[];
     };
@@ -31371,6 +31583,71 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description The destructive change requires a fresh exact preview, or the control-plane/preview state changed before confirmation. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Request a new Flow retention preview and confirm it.",
+           *       "eneo_error_code": 9041,
+           *       "code": "flow_retention_preview_stale"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  preview_flow_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRetentionOrganizationPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionImpactPreviewPublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31475,6 +31752,22 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description The destructive change requires a fresh exact preview, or the control-plane/preview state changed before confirmation. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Request a new Flow retention preview and confirm it.",
+           *       "eneo_error_code": 9041,
+           *       "code": "flow_retention_preview_stale"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31504,6 +31797,74 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Security classification does not exist for this tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Not found.",
+           *       "eneo_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  preview_flow_classification_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Tenant security classification id to preview. */
+        security_classification_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowClassificationRetentionPolicyPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRetentionImpactPreviewPublic"];
+        };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
       403: {

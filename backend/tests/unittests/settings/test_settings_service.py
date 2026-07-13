@@ -3,6 +3,11 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from eneo.data_retention.infrastructure.data_retention_service import (
+    FlowRetentionControlPlaneState,
+    FlowRetentionOrganizationChangeDecision,
+    FlowRetentionOrganizationProposal,
+)
 from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
@@ -69,11 +74,16 @@ class MockFeatureFlagService:
 class MockTenantRepo:
     """Mock tenant repo for testing."""
 
+    def __init__(self):
+        self.tenant = None
+
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
         from eneo.tenants.tenant import TenantInDB, TenantState
 
-        return TenantInDB(
+        if self.tenant is not None:
+            return self.tenant
+        self.tenant = TenantInDB(
             id=tenant_id,
             name="Test Tenant",
             quota_limit=1024**3,
@@ -83,6 +93,14 @@ class MockTenantRepo:
             state=TenantState.ACTIVE,
             provisioning=False,
         )
+        return self.tenant
+
+    async def update_tenant(self, update):
+        tenant = await self.get(update.id)
+        self.tenant = tenant.model_copy(
+            update=update.model_dump(exclude_unset=True, exclude={"id"})
+        )
+        return self.tenant
 
 
 class MockAuditService:
@@ -90,6 +108,49 @@ class MockAuditService:
 
     async def log_async(self, *args, **kwargs):
         pass
+
+    async def log(self, *args, **kwargs):
+        pass
+
+
+class MockDataRetentionService:
+    async def get_flow_retention_control_plane_state(self, *, tenant_id, lock=False):
+        return FlowRetentionControlPlaneState(
+            organization_run_history_days=None,
+            runtime_upload_abandonment_days=None,
+            classification_policies=(),
+            latent_space_retention_days=(),
+            latent_flow_retention_days=(),
+        )
+
+    async def prepare_flow_retention_organization_change(
+        self,
+        *,
+        tenant_id,
+        run_history_patch,
+        upload_abandonment_patch,
+        confirmation,
+    ):
+        old_policy = FlowRetentionOrganizationProposal(
+            flow_run_history_retention_days=None,
+            flow_runtime_upload_abandonment_days=None,
+        )
+        new_policy = FlowRetentionOrganizationProposal(
+            flow_run_history_retention_days=(
+                run_history_patch.value if run_history_patch.is_set else None
+            ),
+            flow_runtime_upload_abandonment_days=(
+                upload_abandonment_patch.value
+                if upload_abandonment_patch.is_set
+                else None
+            ),
+        )
+        return FlowRetentionOrganizationChangeDecision(
+            old_policy=old_policy,
+            new_policy=new_policy,
+            destructive_change=False,
+            preview=None,
+        )
 
 
 def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) -> None:
@@ -113,6 +174,32 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
 
     for model, payload in cases:
         _assert_extra_forbidden(model, payload)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+    ),
+)
+@pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
+def test_flow_retention_policy_update_rejects_invalid_tenant_days(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowRetentionPolicyUpdate.model_validate({field_name: value})
+
+
+def test_flow_retention_policy_update_accepts_nullable_range_boundaries() -> None:
+    for value in (None, 1, 2555):
+        update = FlowRetentionPolicyUpdate(
+            flow_run_history_retention_days=value,
+            flow_runtime_upload_abandonment_days=value,
+        )
+        assert update.flow_run_history_retention_days == value
+        assert update.flow_runtime_upload_abandonment_days == value
 
 
 @pytest.mark.parametrize(
@@ -153,6 +240,7 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     settings = await service.get_settings()
@@ -170,6 +258,7 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED
@@ -194,6 +283,7 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     new_settings = SettingsPublic(chatbot_widget={"preferred_text_format": "richtext"})
@@ -236,6 +326,7 @@ async def test_get_flow_input_limits_reads_tenant_override(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     limits = await service.get_flow_input_limits()
@@ -276,6 +367,7 @@ async def test_get_flow_input_limits_resolved_returns_domain_limits(monkeypatch)
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     limits = await service.get_flow_input_limits_resolved()
@@ -313,6 +405,7 @@ async def test_update_flow_input_limits_persists_and_audits(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_input_limits(
@@ -361,6 +454,7 @@ async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings(
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     await service.update_flow_input_limits(FlowInputLimitsUpdate(max_files_per_run=30))
@@ -400,6 +494,7 @@ async def test_update_flow_input_limits_null_clears_nullable_overrides(monkeypat
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_input_limits(
@@ -424,6 +519,7 @@ async def test_update_flow_input_limits_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(
@@ -454,6 +550,7 @@ async def test_get_flow_document_render_limits_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     limits = await service.get_flow_document_render_limits()
@@ -480,6 +577,7 @@ async def test_update_flow_document_render_limits_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_document_render_limits(
@@ -516,6 +614,7 @@ async def test_update_flow_document_render_limits_null_clears_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_document_render_limits(
@@ -535,6 +634,7 @@ async def test_update_flow_document_render_limits_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(
@@ -570,6 +670,7 @@ async def test_get_flow_evidence_policy_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     policy = await service.get_flow_evidence_policy()
@@ -598,6 +699,7 @@ async def test_update_flow_evidence_policy_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_evidence_policy(
@@ -638,6 +740,7 @@ async def test_update_flow_evidence_policy_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(
@@ -669,6 +772,7 @@ async def test_get_flow_evidence_policy_requires_admin_permission():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(Exception, match="Need permission admin"):
@@ -706,6 +810,7 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     settings = await service.get_ai_builder_budget_settings()
@@ -742,6 +847,7 @@ async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_ai_builder_budget_settings(
@@ -777,6 +883,7 @@ async def test_update_ai_builder_budget_settings_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(
@@ -816,6 +923,7 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     policy = await service.get_flow_runtime_policy()
@@ -851,6 +959,7 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_runtime_policy(
@@ -893,6 +1002,7 @@ async def test_get_flow_retention_policy_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     policy = await service.get_flow_retention_policy()
@@ -909,7 +1019,7 @@ async def test_update_flow_retention_policy_persists_and_audits():
     async def _capture(*args, **kwargs):
         calls.append(kwargs)
 
-    audit_service.log_async = _capture
+    audit_service.log = _capture
 
     service = SettingService(
         repo=repo,
@@ -918,6 +1028,7 @@ async def test_update_flow_retention_policy_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_retention_policy(
@@ -930,7 +1041,11 @@ async def test_update_flow_retention_policy_persists_and_audits():
         "run_debug_evidence_days": 14,
         FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY: FLOW_RETENTION_POLICY_STORAGE_VERSION,
     }
-    assert calls[0]["metadata"]["setting"] == "flow_retention_policy"
+    metadata = calls[0]["metadata"]
+    assert set(metadata) == {"old_policy", "new_policy", "preview", "activation"}
+    assert metadata["old_policy"]["run_debug_evidence_days"] is None
+    assert metadata["new_policy"]["run_debug_evidence_days"] == 14
+    assert metadata["preview"] is None
 
 
 async def test_update_flow_retention_policy_can_clear_override():
@@ -955,6 +1070,7 @@ async def test_update_flow_retention_policy_can_clear_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_retention_policy(
@@ -985,6 +1101,7 @@ async def test_update_flow_retention_policy_rejects_stored_unknown_keys():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -1017,6 +1134,7 @@ async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     updated = await service.update_flow_runtime_policy(
@@ -1042,6 +1160,7 @@ async def test_update_flow_retention_policy_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
     )
 
     with pytest.raises(

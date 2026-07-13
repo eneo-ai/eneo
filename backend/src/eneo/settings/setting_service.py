@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from eneo.ai_models.ai_models_service import AIModelsService
@@ -7,6 +8,12 @@ from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublic
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.data_retention.infrastructure.data_retention_service import (
+    DataRetentionService,
+    FlowRetentionChangeConfirmation,
+    FlowRetentionOrganizationProposal,
+    FlowRetentionValuePatch,
+)
 from eneo.flows.ai_builder.ai_builder_settings import (
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
@@ -46,6 +53,9 @@ from eneo.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowRetentionEffectiveStatePublic,
+    FlowRetentionImpactPreviewPublic,
+    FlowRetentionOrganizationPreviewRequest,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
@@ -77,6 +87,7 @@ class SettingService:
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
         audit_service: AuditService,
+        data_retention_service: DataRetentionService,
     ):
         super().__init__()
         self.repo = repo
@@ -85,6 +96,7 @@ class SettingService:
         self.feature_flag_service = feature_flag_service
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service
+        self.data_retention_service = data_retention_service
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
@@ -465,9 +477,37 @@ class SettingService:
     async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
         policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
+        state = (
+            await self.data_retention_service.get_flow_retention_control_plane_state(
+                tenant_id=self.user.tenant_id
+            )
+        )
         return FlowRetentionPolicyPublic(
             run_debug_evidence_days=policy.run_debug_evidence_days,
+            flow_run_history_retention_days=(state.organization_run_history_days),
+            flow_runtime_upload_abandonment_days=(
+                state.runtime_upload_abandonment_days
+            ),
+            effective_state=FlowRetentionEffectiveStatePublic.from_domain(state),
         )
+
+    @validate_permissions(Permission.ADMIN)
+    async def preview_flow_retention_policy(
+        self,
+        payload: FlowRetentionOrganizationPreviewRequest,
+    ) -> FlowRetentionImpactPreviewPublic:
+        preview = await self.data_retention_service.preview_flow_retention_organization_change(
+            tenant_id=self.user.tenant_id,
+            proposal=FlowRetentionOrganizationProposal(
+                flow_run_history_retention_days=(
+                    payload.flow_run_history_retention_days
+                ),
+                flow_runtime_upload_abandonment_days=(
+                    payload.flow_runtime_upload_abandonment_days
+                ),
+            ),
+        )
+        return FlowRetentionImpactPreviewPublic.from_domain(preview)
 
     @validate_permissions(Permission.ADMIN)
     async def update_flow_retention_policy(
@@ -475,32 +515,112 @@ class SettingService:
         payload: FlowRetentionPolicyUpdate,
     ) -> FlowRetentionPolicyPublic:
         patch = payload.model_dump(exclude_unset=True)
+        patch.pop("confirmation", None)
         if not patch:
             raise BadRequestException(
                 "At least one flow retention policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        tenant = await self._get_tenant_for_flow_settings()
-        try:
-            next_flow_settings = apply_flow_retention_policy_patch(
-                cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-                **patch,
-                remove_keys={key for key, value in patch.items() if value is None},
+        confirmation = (
+            FlowRetentionChangeConfirmation(
+                expected_control_plane_version=(
+                    payload.confirmation.expected_control_plane_version
+                ),
+                expected_preview_hash=payload.confirmation.expected_preview_hash,
+                previewed_at=payload.confirmation.previewed_at,
             )
-        except ValueError as error:
-            raise BadRequestException(
-                str(error),
-                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
-            ) from error
-        await self._persist_flow_settings(next_flow_settings)
-        await self.audit_service.log_async(
+            if payload.confirmation is not None
+            else None
+        )
+        decision = await self.data_retention_service.prepare_flow_retention_organization_change(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            run_history_patch=FlowRetentionValuePatch(
+                is_set="flow_run_history_retention_days" in payload.model_fields_set,
+                value=payload.flow_run_history_retention_days,
+            ),
+            upload_abandonment_patch=FlowRetentionValuePatch(
+                is_set="flow_runtime_upload_abandonment_days"
+                in payload.model_fields_set,
+                value=payload.flow_runtime_upload_abandonment_days,
+            ),
+            confirmation=confirmation,
+        )
+        tenant = await self._get_tenant_for_flow_settings()
+        current_debug_policy = resolve_flow_retention_policy(
+            getattr(tenant, "flow_settings", None)
+        )
+        next_flow_settings = normalize_flow_settings_object(
+            getattr(tenant, "flow_settings", None)
+        )
+        if "run_debug_evidence_days" in payload.model_fields_set:
+            try:
+                next_flow_settings = apply_flow_retention_policy_patch(
+                    next_flow_settings,
+                    run_debug_evidence_days=payload.run_debug_evidence_days,
+                    remove_keys=(
+                        {"run_debug_evidence_days"}
+                        if payload.run_debug_evidence_days is None
+                        else set()
+                    ),
+                )
+            except ValueError as error:
+                raise BadRequestException(
+                    str(error),
+                    code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+                ) from error
+        await self.tenant_repo.update_tenant(
+            TenantUpdate(
+                id=self.user.tenant_id,
+                flow_settings=next_flow_settings,
+                flow_run_history_retention_days=(
+                    decision.new_policy.flow_run_history_retention_days
+                ),
+                flow_runtime_upload_abandonment_days=(
+                    decision.new_policy.flow_runtime_upload_abandonment_days
+                ),
+            )
+        )
+        activation_time = datetime.now(timezone.utc)
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
             description="Updated flow retention policy",
-            metadata={"setting": "flow_retention_policy", "changes": patch},
+            metadata={
+                "old_policy": {
+                    "run_debug_evidence_days": (
+                        current_debug_policy.run_debug_evidence_days
+                    ),
+                    "flow_run_history_retention_days": (
+                        decision.old_policy.flow_run_history_retention_days
+                    ),
+                    "flow_runtime_upload_abandonment_days": (
+                        decision.old_policy.flow_runtime_upload_abandonment_days
+                    ),
+                },
+                "new_policy": {
+                    "run_debug_evidence_days": payload.run_debug_evidence_days
+                    if "run_debug_evidence_days" in payload.model_fields_set
+                    else current_debug_policy.run_debug_evidence_days,
+                    "flow_run_history_retention_days": (
+                        decision.new_policy.flow_run_history_retention_days
+                    ),
+                    "flow_runtime_upload_abandonment_days": (
+                        decision.new_policy.flow_runtime_upload_abandonment_days
+                    ),
+                },
+                "preview": (
+                    decision.preview.audit_summary()
+                    if decision.preview is not None
+                    else None
+                ),
+                "activation": {
+                    "destructive_change": decision.destructive_change,
+                    "activated_at": activation_time.isoformat(),
+                },
+            },
         )
         return await self.get_flow_retention_policy()
 

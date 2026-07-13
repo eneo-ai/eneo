@@ -20,6 +20,7 @@
   import {
     BookText,
     ChartPie,
+    Database,
     LayoutTemplate,
     Cloud,
     Plug,
@@ -60,6 +61,7 @@
       items: [
         navItem("/admin/personal-assistant", IconSpeechBubble, m.governance_title()),
         navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
+        navItem("/admin/flow-data-retention", Database, m.flow_retention_title()),
         navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
       ]
     },

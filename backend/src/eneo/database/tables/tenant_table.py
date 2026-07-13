@@ -2,10 +2,11 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import BigInteger, Column, ForeignKey, String, Table
+from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, String, Table
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.database.tables.base_class import Base, BasePublic
 from eneo.database.tables.module_table import Modules
 from eneo.tenants.tenant import TenantState
@@ -43,6 +44,12 @@ class Tenants(BasePublic):
     flow_settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )
+    flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
+    flow_runtime_upload_abandonment_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
     api_key_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -62,6 +69,21 @@ class Tenants(BasePublic):
     )
     scim_token_hash: Mapped[Optional[str]] = mapped_column(
         String(64), unique=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "flow_run_history_retention_days IS NULL OR "
+            f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} AND "
+            f"flow_run_history_retention_days <= {MAX_RETENTION_DAYS})",
+            name="ck_tenants_flow_run_history_retention_days_range",
+        ),
+        CheckConstraint(
+            "flow_runtime_upload_abandonment_days IS NULL OR "
+            f"(flow_runtime_upload_abandonment_days >= {MIN_RETENTION_DAYS} AND "
+            f"flow_runtime_upload_abandonment_days <= {MAX_RETENTION_DAYS})",
+            name="ck_tenants_flow_runtime_upload_abandonment_days_range",
+        ),
     )
 
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")

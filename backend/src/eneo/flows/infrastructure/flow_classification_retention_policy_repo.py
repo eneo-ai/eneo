@@ -65,12 +65,18 @@ class FlowClassificationRetentionPolicyRepository:
         return _to_domain(record)
 
     async def security_classification_exists(
-        self, *, tenant_id: UUID, security_classification_id: UUID
+        self,
+        *,
+        tenant_id: UUID,
+        security_classification_id: UUID,
+        lock: bool = False,
     ) -> bool:
         stmt = sa.select(SecurityClassification.id).where(
             SecurityClassification.id == security_classification_id,
             SecurityClassification.tenant_id == tenant_id,
         )
+        if lock:
+            stmt = stmt.with_for_update(key_share=True)
         return await self.session.scalar(stmt) is not None
 
     async def upsert(

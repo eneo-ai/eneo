@@ -197,32 +197,35 @@ Eneo also exposes **tenant-level Flow runtime settings** for operators and platf
 
 These are admin surfaces, not end-user runtime endpoints:
 
-| Setting area                | Endpoint                                                                 | Purpose                                                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                           | Control maximum file/audio sizes and file-count limits                                                                   |
-| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                 | Control generated PDF/DOCX rendering limits                                                                              |
-| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                         | Control runtime step execution timeouts                                                                                  |
-| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                        | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
-| Flow retention policy       | `GET/PATCH /api/v1/settings/flow-retention-policy`                       | Configure tenant debug-evidence redaction for completed Flow runs                                                        |
-| Classification retention    | `GET/PUT/DELETE /api/v1/settings/flow-classification-retention-policies` | Tighten full run-history and step-history purge windows for spaces assigned to a security classification                 |
+| Setting area                | Endpoint                                                                                  | Purpose                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                            | Control maximum file/audio sizes and file-count limits                                                                   |
+| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                                  | Control generated PDF/DOCX rendering limits                                                                              |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                                          | Control runtime step execution timeouts                                                                                  |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                                         | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
+| Flow retention policy       | `GET/PATCH/POST .../preview /api/v1/settings/flow-retention-policy`                       | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
+| Classification retention    | `GET/PUT/DELETE/POST .../preview /api/v1/settings/flow-classification-retention-policies` | Inspect and change classification-scoped run-history windows through the same exact-preview gate                         |
 
 AI Builder budget settings live at `GET/PATCH /api/v1/settings/ai-builder-budget`.
 They are authoring/admin settings for AI Builder sessions, not Flow runtime controls.
 
 ### Flow retention policy shape
 
-`/api/v1/settings/flow-retention-policy` exposes the implemented cleanup policy:
+`GET /api/v1/settings/flow-retention-policy` exposes three independent inputs:
 
 - `run_debug_evidence_days`
+- `flow_run_history_retention_days`
+- `flow_runtime_upload_abandonment_days`
 
-Send an integer day count to set the tenant debug-evidence override, or `null` in a PATCH request to remove that override.
+The two organization inputs are nullable integers in the range `1..2555`. `null` means **Off**; there is no default or backfill. The first is the organization activation envelope for completed run and step history. The second covers runtime uploads that were never attached to a run input. Debug-evidence redaction remains a separate cleanup policy.
 
-This endpoint does **not** configure full run-history deletion. Flow and space `data_retention_days` settings are the default full run-history purge controls. Set a Flow override to `1..2555` days, or set it to `null` to inherit from the space. After a run is terminal and older than the effective window, Eneo deletes the Flow run, step results, step attempts, runtime file bindings, review checkpoints, webhook delivery history, audit outbox rows, and unreferenced generated result files. Delivered audit logs remain under audit retention so operators can still prove the Flow ran without retaining step content.
+Enabling either organization input, or shortening an enabled value, is a destructive policy change. First send the exact proposed pair to `POST /api/v1/settings/flow-retention-policy/preview`. The bounded, read-only response includes the control-plane version, preview hash, preview timestamp, newly eligible counts and distinct file bytes, time anchors, latent Space/Flow values, and lifecycle blockers. Send those three evidence fields back as `confirmation` with the same PATCH. The server locks and transactionally recomputes the exact preview; stale policy or data produces `409`. Disabling or lengthening does not need confirmation.
 
 `/api/v1/settings/flow-classification-retention-policies` configures classification-aware full history purge:
 
 - `GET /api/v1/settings/flow-classification-retention-policies` lists policy rows.
-- `PUT /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` creates or replaces a policy.
+- `POST /api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview` previews an exact enable or shorten operation.
+- `PUT /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` creates or replaces a policy and accepts the same confirmation shape.
 - `DELETE /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` removes a policy. Delete is idempotent when the classification exists but has no policy row.
 
 Each policy stores:
@@ -230,15 +233,17 @@ Each policy stores:
 - `security_classification_id`
 - `data_retention_days`
 
-Classification policies tighten the Flow/space full run-history window. If a Flow has `data_retention_days = 30` and the classification policy is `2555`, the run is still eligible at 30 days. If a Flow and its space have no full-history retention window and the classification policy is `7`, terminal runs in spaces carrying that classification are eligible at 7 days.
+Organization or classification policy activates run-history deletion. Once active, the shortest applicable organization, classification, Space, and Flow value is the proposed effective window. Existing Space and Flow values remain visible as latent preview evidence while both activation sources are Off; they must not independently activate deletion.
 
 Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference, which can loosen future dynamic retention back to the Flow/space policy. Use this deliberately when retiring a classification.
 
-Purge is deferred while a run still has undelivered audit events or a queued/running rerun operation. Deferred runs are reported in cleanup-job counters so operators can resolve the blocker instead of silently losing audit or rerun state.
+Purge remains deferred while lifecycle or preservation requirements block deletion, including undelivered audit events, unresolved webhook delivery, active rerun work, and legal or operational holds. The preview reports the known lifecycle blockers but never overrides preservation duties.
 
 Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. For classification-3 or other sensitive workflows, use a stricter Flow/space `data_retention_days` window or a classification retention policy for full run-history purge, and use tenant evidence policy for export controls.
 
-Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
+The never-attached-upload input is only a control-plane value in this slice. Upload sweeping remains a separate implementation step and is not performed by these endpoints.
+
+> **Deployment gate:** this control-plane slice cannot be deployed or described as launch-complete until the canonical run-history purge selector adopts the activation envelope and exact effective-policy semantics. The settings and preview endpoints do not themselves delete data, change worker cadence, or implement upload sweeping.
 
 This is the intended operator-facing seam for sensitive care-data workflows. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 

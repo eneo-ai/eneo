@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from runpy import run_path
+from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
@@ -13,7 +16,9 @@ from eneo.database.tables.flow_classification_retention_policy_table import (
 from eneo.database.tables.flow_tables import FlowRuns, Flows
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
+from eneo.tenants.tenant import TenantUpdate
 
 FLOW_RETENTION_CONSTRAINT_NAME = "ck_flows_data_retention_days_range"
 SPACE_RETENTION_CONSTRAINT_NAME = "ck_spaces_data_retention_days_range"
@@ -22,6 +27,10 @@ CLASSIFICATION_RETENTION_CONSTRAINT_NAME = (
 )
 CLASSIFICATION_RETENTION_POLICY_TABLE_NAME = "flow_classification_retention_policies"
 FLOW_RUN_RETENTION_ANCHOR_INDEX_NAME = "ix_flow_runs_terminal_retention_anchor"
+TENANT_FLOW_RETENTION_CONSTRAINT_NAMES = {
+    "ck_tenants_flow_run_history_retention_days_range",
+    "ck_tenants_flow_runtime_upload_abandonment_days_range",
+}
 
 
 def _check_constraint_sql(table: object, constraint_name: str) -> str:
@@ -79,6 +88,46 @@ def test_spaces_data_retention_days_metadata_matches_existing_range_constraint()
     assert "data_retention_days IS NULL" in constraint_sql
     assert "data_retention_days >= 1" in constraint_sql
     assert "data_retention_days <= 2555" in constraint_sql
+
+
+def test_tenant_flow_retention_inputs_are_nullable_without_defaults() -> None:
+    for column_name in (
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+    ):
+        column = Tenants.__table__.c[column_name]
+        assert column.nullable is True
+        assert column.default is None
+        assert column.server_default is None
+
+
+def test_tenant_flow_retention_inputs_have_separate_named_range_checks() -> None:
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in Tenants.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+        and constraint.name in TENANT_FLOW_RETENTION_CONSTRAINT_NAMES
+    }
+
+    assert set(constraints) == TENANT_FLOW_RETENTION_CONSTRAINT_NAMES
+    for sqltext in constraints.values():
+        assert ">= 1" in sqltext
+        assert "<= 2555" in sqltext
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "flow_run_history_retention_days",
+        "flow_runtime_upload_abandonment_days",
+    ),
+)
+def test_tenant_flow_retention_model_is_strict_and_bounded(field_name: str) -> None:
+    for accepted in (None, 1, 2555):
+        assert TenantUpdate(id=uuid4(), **{field_name: accepted})
+    for rejected in (0, 2556, "30"):
+        with pytest.raises(ValidationError):
+            TenantUpdate(id=uuid4(), **{field_name: rejected})
 
 
 def test_classification_retention_policy_table_has_tenant_paired_contract() -> None:

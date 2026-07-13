@@ -1,4 +1,5 @@
 import type { FlowClassificationRetentionPolicy, SecurityClassification } from "@eneo/eneo-js";
+import { retentionDaysChangeIsDestructive } from "$lib/features/flows/flowRetentionPolicy";
 
 export const FLOW_CLASSIFICATION_RETENTION_MIN_DAYS = 1;
 export const FLOW_CLASSIFICATION_RETENTION_MAX_DAYS = 2555;
@@ -119,4 +120,11 @@ export function parseFlowClassificationRetentionDays(
   }
 
   return { ok: true, days: parsed };
+}
+
+export function flowClassificationRetentionChangeIsDestructive(
+  configuredDays: number | null,
+  proposedDays: number
+): boolean {
+  return retentionDaysChangeIsDestructive(configuredDays, proposedDays);
 }

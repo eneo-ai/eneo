@@ -4,6 +4,7 @@ import {
   buildFlowClassificationRetentionRows,
   clearFlowClassificationRetentionPolicyDraft,
   createFlowClassificationRetentionDrafts,
+  flowClassificationRetentionChangeIsDestructive,
   parseFlowClassificationRetentionDays,
   setFlowClassificationRetentionPolicyDraft,
   updateFlowClassificationRetentionDraft
@@ -148,5 +149,12 @@ describe("flowClassificationRetentionPolicy", () => {
       ok: false,
       reason: "out_of_range"
     });
+  });
+
+  it("requires exact preview confirmation only for enable and shorten", () => {
+    expect(flowClassificationRetentionChangeIsDestructive(null, 30)).toBe(true);
+    expect(flowClassificationRetentionChangeIsDestructive(30, 14)).toBe(true);
+    expect(flowClassificationRetentionChangeIsDestructive(30, 60)).toBe(false);
+    expect(flowClassificationRetentionChangeIsDestructive(30, 30)).toBe(false);
   });
 });

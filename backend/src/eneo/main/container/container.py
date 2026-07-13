@@ -1058,11 +1058,16 @@ class Container(containers.DeclarativeContainer):
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
     )
+    data_retention_service = providers.Factory(
+        DataRetentionService,
+        session=session,
+    )
     flow_classification_retention_policy_service = providers.Factory(
         FlowClassificationRetentionPolicyService,
         user=user,
         repo=flow_classification_retention_policy_repo,
         audit_service=audit_service,
+        data_retention_service=data_retention_service,
     )
     flow_run_audit_outbox_delivery_service = providers.Factory(
         FlowRunAuditOutboxDeliveryService,
@@ -1176,6 +1181,7 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_v2_repo,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=data_retention_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(
@@ -1240,6 +1246,7 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=data_retention_service,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1845,11 +1852,6 @@ class Container(containers.DeclarativeContainer):
         app_service=app_service,
         file_service=file_service,
         job_service=job_service,
-    )
-
-    data_retention_service = providers.Factory(
-        DataRetentionService,
-        session=session,
     )
 
     # ═══════════════════════════════════════════════════════════════════════════

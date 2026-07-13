@@ -3,6 +3,7 @@ import type {
   Flow,
   FlowClassificationRetentionPolicies,
   FlowClassificationRetentionPolicy,
+  FlowClassificationRetentionPolicyPreviewRequest,
   FlowClassificationRetentionPolicyUpdate,
   FlowDocumentRenderLimits,
   FlowEvidencePolicy,
@@ -30,6 +31,10 @@ import type {
   FlowPackageResourceSlotRef,
   FlowPackageValidation,
   FlowRetentionPolicy,
+  FlowRetentionChangeConfirmation,
+  FlowRetentionImpactPreview,
+  FlowRetentionOrganizationPreviewRequest,
+  FlowRetentionPolicyUpdate,
   FlowRun,
   FlowRunContract,
   FlowRunContractStepInput,
@@ -106,6 +111,7 @@ type PublicFlowLaunchAliasSmoke = {
   Flow: Flow;
   FlowClassificationRetentionPolicies: FlowClassificationRetentionPolicies;
   FlowClassificationRetentionPolicy: FlowClassificationRetentionPolicy;
+  FlowClassificationRetentionPolicyPreviewRequest: FlowClassificationRetentionPolicyPreviewRequest;
   FlowClassificationRetentionPolicyUpdate: FlowClassificationRetentionPolicyUpdate;
   FlowDocumentRenderLimits: FlowDocumentRenderLimits;
   FlowEvidencePolicy: FlowEvidencePolicy;
@@ -133,6 +139,10 @@ type PublicFlowLaunchAliasSmoke = {
   FlowPackageResourceSlotRef: FlowPackageResourceSlotRef;
   FlowPackageValidation: FlowPackageValidation;
   FlowRetentionPolicy: FlowRetentionPolicy;
+  FlowRetentionChangeConfirmation: FlowRetentionChangeConfirmation;
+  FlowRetentionImpactPreview: FlowRetentionImpactPreview;
+  FlowRetentionOrganizationPreviewRequest: FlowRetentionOrganizationPreviewRequest;
+  FlowRetentionPolicyUpdate: FlowRetentionPolicyUpdate;
   FlowRun: FlowRun;
   FlowRunContract: FlowRunContract;
   FlowRunContractStepInput: FlowRunContractStepInput;

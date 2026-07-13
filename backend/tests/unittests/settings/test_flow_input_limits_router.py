@@ -20,6 +20,7 @@ from eneo.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowRetentionEffectiveStatePublic,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
@@ -342,6 +343,13 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
     service = AsyncMock()
     service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=7,
+        flow_run_history_retention_days=None,
+        flow_runtime_upload_abandonment_days=None,
+        effective_state=FlowRetentionEffectiveStatePublic(
+            run_history_deletion_active=False,
+            runtime_upload_abandonment_active=False,
+            classification_policy_count=0,
+        ),
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -360,6 +368,13 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
     service = AsyncMock()
     service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=14,
+        flow_run_history_retention_days=None,
+        flow_runtime_upload_abandonment_days=None,
+        effective_state=FlowRetentionEffectiveStatePublic(
+            run_history_deletion_active=False,
+            runtime_upload_abandonment_active=False,
+            classification_policy_count=0,
+        ),
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -427,6 +442,7 @@ async def test_put_flow_classification_retention_policy_delegates_to_flow_servic
     service.set_policy.assert_awaited_once_with(
         security_classification_id=classification_id,
         data_retention_days=14,
+        confirmation=None,
     )
 
 

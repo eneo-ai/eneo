@@ -174,7 +174,7 @@ export function initSettings(client) {
     },
 
     /**
-     * Get flow debug-evidence retention policy for the current tenant.
+     * Get the tenant-admin Flow retention control plane.
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}
      */
@@ -186,8 +186,21 @@ export function initSettings(client) {
     },
 
     /**
-     * Update flow debug-evidence retention policy for the current tenant.
-     * @param {Partial<import('../types/resources').FlowRetentionPolicy>} patch
+     * Preview an exact tenant-admin Flow retention proposal without changing policy.
+     * @param {import('../types/resources').FlowRetentionOrganizationPreviewRequest} proposal
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionImpactPreview>}
+     */
+    previewFlowRetentionPolicy: async (proposal) => {
+      return await client.fetch("/api/v1/settings/flow-retention-policy/preview", {
+        method: "post",
+        requestBody: { "application/json": proposal }
+      });
+    },
+
+    /**
+     * Update the tenant-admin Flow retention control plane.
+     * @param {import('../types/resources').FlowRetentionPolicyUpdate} patch
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}
      */
@@ -209,6 +222,28 @@ export function initSettings(client) {
         method: "get"
       });
       return res;
+    },
+
+    /**
+     * Preview an exact classification retention proposal without changing policy.
+     * @param {string} securityClassificationId
+     * @param {import('../types/resources').FlowClassificationRetentionPolicyPreviewRequest} proposal
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRetentionImpactPreview>}
+     */
+    previewFlowClassificationRetentionPolicy: async (securityClassificationId, proposal) => {
+      return await client.fetch(
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+        {
+          method: "post",
+          params: {
+            path: {
+              security_classification_id: securityClassificationId
+            }
+          },
+          requestBody: { "application/json": proposal }
+        }
+      );
     },
 
     /**
