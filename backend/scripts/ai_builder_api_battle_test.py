@@ -870,10 +870,12 @@ def _run_suite(
             "Release suite omitted required case(s): "
             + ", ".join(sorted(missing_required_cases))
         )
+    cases_path = Path(getattr(args, "cases_file", None) or DEFAULT_CASES_FILE)
+    requested_model_id = getattr(args, "model_id", None)
     release_identity = _release_run_identity(
         cases=cases,
-        cases_path=Path(getattr(args, "cases_file", None) or DEFAULT_CASES_FILE),
-        requested_model_id=getattr(args, "model_id", None),
+        cases_path=cases_path,
+        requested_model_id=requested_model_id,
         require_clean_source=release_gate.require_clean_source,
     )
     started_at = time.strftime("%Y%m%dT%H%M%S")
@@ -937,6 +939,8 @@ def _run_suite(
                 skipped["artifact_schema_version"] = (
                     release_gate.artifact_schema_version
                 )
+                if case.required:
+                    skipped["release_identity"] = release_identity
                 skipped_path = _write_bundle(
                     suite_dir,
                     skipped,
@@ -955,6 +959,28 @@ def _run_suite(
                 )
                 bundle["artifact_schema_version"] = release_gate.artifact_schema_version
                 bundle["repetition"] = repetition
+                if case.required:
+                    provenance = bundle.get("live_execution_provenance")
+                    quality_report = bundle.get("quality_report")
+                    checks = (
+                        quality_report.get("checks")
+                        if isinstance(quality_report, Mapping)
+                        else None
+                    )
+                    if not isinstance(provenance, Mapping) or not isinstance(
+                        checks, list
+                    ):
+                        raise ValueError(
+                            f"required case {case.case_id} has no identity evidence."
+                        )
+                    checks.extend(
+                        _required_case_identity_checks(
+                            case=case,
+                            release_identity=release_identity,
+                            provenance=provenance,
+                        )
+                    )
+                    bundle["release_identity"] = release_identity
                 bundle_path = _write_bundle(
                     suite_dir,
                     bundle,
@@ -994,6 +1020,33 @@ def _run_suite(
                 print(f"failure bundle: {failure_path}", file=sys.stderr)
                 results.append({**failure, "bundle_path": str(failure_path)})
 
+    try:
+        release_identity_recheck = _release_run_identity(
+            cases=cases,
+            cases_path=cases_path,
+            requested_model_id=requested_model_id,
+            require_clean_source=release_gate.require_clean_source,
+        )
+        release_identity_recheck_checks = _release_identity_recheck_checks(
+            expected=release_identity,
+            actual=release_identity_recheck,
+        )
+    except (subprocess.CalledProcessError, ValueError) as error:
+        release_identity_recheck = {"error": str(error)}
+        release_identity_recheck_checks = [
+            {
+                "name": f"suite_{component}_identity_unchanged",
+                "passed": False,
+                "actual": str(error),
+                "expected": release_identity.get(component),
+            }
+            for component in ("source", "build", "model", "prompts")
+        ]
+    suite_identity_failure_count = sum(
+        1
+        for check in release_identity_recheck_checks
+        if check.get("passed") is not True
+    )
     threshold_checks = _evaluate_release_thresholds(
         release_gate.thresholds,
         case_error_count=case_error_count,
@@ -1011,21 +1064,32 @@ def _run_suite(
         "repetitions": args.repetitions,
         "run_count": total_runs,
         "failure_count": (
-            case_error_count + quality_failure_run_count + required_skipped_run_count
+            case_error_count
+            + quality_failure_run_count
+            + required_skipped_run_count
+            + suite_identity_failure_count
         ),
         "case_error_count": case_error_count,
         "quality_failure_run_count": quality_failure_run_count,
         "skipped_run_count": skipped_run_count,
         "required_skipped_run_count": required_skipped_run_count,
+        "suite_identity_failure_count": suite_identity_failure_count,
         "release_threshold_checks": threshold_checks,
         "release_identity": release_identity,
+        "release_identity_recheck": release_identity_recheck,
+        "release_identity_recheck_checks": release_identity_recheck_checks,
         "results": results,
         "reliability": _suite_reliability_summary(results),
     }
     summary_path = suite_dir / "suite-summary.json"
     _write_json_exclusive(summary_path, suite_summary)
     print(f"\nsuite summary: {summary_path}")
-    return 1 if any(check["passed"] is not True for check in threshold_checks) else 0
+    return (
+        1
+        if suite_identity_failure_count
+        or any(check["passed"] is not True for check in threshold_checks)
+        else 0
+    )
 
 
 def _release_run_identity(
@@ -1044,8 +1108,14 @@ def _release_run_identity(
     build = {
         "app_version": LOCAL_APP_VERSION,
         "source_revision": source_revision,
-        "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        "cases_sha256": hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+        "harness_sha256": _release_input_sha256(
+            Path(__file__),
+            label="battle harness",
+        ),
+        "cases_sha256": _release_input_sha256(
+            cases_path,
+            label="battle cases",
+        ),
     }
     prompt_hashes = {
         case.case_id: hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
@@ -1067,6 +1137,132 @@ def _release_run_identity(
             "sha256": _canonical_sha256(prompt_hashes),
         },
     }
+
+
+def _release_input_sha256(path: Path, *, label: str) -> str:
+    repository_root = Path(__file__).resolve().parents[2]
+    resolved_path = path.resolve()
+    try:
+        repository_path = resolved_path.relative_to(repository_root)
+    except ValueError as error:
+        raise ValueError(f"{label} must be a tracked repository input.") from error
+    try:
+        _git_output(
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            repository_path.as_posix(),
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"{label} must be a tracked repository input.") from error
+    return hashlib.sha256(resolved_path.read_bytes()).hexdigest()
+
+
+def _required_case_identity_checks(
+    *,
+    case: BattleCase,
+    release_identity: Mapping[str, object],
+    provenance: Mapping[str, object],
+) -> list[JsonObject]:
+    release_source = release_identity.get("source")
+    release_source = release_source if isinstance(release_source, Mapping) else {}
+    live_source = provenance.get("source")
+    live_source = live_source if isinstance(live_source, Mapping) else {}
+    release_revision = release_source.get("revision")
+    live_revision = live_source.get("revision")
+    source_identity_matches = (
+        isinstance(release_revision, str)
+        and release_revision == live_revision
+        and release_source.get("revision_sha256")
+        == hashlib.sha256(release_revision.encode("utf-8")).hexdigest()
+        and live_source.get("revision_sha256")
+        == hashlib.sha256(release_revision.encode("utf-8")).hexdigest()
+    )
+
+    release_build = release_identity.get("build")
+    release_build = release_build if isinstance(release_build, Mapping) else {}
+    live_build = provenance.get("build")
+    live_build = live_build if isinstance(live_build, Mapping) else {}
+    build_keys = (
+        "app_version",
+        "source_revision",
+        "harness_sha256",
+        "cases_sha256",
+    )
+    release_build_payload = {key: release_build.get(key) for key in build_keys}
+    live_build_payload = {key: live_build.get(key) for key in build_keys}
+    build_identity_matches = (
+        release_build_payload == live_build_payload
+        and release_build.get("sha256") == _canonical_sha256(release_build_payload)
+        and live_build.get("sha256") == _canonical_sha256(live_build_payload)
+    )
+
+    release_model = release_identity.get("model")
+    release_model = release_model if isinstance(release_model, Mapping) else {}
+    live_model = provenance.get("model")
+    live_model = live_model if isinstance(live_model, Mapping) else {}
+    release_model_payload = {"requested_id": release_model.get("requested_id")}
+    model_identity_matches = release_model.get("sha256") == _canonical_sha256(
+        release_model_payload
+    ) and release_model.get("requested_id") == live_model.get("requested_id")
+
+    release_prompts = release_identity.get("prompts")
+    release_prompts = release_prompts if isinstance(release_prompts, Mapping) else {}
+    release_prompt_hashes = release_prompts.get("case_sha256_by_id")
+    release_prompt_hashes = (
+        release_prompt_hashes if isinstance(release_prompt_hashes, Mapping) else {}
+    )
+    live_prompt = provenance.get("prompt")
+    live_prompt = live_prompt if isinstance(live_prompt, Mapping) else {}
+    case_prompt_sha256 = hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+    prompt_identity_matches = (
+        release_prompts.get("sha256") == _canonical_sha256(dict(release_prompt_hashes))
+        and release_prompt_hashes.get(case.case_id) == case_prompt_sha256
+        and live_prompt.get("case_sha256") == case_prompt_sha256
+    )
+
+    return [
+        {
+            "name": "suite_source_revision_identity",
+            "passed": source_identity_matches,
+            "actual": live_source,
+            "expected": release_source,
+        },
+        {
+            "name": "suite_build_input_identity",
+            "passed": build_identity_matches,
+            "actual": live_build_payload,
+            "expected": release_build_payload,
+        },
+        {
+            "name": "suite_requested_model_identity",
+            "passed": model_identity_matches,
+            "actual": live_model.get("requested_id"),
+            "expected": release_model.get("requested_id"),
+        },
+        {
+            "name": "suite_case_prompt_identity",
+            "passed": prompt_identity_matches,
+            "actual": live_prompt.get("case_sha256"),
+            "expected": release_prompt_hashes.get(case.case_id),
+        },
+    ]
+
+
+def _release_identity_recheck_checks(
+    *,
+    expected: Mapping[str, object],
+    actual: Mapping[str, object],
+) -> list[JsonObject]:
+    return [
+        {
+            "name": f"suite_{component}_identity_unchanged",
+            "passed": actual.get(component) == expected.get(component),
+            "actual": actual.get(component),
+            "expected": expected.get(component),
+        }
+        for component in ("source", "build", "model", "prompts")
+    ]
 
 
 def _evaluate_release_thresholds(
@@ -3566,11 +3762,29 @@ def _review_policy_checks(
         )
         and not missing_field_groups
     )
-    synthetic_steps = [
-        step.get("order")
+    target_position = steps.index(target) if target is not None else None
+    next_step = (
+        steps[target_position + 1]
+        if target_position is not None and target_position + 1 < len(steps)
+        else None
+    )
+    review_bypass_step = (
+        next_step
+        if target is not None
+        and next_step is not None
+        and not isinstance(next_step.get("review_policy"), Mapping)
+        and next_step.get("output_type") == target.get("output_type")
+        and next_step.get("output_mode") == "pass_through"
+        else None
+    )
+    structural_topology = [
+        {
+            "order": step.get("order"),
+            "output_type": step.get("output_type"),
+            "output_mode": step.get("output_mode"),
+            "has_review_policy": isinstance(step.get("review_policy"), Mapping),
+        }
         for step in steps
-        if not isinstance(step.get("review_policy"), Mapping)
-        and _looks_like_synthetic_review_step(step)
     ]
     target_order = _int_value(target.get("order")) if target is not None else None
     target_is_terminal_or_delivery = target is None or (
@@ -3617,10 +3831,13 @@ def _review_policy_checks(
             },
         },
         {
-            "name": f"{scope}_no_synthetic_review_step",
-            "passed": synthetic_steps == [],
-            "actual": synthetic_steps,
-            "expected": [],
+            "name": f"{scope}_review_policy_topology",
+            "passed": target is not None and review_bypass_step is None,
+            "actual": structural_topology,
+            "expected": (
+                "reviewed structured output is consumed without an unreviewed "
+                "same-type pass-through"
+            ),
         },
         {
             "name": f"{scope}_review_policy_not_terminal_or_delivery",
@@ -3629,29 +3846,6 @@ def _review_policy_checks(
             "expected": "non-terminal non-delivery step",
         },
     ]
-
-
-def _looks_like_synthetic_review_step(step: Mapping[str, object]) -> bool:
-    text = " ".join(
-        _clean_strings(
-            [
-                step.get("name"),
-                step.get("instruction_excerpt"),
-            ]
-        )
-    )
-    normalized = _normalized_field_name(text)
-    return any(
-        marker in normalized
-        for marker in (
-            "aireview",
-            "approve",
-            "humanreview",
-            "gransk",
-            "godkann",
-            "mansklig",
-        )
-    )
 
 
 def _runtime_evidence_checks(
@@ -3738,6 +3932,29 @@ def _runtime_evidence_checks(
         expected,
         "required_final_field_label_groups",
     )
+    missing_record_field_groups: dict[str, list[list[str]]] = {}
+    for index, document in enumerate(documents, start=1):
+        record_label = _optional_string(document, "source_label") or f"record-{index}"
+        present_fields = [
+            str(key)
+            for key, value in document.items()
+            if isinstance(key, str)
+            and (
+                (isinstance(value, str) and bool(value.strip()))
+                or (isinstance(value, (int, float)) and not isinstance(value, bool))
+            )
+        ]
+        missing_groups = [
+            group
+            for group in expected_field_groups
+            if not any(
+                _field_name_matches(expected_name, actual_name)
+                for expected_name in group
+                for actual_name in present_fields
+            )
+        ]
+        if missing_groups:
+            missing_record_field_groups[record_label] = missing_groups
     artifact_labels = _artifact_labels(artifact_text)
     missing_field_groups = [
         group
@@ -3756,6 +3973,29 @@ def _runtime_evidence_checks(
         group
         for group in degradation_groups
         if not any(marker.casefold() in artifact_text.casefold() for marker in group)
+    ]
+    artifact_source_sections = _artifact_source_sections(artifact_text, source_labels)
+    missing_artifact_field_groups_by_source: dict[str, list[list[str]]] = {}
+    for label in source_labels:
+        section_labels = _artifact_labels(artifact_source_sections.get(label, ""))
+        section_missing_groups = [
+            group
+            for group in expected_field_groups
+            if not any(
+                _field_name_matches(expected_label, actual_label)
+                for expected_label in group
+                for actual_label in section_labels
+            )
+        ]
+        if section_missing_groups:
+            missing_artifact_field_groups_by_source[label] = section_missing_groups
+    associated_artifact_text = "\n".join(artifact_source_sections.values())
+    missing_associated_degradation_groups = [
+        group
+        for group in degradation_groups
+        if not any(
+            marker.casefold() in associated_artifact_text.casefold() for marker in group
+        )
     ]
     missing_source_labels = [
         label
@@ -3806,15 +4046,50 @@ def _runtime_evidence_checks(
             },
         },
         {
+            "name": "runtime_source_record_fields",
+            "passed": missing_record_field_groups == {},
+            "actual": missing_record_field_groups,
+            "expected": expected_field_groups,
+        },
+        {
             "name": "runtime_final_field_labels",
             "passed": missing_field_groups == [],
             "actual": artifact_labels,
             "expected": expected_field_groups,
         },
         {
+            "name": "runtime_per_source_artifact_fields",
+            "passed": (
+                len(artifact_source_sections) == len(source_labels)
+                and missing_artifact_field_groups_by_source == {}
+            ),
+            "actual": {
+                "associated_source_labels": list(artifact_source_sections),
+                "missing_field_groups_by_source": (
+                    missing_artifact_field_groups_by_source
+                ),
+            },
+            "expected": {
+                "source_labels": source_labels,
+                "field_groups_per_source": expected_field_groups,
+            },
+        },
+        {
             "name": "runtime_visible_degradation",
             "passed": missing_degradation_groups == [],
             "actual": artifact_text[:2000],
+            "expected": degradation_groups,
+        },
+        {
+            "name": "runtime_degradation_source_association",
+            "passed": (
+                len(artifact_source_sections) == len(source_labels)
+                and missing_associated_degradation_groups == []
+            ),
+            "actual": {
+                "associated_source_labels": list(artifact_source_sections),
+                "missing_marker_groups": missing_associated_degradation_groups,
+            },
             "expected": degradation_groups,
         },
         {
@@ -3894,6 +4169,32 @@ def _artifact_labels(text: str) -> list[str]:
         if separator and label.strip():
             labels.append(label.strip())
     return labels
+
+
+def _artifact_source_sections(
+    text: str,
+    source_labels: list[str],
+) -> dict[str, str]:
+    lines = text.splitlines()
+    anchors: dict[str, int] = {}
+    for index, line in enumerate(lines):
+        matching_labels = [
+            label for label in source_labels if label.casefold() in line.casefold()
+        ]
+        if len(matching_labels) == 1 and matching_labels[0] not in anchors:
+            anchors[matching_labels[0]] = index
+    if len(anchors) != len(source_labels):
+        return {}
+    ordered_anchors = sorted(anchors.items(), key=lambda item: item[1])
+    sections: dict[str, str] = {}
+    for position, (label, start) in enumerate(ordered_anchors):
+        end = (
+            ordered_anchors[position + 1][1]
+            if position + 1 < len(ordered_anchors)
+            else len(lines)
+        )
+        sections[label] = "\n".join(lines[start:end])
+    return sections
 
 
 def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:

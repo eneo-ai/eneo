@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -217,7 +218,25 @@ def _six_file_runtime_evidence() -> dict[str, object]:
         }
         for index in range(1, 7)
     ]
-    source_labels = " ".join(document["source_label"] for document in documents)
+    artifact_sections = [
+        (
+            f"Source: {document['source_label']}\n"
+            f"Title: {document['title']}\n"
+            f"Year: {document['year']}\n"
+            f"Category: {document['category']}\n"
+            f"Type: {document['type']}\n"
+            f"Author: {document['author']}\n"
+            f"Conclusions: {document['conclusions']}\n"
+            f"Summary: {document['summary']}\n"
+            "Extraction quality: "
+            + (
+                "pdf_text_likely_reversed; värde framgår ej"
+                if index == 6
+                else "full extraction"
+            )
+        )
+        for index, document in enumerate(documents, start=1)
+    ]
     return {
         "run": {
             "status": "completed",
@@ -275,12 +294,7 @@ def _six_file_runtime_evidence() -> dict[str, object]:
         "final_artifact": {
             "file_id": "artifact-1",
             "sha256": "d" * 64,
-            "text": (
-                "Title: Report\nYear: 2026\nCategory: Policy\nType: Report\n"
-                "Author: Municipality\nConclusions: Conclusion\nSummary: Summary\n"
-                "Extraction quality: pdf_text_likely_reversed; värde framgår ej\n"
-                f"Sources: {source_labels}"
-            ),
+            "text": "\n\n".join(artifact_sections),
         },
     }
 
@@ -411,6 +425,70 @@ def _classifier_diagnostics() -> dict[str, object]:
                 "contradictions": [],
             }
         ],
+    }
+
+
+def _release_identity_fixture(
+    harness: ModuleType,
+    *,
+    case_id: str,
+    prompt: str,
+    revision: str = "a" * 40,
+    harness_sha256: str = "b" * 64,
+    cases_sha256: str = "c" * 64,
+    requested_model_id: str | None = "model-a",
+) -> dict[str, object]:
+    build = {
+        "app_version": harness.LOCAL_APP_VERSION,
+        "source_revision": revision,
+        "harness_sha256": harness_sha256,
+        "cases_sha256": cases_sha256,
+    }
+    model = {"requested_id": requested_model_id}
+    prompt_hashes = {
+        case_id: hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+    }
+    return {
+        "source": {
+            "revision": revision,
+            "revision_sha256": hashlib.sha256(revision.encode("utf-8")).hexdigest(),
+            "tracked_clean": True,
+        },
+        "build": {**build, "sha256": harness._canonical_sha256(build)},
+        "model": {**model, "sha256": harness._canonical_sha256(model)},
+        "prompts": {
+            "case_sha256_by_id": prompt_hashes,
+            "sha256": harness._canonical_sha256(prompt_hashes),
+        },
+    }
+
+
+def _live_provenance_fixture(
+    harness: ModuleType,
+    *,
+    revision: str = "a" * 40,
+    harness_sha256: str = "b" * 64,
+    cases_sha256: str = "c" * 64,
+    requested_model_id: str | None = "model-a",
+    prompt: str,
+) -> dict[str, object]:
+    build = {
+        "app_version": harness.LOCAL_APP_VERSION,
+        "source_revision": revision,
+        "harness_sha256": harness_sha256,
+        "cases_sha256": cases_sha256,
+    }
+    return {
+        "source": {
+            "revision": revision,
+            "revision_sha256": hashlib.sha256(revision.encode("utf-8")).hexdigest(),
+            "tracked_clean": True,
+        },
+        "build": {**build, "sha256": harness._canonical_sha256(build)},
+        "model": {"requested_id": requested_model_id},
+        "prompt": {
+            "case_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        },
     }
 
 
@@ -970,11 +1048,30 @@ def test_release_thresholds_are_predeclared_and_compared(
             max_required_skips=0,
         ),
     )
+    case = harness.BattleCase(
+        case_id="required-positive",
+        prompt="Build the required positive case.",
+        required=True,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: release_identity,
+    )
 
     def successful_case(**_: object) -> dict[str, object]:
         return {
             "created_at": "20260713T120001",
             "artifact_mode": "live_execution",
+            "live_execution_provenance": _live_provenance_fixture(
+                harness,
+                prompt=case.prompt,
+            ),
             "case": {"id": "required-positive", "required": True},
             "session_id": "session-1",
             "plan_id": "plan-1",
@@ -985,13 +1082,7 @@ def test_release_thresholds_are_predeclared_and_compared(
 
     monkeypatch.setattr(harness, "_run_case", successful_case)
     exit_code = harness._run_suite(
-        cases=[
-            harness.BattleCase(
-                case_id="required-positive",
-                prompt="Build the required positive case.",
-                required=True,
-            )
-        ],
+        cases=[case],
         config=harness.ApiConfig(
             base_url="http://localhost:8123/api/v1",
             api_key="test-key",
@@ -1026,6 +1117,97 @@ def test_release_thresholds_are_predeclared_and_compared(
         )["passed"]
         is False
     )
+
+
+def test_suite_identity_rechecks_a_to_b_before_green_summary(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="required-identity",
+        prompt="Build the required identity case.",
+        required=True,
+    )
+    identity_a = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+    identity_b = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+        harness_sha256="d" * 64,
+    )
+    identities = iter((identity_a, identity_b))
+    monkeypatch.setattr(
+        harness,
+        "_release_run_identity",
+        lambda **_: next(identities),
+    )
+
+    def successful_case(**_: object) -> dict[str, object]:
+        return {
+            "created_at": "20260713T120002",
+            "artifact_mode": "live_execution",
+            "live_execution_provenance": _live_provenance_fixture(
+                harness,
+                prompt=case.prompt,
+            ),
+            "case": {"id": case.case_id, "required": True},
+            "session_id": "session-1",
+            "plan_id": "plan-1",
+            "plan_summary": {"step_count": 1},
+            "event_summary": {},
+            "quality_report": {"checks": [], "warnings": [], "metrics": {}},
+        }
+
+    monkeypatch.setattr(harness, "_run_case", successful_case)
+
+    exit_code = harness._run_suite(
+        cases=[case],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=type(
+            "Args",
+            (),
+            {
+                "repetitions": 1,
+                "space_id": "space-1",
+                "model_id": "model-a",
+            },
+        )(),
+        output_dir=tmp_path,
+    )
+
+    assert exit_code == 1
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    case_bundle = json.loads(
+        next(suite_dir.glob("ai-builder-api-battle-test-*.json")).read_text()
+    )
+    assert case_bundle["release_identity"] == identity_a
+    identity_check_names = {
+        check["name"]
+        for check in case_bundle["quality_report"]["checks"]
+        if check["name"].startswith("suite_")
+    }
+    assert identity_check_names == {
+        "suite_source_revision_identity",
+        "suite_build_input_identity",
+        "suite_requested_model_identity",
+        "suite_case_prompt_identity",
+    }
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    final_checks = {
+        check["name"]: check for check in summary["release_identity_recheck_checks"]
+    }
+    assert final_checks["suite_build_identity_unchanged"]["passed"] is False
+    assert summary["suite_identity_failure_count"] == 1
+    assert summary["failure_count"] == 1
 
 
 def test_release_gate_rejects_dirty_source_before_creating_output(
@@ -1080,6 +1262,30 @@ def test_release_gate_rejects_dirty_source_before_creating_output(
         )
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_release_identity_rejects_untracked_case_input(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(case_id="required-input", prompt="Build it.")
+
+    def git_output(*args: str) -> str:
+        if args and args[0] == "ls-files":
+            raise subprocess.CalledProcessError(1, ["git", *args])
+        if args == ("status", "--porcelain", "--untracked-files=no"):
+            return ""
+        return "a" * 40
+
+    monkeypatch.setattr(harness, "_git_output", git_output)
+
+    with raises(ValueError, match="tracked repository input"):
+        harness._release_run_identity(
+            cases=[case],
+            cases_path=harness.DEFAULT_CASES_FILE,
+            requested_model_id="model-a",
+            require_clean_source=True,
+        )
 
 
 def test_live_provenance_captures_source_build_model_prompt_and_usage(
@@ -1158,6 +1364,74 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
     )
 
 
+def test_required_case_identity_rejects_each_manifest_drift() -> None:
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="required-identity",
+        prompt="Build the required identity case.",
+        required=True,
+    )
+    release_identity = _release_identity_fixture(
+        harness,
+        case_id=case.case_id,
+        prompt=case.prompt,
+    )
+
+    def checks_for(provenance: dict[str, object]) -> dict[str, dict[str, object]]:
+        return {
+            check["name"]: check
+            for check in harness._required_case_identity_checks(
+                case=case,
+                release_identity=release_identity,
+                provenance=provenance,
+            )
+        }
+
+    baseline = checks_for(_live_provenance_fixture(harness, prompt=case.prompt))
+    assert all(check["passed"] is True for check in baseline.values())
+
+    source_drift = checks_for(
+        _live_provenance_fixture(
+            harness,
+            prompt=case.prompt,
+            revision="d" * 40,
+        )
+    )
+    assert source_drift["suite_source_revision_identity"]["passed"] is False
+
+    harness_drift = checks_for(
+        _live_provenance_fixture(
+            harness,
+            prompt=case.prompt,
+            harness_sha256="e" * 64,
+        )
+    )
+    assert harness_drift["suite_build_input_identity"]["passed"] is False
+
+    cases_drift = checks_for(
+        _live_provenance_fixture(
+            harness,
+            prompt=case.prompt,
+            cases_sha256="f" * 64,
+        )
+    )
+    assert cases_drift["suite_build_input_identity"]["passed"] is False
+
+    model_drift = checks_for(
+        _live_provenance_fixture(
+            harness,
+            prompt=case.prompt,
+            requested_model_id="model-b",
+        )
+    )
+    assert model_drift["suite_requested_model_identity"]["passed"] is False
+
+    prompt_drift = checks_for(
+        _live_provenance_fixture(harness, prompt="Build a different case.")
+    )
+    assert prompt_drift["suite_case_prompt_identity"]["passed"] is False
+
+
 def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     harness = _battle_harness()
     expected = {
@@ -1188,12 +1462,12 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
         "proposed_review_policy_count",
         "proposed_review_policy_mode",
         "proposed_review_policy_target",
-        "proposed_no_synthetic_review_step",
+        "proposed_review_policy_topology",
         "proposed_review_policy_not_terminal_or_delivery",
         "applied_review_policy_count",
         "applied_review_policy_mode",
         "applied_review_policy_target",
-        "applied_no_synthetic_review_step",
+        "applied_review_policy_topology",
         "applied_review_policy_not_terminal_or_delivery",
     ):
         assert baseline[name]["passed"] is True
@@ -1209,20 +1483,39 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     _review_plan_steps(duplicate)[1]["review_policy"] = {"mode": "view"}
     assert checks_for(duplicate)["proposed_review_policy_count"]["passed"] is False
 
-    synthetic = _review_policy_plan()
+    swedish_bypass = _review_policy_plan()
     _insert_review_plan_step(
-        synthetic,
+        swedish_bypass,
         1,
         {
-            "plan_step_ref": "ai_review",
-            "name": "AI review and approve matrix",
+            "plan_step_ref": "matrix_check",
+            "name": "Kontrollera poängmatrisen",
             "input_source": "previous_step",
             "input_type": "json",
             "output_type": "json",
             "output_mode": "pass_through",
         },
     )
-    assert checks_for(synthetic)["proposed_no_synthetic_review_step"]["passed"] is False
+    swedish_checks = checks_for(swedish_bypass)
+    assert swedish_checks["proposed_review_policy_topology"]["passed"] is False
+    assert swedish_checks["applied_review_policy_topology"]["passed"] is False
+
+    neutral_bypass = _review_policy_plan()
+    _insert_review_plan_step(
+        neutral_bypass,
+        1,
+        {
+            "plan_step_ref": "stage_two",
+            "name": "Stage 2",
+            "input_source": "previous_step",
+            "input_type": "json",
+            "output_type": "json",
+            "output_mode": "pass_through",
+        },
+    )
+    neutral_checks = checks_for(neutral_bypass)
+    assert neutral_checks["proposed_review_policy_topology"]["passed"] is False
+    assert neutral_checks["applied_review_policy_topology"]["passed"] is False
 
     terminal = _review_policy_plan()
     terminal_steps = _review_plan_steps(terminal)
@@ -1330,8 +1623,11 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
         "runtime_source_file_count",
         "runtime_source_record_count",
         "runtime_one_record_per_source_file",
+        "runtime_source_record_fields",
         "runtime_final_field_labels",
+        "runtime_per_source_artifact_fields",
         "runtime_visible_degradation",
+        "runtime_degradation_source_association",
         "runtime_source_display",
         "runtime_model_call_count",
         "runtime_total_tokens",
@@ -1344,6 +1640,34 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
     assert isinstance(artifact_text, str)
     missing_field_artifact["text"] = artifact_text.replace("Year: 2026", "2026")
     assert checks_for(missing_field)["runtime_final_field_labels"]["passed"] is False
+
+    one_record_field_loss = _six_file_runtime_evidence()
+    _runtime_documents(one_record_field_loss)[5].pop("year")
+    assert (
+        checks_for(one_record_field_loss)["runtime_source_record_fields"]["passed"]
+        is False
+    )
+
+    global_only_evidence = _six_file_runtime_evidence()
+    global_only_artifact = _runtime_final_artifact(global_only_evidence)
+    source_labels = " ".join(
+        str(document["source_label"])
+        for document in _runtime_documents(global_only_evidence)
+    )
+    global_only_artifact["text"] = (
+        "Title: Report\nYear: 2026\nCategory: Policy\nType: Report\n"
+        "Author: Municipality\nConclusions: Conclusion\nSummary: Summary\n"
+        "Extraction quality: pdf_text_likely_reversed; värde framgår ej\n"
+        f"Sources: {source_labels}"
+    )
+    global_only_checks = checks_for(global_only_evidence)
+    assert global_only_checks["runtime_final_field_labels"]["passed"] is True
+    assert global_only_checks["runtime_visible_degradation"]["passed"] is True
+    assert global_only_checks["runtime_source_display"]["passed"] is True
+    assert global_only_checks["runtime_per_source_artifact_fields"]["passed"] is False
+    assert (
+        global_only_checks["runtime_degradation_source_association"]["passed"] is False
+    )
 
     cardinality_drift = _six_file_runtime_evidence()
     _append_first_runtime_document(cardinality_drift)
