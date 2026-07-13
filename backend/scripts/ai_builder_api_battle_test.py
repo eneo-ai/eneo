@@ -9,8 +9,12 @@ Set ENEO_API_KEY in the environment; never commit local keys into this file.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
+import mimetypes
 import os
+import subprocess
 import sys
 import time
 import unicodedata
@@ -56,10 +60,30 @@ class BattleCase:
     prompt: str
     complexity: str = "custom"
     domain: str = "custom"
+    required: bool = False
+    apply_plan: bool = False
+    execute_flow: bool = False
+    release_dimensions: tuple[str, ...] = ()
     expected: JsonObject | None = None
     file_ids: tuple[str, ...] = ()
     file_id_envs: tuple[str, ...] = ()
+    runtime_file_path_envs: tuple[str, ...] = ()
     scripted_question_answers: JsonObject | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseThresholds:
+    max_case_errors: int
+    max_quality_failures: int
+    max_required_skips: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseGate:
+    required_case_ids: tuple[str, ...]
+    thresholds: ReleaseThresholds
+    artifact_schema_version: str = "ai-builder-live-release.v1"
+    require_clean_source: bool = False
 
 
 def main() -> int:
@@ -86,6 +110,7 @@ def main() -> int:
     )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(output_dir, 0o700)
 
     try:
         cases = _cases_from_args(args)
@@ -95,6 +120,9 @@ def main() -> int:
                 config=config,
                 args=args,
                 output_dir=output_dir,
+                release_gate=(
+                    _release_gate_from_args(args) if args.run_suite else None
+                ),
             )
         case = cases[0]
         if missing_envs := _missing_file_id_envs(case, args):
@@ -110,12 +138,13 @@ def main() -> int:
             )
             print(f"case skipped: {skipped['skip_reason']}")
             print(f"skipped bundle: {skipped_path}")
-            return 0
+            return 1 if case.required else 0
         bundle = _run_case(
             case=case,
             config=config,
             args=args,
             existing_session_id=args.session_id,
+            artifact_output_dir=output_dir,
         )
         bundle_path = _write_bundle(output_dir, bundle, suffix=case.case_id)
         _print_summary(bundle["plan_summary"], bundle_path)
@@ -132,10 +161,8 @@ def main() -> int:
             "space_id": args.space_id,
             "error": str(error),
         }
-        bundle_path.write_text(
-            json.dumps(failure, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        failure["artifact_mode"] = "live_execution_failure"
+        _write_json_exclusive(bundle_path, failure)
         print(f"battle test failed: {error}", file=sys.stderr)
         print(f"failure bundle: {bundle_path}", file=sys.stderr)
         return 1
@@ -362,6 +389,74 @@ _EVIDENCE_POSTURE_EXPECTATION_PREFIXES = (
     "expected_assumption",
     "forbidden_assumption",
 )
+_CASE_KEYS = frozenset(
+    {
+        "id",
+        "prompt",
+        "complexity",
+        "domain",
+        "required",
+        "apply_plan",
+        "execute_flow",
+        "release_dimensions",
+        "expected",
+        "file_ids",
+        "file_id_envs",
+        "runtime_file_path_envs",
+        "scripted_question_answers",
+    }
+)
+_EXPECTATION_KEYS = frozenset(
+    {
+        "allow_question_instead_of_plan",
+        "expected_classifier_slots",
+        "expected_file_roles",
+        "expected_form_field_groups",
+        "expected_leaf_output_field_groups",
+        "expected_output_modes",
+        "expected_question_event_count",
+        "expected_question_event_ids",
+        "expected_review_policy",
+        "expected_runtime_evidence",
+        "forbid_classifier_commit_grade_slots",
+        "forbid_generic_primary_reader_envelope",
+        "forbid_input_sources",
+        "forbid_primary_material_form_fields",
+        "forbidden_form_field_groups",
+        "forbidden_assumption_topics",
+        "forbidden_question_event_ids",
+        "max_all_previous_steps",
+        "max_post_json_text_cleanup_steps",
+        "max_question_event_count",
+        "max_steps",
+        "min_form_field_count",
+        "min_json_steps",
+        "min_source_ref_steps",
+        "min_steps",
+        "terminal_document_output_mode",
+        "terminal_output_type",
+        "terminal_output_types",
+    }
+)
+_REVIEW_POLICY_EXPECTATION_KEYS = frozenset(
+    {
+        "mode",
+        "target_output_type",
+        "target_field_groups",
+        "target_must_be_non_terminal",
+    }
+)
+_RUNTIME_EVIDENCE_EXPECTATION_KEYS = frozenset(
+    {
+        "source_file_count",
+        "source_record_count",
+        "required_final_field_label_groups",
+        "required_visible_degradation_markers",
+        "source_display_count",
+        "model_call_count",
+        "max_total_tokens",
+    }
+)
 
 
 def _read_cases_file(path: Path) -> list[BattleCase]:
@@ -374,6 +469,12 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
     for index, raw_case in enumerate(raw_cases):
         if not isinstance(raw_case, Mapping):
             raise ValueError(f"{path} cases[{index}] must be an object.")
+        unknown_case_keys = set(raw_case) - _CASE_KEYS
+        if unknown_case_keys:
+            raise ValueError(
+                f"{path} cases[{index}] has unknown keys: "
+                + ", ".join(sorted(str(key) for key in unknown_case_keys))
+            )
         case_id = _required_string(raw_case, "id")
         prompt = _required_string(raw_case, "prompt").strip()
         if not prompt:
@@ -394,33 +495,238 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(
                 f"{path} case {case_id}.file_id_envs must be a string list."
             )
+        runtime_file_path_envs = raw_case.get("runtime_file_path_envs")
+        if runtime_file_path_envs is None:
+            runtime_file_path_envs = []
+        if not isinstance(runtime_file_path_envs, list) or not all(
+            isinstance(env_name, str) for env_name in runtime_file_path_envs
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.runtime_file_path_envs must be a string list."
+            )
+        release_dimensions = raw_case.get("release_dimensions")
+        if release_dimensions is None:
+            release_dimensions = []
+        if not isinstance(release_dimensions, list) or not all(
+            isinstance(dimension, str) and dimension.strip()
+            for dimension in release_dimensions
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.release_dimensions must be a string list."
+            )
         expected = raw_case.get("expected")
         if expected is not None and not isinstance(expected, Mapping):
             raise ValueError(f"{path} case {case_id}.expected must be an object.")
         if isinstance(expected, Mapping):
             _validate_classifier_expectations(path, case_id, expected)
+            _validate_release_expectations(path, case_id, expected)
         scripted_answers = raw_case.get("scripted_question_answers")
         if scripted_answers is not None and not isinstance(scripted_answers, Mapping):
             raise ValueError(
                 f"{path} case {case_id}.scripted_question_answers must be an object."
             )
-        cases.append(
-            BattleCase(
-                case_id=case_id,
-                prompt=prompt,
-                complexity=str(raw_case.get("complexity") or "custom"),
-                domain=str(raw_case.get("domain") or "custom"),
-                expected=dict(expected) if isinstance(expected, Mapping) else None,
-                file_ids=tuple(file_ids),
-                file_id_envs=tuple(file_id_envs),
-                scripted_question_answers=(
-                    dict(scripted_answers)
-                    if isinstance(scripted_answers, Mapping)
-                    else None
-                ),
-            )
+        case = BattleCase(
+            case_id=case_id,
+            prompt=prompt,
+            complexity=str(raw_case.get("complexity") or "custom"),
+            domain=str(raw_case.get("domain") or "custom"),
+            required=raw_case.get("required") is True,
+            apply_plan=raw_case.get("apply_plan") is True,
+            execute_flow=raw_case.get("execute_flow") is True,
+            release_dimensions=tuple(release_dimensions),
+            expected=dict(expected) if isinstance(expected, Mapping) else None,
+            file_ids=tuple(file_ids),
+            file_id_envs=tuple(file_id_envs),
+            runtime_file_path_envs=tuple(runtime_file_path_envs),
+            scripted_question_answers=(
+                dict(scripted_answers)
+                if isinstance(scripted_answers, Mapping)
+                else None
+            ),
         )
+        if case.execute_flow and not case.apply_plan:
+            raise ValueError(
+                f"{path} case {case_id} cannot execute without apply_plan=true."
+            )
+        if case.execute_flow and not case.runtime_file_path_envs:
+            raise ValueError(
+                f"{path} case {case_id} must declare runtime_file_path_envs."
+            )
+        cases.append(case)
     return cases
+
+
+def _release_gate_from_args(args: argparse.Namespace) -> ReleaseGate:
+    path = Path(args.cases_file) if args.cases_file else DEFAULT_CASES_FILE
+    return _read_release_gate(path, cases=_read_cases_file(path))
+
+
+def _read_release_gate(path: Path, *, cases: list[BattleCase]) -> ReleaseGate:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_gate = payload.get("release_gate") if isinstance(payload, Mapping) else None
+    if not isinstance(raw_gate, Mapping):
+        raise ValueError(f"{path} must contain a top-level 'release_gate' object.")
+    expected_gate_keys = {
+        "artifact_schema_version",
+        "require_clean_source",
+        "required_case_ids",
+        "thresholds",
+    }
+    if set(raw_gate) != expected_gate_keys:
+        raise ValueError(
+            f"{path} release_gate must contain exactly: "
+            + ", ".join(sorted(expected_gate_keys))
+        )
+    artifact_schema_version = raw_gate.get("artifact_schema_version")
+    if not isinstance(artifact_schema_version, str) or not artifact_schema_version:
+        raise ValueError(
+            f"{path} release_gate.artifact_schema_version must be a string."
+        )
+    require_clean_source = raw_gate.get("require_clean_source")
+    if not isinstance(require_clean_source, bool):
+        raise ValueError(f"{path} release_gate.require_clean_source must be a boolean.")
+    raw_required_ids = raw_gate.get("required_case_ids")
+    if (
+        not isinstance(raw_required_ids, list)
+        or not raw_required_ids
+        or not all(
+            isinstance(case_id, str) and case_id.strip() for case_id in raw_required_ids
+        )
+    ):
+        raise ValueError(f"{path} release_gate.required_case_ids is invalid.")
+    required_case_ids = tuple(raw_required_ids)
+    if len(set(required_case_ids)) != len(required_case_ids):
+        raise ValueError(f"{path} release_gate.required_case_ids contains duplicates.")
+    raw_thresholds = raw_gate.get("thresholds")
+    expected_threshold_keys = {
+        "max_case_errors",
+        "max_quality_failures",
+        "max_required_skips",
+    }
+    if not isinstance(raw_thresholds, Mapping) or set(raw_thresholds) != (
+        expected_threshold_keys
+    ):
+        raise ValueError(
+            f"{path} release_gate.thresholds must contain exactly: "
+            + ", ".join(sorted(expected_threshold_keys))
+        )
+    threshold_values: dict[str, int] = {}
+    for key in sorted(expected_threshold_keys):
+        value = raw_thresholds[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(
+                f"{path} release_gate.thresholds.{key} must be a non-negative integer."
+            )
+        threshold_values[key] = value
+    by_id = {case.case_id: case for case in cases}
+    missing_case_ids = set(required_case_ids) - set(by_id)
+    if missing_case_ids:
+        raise ValueError(
+            f"{path} release gate references unknown required case(s): "
+            + ", ".join(sorted(missing_case_ids))
+        )
+    not_required = [
+        case_id for case_id in required_case_ids if not by_id[case_id].required
+    ]
+    if not_required:
+        raise ValueError(
+            f"{path} release gate case(s) are not marked required: "
+            + ", ".join(not_required)
+        )
+    return ReleaseGate(
+        required_case_ids=required_case_ids,
+        thresholds=ReleaseThresholds(**threshold_values),
+        artifact_schema_version=artifact_schema_version,
+        require_clean_source=require_clean_source,
+    )
+
+
+def _validate_release_expectations(
+    path: Path,
+    case_id: str,
+    expected: Mapping[str, object],
+) -> None:
+    unknown_keys = set(expected) - _EXPECTATION_KEYS
+    if unknown_keys:
+        raise ValueError(
+            f"{path} case {case_id}.expected has unknown expectation keys: "
+            + ", ".join(sorted(str(key) for key in unknown_keys))
+        )
+    review_policy = expected.get("expected_review_policy")
+    if review_policy is not None:
+        if not isinstance(review_policy, Mapping) or set(review_policy) != (
+            _REVIEW_POLICY_EXPECTATION_KEYS
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected_review_policy has an invalid shape."
+            )
+        if review_policy.get("mode") not in {"view", "edit"}:
+            raise ValueError(
+                f"{path} case {case_id}.expected_review_policy.mode is invalid."
+            )
+        if review_policy.get("target_must_be_non_terminal") is not True:
+            raise ValueError(
+                f"{path} case {case_id}.expected_review_policy must target a "
+                "non-terminal step."
+            )
+        _require_non_empty_field_groups(
+            path,
+            case_id,
+            "expected_review_policy.target_field_groups",
+            review_policy.get("target_field_groups"),
+        )
+    runtime_evidence = expected.get("expected_runtime_evidence")
+    if runtime_evidence is not None:
+        if not isinstance(runtime_evidence, Mapping) or set(runtime_evidence) != (
+            _RUNTIME_EVIDENCE_EXPECTATION_KEYS
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected_runtime_evidence has an invalid shape."
+            )
+        for key in (
+            "source_file_count",
+            "source_record_count",
+            "source_display_count",
+            "model_call_count",
+            "max_total_tokens",
+        ):
+            value = runtime_evidence.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(
+                    f"{path} case {case_id}.expected_runtime_evidence.{key} "
+                    "must be a positive integer."
+                )
+        for key in (
+            "required_final_field_label_groups",
+            "required_visible_degradation_markers",
+        ):
+            _require_non_empty_field_groups(
+                path,
+                case_id,
+                f"expected_runtime_evidence.{key}",
+                runtime_evidence.get(key),
+            )
+
+
+def _require_non_empty_field_groups(
+    path: Path,
+    case_id: str,
+    key: str,
+    value: object,
+) -> None:
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(
+            isinstance(group, list)
+            and group
+            and all(isinstance(item, str) and item.strip() for item in group)
+            for group in value
+        )
+    ):
+        raise ValueError(
+            f"{path} case {case_id}.{key} must be non-empty string groups."
+        )
 
 
 def _validate_classifier_expectations(
@@ -545,16 +851,66 @@ def _run_suite(
     config: ApiConfig,
     args: argparse.Namespace,
     output_dir: Path,
+    release_gate: ReleaseGate | None = None,
 ) -> int:
     if args.repetitions < 1:
         raise ValueError("--repetitions must be >= 1.")
+    release_gate = release_gate or ReleaseGate(
+        required_case_ids=tuple(case.case_id for case in cases if case.required),
+        thresholds=ReleaseThresholds(
+            max_case_errors=0,
+            max_quality_failures=0,
+            max_required_skips=0,
+        ),
+    )
+    selected_case_ids = {case.case_id for case in cases}
+    missing_required_cases = set(release_gate.required_case_ids) - selected_case_ids
+    if missing_required_cases:
+        raise ValueError(
+            "Release suite omitted required case(s): "
+            + ", ".join(sorted(missing_required_cases))
+        )
+    release_identity = _release_run_identity(
+        cases=cases,
+        cases_path=Path(getattr(args, "cases_file", None) or DEFAULT_CASES_FILE),
+        requested_model_id=getattr(args, "model_id", None),
+        require_clean_source=release_gate.require_clean_source,
+    )
     started_at = time.strftime("%Y%m%dT%H%M%S")
     suite_dir = output_dir / f"ai-builder-api-battle-suite-{started_at}"
-    suite_dir.mkdir(parents=True, exist_ok=True)
+    suite_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    os.chmod(suite_dir, 0o700)
+    _write_json_exclusive(
+        suite_dir / "release-manifest.json",
+        {
+            "artifact_schema_version": release_gate.artifact_schema_version,
+            "artifact_mode": "live_execution_manifest",
+            "created_at": started_at,
+            "release_identity": release_identity,
+            "required_case_ids": list(release_gate.required_case_ids),
+            "thresholds": {
+                "max_case_errors": release_gate.thresholds.max_case_errors,
+                "max_quality_failures": (release_gate.thresholds.max_quality_failures),
+                "max_required_skips": release_gate.thresholds.max_required_skips,
+            },
+            "selected_cases": [
+                {
+                    "id": case.case_id,
+                    "required": case.required,
+                    "release_dimensions": list(case.release_dimensions),
+                    "prompt_sha256": hashlib.sha256(
+                        case.prompt.encode("utf-8")
+                    ).hexdigest(),
+                }
+                for case in cases
+            ],
+        },
+    )
     results: list[JsonObject] = []
     case_error_count = 0
     quality_failure_run_count = 0
     skipped_run_count = 0
+    required_skipped_run_count = 0
     total_runs = len(cases) * args.repetitions
 
     run_index = 0
@@ -571,10 +927,15 @@ def _run_suite(
             )
             if missing_envs := _missing_file_id_envs(case, args):
                 skipped_run_count += 1
+                if case.required:
+                    required_skipped_run_count += 1
                 skipped = _skipped_case_bundle(
                     case=case,
                     repetition=repetition,
                     missing_envs=missing_envs,
+                )
+                skipped["artifact_schema_version"] = (
+                    release_gate.artifact_schema_version
                 )
                 skipped_path = _write_bundle(
                     suite_dir,
@@ -590,7 +951,9 @@ def _run_suite(
                     config=config,
                     args=args,
                     existing_session_id=None,
+                    artifact_output_dir=suite_dir,
                 )
+                bundle["artifact_schema_version"] = release_gate.artifact_schema_version
                 bundle["repetition"] = repetition
                 bundle_path = _write_bundle(
                     suite_dir,
@@ -611,6 +974,8 @@ def _run_suite(
             except (HTTPError, URLError, TimeoutError, ValueError) as error:
                 case_error_count += 1
                 failure = {
+                    "artifact_schema_version": release_gate.artifact_schema_version,
+                    "artifact_mode": "live_execution_failure",
                     "created_at": time.strftime("%Y%m%dT%H%M%S"),
                     "app_version": LOCAL_APP_VERSION,
                     "case_id": case.case_id,
@@ -618,6 +983,7 @@ def _run_suite(
                     "domain": case.domain,
                     "repetition": repetition,
                     "error": str(error),
+                    "release_identity": release_identity,
                 }
                 failure_path = _write_bundle(
                     suite_dir,
@@ -628,7 +994,15 @@ def _run_suite(
                 print(f"failure bundle: {failure_path}", file=sys.stderr)
                 results.append({**failure, "bundle_path": str(failure_path)})
 
+    threshold_checks = _evaluate_release_thresholds(
+        release_gate.thresholds,
+        case_error_count=case_error_count,
+        quality_failure_run_count=quality_failure_run_count,
+        required_skipped_run_count=required_skipped_run_count,
+    )
     suite_summary: JsonObject = {
+        "artifact_schema_version": release_gate.artifact_schema_version,
+        "artifact_mode": "live_execution_summary",
         "created_at": started_at,
         "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
@@ -636,20 +1010,92 @@ def _run_suite(
         "case_count": len(cases),
         "repetitions": args.repetitions,
         "run_count": total_runs,
-        "failure_count": case_error_count + quality_failure_run_count,
+        "failure_count": (
+            case_error_count + quality_failure_run_count + required_skipped_run_count
+        ),
         "case_error_count": case_error_count,
         "quality_failure_run_count": quality_failure_run_count,
         "skipped_run_count": skipped_run_count,
+        "required_skipped_run_count": required_skipped_run_count,
+        "release_threshold_checks": threshold_checks,
+        "release_identity": release_identity,
         "results": results,
         "reliability": _suite_reliability_summary(results),
     }
     summary_path = suite_dir / "suite-summary.json"
-    summary_path.write_text(
-        json.dumps(suite_summary, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    _write_json_exclusive(summary_path, suite_summary)
     print(f"\nsuite summary: {summary_path}")
-    return 1 if case_error_count or quality_failure_run_count else 0
+    return 1 if any(check["passed"] is not True for check in threshold_checks) else 0
+
+
+def _release_run_identity(
+    *,
+    cases: list[BattleCase],
+    cases_path: Path,
+    requested_model_id: str | None,
+    require_clean_source: bool,
+) -> JsonObject:
+    tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
+    if require_clean_source and tracked_status:
+        raise ValueError(
+            "Live release execution requires a clean tracked source revision."
+        )
+    source_revision = _git_output("rev-parse", "HEAD")
+    build = {
+        "app_version": LOCAL_APP_VERSION,
+        "source_revision": source_revision,
+        "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "cases_sha256": hashlib.sha256(cases_path.read_bytes()).hexdigest(),
+    }
+    prompt_hashes = {
+        case.case_id: hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+        for case in cases
+    }
+    model = {"requested_id": requested_model_id}
+    return {
+        "source": {
+            "revision": source_revision,
+            "revision_sha256": hashlib.sha256(
+                source_revision.encode("utf-8")
+            ).hexdigest(),
+            "tracked_clean": not tracked_status,
+        },
+        "build": {**build, "sha256": _canonical_sha256(build)},
+        "model": {**model, "sha256": _canonical_sha256(model)},
+        "prompts": {
+            "case_sha256_by_id": prompt_hashes,
+            "sha256": _canonical_sha256(prompt_hashes),
+        },
+    }
+
+
+def _evaluate_release_thresholds(
+    thresholds: ReleaseThresholds,
+    *,
+    case_error_count: int,
+    quality_failure_run_count: int,
+    required_skipped_run_count: int,
+) -> list[JsonObject]:
+    return [
+        {
+            "name": "max_case_errors",
+            "passed": case_error_count <= thresholds.max_case_errors,
+            "actual": case_error_count,
+            "threshold": thresholds.max_case_errors,
+        },
+        {
+            "name": "max_quality_failures",
+            "passed": quality_failure_run_count <= thresholds.max_quality_failures,
+            "actual": quality_failure_run_count,
+            "threshold": thresholds.max_quality_failures,
+        },
+        {
+            "name": "max_required_skips",
+            "passed": required_skipped_run_count <= thresholds.max_required_skips,
+            "actual": required_skipped_run_count,
+            "threshold": thresholds.max_required_skips,
+        },
+    ]
 
 
 def _run_case(
@@ -658,6 +1104,7 @@ def _run_case(
     config: ApiConfig,
     args: argparse.Namespace,
     existing_session_id: str | None,
+    artifact_output_dir: Path,
 ) -> JsonObject:
     started_at = time.strftime("%Y%m%dT%H%M%S")
     if existing_session_id:
@@ -748,6 +1195,28 @@ def _run_case(
     plan = final_interaction.get("plan")
     plan = plan if isinstance(plan, dict) else None
     plan_summary = _summarize_plan(plan)
+    applied_flow_evidence = None
+    plan_id = _optional_string(final_interaction, "plan_id")
+    if case.apply_plan and plan_id is not None:
+        applied_flow_evidence = _apply_and_fetch_flow(
+            config=config,
+            plan_id=plan_id,
+        )
+    runtime_evidence = None
+    if case.execute_flow:
+        if not isinstance(applied_flow_evidence, Mapping):
+            raise ValueError(f"case {case.case_id} requires an applied flow.")
+        apply_result = applied_flow_evidence.get("apply_result")
+        if not isinstance(apply_result, Mapping):
+            raise ValueError(f"case {case.case_id} has no apply result.")
+        runtime_evidence = _execute_and_collect_runtime_evidence(
+            config=config,
+            flow_id=_required_string(apply_result, "flow_id"),
+            runtime_file_paths=_case_runtime_file_paths(case),
+            timeout_seconds=args.timeout_seconds,
+            artifact_output_dir=artifact_output_dir,
+            case_id=case.case_id,
+        )
     event_summary = _interaction_event_summary(interactions)
     failure_summary = _failure_summary(event_summary)
     classifier_diagnostics = _request_json(
@@ -762,9 +1231,32 @@ def _run_case(
         event_summary=event_summary,
         classifier_diagnostics=classifier_diagnostics,
         attached_file_ids=file_ids,
+        applied_flow=(
+            applied_flow_evidence.get("flow")
+            if isinstance(applied_flow_evidence, Mapping)
+            and isinstance(applied_flow_evidence.get("flow"), Mapping)
+            else None
+        ),
+        runtime_evidence=runtime_evidence,
     )
+    live_execution_provenance = _live_execution_provenance(
+        case=case,
+        latest_session=(
+            final_interaction.get("latest_session")
+            if isinstance(final_interaction.get("latest_session"), Mapping)
+            else None
+        ),
+        classifier_diagnostics=classifier_diagnostics,
+        requested_model_id=args.model_id,
+    )
+    if case.required:
+        checks = quality_report.get("checks")
+        if isinstance(checks, list):
+            checks.extend(_live_provenance_checks(live_execution_provenance))
 
     return {
+        "artifact_mode": "live_execution",
+        "live_execution_provenance": live_execution_provenance,
         "created_at": started_at,
         "app_version": LOCAL_APP_VERSION,
         "base_url": config.base_url,
@@ -773,10 +1265,14 @@ def _run_case(
             "id": case.case_id,
             "complexity": case.complexity,
             "domain": case.domain,
+            "required": case.required,
+            "apply_plan": case.apply_plan,
+            "execute_flow": case.execute_flow,
             "prompt": case.prompt,
             "expected": case.expected or {},
             "file_ids": list(file_ids),
             "file_id_envs": list(case.file_id_envs),
+            "runtime_file_path_envs": list(case.runtime_file_path_envs),
             "scripted_question_answers": case.scripted_question_answers or {},
         },
         "session_id": session_id,
@@ -789,7 +1285,220 @@ def _run_case(
         "event_summary": event_summary,
         "failure_summary": failure_summary,
         "classifier_diagnostics": classifier_diagnostics,
+        "applied_flow_evidence": applied_flow_evidence,
+        "runtime_evidence": runtime_evidence,
+        "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
         "quality_report": quality_report,
+    }
+
+
+def _apply_and_fetch_flow(*, config: ApiConfig, plan_id: str) -> JsonObject:
+    apply_result = _request_json(
+        config=config,
+        method="POST",
+        path=f"/flows/ai-builder/plans/{plan_id}/create",
+    )
+    flow_id = _required_string(apply_result, "flow_id")
+    flow = _request_json(
+        config=config,
+        method="GET",
+        path=f"/flows/{flow_id}/",
+    )
+    return {
+        "apply_result": apply_result,
+        "flow": flow,
+        "evidence_scope": (
+            "compiled_proposal_and_applied_draft_only; "
+            "does_not_prove_runtime_checkpoint_pause_or_resume"
+        ),
+    }
+
+
+def _execute_and_collect_runtime_evidence(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    runtime_file_paths: tuple[Path, ...],
+    timeout_seconds: int,
+    artifact_output_dir: Path,
+    case_id: str,
+) -> JsonObject:
+    published_flow = _request_json(
+        config=config,
+        method="POST",
+        path=f"/flows/{flow_id}/publish/",
+    )
+    contract = _request_json(
+        config=config,
+        method="GET",
+        path=f"/flows/{flow_id}/run-contract/",
+    )
+    input_steps = contract.get("steps_requiring_input")
+    if not isinstance(input_steps, list) or len(input_steps) != 1:
+        raise ValueError(
+            f"case {case_id} requires exactly one runtime file-input step."
+        )
+    input_step = input_steps[0]
+    if not isinstance(input_step, Mapping):
+        raise ValueError(f"case {case_id} runtime input contract is malformed.")
+    step_id = _required_string(input_step, "step_id")
+    uploaded_files = [
+        _upload_runtime_file(
+            config=config,
+            flow_id=flow_id,
+            step_id=step_id,
+            source_path=source_path,
+        )
+        for source_path in runtime_file_paths
+    ]
+    uploaded_file_ids = [
+        _required_string(uploaded_file, "id") for uploaded_file in uploaded_files
+    ]
+    published_version = _int_value(contract.get("published_flow_version"))
+    if published_version is None:
+        raise ValueError(f"case {case_id} run contract has no published version.")
+    created_run = _request_json(
+        config=config,
+        method="POST",
+        path=f"/flows/{flow_id}/runs/",
+        payload={
+            "expected_flow_version": published_version,
+            "input_payload_json": None,
+            "step_inputs": {step_id: {"file_ids": uploaded_file_ids}},
+        },
+    )
+    run_id = _required_string(created_run, "id")
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        run = _request_json(
+            config=config,
+            method="GET",
+            path=f"/flows/{flow_id}/runs/{run_id}/",
+        )
+        status = _optional_string(run, "status")
+        if status in {"completed", "failed", "cancelled"}:
+            break
+        if status == "awaiting_review":
+            raise ValueError(
+                f"case {case_id} unexpectedly reached a runtime review checkpoint."
+            )
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"case {case_id} runtime execution timed out.")
+        time.sleep(1)
+    evidence = _request_json(
+        config=config,
+        method="GET",
+        path=f"/flows/{flow_id}/runs/{run_id}/evidence/",
+    )
+    evidence["run"] = run
+    evidence["final_artifact"] = _download_final_artifact(
+        config=config,
+        flow_id=flow_id,
+        run_id=run_id,
+        run=run,
+        output_dir=artifact_output_dir,
+        case_id=case_id,
+    )
+    evidence["published_flow"] = published_flow
+    evidence["run_contract"] = contract
+    evidence["uploaded_files"] = uploaded_files
+    return evidence
+
+
+def _upload_runtime_file(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    step_id: str,
+    source_path: Path,
+) -> JsonObject:
+    content = source_path.read_bytes()
+    boundary = (
+        "eneo-battle-"
+        + hashlib.sha256(
+            f"{source_path.name}:{len(content)}:{time.time_ns()}".encode("utf-8")
+        ).hexdigest()[:32]
+    )
+    content_type = (
+        mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    )
+    safe_name = source_path.name.replace('"', "_")
+    prefix = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="upload_file"; filename="{safe_name}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n"
+    ).encode("utf-8")
+    body = prefix + content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    request = Request(
+        f"{config.base_url}/flows/{flow_id}/steps/{step_id}/runtime-files/",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "X-API-Key": config.api_key,
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=config.timeout_seconds) as response:
+        parsed = json.loads(response.read().decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Runtime upload for {source_path.name} returned no object.")
+    return parsed
+
+
+def _download_final_artifact(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    run_id: str,
+    run: Mapping[str, Any],
+    output_dir: Path,
+    case_id: str,
+) -> JsonObject | None:
+    result = run.get("result")
+    if not isinstance(result, Mapping) or result.get("kind") != "artifact":
+        return None
+    files = result.get("files")
+    if (
+        not isinstance(files, list)
+        or len(files) != 1
+        or not isinstance(files[0], Mapping)
+    ):
+        raise ValueError(f"case {case_id} expected exactly one final artifact.")
+    artifact = files[0]
+    file_id = _required_string(artifact, "file_id")
+    signed_url = _request_json(
+        config=config,
+        method="POST",
+        path=f"/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        payload={"expires_in": 3600, "content_disposition": "attachment"},
+    )
+    url = _required_string(signed_url, "url")
+    with urlopen(url, timeout=config.timeout_seconds) as response:
+        content = response.read()
+    name = _optional_string(artifact, "name") or f"{file_id}.pdf"
+    suffix = Path(name).suffix.casefold()
+    if suffix != ".pdf":
+        raise ValueError(f"case {case_id} expected a PDF final artifact, got {name}.")
+    safe_case_id = "".join(
+        char if char.isalnum() or char in "-_" else "-" for char in case_id
+    )
+    safe_run_id = "".join(
+        char if char.isalnum() or char in "-_" else "-" for char in run_id
+    )
+    artifact_path = output_dir / f"{safe_case_id}-{safe_run_id}-final-artifact.pdf"
+    _write_bytes_exclusive(artifact_path, content)
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    return {
+        "file_id": file_id,
+        "name": name,
+        "path": str(artifact_path),
+        "byte_count": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "text": text,
     }
 
 
@@ -1014,7 +1723,7 @@ def _missing_file_id_envs(
         return ()
     return tuple(
         env_name
-        for env_name in case.file_id_envs
+        for env_name in (*case.file_id_envs, *case.runtime_file_path_envs)
         if not os.getenv(env_name, "").strip()
     )
 
@@ -1027,6 +1736,19 @@ def _file_ids_from_envs(env_names: tuple[str, ...]) -> tuple[str, ...]:
     )
 
 
+def _case_runtime_file_paths(case: BattleCase) -> tuple[Path, ...]:
+    paths = tuple(
+        Path(os.environ[env_name].strip()) for env_name in case.runtime_file_path_envs
+    )
+    invalid_paths = [str(path) for path in paths if not path.is_file()]
+    if invalid_paths:
+        raise ValueError(
+            f"case {case.case_id} runtime source path(s) are not readable files: "
+            + ", ".join(invalid_paths)
+        )
+    return paths
+
+
 def _skipped_case_bundle(
     *,
     case: BattleCase,
@@ -1034,13 +1756,22 @@ def _skipped_case_bundle(
     missing_envs: tuple[str, ...],
 ) -> JsonObject:
     return {
+        "artifact_mode": "live_execution",
+        "live_execution_provenance": _live_execution_provenance(
+            case=case,
+            latest_session=None,
+            classifier_diagnostics=None,
+            requested_model_id=None,
+        ),
         "created_at": time.strftime("%Y%m%dT%H%M%S"),
         "app_version": LOCAL_APP_VERSION,
         "case": {
             "id": case.case_id,
             "complexity": case.complexity,
             "domain": case.domain,
+            "required": case.required,
             "file_id_envs": list(case.file_id_envs),
+            "runtime_file_path_envs": list(case.runtime_file_path_envs),
         },
         "repetition": repetition,
         "skipped": True,
@@ -1054,11 +1785,264 @@ def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
     created_at = str(bundle.get("created_at") or time.strftime("%Y%m%dT%H%M%S"))
     safe_suffix = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in suffix)
     path = output_dir / f"ai-builder-api-battle-test-{created_at}-{safe_suffix}.json"
-    path.write_text(
-        json.dumps(bundle, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    _write_json_exclusive(path, bundle)
     return path
+
+
+def _live_execution_provenance(
+    *,
+    case: BattleCase,
+    latest_session: Mapping[str, Any] | None,
+    classifier_diagnostics: Mapping[str, object] | None,
+    requested_model_id: str | None,
+) -> JsonObject:
+    source_revision = _git_output("rev-parse", "HEAD")
+    tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
+    source_revision_sha256 = hashlib.sha256(source_revision.encode("utf-8")).hexdigest()
+    harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    cases_sha256 = hashlib.sha256(DEFAULT_CASES_FILE.read_bytes()).hexdigest()
+    build_payload = {
+        "app_version": LOCAL_APP_VERSION,
+        "source_revision": source_revision,
+        "harness_sha256": harness_sha256,
+        "cases_sha256": cases_sha256,
+    }
+    telemetry = (
+        latest_session.get("telemetry")
+        if isinstance(latest_session, Mapping)
+        and isinstance(latest_session.get("telemetry"), Mapping)
+        else {}
+    )
+    model_ids = list(
+        dict.fromkeys(
+            _clean_strings(
+                [
+                    requested_model_id,
+                    telemetry.get("last_model")
+                    if isinstance(telemetry, Mapping)
+                    else None,
+                    *[
+                        run.get("model")
+                        for run in _classifier_runs(classifier_diagnostics)
+                        if isinstance(run.get("model"), str)
+                    ],
+                ]
+            )
+        )
+    )
+    classifier_prompt_hashes = list(
+        dict.fromkeys(
+            _clean_strings(
+                [
+                    run.get("prompt_hash")
+                    for run in _classifier_runs(classifier_diagnostics)
+                    if isinstance(run.get("prompt_hash"), str)
+                ]
+            )
+        )
+    )
+    return {
+        "mode": "live_execution",
+        "source": {
+            "revision": source_revision,
+            "revision_sha256": source_revision_sha256,
+            "tracked_clean": not tracked_status,
+        },
+        "build": {
+            **build_payload,
+            "sha256": _canonical_sha256(build_payload),
+        },
+        "model": {
+            "requested_id": requested_model_id,
+            "observed_ids": model_ids,
+            "sha256": _canonical_sha256(model_ids),
+        },
+        "prompt": {
+            "case_sha256": hashlib.sha256(case.prompt.encode("utf-8")).hexdigest(),
+            "classifier_hashes": classifier_prompt_hashes,
+        },
+        "usage": {
+            "prompt_tokens": _int_value(telemetry.get("prompt_tokens_total")) or 0,
+            "completion_tokens": (
+                _int_value(telemetry.get("completion_tokens_total")) or 0
+            ),
+            "total_tokens": _int_value(telemetry.get("total_tokens_total")) or 0,
+            "model_calls": _int_value(telemetry.get("llm_calls_made_total")) or 0,
+            "raw_reads": _classifier_raw_read_metrics(classifier_diagnostics),
+        },
+    }
+
+
+def _classifier_raw_read_metrics(
+    classifier_diagnostics: Mapping[str, object] | None,
+) -> JsonObject:
+    inventories = [
+        inventory
+        for run in _classifier_runs(classifier_diagnostics)
+        for inventory in [run.get("source_inventory")]
+        if isinstance(inventory, list)
+    ]
+    sources = [
+        source
+        for inventory in inventories
+        for source in inventory
+        if isinstance(source, Mapping)
+    ]
+    uploaded_sources = [
+        source for source in sources if source.get("kind") == "uploaded_file"
+    ]
+    uploaded_file_ids = _clean_strings(
+        [source.get("file_id") for source in uploaded_sources]
+    )
+    coverage_counts: dict[str, int] = {}
+    for source in uploaded_sources:
+        coverage = source.get("coverage")
+        if isinstance(coverage, str) and coverage:
+            coverage_counts[coverage] = coverage_counts.get(coverage, 0) + 1
+    return {
+        "classifier_run_count": len(_classifier_runs(classifier_diagnostics)),
+        "source_inventory_entry_count": len(sources),
+        "uploaded_file_raw_read_count": len(uploaded_sources),
+        "distinct_uploaded_file_count": len(set(uploaded_file_ids)),
+        "uploaded_file_reread_count": max(
+            0,
+            len(uploaded_sources) - len(set(uploaded_file_ids)),
+        ),
+        "truncated_source_count": sum(
+            1 for source in sources if source.get("truncated") is True
+        ),
+        "uploaded_file_coverage_counts": coverage_counts,
+    }
+
+
+def _live_provenance_checks(provenance: Mapping[str, Any]) -> list[JsonObject]:
+    source = provenance.get("source")
+    source = source if isinstance(source, Mapping) else {}
+    build = provenance.get("build")
+    build = build if isinstance(build, Mapping) else {}
+    model = provenance.get("model")
+    model = model if isinstance(model, Mapping) else {}
+    prompt = provenance.get("prompt")
+    prompt = prompt if isinstance(prompt, Mapping) else {}
+    usage = provenance.get("usage")
+    usage = usage if isinstance(usage, Mapping) else {}
+    raw_reads = usage.get("raw_reads")
+    raw_reads = raw_reads if isinstance(raw_reads, Mapping) else {}
+    source_complete = (
+        isinstance(source.get("revision"), str)
+        and _is_sha256(source.get("revision_sha256"))
+        and source.get("tracked_clean") is True
+    )
+    build_complete = all(
+        _is_sha256(build.get(key))
+        for key in ("harness_sha256", "cases_sha256", "sha256")
+    ) and isinstance(build.get("app_version"), str)
+    observed_model_ids = _string_list(model.get("observed_ids"))
+    model_complete = bool(observed_model_ids) and _is_sha256(model.get("sha256"))
+    classifier_hashes = _string_list(prompt.get("classifier_hashes"))
+    prompt_complete = (
+        _is_sha256(prompt.get("case_sha256"))
+        and bool(classifier_hashes)
+        and all(_is_sha256(item) for item in classifier_hashes)
+    )
+    usage_complete = all(
+        isinstance(usage.get(key), int) and usage.get(key) >= 0
+        for key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "model_calls",
+        )
+    ) and all(
+        isinstance(raw_reads.get(key), int) and raw_reads.get(key) >= 0
+        for key in (
+            "classifier_run_count",
+            "source_inventory_entry_count",
+            "uploaded_file_raw_read_count",
+            "distinct_uploaded_file_count",
+            "uploaded_file_reread_count",
+            "truncated_source_count",
+        )
+    )
+    return [
+        {
+            "name": "live_source_provenance_complete",
+            "passed": source_complete,
+            "actual": dict(source),
+            "expected": "clean immutable source revision and hash",
+        },
+        {
+            "name": "live_build_provenance_complete",
+            "passed": build_complete,
+            "actual": dict(build),
+            "expected": "app version plus harness, cases, and build hashes",
+        },
+        {
+            "name": "live_model_provenance_complete",
+            "passed": model_complete,
+            "actual": dict(model),
+            "expected": "observed model identity and hash",
+        },
+        {
+            "name": "live_prompt_provenance_complete",
+            "passed": prompt_complete,
+            "actual": dict(prompt),
+            "expected": "case and classifier prompt hashes",
+        },
+        {
+            "name": "live_usage_provenance_complete",
+            "passed": usage_complete,
+            "actual": dict(usage),
+            "expected": "token, model-call, and classifier raw-read metrics",
+        },
+    ]
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _git_output(*args: str) -> str:
+    repository_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _canonical_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _write_json_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _write_bytes_exclusive(path: Path, payload: bytes) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
@@ -1170,11 +2154,13 @@ def _reanalyze_bundles(
     expected_overrides_by_case_id: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(output_dir, 0o700)
     failures = 0
     expected_overrides_by_case_id = expected_overrides_by_case_id or {}
     for bundle_path in bundle_paths:
         try:
-            bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+            source_bytes = bundle_path.read_bytes()
+            bundle = json.loads(source_bytes.decode("utf-8"))
             if not isinstance(bundle, dict):
                 raise ValueError(f"{bundle_path} did not contain a JSON object.")
             case = bundle.get("case")
@@ -1214,13 +2200,34 @@ def _reanalyze_bundles(
                     if isinstance(case, Mapping)
                     else ()
                 ),
+                applied_flow=(
+                    bundle["applied_flow_evidence"].get("flow")
+                    if isinstance(bundle.get("applied_flow_evidence"), Mapping)
+                    and isinstance(bundle["applied_flow_evidence"].get("flow"), Mapping)
+                    else None
+                ),
+                runtime_evidence=(
+                    bundle.get("runtime_evidence")
+                    if isinstance(bundle.get("runtime_evidence"), Mapping)
+                    else None
+                ),
             )
             refreshed = {
                 **bundle,
+                "artifact_mode": "reanalysis",
                 "reanalyzed_at": time.strftime("%Y%m%dT%H%M%S"),
+                "reanalysis_provenance": {
+                    "source_bundle_sha256": hashlib.sha256(source_bytes).hexdigest(),
+                    "reanalyzer_source_revision": _git_output("rev-parse", "HEAD"),
+                    "reanalyzer_harness_sha256": hashlib.sha256(
+                        Path(__file__).read_bytes()
+                    ).hexdigest(),
+                    "expectations_sha256": _canonical_sha256(expected),
+                },
                 "plan_summary": summary,
                 "event_summary": event_summary,
                 "failure_summary": _failure_summary(event_summary),
+                "runtime_metrics": _runtime_metrics_from_quality_report(report),
                 "quality_report": report,
             }
             output_path = _write_reanalysis_bundle(output_dir, bundle_path, refreshed)
@@ -1240,10 +2247,7 @@ def _write_reanalysis_bundle(
 ) -> Path:
     reanalyzed_at = str(bundle.get("reanalyzed_at") or time.strftime("%Y%m%dT%H%M%S"))
     path = output_dir / f"{source_path.stem}-reanalyzed-{reanalyzed_at}.json"
-    path.write_text(
-        json.dumps(bundle, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    _write_json_exclusive(path, bundle)
     return path
 
 
@@ -1410,6 +2414,16 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
                 "input_type": raw_step.get("input_type"),
                 "output_type": raw_step.get("output_type"),
                 "output_mode": raw_step.get("output_mode"),
+                "review_policy": (
+                    dict(raw_step["review_policy"])
+                    if isinstance(raw_step.get("review_policy"), Mapping)
+                    else None
+                ),
+                "review_mode": (
+                    raw_step["review_policy"].get("mode")
+                    if isinstance(raw_step.get("review_policy"), Mapping)
+                    else None
+                ),
                 "has_question": _has_question(bindings),
                 "source_ref_count": len(refs),
                 "source_refs": refs,
@@ -1985,6 +2999,8 @@ def _quality_report(
     event_summary: Mapping[str, Any] | None = None,
     classifier_diagnostics: Mapping[str, object] | None = None,
     attached_file_ids: tuple[str, ...] = (),
+    applied_flow: Mapping[str, Any] | None = None,
+    runtime_evidence: Mapping[str, Any] | None = None,
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -2193,6 +3209,30 @@ def _quality_report(
             matched_topics == [],
             matched_topics,
             [],
+        )
+    expected_review_policy = expected.get("expected_review_policy")
+    if isinstance(expected_review_policy, Mapping):
+        checks.extend(
+            _review_policy_checks(
+                scope="proposed",
+                summary=summary,
+                expected=expected_review_policy,
+            )
+        )
+        checks.extend(
+            _review_policy_checks(
+                scope="applied",
+                summary=_summarize_applied_flow(applied_flow),
+                expected=expected_review_policy,
+            )
+        )
+    expected_runtime_evidence = expected.get("expected_runtime_evidence")
+    if isinstance(expected_runtime_evidence, Mapping):
+        checks.extend(
+            _runtime_evidence_checks(
+                evidence=runtime_evidence,
+                expected=expected_runtime_evidence,
+            )
         )
     if plan is None:
         return {"checks": checks, "warnings": warnings}
@@ -2446,6 +3486,414 @@ def _quality_report(
         "warnings": warnings,
         "metrics": _source_context_metrics(summary),
     }
+
+
+def _summarize_applied_flow(flow: Mapping[str, Any] | None) -> JsonObject:
+    if not isinstance(flow, Mapping):
+        return {"has_flow": False, "step_count": 0, "steps": []}
+    raw_steps = flow.get("steps")
+    if not isinstance(raw_steps, list):
+        return {"has_flow": True, "step_count": 0, "steps": []}
+    steps: list[JsonObject] = []
+    for index, raw_step in enumerate(raw_steps, start=1):
+        if not isinstance(raw_step, Mapping):
+            continue
+        review_policy = raw_step.get("review_policy")
+        steps.append(
+            {
+                "order": _int_value(raw_step.get("step_order")) or index,
+                "plan_step_ref": raw_step.get("plan_step_ref"),
+                "name": raw_step.get("user_description") or raw_step.get("name"),
+                "output_type": raw_step.get("output_type"),
+                "output_mode": raw_step.get("output_mode"),
+                "review_policy": (
+                    dict(review_policy) if isinstance(review_policy, Mapping) else None
+                ),
+                "review_mode": (
+                    review_policy.get("mode")
+                    if isinstance(review_policy, Mapping)
+                    else None
+                ),
+                "output_contract_leaf_properties": _schema_leaf_property_names(
+                    raw_step.get("output_contract")
+                ),
+            }
+        )
+    steps.sort(key=lambda step: _int_value(step.get("order")) or 0)
+    return {
+        "has_flow": True,
+        "step_count": len(steps),
+        "steps": steps,
+    }
+
+
+def _review_policy_checks(
+    *,
+    scope: str,
+    summary: Mapping[str, Any],
+    expected: Mapping[str, Any],
+) -> list[JsonObject]:
+    steps = _step_summaries(summary)
+    review_steps = [
+        step for step in steps if isinstance(step.get("review_policy"), Mapping)
+    ]
+    target = review_steps[0] if len(review_steps) == 1 else None
+    expected_mode = _optional_string(expected, "mode")
+    expected_output_type = _optional_string(expected, "target_output_type")
+    expected_field_groups = _field_groups_from_expected_key(
+        expected,
+        "target_field_groups",
+    )
+    target_fields = (
+        _string_list(target.get("output_contract_leaf_properties"))
+        if target is not None
+        else []
+    )
+    missing_field_groups = [
+        group
+        for group in expected_field_groups
+        if not any(
+            _field_name_matches(expected_name, actual_name)
+            for expected_name in group
+            for actual_name in target_fields
+        )
+    ]
+    target_matches = (
+        target is not None
+        and (
+            expected_output_type is None
+            or target.get("output_type") == expected_output_type
+        )
+        and not missing_field_groups
+    )
+    synthetic_steps = [
+        step.get("order")
+        for step in steps
+        if not isinstance(step.get("review_policy"), Mapping)
+        and _looks_like_synthetic_review_step(step)
+    ]
+    target_order = _int_value(target.get("order")) if target is not None else None
+    target_is_terminal_or_delivery = target is None or (
+        expected.get("target_must_be_non_terminal") is True
+        and target_order == len(steps)
+    )
+    if target is not None and (
+        target.get("output_type") in {"pdf", "docx"}
+        or target.get("output_mode") in {"render_verbatim", "http_post"}
+    ):
+        target_is_terminal_or_delivery = True
+    actual_target = (
+        {
+            "order": target.get("order"),
+            "plan_step_ref": target.get("plan_step_ref"),
+            "name": target.get("name"),
+            "output_type": target.get("output_type"),
+            "output_mode": target.get("output_mode"),
+            "output_contract_leaf_properties": target_fields,
+        }
+        if target is not None
+        else None
+    )
+    return [
+        {
+            "name": f"{scope}_review_policy_count",
+            "passed": len(review_steps) == 1,
+            "actual": len(review_steps),
+            "expected": 1,
+        },
+        {
+            "name": f"{scope}_review_policy_mode",
+            "passed": target is not None and target.get("review_mode") == expected_mode,
+            "actual": target.get("review_mode") if target is not None else None,
+            "expected": expected_mode,
+        },
+        {
+            "name": f"{scope}_review_policy_target",
+            "passed": target_matches,
+            "actual": actual_target,
+            "expected": {
+                "output_type": expected_output_type,
+                "field_groups": expected_field_groups,
+            },
+        },
+        {
+            "name": f"{scope}_no_synthetic_review_step",
+            "passed": synthetic_steps == [],
+            "actual": synthetic_steps,
+            "expected": [],
+        },
+        {
+            "name": f"{scope}_review_policy_not_terminal_or_delivery",
+            "passed": not target_is_terminal_or_delivery,
+            "actual": actual_target,
+            "expected": "non-terminal non-delivery step",
+        },
+    ]
+
+
+def _looks_like_synthetic_review_step(step: Mapping[str, Any]) -> bool:
+    text = " ".join(
+        _clean_strings(
+            [
+                step.get("name"),
+                step.get("instruction_excerpt"),
+            ]
+        )
+    )
+    normalized = _normalized_field_name(text)
+    return any(
+        marker in normalized
+        for marker in (
+            "aireview",
+            "approve",
+            "humanreview",
+            "gransk",
+            "godkann",
+            "mansklig",
+        )
+    )
+
+
+def _runtime_evidence_checks(
+    *,
+    evidence: Mapping[str, Any] | None,
+    expected: Mapping[str, Any],
+) -> list[JsonObject]:
+    evidence = evidence or {}
+    run = evidence.get("run")
+    run = run if isinstance(run, Mapping) else {}
+    raw_steps = evidence.get("step_results")
+    steps = (
+        [step for step in raw_steps if isinstance(step, Mapping)]
+        if isinstance(raw_steps, list)
+        else []
+    )
+    artifact = evidence.get("final_artifact")
+    artifact = artifact if isinstance(artifact, Mapping) else {}
+    artifact_text = _optional_string(artifact, "text") or ""
+    artifact_sha256 = _optional_string(artifact, "sha256")
+    result = run.get("result")
+    result = result if isinstance(result, Mapping) else {}
+    final_artifact_present = (
+        run.get("status") == "completed"
+        and result.get("kind") == "artifact"
+        and isinstance(artifact_sha256, str)
+        and len(artifact_sha256) == 64
+        and bool(artifact_text)
+    )
+
+    runtime_file_ids: list[str] = []
+    documents: list[Mapping[str, Any]] = []
+    model_call_count = 0
+    for step in steps:
+        _extend_unique_strings(
+            runtime_file_ids,
+            _string_list(step.get("runtime_input_file_ids")),
+        )
+        output_payload = step.get("output_payload_json")
+        step_documents = _first_mapping_list_for_key(output_payload, "documents")
+        if step_documents is not None:
+            documents.extend(step_documents)
+        parameters = step.get("model_parameters_json")
+        per_source_calls = (
+            _int_value(parameters.get("per_source_call_count"))
+            if isinstance(parameters, Mapping)
+            else None
+        )
+        if per_source_calls is not None and per_source_calls > 0:
+            model_call_count += per_source_calls
+        elif (_int_value(step.get("num_tokens_input")) or 0) > 0 or (
+            _int_value(step.get("num_tokens_output")) or 0
+        ) > 0:
+            model_call_count += 1
+
+    source_labels = list(
+        dict.fromkeys(
+            _clean_strings([document.get("source_label") for document in documents])
+        )
+    )
+    record_source_file_ids = _clean_strings(
+        [document.get("source_file_id") for document in documents]
+    )
+    record_count_by_source_file_id = {
+        file_id: record_source_file_ids.count(file_id)
+        for file_id in dict.fromkeys(record_source_file_ids)
+    }
+    one_record_per_source_file = set(record_count_by_source_file_id) == set(
+        runtime_file_ids
+    ) and all(count == 1 for count in record_count_by_source_file_id.values())
+    expected_source_files = _int_value(expected.get("source_file_count"))
+    expected_source_records = _int_value(expected.get("source_record_count"))
+    expected_source_displays = _int_value(expected.get("source_display_count"))
+    expected_model_calls = _int_value(expected.get("model_call_count"))
+    token_usage = run.get("token_usage")
+    total_tokens = (
+        _int_value(token_usage.get("num_tokens_total"))
+        if isinstance(token_usage, Mapping)
+        else None
+    )
+    max_total_tokens = _int_value(expected.get("max_total_tokens"))
+
+    expected_field_groups = _field_groups_from_expected_key(
+        expected,
+        "required_final_field_label_groups",
+    )
+    artifact_labels = _artifact_labels(artifact_text)
+    missing_field_groups = [
+        group
+        for group in expected_field_groups
+        if not any(
+            _field_name_matches(expected_label, actual_label)
+            for expected_label in group
+            for actual_label in artifact_labels
+        )
+    ]
+    degradation_groups = _field_groups_from_expected_key(
+        expected,
+        "required_visible_degradation_markers",
+    )
+    missing_degradation_groups = [
+        group
+        for group in degradation_groups
+        if not any(marker.casefold() in artifact_text.casefold() for marker in group)
+    ]
+    missing_source_labels = [
+        label
+        for label in source_labels
+        if label.casefold() not in artifact_text.casefold()
+    ]
+    return [
+        {
+            "name": "runtime_final_artifact",
+            "passed": final_artifact_present,
+            "actual": {
+                "run_status": run.get("status"),
+                "result_kind": result.get("kind"),
+                "artifact_sha256": artifact_sha256,
+                "artifact_text_chars": len(artifact_text),
+            },
+            "expected": "completed artifact with immutable bytes and extracted text",
+        },
+        {
+            "name": "runtime_source_file_count",
+            "passed": (
+                expected_source_files is not None
+                and len(runtime_file_ids) == expected_source_files
+            ),
+            "actual": len(runtime_file_ids),
+            "expected": expected_source_files,
+        },
+        {
+            "name": "runtime_source_record_count",
+            "passed": (
+                expected_source_records is not None
+                and len(documents) == expected_source_records
+            ),
+            "actual": len(documents),
+            "expected": expected_source_records,
+        },
+        {
+            "name": "runtime_one_record_per_source_file",
+            "passed": (
+                expected_source_records is not None
+                and len(documents) == expected_source_records
+                and one_record_per_source_file
+            ),
+            "actual": record_count_by_source_file_id,
+            "expected": {
+                "source_file_ids": runtime_file_ids,
+                "records_per_source_file": 1,
+            },
+        },
+        {
+            "name": "runtime_final_field_labels",
+            "passed": missing_field_groups == [],
+            "actual": artifact_labels,
+            "expected": expected_field_groups,
+        },
+        {
+            "name": "runtime_visible_degradation",
+            "passed": missing_degradation_groups == [],
+            "actual": artifact_text[:2000],
+            "expected": degradation_groups,
+        },
+        {
+            "name": "runtime_source_display",
+            "passed": (
+                expected_source_displays is not None
+                and len(source_labels) == expected_source_displays
+                and missing_source_labels == []
+            ),
+            "actual": {
+                "source_labels": source_labels,
+                "missing_from_artifact": missing_source_labels,
+            },
+            "expected": expected_source_displays,
+        },
+        {
+            "name": "runtime_model_call_count",
+            "passed": (
+                expected_model_calls is not None
+                and model_call_count == expected_model_calls
+            ),
+            "actual": model_call_count,
+            "expected": expected_model_calls,
+        },
+        {
+            "name": "runtime_total_tokens",
+            "passed": (
+                total_tokens is not None
+                and max_total_tokens is not None
+                and total_tokens <= max_total_tokens
+            ),
+            "actual": total_tokens,
+            "expected": {"max": max_total_tokens},
+        },
+    ]
+
+
+def _runtime_metrics_from_quality_report(report: Mapping[str, Any]) -> JsonObject:
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        return {}
+    return {
+        str(check["name"]): check.get("actual")
+        for check in checks
+        if isinstance(check, Mapping)
+        and isinstance(check.get("name"), str)
+        and str(check["name"]).startswith("runtime_")
+    }
+
+
+def _first_mapping_list_for_key(
+    value: object,
+    key: str,
+) -> list[Mapping[str, Any]] | None:
+    if isinstance(value, Mapping):
+        candidate = value.get(key)
+        if isinstance(candidate, list) and all(
+            isinstance(item, Mapping) for item in candidate
+        ):
+            return [item for item in candidate if isinstance(item, Mapping)]
+        for child in value.values():
+            found = _first_mapping_list_for_key(child, key)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _first_mapping_list_for_key(child, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _artifact_labels(text: str) -> list[str]:
+    labels: list[str] = []
+    for line in text.splitlines():
+        label, separator, _value = line.partition(":")
+        if separator and label.strip():
+            labels.append(label.strip())
+    return labels
 
 
 def _all_output_fields(summary: Mapping[str, Any]) -> list[str]:

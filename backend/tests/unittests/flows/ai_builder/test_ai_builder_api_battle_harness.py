@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -109,6 +110,148 @@ def _document_plan_with_extra_text_helper() -> dict[str, Any]:
                 ],
             }
         }
+    }
+
+
+def _review_policy_plan(*, mode: str = "view") -> dict[str, Any]:
+    return {
+        "proposal": {
+            "spec": {
+                "flow_name": "Procurement report",
+                "steps": [
+                    {
+                        "plan_step_ref": "extract_matrix",
+                        "name": "Extract scoring matrix",
+                        "input_source": "flow_input",
+                        "input_type": "document",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {
+                                "supplier": {"type": "string"},
+                                "score": {"type": "number"},
+                            },
+                        },
+                        "review_policy": {"mode": mode},
+                    },
+                    {
+                        "plan_step_ref": "write_report",
+                        "name": "Write report",
+                        "input_source": "previous_step",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "plan_step_ref": "render_report",
+                        "name": "Render report",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "pdf",
+                        "output_mode": "render_verbatim",
+                    },
+                ],
+            }
+        }
+    }
+
+
+def _applied_flow_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    steps = plan["proposal"]["spec"]["steps"]
+    return {
+        "id": "flow-1",
+        "steps": [
+            {
+                **step,
+                "step_order": index,
+                "user_description": step["name"],
+            }
+            for index, step in enumerate(steps, start=1)
+        ],
+    }
+
+
+def _six_file_runtime_evidence() -> dict[str, Any]:
+    documents = [
+        {
+            "source_file_id": f"file-{index}",
+            "source_label": f"source-{index}.pdf",
+            "title": f"Document {index}",
+            "year": "2026",
+            "category": "Policy",
+            "type": "Report",
+            "author": "Municipality",
+            "conclusions": "Conclusion",
+            "summary": "Summary",
+        }
+        for index in range(1, 7)
+    ]
+    source_labels = " ".join(document["source_label"] for document in documents)
+    return {
+        "run": {
+            "status": "completed",
+            "result": {
+                "kind": "artifact",
+                "files": [{"file_id": "artifact-1", "name": "report.pdf"}],
+            },
+            "token_usage": {
+                "num_tokens_input": 1200,
+                "num_tokens_output": 300,
+                "num_tokens_total": 1500,
+            },
+        },
+        "step_results": [
+            {
+                "step_order": 1,
+                "status": "completed",
+                "runtime_input_file_ids": [f"file-{index}" for index in range(1, 7)],
+                "output_payload_json": {"documents": documents},
+                "model_parameters_json": {
+                    "runtime_input_execution_mode": "per_source",
+                    "per_source_call_count": 6,
+                },
+                "num_tokens_input": 1000,
+                "num_tokens_output": 200,
+                "diagnostics": [
+                    {
+                        "code": "runtime_input_source_extraction_warning",
+                        "message": "pdf_text_likely_reversed",
+                    }
+                ],
+            },
+            {
+                "step_order": 2,
+                "status": "completed",
+                "output_payload_json": {"overview": "Aggregate overview"},
+                "num_tokens_input": 200,
+                "num_tokens_output": 100,
+            },
+            {
+                "step_order": 3,
+                "status": "completed",
+                "output_payload_json": {"text": "Deterministic composed report"},
+                "num_tokens_input": None,
+                "num_tokens_output": None,
+            },
+            {
+                "step_order": 4,
+                "status": "completed",
+                "result_files": [{"file_id": "artifact-1", "name": "report.pdf"}],
+                "num_tokens_input": None,
+                "num_tokens_output": None,
+            },
+        ],
+        "final_artifact": {
+            "file_id": "artifact-1",
+            "sha256": "d" * 64,
+            "text": (
+                "Title: Report\nYear: 2026\nCategory: Policy\nType: Report\n"
+                "Author: Municipality\nConclusions: Conclusion\nSummary: Summary\n"
+                "Extraction quality: pdf_text_likely_reversed; värde framgår ej\n"
+                f"Sources: {source_labels}"
+            ),
+        },
     }
 
 
@@ -624,6 +767,711 @@ def test_attachment_case_file_ids_can_resolve_from_environment(
     cli_args = type("Args", (), {"file_ids": ["file-cli-1"]})()
     assert harness._missing_file_id_envs(case, cli_args) == ()
     assert harness._case_file_ids(case, cli_args) == ("file-cli-1",)
+
+
+def test_required_case_skip_fails_suite(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    missing_env = "ENEO_AI_BUILDER_REQUIRED_TEST_FILE_ID"
+    monkeypatch.delenv(missing_env, raising=False)
+
+    exit_code = harness._run_suite(
+        cases=[
+            harness.BattleCase(
+                case_id="required-file-role",
+                prompt="Build from the attached source.",
+                required=True,
+                file_id_envs=(missing_env,),
+            )
+        ],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=type("Args", (), {"repetitions": 1, "space_id": "space-1"})(),
+        output_dir=tmp_path,
+    )
+
+    assert exit_code == 1
+    summary_path = next(
+        tmp_path.glob("ai-builder-api-battle-suite-*/suite-summary.json")
+    )
+    summary = json.loads(summary_path.read_text())
+    assert summary["skipped_run_count"] == 1
+    assert summary["required_skipped_run_count"] == 1
+    assert summary["failure_count"] == 1
+
+
+def test_live_bundle_is_immutable_and_owner_only(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    bundle = {"created_at": "20260713T120000", "marker": "original"}
+
+    bundle_path = harness._write_bundle(tmp_path, bundle, suffix="required-case")
+
+    assert bundle_path.stat().st_mode & 0o777 == 0o600
+    with raises(FileExistsError):
+        harness._write_bundle(
+            tmp_path,
+            {**bundle, "marker": "replacement"},
+            suffix="required-case",
+        )
+    assert json.loads(bundle_path.read_text())["marker"] == "original"
+
+
+def test_reanalysis_preserves_live_provenance_and_records_source_hash(
+    tmp_path: Path,
+) -> None:
+    harness = _battle_harness()
+    source_path = tmp_path / "live.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "artifact_mode": "live_execution",
+                "live_execution_provenance": {
+                    "source_revision": "immutable-source-revision"
+                },
+                "case": {"id": "live-case", "expected": {}},
+                "interactions": [],
+                "plan": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_bytes = source_path.read_bytes()
+
+    output_dir = tmp_path / "reanalyzed"
+    assert (
+        harness._reanalyze_bundles(
+            bundle_paths=[source_path],
+            output_dir=output_dir,
+        )
+        == 0
+    )
+
+    assert source_path.read_bytes() == source_bytes
+    reanalyzed = json.loads(next(output_dir.iterdir()).read_text())
+    assert reanalyzed["artifact_mode"] == "reanalysis"
+    assert reanalyzed["live_execution_provenance"] == {
+        "source_revision": "immutable-source-revision"
+    }
+    assert reanalyzed["reanalysis_provenance"]["source_bundle_sha256"] == (
+        hashlib.sha256(source_bytes).hexdigest()
+    )
+
+
+def test_release_thresholds_are_predeclared_and_compared(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    gate = harness.ReleaseGate(
+        required_case_ids=("required-positive",),
+        thresholds=harness.ReleaseThresholds(
+            max_case_errors=0,
+            max_quality_failures=0,
+            max_required_skips=0,
+        ),
+    )
+
+    def successful_case(**_: Any) -> dict[str, Any]:
+        return {
+            "created_at": "20260713T120001",
+            "artifact_mode": "live_execution",
+            "case": {"id": "required-positive", "required": True},
+            "session_id": "session-1",
+            "plan_id": "plan-1",
+            "plan_summary": {"step_count": 1},
+            "event_summary": {},
+            "quality_report": {"checks": [], "warnings": [], "metrics": {}},
+        }
+
+    monkeypatch.setattr(harness, "_run_case", successful_case)
+    exit_code = harness._run_suite(
+        cases=[
+            harness.BattleCase(
+                case_id="required-positive",
+                prompt="Build the required positive case.",
+                required=True,
+            )
+        ],
+        config=harness.ApiConfig(
+            base_url="http://localhost:8123/api/v1",
+            api_key="test-key",
+            timeout_seconds=1,
+        ),
+        args=type("Args", (), {"repetitions": 1, "space_id": "space-1"})(),
+        output_dir=tmp_path,
+        release_gate=gate,
+    )
+
+    assert exit_code == 0
+    suite_dir = next(tmp_path.glob("ai-builder-api-battle-suite-*"))
+    assert suite_dir.stat().st_mode & 0o777 == 0o700
+    manifest = json.loads((suite_dir / "release-manifest.json").read_text())
+    assert manifest["thresholds"] == {
+        "max_case_errors": 0,
+        "max_quality_failures": 0,
+        "max_required_skips": 0,
+    }
+    summary = json.loads((suite_dir / "suite-summary.json").read_text())
+    assert all(check["passed"] for check in summary["release_threshold_checks"])
+
+    failed_checks = harness._evaluate_release_thresholds(
+        gate.thresholds,
+        case_error_count=0,
+        quality_failure_run_count=1,
+        required_skipped_run_count=0,
+    )
+    assert (
+        next(
+            check for check in failed_checks if check["name"] == "max_quality_failures"
+        )["passed"]
+        is False
+    )
+
+
+def test_release_gate_rejects_dirty_source_before_creating_output(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    gate = harness.ReleaseGate(
+        artifact_schema_version="ai-builder-live-release.v1",
+        required_case_ids=("required-positive",),
+        thresholds=harness.ReleaseThresholds(
+            max_case_errors=0,
+            max_quality_failures=0,
+            max_required_skips=0,
+        ),
+        require_clean_source=True,
+    )
+
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: " M backend/scripts/ai_builder_api_battle_test.py"
+        if args == ("status", "--porcelain", "--untracked-files=no")
+        else "23fab2d4a638ef1411a4d5808981aa77cb17f59d",
+    )
+
+    with raises(ValueError, match="clean tracked source"):
+        harness._run_suite(
+            cases=[
+                harness.BattleCase(
+                    case_id="required-positive",
+                    prompt="Build the required positive case.",
+                    required=True,
+                )
+            ],
+            config=harness.ApiConfig(
+                base_url="http://localhost:8123/api/v1",
+                api_key="test-key",
+                timeout_seconds=1,
+            ),
+            args=type(
+                "Args",
+                (),
+                {
+                    "repetitions": 1,
+                    "space_id": "space-1",
+                    "model_id": "model-1",
+                },
+            )(),
+            output_dir=tmp_path,
+            release_gate=gate,
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_live_provenance_captures_source_build_model_prompt_and_usage(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: ""
+        if args == ("status", "--porcelain", "--untracked-files=no")
+        else "23fab2d4a638ef1411a4d5808981aa77cb17f59d",
+    )
+    case = harness.BattleCase(
+        case_id="provenance-case",
+        prompt="Build a source-faithful report.",
+        required=True,
+    )
+    latest_session = {
+        "telemetry": {
+            "prompt_tokens_total": 101,
+            "completion_tokens_total": 17,
+            "total_tokens_total": 118,
+            "llm_calls_made_total": 3,
+            "last_model": "openai/gpt-test",
+        }
+    }
+    classifier_diagnostics = _classifier_diagnostics()
+
+    provenance = harness._live_execution_provenance(
+        case=case,
+        latest_session=latest_session,
+        classifier_diagnostics=classifier_diagnostics,
+        requested_model_id=None,
+    )
+
+    assert provenance["mode"] == "live_execution"
+    assert provenance["source"]["revision"]
+    assert len(provenance["source"]["revision_sha256"]) == 64
+    assert provenance["build"]["app_version"] == harness.LOCAL_APP_VERSION
+    assert len(provenance["build"]["sha256"]) == 64
+    assert provenance["model"]["observed_ids"] == ["openai/gpt-test"]
+    assert len(provenance["model"]["sha256"]) == 64
+    assert (
+        provenance["prompt"]["case_sha256"]
+        == hashlib.sha256(case.prompt.encode("utf-8")).hexdigest()
+    )
+    assert provenance["prompt"]["classifier_hashes"] == ["a" * 64]
+    assert provenance["usage"] == {
+        "prompt_tokens": 101,
+        "completion_tokens": 17,
+        "total_tokens": 118,
+        "model_calls": 3,
+        "raw_reads": {
+            "classifier_run_count": 1,
+            "source_inventory_entry_count": 2,
+            "uploaded_file_raw_read_count": 1,
+            "distinct_uploaded_file_count": 1,
+            "uploaded_file_reread_count": 0,
+            "truncated_source_count": 0,
+            "uploaded_file_coverage_counts": {"fully_seen": 1},
+        },
+    }
+    assert all(
+        check["passed"] is True for check in harness._live_provenance_checks(provenance)
+    )
+
+    missing_model = {**provenance, "model": {"observed_ids": [], "sha256": "0" * 64}}
+    assert (
+        next(
+            check
+            for check in harness._live_provenance_checks(missing_model)
+            if check["name"] == "live_model_provenance_complete"
+        )["passed"]
+        is False
+    )
+
+
+def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
+    harness = _battle_harness()
+    expected = {
+        "expected_review_policy": {
+            "mode": "view",
+            "target_output_type": "json",
+            "target_field_groups": [["supplier"], ["score"]],
+            "target_must_be_non_terminal": True,
+        }
+    }
+
+    def checks_for(
+        plan: dict[str, Any],
+        applied_flow: dict[str, Any] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        report = harness._quality_report(
+            plan=plan,
+            summary=harness._summarize_plan(plan),
+            expected=expected,
+            event_summary={},
+            applied_flow=applied_flow or _applied_flow_from_plan(plan),
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    baseline_plan = _review_policy_plan()
+    baseline = checks_for(baseline_plan)
+    for name in (
+        "proposed_review_policy_count",
+        "proposed_review_policy_mode",
+        "proposed_review_policy_target",
+        "proposed_no_synthetic_review_step",
+        "proposed_review_policy_not_terminal_or_delivery",
+        "applied_review_policy_count",
+        "applied_review_policy_mode",
+        "applied_review_policy_target",
+        "applied_no_synthetic_review_step",
+        "applied_review_policy_not_terminal_or_delivery",
+    ):
+        assert baseline[name]["passed"] is True
+
+    wrong_mode = _review_policy_plan(mode="edit")
+    assert checks_for(wrong_mode)["proposed_review_policy_mode"]["passed"] is False
+
+    missing = _review_policy_plan()
+    missing["proposal"]["spec"]["steps"][0]["review_policy"] = None
+    assert checks_for(missing)["proposed_review_policy_count"]["passed"] is False
+
+    duplicate = _review_policy_plan()
+    duplicate["proposal"]["spec"]["steps"][1]["review_policy"] = {"mode": "view"}
+    assert checks_for(duplicate)["proposed_review_policy_count"]["passed"] is False
+
+    synthetic = _review_policy_plan()
+    synthetic["proposal"]["spec"]["steps"].insert(
+        1,
+        {
+            "plan_step_ref": "ai_review",
+            "name": "AI review and approve matrix",
+            "input_source": "previous_step",
+            "input_type": "json",
+            "output_type": "json",
+            "output_mode": "pass_through",
+        },
+    )
+    assert checks_for(synthetic)["proposed_no_synthetic_review_step"]["passed"] is False
+
+    terminal = _review_policy_plan()
+    terminal["proposal"]["spec"]["steps"][0]["review_policy"] = None
+    terminal["proposal"]["spec"]["steps"][-1]["review_policy"] = {"mode": "view"}
+    assert (
+        checks_for(terminal)["proposed_review_policy_not_terminal_or_delivery"][
+            "passed"
+        ]
+        is False
+    )
+
+    applied_wrong_target = _applied_flow_from_plan(_review_policy_plan())
+    applied_wrong_target["steps"][0]["review_policy"] = None
+    applied_wrong_target["steps"][1]["review_policy"] = {"mode": "view"}
+    assert (
+        checks_for(baseline_plan, applied_wrong_target)["applied_review_policy_target"][
+            "passed"
+        ]
+        is False
+    )
+
+
+def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    calls: list[tuple[str, str]] = []
+
+    def request_json(*, method: str, path: str, **_: Any) -> dict[str, Any]:
+        calls.append((method, path))
+        if path == "/flows/ai-builder/plans/plan-1/create":
+            return {
+                "flow_id": "flow-1",
+                "flow_name": "Review flow",
+                "steps_created": 3,
+                "steps_updated": 0,
+                "steps_removed": 0,
+            }
+        return _applied_flow_from_plan(_review_policy_plan())
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+
+    evidence = harness._apply_and_fetch_flow(
+        config=config,
+        plan_id="plan-1",
+    )
+
+    assert calls == [
+        ("POST", "/flows/ai-builder/plans/plan-1/create"),
+        ("GET", "/flows/flow-1/"),
+    ]
+    assert evidence["apply_result"]["flow_id"] == "flow-1"
+    assert evidence["flow"]["steps"][0]["review_policy"] == {"mode": "view"}
+    assert evidence["evidence_scope"] == (
+        "compiled_proposal_and_applied_draft_only; "
+        "does_not_prove_runtime_checkpoint_pause_or_resume"
+    )
+
+
+def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
+    harness = _battle_harness()
+    expected = {
+        "expected_runtime_evidence": {
+            "source_file_count": 6,
+            "source_record_count": 6,
+            "required_final_field_label_groups": [
+                ["title"],
+                ["year"],
+                ["category"],
+                ["type"],
+                ["author"],
+                ["conclusions"],
+                ["summary"],
+            ],
+            "required_visible_degradation_markers": [
+                ["pdf_text_likely_reversed"],
+                ["framgår ej"],
+            ],
+            "source_display_count": 6,
+            "model_call_count": 7,
+            "max_total_tokens": 2000,
+        }
+    }
+
+    def checks_for(evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        report = harness._quality_report(
+            plan={},
+            summary={},
+            expected=expected,
+            event_summary={},
+            runtime_evidence=evidence,
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    baseline = checks_for(_six_file_runtime_evidence())
+    for name in (
+        "runtime_final_artifact",
+        "runtime_source_file_count",
+        "runtime_source_record_count",
+        "runtime_one_record_per_source_file",
+        "runtime_final_field_labels",
+        "runtime_visible_degradation",
+        "runtime_source_display",
+        "runtime_model_call_count",
+        "runtime_total_tokens",
+    ):
+        assert baseline[name]["passed"] is True
+
+    missing_field = _six_file_runtime_evidence()
+    missing_field["final_artifact"]["text"] = missing_field["final_artifact"][
+        "text"
+    ].replace("Year: 2026", "2026")
+    assert checks_for(missing_field)["runtime_final_field_labels"]["passed"] is False
+
+    cardinality_drift = _six_file_runtime_evidence()
+    cardinality_drift["step_results"][0]["output_payload_json"]["documents"].append(
+        cardinality_drift["step_results"][0]["output_payload_json"]["documents"][0]
+    )
+    assert (
+        checks_for(cardinality_drift)["runtime_source_record_count"]["passed"] is False
+    )
+
+    duplicate_source_mapping = _six_file_runtime_evidence()
+    documents = duplicate_source_mapping["step_results"][0]["output_payload_json"][
+        "documents"
+    ]
+    documents[5]["source_file_id"] = documents[0]["source_file_id"]
+    assert (
+        checks_for(duplicate_source_mapping)["runtime_one_record_per_source_file"][
+            "passed"
+        ]
+        is False
+    )
+
+    hidden_degradation = _six_file_runtime_evidence()
+    hidden_degradation["final_artifact"]["text"] = hidden_degradation["final_artifact"][
+        "text"
+    ].replace("pdf_text_likely_reversed; värde framgår ej", "")
+    assert (
+        checks_for(hidden_degradation)["runtime_visible_degradation"]["passed"] is False
+    )
+
+    missing_source = _six_file_runtime_evidence()
+    missing_source["final_artifact"]["text"] = missing_source["final_artifact"][
+        "text"
+    ].replace("source-6.pdf", "")
+    assert checks_for(missing_source)["runtime_source_display"]["passed"] is False
+
+    extra_model_stage = _six_file_runtime_evidence()
+    extra_model_stage["step_results"].insert(
+        2,
+        {
+            "step_order": 3,
+            "status": "completed",
+            "num_tokens_input": 10,
+            "num_tokens_output": 5,
+        },
+    )
+    assert checks_for(extra_model_stage)["runtime_model_call_count"]["passed"] is False
+
+    missing_artifact = _six_file_runtime_evidence()
+    missing_artifact["final_artifact"] = None
+    assert checks_for(missing_artifact)["runtime_final_artifact"]["passed"] is False
+
+
+def test_runtime_evidence_collection_uses_published_contract(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+    source_paths = tuple(tmp_path / f"source-{index}.pdf" for index in range(1, 7))
+    calls: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def request_json(
+        *, method: str, path: str, payload: dict[str, Any] | None = None, **_: Any
+    ) -> dict[str, Any]:
+        calls.append((method, path, payload))
+        if path == "/flows/flow-1/publish/":
+            return {"id": "flow-1", "published_version": 4}
+        if path == "/flows/flow-1/run-contract/":
+            return {
+                "published_flow_version": 4,
+                "steps_requiring_input": [{"step_id": "reader-step"}],
+            }
+        if path == "/flows/flow-1/runs/" and method == "POST":
+            return {"id": "run-1", "status": "queued"}
+        if path == "/flows/flow-1/runs/run-1/":
+            return {
+                "id": "run-1",
+                "status": "completed",
+                "result": {
+                    "kind": "artifact",
+                    "files": [{"file_id": "artifact-1", "name": "report.pdf"}],
+                },
+            }
+        if path == "/flows/flow-1/runs/run-1/evidence/":
+            return {
+                "run": {"id": "run-1", "status": "completed"},
+                "step_results": [],
+            }
+        raise AssertionError((method, path, payload))
+
+    uploaded_paths: list[Path] = []
+
+    def upload_runtime_file(**kwargs: Any) -> dict[str, Any]:
+        source_path = kwargs["source_path"]
+        uploaded_paths.append(source_path)
+        return {"id": f"uploaded-{len(uploaded_paths)}"}
+
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_upload_runtime_file", upload_runtime_file)
+    monkeypatch.setattr(
+        harness,
+        "_download_final_artifact",
+        lambda **_: {
+            "file_id": "artifact-1",
+            "sha256": "d" * 64,
+            "text": "Title: report",
+        },
+    )
+
+    evidence = harness._execute_and_collect_runtime_evidence(
+        config=config,
+        flow_id="flow-1",
+        runtime_file_paths=source_paths,
+        timeout_seconds=1,
+        artifact_output_dir=tmp_path,
+        case_id="six-file-case",
+    )
+
+    assert uploaded_paths == list(source_paths)
+    create_call = next(
+        call for call in calls if call[:2] == ("POST", "/flows/flow-1/runs/")
+    )
+    assert create_call[2] == {
+        "expected_flow_version": 4,
+        "input_payload_json": None,
+        "step_inputs": {
+            "reader-step": {"file_ids": [f"uploaded-{index}" for index in range(1, 7)]}
+        },
+    }
+    assert evidence["run"]["status"] == "completed"
+    assert evidence["final_artifact"]["sha256"] == "d" * 64
+
+
+def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    cases = harness._read_cases_file(cases_path)
+    release_gate = harness._read_release_gate(cases_path, cases=cases)
+    by_id = {case.case_id: case for case in cases}
+
+    assert release_gate.artifact_schema_version == "ai-builder-live-release.v1"
+    assert release_gate.require_clean_source is True
+    assert release_gate.thresholds == harness.ReleaseThresholds(
+        max_case_errors=0,
+        max_quality_failures=0,
+        max_required_skips=0,
+    )
+    required_dimensions = {
+        dimension
+        for case_id in release_gate.required_case_ids
+        for dimension in by_id[case_id].release_dimensions
+    }
+    assert {
+        "positive",
+        "negative",
+        "calibration",
+        "file_role",
+        "topology",
+        "review_policy",
+        "six_file_document_report",
+    } <= required_dimensions
+    assert all(by_id[case_id].required for case_id in release_gate.required_case_ids)
+
+    review_case = by_id["ordinary_language_human_review_policy"]
+    assert review_case.apply_plan is True
+    assert review_case.execute_flow is False
+    assert review_case.expected is not None
+    assert review_case.expected["expected_review_policy"]["mode"] == "view"
+
+    six_file_case = by_id["six_file_document_report_release_gate"]
+    assert six_file_case.apply_plan is True
+    assert six_file_case.execute_flow is True
+    assert len(six_file_case.file_id_envs) == 6
+    assert len(six_file_case.runtime_file_path_envs) == 6
+    assert six_file_case.expected is not None
+    assert six_file_case.expected["expected_runtime_evidence"] == {
+        "source_file_count": 6,
+        "source_record_count": 6,
+        "required_final_field_label_groups": [
+            ["titel", "title"],
+            ["år", "year"],
+            ["kategori", "category"],
+            ["typ", "type"],
+            ["författare", "author"],
+            ["slutsatser", "conclusions"],
+            ["sammanfattning", "summary"],
+        ],
+        "required_visible_degradation_markers": [
+            ["pdf_text_likely_reversed"],
+            ["framgår ej"],
+        ],
+        "source_display_count": 6,
+        "model_call_count": 7,
+        "max_total_tokens": 250000,
+    }
+
+
+def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "typo",
+                        "prompt": "Build a report.",
+                        "expected": {
+                            "expected_runtime_evidnce": {"source_file_count": 6}
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with raises(ValueError, match="unknown expectation keys"):
+        harness._read_cases_file(cases_path)
 
 
 def test_attachment_and_ambiguous_cases_gate_classifier_posture() -> None:
