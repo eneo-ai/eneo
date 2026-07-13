@@ -1451,7 +1451,7 @@ def _download_final_artifact(
     config: ApiConfig,
     flow_id: str,
     run_id: str,
-    run: Mapping[str, Any],
+    run: Mapping[str, object],
     output_dir: Path,
     case_id: str,
 ) -> JsonObject | None:
@@ -1792,7 +1792,7 @@ def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
 def _live_execution_provenance(
     *,
     case: BattleCase,
-    latest_session: Mapping[str, Any] | None,
+    latest_session: Mapping[str, object] | None,
     classifier_diagnostics: Mapping[str, object] | None,
     requested_model_id: str | None,
 ) -> JsonObject:
@@ -1915,7 +1915,7 @@ def _classifier_raw_read_metrics(
     }
 
 
-def _live_provenance_checks(provenance: Mapping[str, Any]) -> list[JsonObject]:
+def _live_provenance_checks(provenance: Mapping[str, object]) -> list[JsonObject]:
     source = provenance.get("source")
     source = source if isinstance(source, Mapping) else {}
     build = provenance.get("build")
@@ -2028,7 +2028,7 @@ def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _write_json_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
+def _write_json_exclusive(path: Path, payload: Mapping[str, object]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -2999,8 +2999,8 @@ def _quality_report(
     event_summary: Mapping[str, Any] | None = None,
     classifier_diagnostics: Mapping[str, object] | None = None,
     attached_file_ids: tuple[str, ...] = (),
-    applied_flow: Mapping[str, Any] | None = None,
-    runtime_evidence: Mapping[str, Any] | None = None,
+    applied_flow: Mapping[str, object] | None = None,
+    runtime_evidence: Mapping[str, object] | None = None,
 ) -> JsonObject:
     checks: list[JsonObject] = []
     warnings: list[str] = []
@@ -3488,7 +3488,7 @@ def _quality_report(
     }
 
 
-def _summarize_applied_flow(flow: Mapping[str, Any] | None) -> JsonObject:
+def _summarize_applied_flow(flow: Mapping[str, object] | None) -> JsonObject:
     if not isinstance(flow, Mapping):
         return {"has_flow": False, "step_count": 0, "steps": []}
     raw_steps = flow.get("steps")
@@ -3530,8 +3530,8 @@ def _summarize_applied_flow(flow: Mapping[str, Any] | None) -> JsonObject:
 def _review_policy_checks(
     *,
     scope: str,
-    summary: Mapping[str, Any],
-    expected: Mapping[str, Any],
+    summary: Mapping[str, object],
+    expected: Mapping[str, object],
 ) -> list[JsonObject]:
     steps = _step_summaries(summary)
     review_steps = [
@@ -3631,7 +3631,7 @@ def _review_policy_checks(
     ]
 
 
-def _looks_like_synthetic_review_step(step: Mapping[str, Any]) -> bool:
+def _looks_like_synthetic_review_step(step: Mapping[str, object]) -> bool:
     text = " ".join(
         _clean_strings(
             [
@@ -3656,8 +3656,8 @@ def _looks_like_synthetic_review_step(step: Mapping[str, Any]) -> bool:
 
 def _runtime_evidence_checks(
     *,
-    evidence: Mapping[str, Any] | None,
-    expected: Mapping[str, Any],
+    evidence: Mapping[str, object] | None,
+    expected: Mapping[str, object],
 ) -> list[JsonObject]:
     evidence = evidence or {}
     run = evidence.get("run")
@@ -3683,7 +3683,7 @@ def _runtime_evidence_checks(
     )
 
     runtime_file_ids: list[str] = []
-    documents: list[Mapping[str, Any]] = []
+    documents: list[Mapping[str, object]] = []
     model_call_count = 0
     for step in steps:
         _extend_unique_strings(
@@ -3852,7 +3852,7 @@ def _runtime_evidence_checks(
     ]
 
 
-def _runtime_metrics_from_quality_report(report: Mapping[str, Any]) -> JsonObject:
+def _runtime_metrics_from_quality_report(report: Mapping[str, object]) -> JsonObject:
     checks = report.get("checks")
     if not isinstance(checks, list):
         return {}
@@ -3868,7 +3868,7 @@ def _runtime_metrics_from_quality_report(report: Mapping[str, Any]) -> JsonObjec
 def _first_mapping_list_for_key(
     value: object,
     key: str,
-) -> list[Mapping[str, Any]] | None:
+) -> list[Mapping[str, object]] | None:
     if isinstance(value, Mapping):
         candidate = value.get(key)
         if isinstance(candidate, list) and all(

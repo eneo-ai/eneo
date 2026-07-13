@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -113,7 +114,7 @@ def _document_plan_with_extra_text_helper() -> dict[str, Any]:
     }
 
 
-def _review_policy_plan(*, mode: str = "view") -> dict[str, Any]:
+def _review_policy_plan(*, mode: str = "view") -> dict[str, object]:
     return {
         "proposal": {
             "spec": {
@@ -157,8 +158,37 @@ def _review_policy_plan(*, mode: str = "view") -> dict[str, Any]:
     }
 
 
-def _applied_flow_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    steps = plan["proposal"]["spec"]["steps"]
+def _review_plan_steps(plan: Mapping[str, object]) -> list[dict[str, object]]:
+    proposal = plan.get("proposal")
+    assert isinstance(proposal, Mapping)
+    spec = proposal.get("spec")
+    assert isinstance(spec, Mapping)
+    raw_steps = spec.get("steps")
+    assert isinstance(raw_steps, list)
+    steps: list[dict[str, object]] = []
+    for step in raw_steps:
+        assert isinstance(step, dict)
+        assert all(isinstance(key, str) for key in step)
+        steps.append(step)
+    return steps
+
+
+def _insert_review_plan_step(
+    plan: Mapping[str, object],
+    index: int,
+    step: dict[str, object],
+) -> None:
+    proposal = plan.get("proposal")
+    assert isinstance(proposal, Mapping)
+    spec = proposal.get("spec")
+    assert isinstance(spec, Mapping)
+    raw_steps = spec.get("steps")
+    assert isinstance(raw_steps, list)
+    raw_steps.insert(index, step)
+
+
+def _applied_flow_from_plan(plan: dict[str, object]) -> dict[str, object]:
+    steps = _review_plan_steps(plan)
     return {
         "id": "flow-1",
         "steps": [
@@ -172,7 +202,7 @@ def _applied_flow_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _six_file_runtime_evidence() -> dict[str, Any]:
+def _six_file_runtime_evidence() -> dict[str, object]:
     documents = [
         {
             "source_file_id": f"file-{index}",
@@ -253,6 +283,71 @@ def _six_file_runtime_evidence() -> dict[str, Any]:
             ),
         },
     }
+
+
+def _applied_flow_steps(flow: Mapping[str, object]) -> list[dict[str, object]]:
+    raw_steps = flow.get("steps")
+    assert isinstance(raw_steps, list)
+    steps: list[dict[str, object]] = []
+    for step in raw_steps:
+        assert isinstance(step, dict)
+        assert all(isinstance(key, str) for key in step)
+        steps.append(step)
+    return steps
+
+
+def _runtime_step_results(
+    evidence: Mapping[str, object],
+) -> list[dict[str, object]]:
+    raw_steps = evidence.get("step_results")
+    assert isinstance(raw_steps, list)
+    steps: list[dict[str, object]] = []
+    for step in raw_steps:
+        assert isinstance(step, dict)
+        assert all(isinstance(key, str) for key in step)
+        steps.append(step)
+    return steps
+
+
+def _runtime_documents(evidence: Mapping[str, object]) -> list[dict[str, object]]:
+    first_step = _runtime_step_results(evidence)[0]
+    payload = first_step.get("output_payload_json")
+    assert isinstance(payload, Mapping)
+    raw_documents = payload.get("documents")
+    assert isinstance(raw_documents, list)
+    documents: list[dict[str, object]] = []
+    for document in raw_documents:
+        assert isinstance(document, dict)
+        assert all(isinstance(key, str) for key in document)
+        documents.append(document)
+    return documents
+
+
+def _append_first_runtime_document(evidence: Mapping[str, object]) -> None:
+    first_step = _runtime_step_results(evidence)[0]
+    payload = first_step.get("output_payload_json")
+    assert isinstance(payload, Mapping)
+    raw_documents = payload.get("documents")
+    assert isinstance(raw_documents, list)
+    assert raw_documents
+    raw_documents.append(raw_documents[0])
+
+
+def _insert_runtime_step_result(
+    evidence: Mapping[str, object],
+    index: int,
+    step: dict[str, object],
+) -> None:
+    raw_steps = evidence.get("step_results")
+    assert isinstance(raw_steps, list)
+    raw_steps.insert(index, step)
+
+
+def _runtime_final_artifact(evidence: Mapping[str, object]) -> dict[str, object]:
+    artifact = evidence.get("final_artifact")
+    assert isinstance(artifact, dict)
+    assert all(isinstance(key, str) for key in artifact)
+    return artifact
 
 
 def _classifier_diagnostics() -> dict[str, object]:
@@ -876,7 +971,7 @@ def test_release_thresholds_are_predeclared_and_compared(
         ),
     )
 
-    def successful_case(**_: Any) -> dict[str, Any]:
+    def successful_case(**_: object) -> dict[str, object]:
         return {
             "created_at": "20260713T120001",
             "artifact_mode": "live_execution",
@@ -1075,9 +1170,9 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     }
 
     def checks_for(
-        plan: dict[str, Any],
-        applied_flow: dict[str, Any] | None = None,
-    ) -> dict[str, dict[str, Any]]:
+        plan: dict[str, object],
+        applied_flow: dict[str, object] | None = None,
+    ) -> dict[str, dict[str, object]]:
         report = harness._quality_report(
             plan=plan,
             summary=harness._summarize_plan(plan),
@@ -1107,15 +1202,16 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     assert checks_for(wrong_mode)["proposed_review_policy_mode"]["passed"] is False
 
     missing = _review_policy_plan()
-    missing["proposal"]["spec"]["steps"][0]["review_policy"] = None
+    _review_plan_steps(missing)[0]["review_policy"] = None
     assert checks_for(missing)["proposed_review_policy_count"]["passed"] is False
 
     duplicate = _review_policy_plan()
-    duplicate["proposal"]["spec"]["steps"][1]["review_policy"] = {"mode": "view"}
+    _review_plan_steps(duplicate)[1]["review_policy"] = {"mode": "view"}
     assert checks_for(duplicate)["proposed_review_policy_count"]["passed"] is False
 
     synthetic = _review_policy_plan()
-    synthetic["proposal"]["spec"]["steps"].insert(
+    _insert_review_plan_step(
+        synthetic,
         1,
         {
             "plan_step_ref": "ai_review",
@@ -1129,8 +1225,9 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     assert checks_for(synthetic)["proposed_no_synthetic_review_step"]["passed"] is False
 
     terminal = _review_policy_plan()
-    terminal["proposal"]["spec"]["steps"][0]["review_policy"] = None
-    terminal["proposal"]["spec"]["steps"][-1]["review_policy"] = {"mode": "view"}
+    terminal_steps = _review_plan_steps(terminal)
+    terminal_steps[0]["review_policy"] = None
+    terminal_steps[-1]["review_policy"] = {"mode": "view"}
     assert (
         checks_for(terminal)["proposed_review_policy_not_terminal_or_delivery"][
             "passed"
@@ -1139,8 +1236,9 @@ def test_review_policy_gate_rejects_wrong_or_unowned_checkpoint_shape() -> None:
     )
 
     applied_wrong_target = _applied_flow_from_plan(_review_policy_plan())
-    applied_wrong_target["steps"][0]["review_policy"] = None
-    applied_wrong_target["steps"][1]["review_policy"] = {"mode": "view"}
+    applied_steps = _applied_flow_steps(applied_wrong_target)
+    applied_steps[0]["review_policy"] = None
+    applied_steps[1]["review_policy"] = {"mode": "view"}
     assert (
         checks_for(baseline_plan, applied_wrong_target)["applied_review_policy_target"][
             "passed"
@@ -1160,7 +1258,7 @@ def test_apply_and_fetch_flow_preserves_compiled_structure_scope(
     )
     calls: list[tuple[str, str]] = []
 
-    def request_json(*, method: str, path: str, **_: Any) -> dict[str, Any]:
+    def request_json(*, method: str, path: str, **_: object) -> dict[str, object]:
         calls.append((method, path))
         if path == "/flows/ai-builder/plans/plan-1/create":
             return {
@@ -1216,7 +1314,7 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
         }
     }
 
-    def checks_for(evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def checks_for(evidence: dict[str, object]) -> dict[str, dict[str, object]]:
         report = harness._quality_report(
             plan={},
             summary={},
@@ -1241,23 +1339,20 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
         assert baseline[name]["passed"] is True
 
     missing_field = _six_file_runtime_evidence()
-    missing_field["final_artifact"]["text"] = missing_field["final_artifact"][
-        "text"
-    ].replace("Year: 2026", "2026")
+    missing_field_artifact = _runtime_final_artifact(missing_field)
+    artifact_text = missing_field_artifact.get("text")
+    assert isinstance(artifact_text, str)
+    missing_field_artifact["text"] = artifact_text.replace("Year: 2026", "2026")
     assert checks_for(missing_field)["runtime_final_field_labels"]["passed"] is False
 
     cardinality_drift = _six_file_runtime_evidence()
-    cardinality_drift["step_results"][0]["output_payload_json"]["documents"].append(
-        cardinality_drift["step_results"][0]["output_payload_json"]["documents"][0]
-    )
+    _append_first_runtime_document(cardinality_drift)
     assert (
         checks_for(cardinality_drift)["runtime_source_record_count"]["passed"] is False
     )
 
     duplicate_source_mapping = _six_file_runtime_evidence()
-    documents = duplicate_source_mapping["step_results"][0]["output_payload_json"][
-        "documents"
-    ]
+    documents = _runtime_documents(duplicate_source_mapping)
     documents[5]["source_file_id"] = documents[0]["source_file_id"]
     assert (
         checks_for(duplicate_source_mapping)["runtime_one_record_per_source_file"][
@@ -1267,21 +1362,26 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
     )
 
     hidden_degradation = _six_file_runtime_evidence()
-    hidden_degradation["final_artifact"]["text"] = hidden_degradation["final_artifact"][
-        "text"
-    ].replace("pdf_text_likely_reversed; värde framgår ej", "")
+    hidden_artifact = _runtime_final_artifact(hidden_degradation)
+    hidden_text = hidden_artifact.get("text")
+    assert isinstance(hidden_text, str)
+    hidden_artifact["text"] = hidden_text.replace(
+        "pdf_text_likely_reversed; värde framgår ej", ""
+    )
     assert (
         checks_for(hidden_degradation)["runtime_visible_degradation"]["passed"] is False
     )
 
     missing_source = _six_file_runtime_evidence()
-    missing_source["final_artifact"]["text"] = missing_source["final_artifact"][
-        "text"
-    ].replace("source-6.pdf", "")
+    missing_source_artifact = _runtime_final_artifact(missing_source)
+    source_text = missing_source_artifact.get("text")
+    assert isinstance(source_text, str)
+    missing_source_artifact["text"] = source_text.replace("source-6.pdf", "")
     assert checks_for(missing_source)["runtime_source_display"]["passed"] is False
 
     extra_model_stage = _six_file_runtime_evidence()
-    extra_model_stage["step_results"].insert(
+    _insert_runtime_step_result(
+        extra_model_stage,
         2,
         {
             "step_order": 3,
@@ -1308,11 +1408,15 @@ def test_runtime_evidence_collection_uses_published_contract(
         timeout_seconds=1,
     )
     source_paths = tuple(tmp_path / f"source-{index}.pdf" for index in range(1, 7))
-    calls: list[tuple[str, str, dict[str, Any] | None]] = []
+    calls: list[tuple[str, str, dict[str, object] | None]] = []
 
     def request_json(
-        *, method: str, path: str, payload: dict[str, Any] | None = None, **_: Any
-    ) -> dict[str, Any]:
+        *,
+        method: str,
+        path: str,
+        payload: dict[str, object] | None = None,
+        **_: object,
+    ) -> dict[str, object]:
         calls.append((method, path, payload))
         if path == "/flows/flow-1/publish/":
             return {"id": "flow-1", "published_version": 4}
@@ -1341,8 +1445,9 @@ def test_runtime_evidence_collection_uses_published_contract(
 
     uploaded_paths: list[Path] = []
 
-    def upload_runtime_file(**kwargs: Any) -> dict[str, Any]:
+    def upload_runtime_file(**kwargs: object) -> dict[str, object]:
         source_path = kwargs["source_path"]
+        assert isinstance(source_path, Path)
         uploaded_paths.append(source_path)
         return {"id": f"uploaded-{len(uploaded_paths)}"}
 
