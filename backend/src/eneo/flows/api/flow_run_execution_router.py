@@ -772,9 +772,8 @@ async def create_flow_run(
             dispatch_run = run
         elif run.status is FlowRunStatus.COMPLETED:
             completed_replay_view = (
-                await run_service.get_run_with_result_files_and_token_usage(
-                    flow_id=id,
-                    run_id=run.id,
+                await run_service.enrich_run_with_result_files_and_token_usage(
+                    run=run,
                 )
             )
 
@@ -1287,6 +1286,7 @@ async def resume_flow_run_review_checkpoint(
     ),
 ):
     dispatch_run = None
+    completed_run_view = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1305,6 +1305,10 @@ async def resume_flow_run_review_checkpoint(
         )
         if result.accepted:
             dispatch_run = result.run
+        elif result.run.status is FlowRunStatus.COMPLETED:
+            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_token_usage(
+                run=result.run,
+            )
         checkpoint = await _present_review_checkpoint(
             container=container,
             checkpoint=result.checkpoint,
@@ -1316,9 +1320,20 @@ async def resume_flow_run_review_checkpoint(
             tenant_id=dispatch_run.tenant_id,
             expected_revision=dispatch_run.revision,
         )
+    assembler = FlowAssembler()
+    public_run = (
+        assembler.to_run_public(
+            completed_run_view.run,
+            result_files=completed_run_view.result_files,
+            token_usage=completed_run_view.token_usage,
+            final_output=completed_run_view.final_output,
+        )
+        if completed_run_view is not None
+        else assembler.to_run_public(result.run)
+    )
     return FlowRunReviewCheckpointResumeResponse(
         checkpoint=checkpoint,
-        run=FlowAssembler().to_run_public(result.run),
+        run=public_run,
     )
 
 
@@ -1367,6 +1382,7 @@ async def cancel_flow_run(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
+    completed_run_view = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1377,6 +1393,19 @@ async def cancel_flow_run(
         )
         run_service = container.flow_run_service()
         run = await run_service.cancel_run(run_id=run_id, flow_id=id)
+        if run.status is FlowRunStatus.COMPLETED:
+            completed_run_view = (
+                await run_service.enrich_run_with_result_files_and_token_usage(
+                    run=run,
+                )
+            )
+    if completed_run_view is not None:
+        return FlowAssembler().to_run_public(
+            completed_run_view.run,
+            result_files=completed_run_view.result_files,
+            token_usage=completed_run_view.token_usage,
+            final_output=completed_run_view.final_output,
+        )
     return FlowAssembler().to_run_public(run)
 
 
@@ -1437,6 +1466,7 @@ async def rerun_flow_run_step(
     ),
 ):
     dispatch_run = None
+    completed_run_view = None
     async with _commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1490,6 +1520,10 @@ async def rerun_flow_run_step(
         )
         if result.created:
             dispatch_run = result.run
+        elif result.run.status is FlowRunStatus.COMPLETED:
+            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_token_usage(
+                run=result.run,
+            )
     if dispatch_run is not None:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,
@@ -1499,8 +1533,17 @@ async def rerun_flow_run_step(
         )
     return FlowAssembler().to_rerun_response(
         operation=result.operation,
-        run=result.run,
+        run=(completed_run_view.run if completed_run_view is not None else result.run),
         invalidated_steps=result.invalidated_steps,
+        result_files=(
+            completed_run_view.result_files if completed_run_view is not None else ()
+        ),
+        token_usage=(
+            completed_run_view.token_usage if completed_run_view is not None else None
+        ),
+        final_output=(
+            completed_run_view.final_output if completed_run_view is not None else None
+        ),
     )
 
 
@@ -1593,8 +1636,24 @@ async def redispatch_flow_run(
         description=f"Redispatch requested for flow run {run.id} (dispatch_count={redispatched_count})",
         metadata=AuditMetadata.standard(actor=user, target=run),
     )
+    completed_run_view = (
+        await run_service.enrich_run_with_result_files_and_token_usage(run=run)
+        if run.status is FlowRunStatus.COMPLETED
+        else None
+    )
+    assembler = FlowAssembler()
+    public_run = (
+        assembler.to_run_public(
+            completed_run_view.run,
+            result_files=completed_run_view.result_files,
+            token_usage=completed_run_view.token_usage,
+            final_output=completed_run_view.final_output,
+        )
+        if completed_run_view is not None
+        else assembler.to_run_public(run)
+    )
     return FlowRunRedispatchResponse(
-        run=FlowAssembler().to_run_public(run),
+        run=public_run,
         redispatched_count=redispatched_count,
     )
 

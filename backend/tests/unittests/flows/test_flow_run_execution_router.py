@@ -19,8 +19,12 @@ from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api import flow_run_execution_router as router_module
+from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
+    FlowFinalOutputContractPublic,
+    FlowOutputDelivery,
     FlowRunCreateRequest,
+    FlowRunReviewCheckpointResumeRequest,
     FlowRunStepRerunRequest,
 )
 from eneo.flows.api.flow_run_execution_router import (
@@ -30,6 +34,7 @@ from eneo.flows.api.flow_run_execution_router import (
     list_flow_runs,
     redispatch_flow_run,
     rerun_flow_run_step,
+    resume_flow_run_review_checkpoint,
 )
 from eneo.flows.api.flow_run_steps_router import (
     get_flow_graph,
@@ -54,7 +59,12 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from eneo.flows.enums import FlowRunRerunOperationStatus, FlowStepResultStatus
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowRunRerunOperationStatus,
+    FlowStepResultStatus,
+)
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -73,6 +83,7 @@ from tests.unittests.flows.test_flow_router import (
     _RecordingBackgroundTasks,
     _rerun_result,
     _result_file,
+    _review_checkpoint,
     _run,
     _service_key,
 )
@@ -236,7 +247,10 @@ async def test_create_flow_run_allows_service_key_principals():
     _enable_space_access(container, user_permissions=[Permission.FLOWS])
 
     flow = _flow(uuid4())
-    run = _run(flow_id=flow.id, tenant_id=container.user.return_value.tenant_id)
+    run = _run(
+        flow_id=flow.id,
+        tenant_id=container.user.return_value.tenant_id,
+    ).model_copy(update={"status": FlowRunStatus.QUEUED})
     flow_run_service.create_run.return_value = CreateRunResult(run=run, created=True)
     flow_service.get_flow.return_value = flow
 
@@ -345,13 +359,92 @@ async def test_create_flow_run_replay_skips_creation_audit_and_dispatch():
 
 
 @pytest.mark.asyncio
+async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Reviewed report"}}
+    )
+    checkpoint = _review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+    )
+    checkpoint_public = FlowAssembler().to_review_checkpoint_public(
+        checkpoint.model_copy(
+            update={
+                "requester_user_id": uuid4(),
+                "decided_by_user_id": uuid4(),
+            }
+        )
+    )
+    final_output = FlowFinalOutputContractPublic(
+        step_id=step_id,
+        step_order=1,
+        output_type=FlowOutputType.TEXT,
+        output_mode=FlowOutputMode.PASS_THROUGH,
+        delivery=FlowOutputDelivery.PAYLOAD,
+    )
+    run_service = AsyncMock()
+    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
+        FlowRunWithResultFilesAndTokenUsage(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            final_output=final_output,
+        )
+    )
+    review_service = AsyncMock()
+    review_service.resume_review_checkpoint.return_value = SimpleNamespace(
+        checkpoint=checkpoint,
+        run=run,
+        accepted=False,
+    )
+    container.flow_run_service.return_value = run_service
+    container.flow_run_review_checkpoint_service.return_value = review_service
+    container.flow_service.return_value = AsyncMock()
+    container.user.return_value = user
+    _enable_space_access(container)
+    monkeypatch.setattr(
+        router_module,
+        "_present_review_checkpoint",
+        AsyncMock(return_value=checkpoint_public),
+    )
+
+    response = await resume_flow_run_review_checkpoint(
+        id=flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointResumeRequest(
+            expected_checkpoint_revision=checkpoint.revision
+        ),
+        background_tasks=BackgroundTasks(),
+        idempotency_key="completed-review-replay",
+        container=container,
+    )
+
+    assert response.run.result is not None
+    assert response.run.result.kind == "inline_text"
+    assert response.run.result.text == "Reviewed report"
+    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
+        run=run,
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_flow_run_forwards_idempotency_key():
     container = MagicMock()
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     flow_run_service.create_run.return_value = CreateRunResult(run=run, created=True)
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()
@@ -384,7 +477,9 @@ async def test_create_flow_run_handles_missing_headers_object():
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     flow_run_service.create_run.return_value = CreateRunResult(run=run, created=True)
     container.flow_run_service.return_value = flow_run_service
     container.flow_service.return_value = AsyncMock()
@@ -505,7 +600,9 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
     flow_id = uuid4()
     step_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Rerun finished"}}
+    )
     rerun_result = _rerun_result(
         run,
         step_id,
@@ -513,6 +610,20 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
         status=FlowRunRerunOperationStatus.COMPLETED,
     )
     run_service = AsyncMock()
+    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
+        FlowRunWithResultFilesAndTokenUsage(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            final_output=FlowFinalOutputContractPublic(
+                step_id=step_id,
+                step_order=1,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            ),
+        )
+    )
     rerun_service = AsyncMock()
     rerun_service.rerun_step.return_value = rerun_result
     flow_service = AsyncMock()
@@ -544,8 +655,14 @@ async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch
     )
 
     assert response.status == FlowRunRerunOperationStatus.COMPLETED
+    assert response.run.result is not None
+    assert response.run.result.kind == "inline_text"
+    assert response.run.result.text == "Rerun finished"
     assert background_tasks.tasks == []
     rerun_service.rerun_step.assert_awaited_once()
+    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
+        run=run,
+    )
     audit_kwargs = container.audit_service.return_value.log_async.await_args.kwargs
     assert audit_kwargs["action"] == ActionType.FLOW_RUN_RERUN_REQUESTED
     assert audit_kwargs["metadata"]["extra"]["rerun_created"] is False
@@ -603,7 +720,9 @@ async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
 async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
-    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     result_file = _result_file(run=run)
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_token_usage.return_value = (
@@ -767,8 +886,12 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     container = MagicMock()
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
-    refreshed = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    refreshed = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
     events: list[str] = []
     run_service = AsyncMock()
     run_service.get_run.side_effect = [run, refreshed]
@@ -835,9 +958,25 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     container = MagicMock()
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Already finished"}}
+    )
     run_service = AsyncMock()
     run_service.get_run.return_value = run
+    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
+        FlowRunWithResultFilesAndTokenUsage(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            final_output=FlowFinalOutputContractPublic(
+                step_id=uuid4(),
+                step_order=1,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            ),
+        )
+    )
     container.flow_run_service.return_value = run_service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
@@ -862,12 +1001,18 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     )
 
     assert response.run.id == run.id
+    assert response.run.result is not None
+    assert response.run.result.kind == "inline_text"
+    assert response.run.result.text == "Already finished"
     assert response.redispatched_count == 0
     assert run_service.get_run.await_count == 1
     dispatch.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=run.tenant_id,
         expected_revision=run.revision,
+    )
+    run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
+        run=run
     )
     kwargs = container.audit_service.return_value.log_async.await_args.kwargs
     assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED

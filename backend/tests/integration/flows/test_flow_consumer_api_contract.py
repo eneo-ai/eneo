@@ -934,6 +934,14 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert completed_replay_response.status_code == 201, completed_replay_response.text
     assert completed_replay_response.json()["result"] == completed_runs[0]["result"]
 
+    completed_cancel_response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/{first_run['id']}/cancel/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert completed_cancel_response.status_code == 200, completed_cancel_response.text
+    assert completed_cancel_response.json()["status"] == "completed"
+    assert completed_cancel_response.json()["result"] == completed_runs[0]["result"]
+
     queued_runs_response = await client.get(
         f"/api/v1/flows/{flow_id}/runs/?status=queued",
         headers={"Authorization": f"Bearer {admin_token}"},

@@ -163,10 +163,17 @@ class FlowAssembler:
         run: FlowRun,
         invalidated_steps: Sequence[FlowRunRerunInvalidatedStep],
         result_files: Sequence[FlowRunStepResultFile] = (),
+        token_usage: FlowRunTokenUsage | None = None,
+        final_output: FlowFinalOutputContractPublic | None = None,
     ) -> FlowRunStepRerunResponse:
         return FlowRunStepRerunResponse(
             operation_id=operation.id,
-            run=self.to_run_public(run, result_files=result_files),
+            run=self.to_run_public(
+                run,
+                result_files=result_files,
+                token_usage=token_usage,
+                final_output=final_output,
+            ),
             rerun_step_id=operation.rerun_step_id,
             new_attempt_no=operation.root_attempt_no,
             invalidated_step_ids=[step.step_id for step in invalidated_steps],
@@ -219,8 +226,12 @@ def _project_run_result(
     final_output: FlowFinalOutputContractPublic | None,
     result_files: Sequence[FlowRunStepResultFile],
 ) -> FlowRunResultPublic | None:
-    if run.status is not FlowRunStatus.COMPLETED or final_output is None:
+    if run.status is not FlowRunStatus.COMPLETED:
         return None
+    if final_output is None:
+        raise FlowRunResultProjectionError(
+            "Completed run has no pinned final-output contract."
+        )
 
     if final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP:
         return FlowRunOutboundHttpResultPublic(

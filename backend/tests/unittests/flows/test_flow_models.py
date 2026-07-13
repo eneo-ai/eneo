@@ -523,7 +523,7 @@ def test_run_public_exposes_only_semantic_input_payload() -> None:
         principal_user_id=uuid4(),
         tenant_id=uuid4(),
         trace_id=uuid4(),
-        status=FlowRunStatus.COMPLETED,
+        status=FlowRunStatus.QUEUED,
         input_payload_json={
             "employee_name": "Alex Example",
             "expected_flow_version": 3,
@@ -685,6 +685,16 @@ def test_run_public_fails_explicitly_when_completed_artifact_is_missing() -> Non
                 output_type=FlowOutputType.DOCX,
                 delivery=FlowOutputDelivery.ARTIFACT,
             ),
+        )
+
+
+def test_run_public_fails_explicitly_without_completed_run_contract() -> None:
+    with pytest.raises(
+        FlowRunResultProjectionError,
+        match="has no pinned final-output contract",
+    ):
+        FlowAssembler().to_run_public(
+            _completed_run(output_payload_json={"text": "Finished report"})
         )
 
 

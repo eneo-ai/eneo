@@ -586,6 +586,13 @@ class FlowRunService:
         run_id: UUID,
     ) -> FlowRunWithResultFilesAndTokenUsage:
         run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        return await self.enrich_run_with_result_files_and_token_usage(run=run)
+
+    async def enrich_run_with_result_files_and_token_usage(
+        self,
+        *,
+        run: FlowRun,
+    ) -> FlowRunWithResultFilesAndTokenUsage:
         views = await self._runs_with_result_files_and_token_usage(runs=(run,))
         return views[0]
 
