@@ -31,11 +31,21 @@ export default defineConfig(({ mode }) => ({
         }
       : undefined,
   plugins: [
-    paraglideVitePlugin({
-      project: "./project.inlang",
-      outdir: "./src/lib/paraglide",
-      strategy: ["url", "cookie", "baseLocale"]
-    }) as PluginOption,
+    // Paraglide's change detection is in-memory only, so every fresh process
+    // (a second build, a vitest run) rewrites the whole catalog under
+    // src/lib/paraglide. A dev server polling the same tree then HMR-updates
+    // every module that imports messages — hundreds of components per write.
+    // Secondary tooling that already has a compiled catalog on disk can set
+    // PARAGLIDE_SKIP_COMPILE=1 to leave the running dev server undisturbed.
+    ...(process.env.PARAGLIDE_SKIP_COMPILE
+      ? []
+      : [
+          paraglideVitePlugin({
+            project: "./project.inlang",
+            outdir: "./src/lib/paraglide",
+            strategy: ["url", "cookie", "baseLocale"]
+          }) as PluginOption
+        ]),
     tailwindcss() as PluginOption,
     eneoIcons() as PluginOption,
     sveltekit() as PluginOption
@@ -104,7 +114,10 @@ export default defineConfig(({ mode }) => ({
     },
     watch: {
       usePolling: true,
-      interval: 1000
+      interval: 1000,
+      // E2E tooling writes thousands of files into these while a dev server
+      // runs; none of them belong to the dev module graph.
+      ignored: ["**/.svelte-kit-e2e/**", "**/test-results/**", "**/playwright-report/**"]
     }
   },
   define: {
