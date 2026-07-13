@@ -39,6 +39,7 @@ async def test_list_bound_file_ids_for_owner_can_lock_rows_for_binding() -> None
         )
     )
     assert "FOR KEY SHARE OF flow_runtime_uploaded_files" in compiled
+    assert "ORDER BY flow_runtime_uploaded_files.file_id" in compiled
 
 
 @pytest.mark.asyncio

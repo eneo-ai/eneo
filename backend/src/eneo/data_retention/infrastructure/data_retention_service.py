@@ -23,9 +23,7 @@ from eneo.database.tables.flow_tables import (
     BuilderSessions,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
-    FlowRunRerunOperations,
     FlowRuns,
-    FlowRunWebhookDeliveries,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
@@ -35,10 +33,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
-from eneo.flows.enums import (
-    TERMINAL_FLOW_RUN_STATUS_VALUES,
-    FlowRunRerunOperationStatus,
-)
+from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
@@ -54,9 +49,12 @@ from eneo.flows.flow_retention_tombstone import (
     has_retention_tombstone,
 )
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
+    FlowRunHistoryPurgeResult,
     FlowTemplateAssetPurgeCounts,
+    flow_run_active_rerun_exists,
+    flow_run_undelivered_audit_exists,
+    flow_run_unresolved_webhook_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,8 +89,15 @@ def _builder_session_has_no_fresh_send_lock(now: datetime) -> sa.ColumnElement[b
 class FlowRuntimeCleanupCounts(TypedDict):
     debug_step_results: int
     debug_step_attempts: int
+    flow_runs_considered: int
+    flow_runs_lock_deferred: int
     flow_runs_purged: int
     flow_generated_files_deleted: int
+    flow_runtime_source_candidates: int
+    flow_runtime_source_candidate_bytes: int
+    flow_runtime_source_bindings_deleted: int
+    flow_runtime_source_files_deleted: int
+    flow_runtime_source_bytes_deleted: int
     flow_webhook_deliveries_deleted: int
     flow_audit_outbox_rows_deleted: int
     flow_review_checkpoints_deleted: int
@@ -109,8 +114,15 @@ def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
     return {
         "debug_step_results": 0,
         "debug_step_attempts": 0,
+        "flow_runs_considered": 0,
+        "flow_runs_lock_deferred": 0,
         "flow_runs_purged": 0,
         "flow_generated_files_deleted": 0,
+        "flow_runtime_source_candidates": 0,
+        "flow_runtime_source_candidate_bytes": 0,
+        "flow_runtime_source_bindings_deleted": 0,
+        "flow_runtime_source_files_deleted": 0,
+        "flow_runtime_source_bytes_deleted": 0,
         "flow_webhook_deliveries_deleted": 0,
         "flow_audit_outbox_rows_deleted": 0,
         "flow_review_checkpoints_deleted": 0,
@@ -158,10 +170,28 @@ class DataRetentionService:
         now = datetime.now(timezone.utc)
         counts = _empty_flow_runtime_cleanup_counts()
 
-        purge_counts = await self._purge_all_old_flow_run_history(now=now)
+        purge_result = await self._purge_all_old_flow_run_history(now=now)
+        purge_counts = purge_result.counts
+        counts["flow_runs_considered"] += purge_counts.flow_runs_considered
+        counts["flow_runs_lock_deferred"] += purge_counts.flow_runs_lock_deferred
         counts["flow_runs_purged"] += purge_counts.flow_runs_purged
         counts["flow_generated_files_deleted"] += (
             purge_counts.flow_generated_files_deleted
+        )
+        counts["flow_runtime_source_candidates"] += (
+            purge_counts.flow_runtime_source_candidates
+        )
+        counts["flow_runtime_source_candidate_bytes"] += (
+            purge_counts.flow_runtime_source_candidate_bytes
+        )
+        counts["flow_runtime_source_bindings_deleted"] += (
+            purge_counts.flow_runtime_source_bindings_deleted
+        )
+        counts["flow_runtime_source_files_deleted"] += (
+            purge_counts.flow_runtime_source_files_deleted
+        )
+        counts["flow_runtime_source_bytes_deleted"] += (
+            purge_counts.flow_runtime_source_bytes_deleted
         )
         counts["flow_webhook_deliveries_deleted"] += (
             purge_counts.flow_webhook_deliveries_deleted
@@ -595,19 +625,26 @@ class DataRetentionService:
 
     async def _purge_all_old_flow_run_history(
         self, *, now: datetime
-    ) -> FlowRunHistoryPurgeCounts:
-        total_counts = FlowRunHistoryPurgeCounts()
+    ) -> FlowRunHistoryPurgeResult:
+        total_result = FlowRunHistoryPurgeResult()
 
         while True:
-            batch_counts = await self.purge_old_flow_run_history_batch(
+            batch_result = await self.purge_old_flow_run_history_batch(
                 now=now,
                 limit=RETENTION_BATCH_SIZE,
             )
-            total_counts = total_counts.add(batch_counts)
-            if batch_counts.flow_runs_purged == 0:
+            total_result = total_result.add(batch_result)
+            if batch_result.counts.flow_runs_lock_deferred > 0:
                 break
+            if (
+                batch_result.counts.flow_runs_purged == 0
+                and batch_result.counts.flow_runs_considered == 0
+            ):
+                break
+            # A nondeferred recheck rejection is mirrored by the next selector,
+            # so this loop advances without polling the same ineligible run.
 
-        return total_counts
+        return total_result
 
     async def purge_soft_deleted_flow_template_assets(
         self,
@@ -620,7 +657,7 @@ class DataRetentionService:
 
     async def purge_old_flow_run_history_batch(
         self, *, now: datetime, limit: int
-    ) -> FlowRunHistoryPurgeCounts:
+    ) -> FlowRunHistoryPurgeResult:
         run_ids = await self._select_flow_run_history_purge_batch(
             now=now,
             limit=limit,
@@ -634,9 +671,9 @@ class DataRetentionService:
     ) -> FlowRunHistoryPurgeBlockedCounts:
         due_runs = self._build_due_flow_run_history_purge_query(now=now).subquery()
         run_id_col = due_runs.c.run_id
-        undelivered_audit_exists = self._undelivered_flow_audit_exists(run_id_col)
-        unresolved_webhook_exists = self._unresolved_flow_webhook_exists(run_id_col)
-        active_rerun_exists = self._active_flow_rerun_exists(run_id_col)
+        undelivered_audit_exists = flow_run_undelivered_audit_exists(run_id_col)
+        unresolved_webhook_exists = flow_run_unresolved_webhook_exists(run_id_col)
+        active_rerun_exists = flow_run_active_rerun_exists(run_id_col)
 
         undelivered_audit_count, unresolved_webhook_count, active_rerun_count = (
             await self.session.execute(
@@ -667,9 +704,9 @@ class DataRetentionService:
         retention_anchor = self._flow_run_history_retention_anchor()
         stmt = (
             self._build_due_flow_run_history_purge_query(now=now)
-            .where(sa.not_(self._undelivered_flow_audit_exists(FlowRuns.id)))
-            .where(sa.not_(self._unresolved_flow_webhook_exists(FlowRuns.id)))
-            .where(sa.not_(self._active_flow_rerun_exists(FlowRuns.id)))
+            .where(sa.not_(flow_run_undelivered_audit_exists(FlowRuns.id)))
+            .where(sa.not_(flow_run_unresolved_webhook_exists(FlowRuns.id)))
+            .where(sa.not_(flow_run_active_rerun_exists(FlowRuns.id)))
             .order_by(retention_anchor, FlowRuns.id)
             .limit(limit)
         )
@@ -717,43 +754,6 @@ class DataRetentionService:
                     - sa.func.make_interval(0, 0, 0, effective_retention_days),
                 )
             )
-        )
-
-    def _undelivered_flow_audit_exists(self, run_id_col: object) -> sa.Exists:
-        return (
-            sa.select(sa.literal(1))
-            .select_from(FlowRunAuditOutbox)
-            .where(FlowRunAuditOutbox.flow_run_id == run_id_col)
-            .where(
-                FlowRunAuditOutbox.delivery_status
-                != FlowOutboxDeliveryStatus.DELIVERED.value
-            )
-            .exists()
-        )
-
-    def _unresolved_flow_webhook_exists(self, run_id_col: object) -> sa.Exists:
-        return (
-            sa.select(sa.literal(1))
-            .select_from(FlowRunWebhookDeliveries)
-            .where(FlowRunWebhookDeliveries.flow_run_id == run_id_col)
-            .where(
-                FlowRunWebhookDeliveries.delivery_status
-                == FlowOutboxDeliveryStatus.PENDING.value
-            )
-            .exists()
-        )
-
-    def _active_flow_rerun_exists(self, run_id_col: object) -> sa.Exists:
-        active_rerun_statuses = (
-            FlowRunRerunOperationStatus.QUEUED.value,
-            FlowRunRerunOperationStatus.RUNNING.value,
-        )
-        return (
-            sa.select(sa.literal(1))
-            .select_from(FlowRunRerunOperations)
-            .where(FlowRunRerunOperations.flow_run_id == run_id_col)
-            .where(FlowRunRerunOperations.status.in_(active_rerun_statuses))
-            .exists()
         )
 
     async def redact_old_flow_debug_evidence(

@@ -97,10 +97,8 @@ class FlowRuntimeUploadRepository:
                 raise RuntimeError(
                     "Runtime upload binding locks require an active transaction."
                 )
-            stmt = stmt.with_for_update(
-                read=True,
-                key_share=True,
-                of=FlowRuntimeUploadedFiles,
+            stmt = stmt.order_by(FlowRuntimeUploadedFiles.file_id).with_for_update(
+                read=True, key_share=True, of=FlowRuntimeUploadedFiles
             )
 
         return set(await self.session.scalars(stmt))

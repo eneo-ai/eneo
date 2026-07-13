@@ -11,10 +11,12 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     RETENTION_BATCH_SIZE,
     FlowDebugRedactionCounts,
     FlowRunHistoryPurgeBlockedCounts,
-    FlowRunHistoryPurgeCounts,
     FlowTemplateAssetPurgeCounts,
 )
 from eneo.database.database import sessionmanager
+from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+    FlowRunHistoryPurgeCounts,
+)
 from eneo.main.container.container import Container
 from eneo.worker.worker import Worker
 
@@ -30,8 +32,15 @@ class DeletedCounts(TypedDict):
     builder_sessions: int
     flow_debug_rows: int
     flow_attempt_provenance: int
+    flow_runs_considered: int
+    flow_runs_lock_deferred: int
     flow_runs_purged: int
     flow_generated_files_deleted: int
+    flow_runtime_source_candidates: int
+    flow_runtime_source_candidate_bytes: int
+    flow_runtime_source_bindings_deleted: int
+    flow_runtime_source_files_deleted: int
+    flow_runtime_source_bytes_deleted: int
     flow_webhook_deliveries_deleted: int
     flow_audit_outbox_rows_deleted: int
     flow_review_checkpoints_deleted: int
@@ -66,8 +75,8 @@ async def _run_cleanup_step(
         async with session.begin():
             return await action()
     except Exception as e:
-        error_msg = f"{error_prefix}: {e}"
-        logger.error(error_msg, exc_info=True)
+        error_msg = f"{error_prefix}: {type(e).__name__}"
+        logger.error(error_msg)
         results["errors"].append(error_msg)
         results["success"] = False
         return None
@@ -76,8 +85,23 @@ async def _run_cleanup_step(
 def _record_flow_run_history_purge_counts(
     deleted: DeletedCounts, counts: FlowRunHistoryPurgeCounts
 ) -> None:
+    deleted["flow_runs_considered"] += counts.flow_runs_considered
+    deleted["flow_runs_lock_deferred"] += counts.flow_runs_lock_deferred
     deleted["flow_runs_purged"] += counts.flow_runs_purged
     deleted["flow_generated_files_deleted"] += counts.flow_generated_files_deleted
+    deleted["flow_runtime_source_candidates"] += counts.flow_runtime_source_candidates
+    deleted["flow_runtime_source_candidate_bytes"] += (
+        counts.flow_runtime_source_candidate_bytes
+    )
+    deleted["flow_runtime_source_bindings_deleted"] += (
+        counts.flow_runtime_source_bindings_deleted
+    )
+    deleted["flow_runtime_source_files_deleted"] += (
+        counts.flow_runtime_source_files_deleted
+    )
+    deleted["flow_runtime_source_bytes_deleted"] += (
+        counts.flow_runtime_source_bytes_deleted
+    )
     deleted["flow_webhook_deliveries_deleted"] += counts.flow_webhook_deliveries_deleted
     deleted["flow_audit_outbox_rows_deleted"] += counts.flow_audit_outbox_rows_deleted
     deleted["flow_review_checkpoints_deleted"] += counts.flow_review_checkpoints_deleted
@@ -138,8 +162,15 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "builder_sessions": 0,
             "flow_debug_rows": 0,
             "flow_attempt_provenance": 0,
+            "flow_runs_considered": 0,
+            "flow_runs_lock_deferred": 0,
             "flow_runs_purged": 0,
             "flow_generated_files_deleted": 0,
+            "flow_runtime_source_candidates": 0,
+            "flow_runtime_source_candidate_bytes": 0,
+            "flow_runtime_source_bindings_deleted": 0,
+            "flow_runtime_source_files_deleted": 0,
+            "flow_runtime_source_bytes_deleted": 0,
             "flow_webhook_deliveries_deleted": 0,
             "flow_audit_outbox_rows_deleted": 0,
             "flow_review_checkpoints_deleted": 0,
@@ -223,7 +254,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             flow_runtime_now = start_time
             flow_purge_drained = True
             while True:
-                purge_counts = await _run_cleanup_step(
+                purge_result = await _run_cleanup_step(
                     session=session,
                     results=results,
                     error_prefix="Failed to purge old Flow run history batch",
@@ -232,15 +263,26 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                         limit=RETENTION_BATCH_SIZE,
                     ),
                 )
-                if purge_counts is None:
+                if purge_result is None:
                     flow_purge_drained = False
                     break
 
                 _record_flow_run_history_purge_counts(
                     results["deleted"],
-                    purge_counts,
+                    purge_result.counts,
                 )
-                if purge_counts.flow_runs_purged == 0:
+                if purge_result.counts.flow_runs_lock_deferred > 0:
+                    flow_purge_drained = False
+                    logger.warning(
+                        "Deferred Flow run-history purge candidates because of "
+                        "concurrent locks (count=%s); a later cleanup run will retry",
+                        purge_result.counts.flow_runs_lock_deferred,
+                    )
+                    break
+                if (
+                    purge_result.counts.flow_runs_purged == 0
+                    and purge_result.counts.flow_runs_considered == 0
+                ):
                     break
 
             if flow_purge_drained:
@@ -322,6 +364,8 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["flow_attempt_provenance"]
         + results["deleted"]["flow_runs_purged"]
         + results["deleted"]["flow_generated_files_deleted"]
+        + results["deleted"]["flow_runtime_source_bindings_deleted"]
+        + results["deleted"]["flow_runtime_source_files_deleted"]
         + results["deleted"]["flow_webhook_deliveries_deleted"]
         + results["deleted"]["flow_audit_outbox_rows_deleted"]
         + results["deleted"]["flow_review_checkpoints_deleted"]
@@ -340,9 +384,22 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"builder_sessions: {results['deleted']['builder_sessions']}, "
             f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
+            f"flow_runs_considered: {results['deleted']['flow_runs_considered']}, "
+            f"flow_runs_lock_deferred: "
+            f"{results['deleted']['flow_runs_lock_deferred']}, "
             f"flow_runs_purged: {results['deleted']['flow_runs_purged']}, "
             f"flow_generated_files_deleted: "
             f"{results['deleted']['flow_generated_files_deleted']}, "
+            f"flow_runtime_source_candidates: "
+            f"{results['deleted']['flow_runtime_source_candidates']}, "
+            f"flow_runtime_source_candidate_bytes: "
+            f"{results['deleted']['flow_runtime_source_candidate_bytes']}, "
+            f"flow_runtime_source_bindings_deleted: "
+            f"{results['deleted']['flow_runtime_source_bindings_deleted']}, "
+            f"flow_runtime_source_files_deleted: "
+            f"{results['deleted']['flow_runtime_source_files_deleted']}, "
+            f"flow_runtime_source_bytes_deleted: "
+            f"{results['deleted']['flow_runtime_source_bytes_deleted']}, "
             f"flow_webhook_deliveries_deleted: "
             f"{results['deleted']['flow_webhook_deliveries_deleted']}, "
             f"flow_audit_outbox_rows_deleted: "
