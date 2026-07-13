@@ -670,7 +670,7 @@ async def create_session(
     # Audit
     user = container.user()
     audit_service = _get_audit_service(container)
-    await audit_service.log_async(
+    await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.AI_BUILDER_SESSION_CREATED,
@@ -1399,7 +1399,7 @@ async def cancel_session(
 
     user = container.user()
     audit_service = _get_audit_service(container)
-    await audit_service.log_async(
+    await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.AI_BUILDER_SESSION_CANCELLED,
@@ -1460,7 +1460,7 @@ async def approve_plan(
     # Audit
     user = container.user()
     audit_service = _get_audit_service(container)
-    await audit_service.log_async(
+    await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.AI_BUILDER_PLAN_APPROVED,
@@ -1547,7 +1547,7 @@ async def apply_plan(
     # Audit
     user = container.user()
     audit_service = _get_audit_service(container)
-    await audit_service.log_async(
+    await audit_service.log(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.AI_BUILDER_FLOW_APPLIED,
@@ -1639,7 +1639,7 @@ async def approve_and_apply_create_plan(
     if not outcome.replayed:
         user = container.user()
         audit_service = _get_audit_service(container)
-        await audit_service.log_async(
+        await audit_service.log(
             tenant_id=user.tenant_id,
             actor_id=user.id,
             action=ActionType.AI_BUILDER_FLOW_APPLIED,

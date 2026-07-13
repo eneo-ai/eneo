@@ -19,8 +19,12 @@ from sse_starlette import ServerSentEvent
 from starlette.requests import Request
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderPlans,
@@ -600,6 +604,94 @@ async def _create_proposed_ai_builder_plan(
             lease=turn.lease,
         )
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_session_commits_exactly_one_canonical_audit_log(
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder transactional audit",
+    )
+
+    session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
+
+    async with db_container() as container:
+        audit_result = await container.session().execute(
+            select(AuditLogTable.description).where(
+                AuditLogTable.tenant_id == container.user().tenant_id,
+                AuditLogTable.action == ActionType.AI_BUILDER_SESSION_CREATED.value,
+                AuditLogTable.entity_type == EntityType.AI_BUILDER_SESSION.value,
+                AuditLogTable.entity_id == session_id,
+            )
+        )
+        audit_descriptions = audit_result.scalars().all()
+
+    assert audit_descriptions == ["Started AI builder session (create)"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_session_rolls_back_when_canonical_audit_insert_fails(
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder audit rollback",
+    )
+
+    async def fail_audit_insert(
+        _repository: AuditLogRepositoryImpl,
+        _audit_log: object,
+    ) -> object:
+        raise RuntimeError("forced canonical audit insert failure")
+
+    monkeypatch.setattr(AuditLogRepositoryImpl, "create", fail_audit_insert)
+
+    with pytest.raises(RuntimeError, match="forced canonical audit insert failure"):
+        await client.post(
+            "/api/v1/flows/ai-builder/sessions",
+            json={"target_kind": "create", "space_id": space_id},
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+
+    async with db_container() as container:
+        session_count = await container.session().scalar(
+            select(sa.func.count(BuilderSessions.id)).where(
+                BuilderSessions.tenant_id == container.user().tenant_id,
+                BuilderSessions.space_id == UUID(space_id),
+            )
+        )
+        audit_count = await container.session().scalar(
+            select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == container.user().tenant_id,
+                AuditLogTable.action == ActionType.AI_BUILDER_SESSION_CREATED.value,
+            )
+        )
+
+    assert session_count == 0
+    assert audit_count == 0
 
 
 @pytest.mark.parametrize(

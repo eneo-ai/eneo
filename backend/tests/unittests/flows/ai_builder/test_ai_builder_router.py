@@ -670,8 +670,8 @@ class TestCreateSessionEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_awaited_once()
-        call_kwargs = audit_service.log_async.await_args.kwargs
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
         assert call_kwargs["tenant_id"] == user.tenant_id
         assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_SESSION_CREATED
@@ -1346,8 +1346,8 @@ class TestCancelSessionEndpoint:
         assert result.status == SessionStatus.CANCELLED
         service.cancel_session.assert_called_once_with(session.id)
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_awaited_once()
-        call_kwargs = audit_service.log_async.await_args.kwargs
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
         assert call_kwargs["tenant_id"] == user.tenant_id
         assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_SESSION_CANCELLED
@@ -2178,8 +2178,8 @@ class TestApprovePlanEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_awaited_once()
-        call_kwargs = audit_service.log_async.await_args.kwargs
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
         assert call_kwargs["tenant_id"] == user.tenant_id
         assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_PLAN_APPROVED
@@ -2273,8 +2273,8 @@ class TestApplyPlanEndpoint:
         )
 
         audit_service = container.audit_service.return_value
-        audit_service.log_async.assert_awaited_once()
-        call_kwargs = audit_service.log_async.await_args.kwargs
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
         assert call_kwargs["tenant_id"] == user.tenant_id
         assert call_kwargs["actor_id"] == user.id
         assert call_kwargs["action"] == ActionType.AI_BUILDER_FLOW_APPLIED
@@ -2481,7 +2481,7 @@ class TestCreatePlanEndpoint:
         )
 
         assert response.flow_id == result.flow_id
-        container.audit_service.return_value.log_async.assert_awaited_once()
+        container.audit_service.return_value.log.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_replay_skips_creation_audit_event(self):
@@ -2511,4 +2511,4 @@ class TestCreatePlanEndpoint:
         )
 
         assert response.flow_id == result.flow_id
-        container.audit_service.return_value.log_async.assert_not_awaited()
+        container.audit_service.return_value.log.assert_not_awaited()
