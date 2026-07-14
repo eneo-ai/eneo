@@ -8,6 +8,9 @@ on:
 
 permissions:
   issues: write
+  # GitHub's Actions integration requires this when reacting to a pull-request
+  # conversation comment, even though the REST path is under issue comments.
+  pull-requests: write
 
 concurrency:
   group: eneo-ai-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
@@ -158,11 +161,14 @@ jobs:
         if: >-
           steps.dispatch.outputs.dispatched == 'true' &&
           steps.dispatch.outputs.mode == 'review'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
-        run: >-
-          gh api --silent --method POST
-          "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes
+        shell: bash
+        run: |
+          if ! gh api --silent --method POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content=eyes >/dev/null 2>&1; then
+            echo "::warning::Review request was accepted, but GitHub refused the eyes reaction. Check the workflow token's Issues and Pull requests write permissions."
+          fi
