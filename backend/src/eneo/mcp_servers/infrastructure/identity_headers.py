@@ -6,15 +6,19 @@ built once per completion request and handed to every client; each client then
 decides whether to send it based on its own server's flag.
 
 Header values originate from user-controlled fields (email, display name), so
-every value is sanitized for HTTP safety: CR/LF stripped (header-injection
-guard) and encoded latin-1-safe (httpx encodes request headers as latin-1;
-Swedish å/ä/ö are latin-1 but other Unicode is not, so non-encodable characters
-are replaced rather than raising).
+every value is sanitized for HTTP safety: control characters are stripped
+(header-injection guard) and the result is percent-encoded as UTF-8 via
+``urllib.parse.quote`` (httpx encodes str request headers as ASCII, so Swedish
+å/ä/ö or any other non-ASCII character would otherwise raise while the HTTP
+client is constructed). Space, ``@`` and ``,`` stay literal for readability;
+servers recover the original value with ``urllib.parse.unquote``. This mirrors
+OpenWebUI's forwarded user-info headers, which this feature is the analogue of.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from eneo.tenants.tenant import TenantInDB
@@ -22,10 +26,12 @@ if TYPE_CHECKING:
 
 
 def _sanitize(value: Optional[str]) -> Optional[str]:
-    """Return an HTTP-header-safe form of ``value``, or None when empty.
+    """Return an ASCII-safe HTTP-header form of ``value``, or None when empty.
 
-    Strips CR/LF and any other control characters, then forces the result into
-    the latin-1 range httpx requires (non-encodable characters become "?").
+    Strips CR/LF and any other control characters, then percent-encodes the
+    result as UTF-8 so it fits the ASCII range httpx requires for str header
+    values. ``%`` in the input is encoded too, so ``urllib.parse.unquote``
+    recovers the original value exactly.
     """
     if value is None:
         return None
@@ -33,7 +39,7 @@ def _sanitize(value: Optional[str]) -> Optional[str]:
     cleaned = cleaned.replace("\r", "").replace("\n", "").strip()
     if not cleaned:
         return None
-    return cleaned.encode("latin-1", errors="replace").decode("latin-1")
+    return quote(cleaned, safe=" @,")
 
 
 def build_identity_headers(

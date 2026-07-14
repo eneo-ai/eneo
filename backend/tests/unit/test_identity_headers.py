@@ -6,9 +6,12 @@ headers only when its own server opted in via ``forward_identity``.
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from urllib.parse import unquote
 from uuid import uuid4
 
+import httpx
 import pytest
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
@@ -53,11 +56,40 @@ class TestBuildIdentityHeaders:
         assert "\r" not in headers["X-Eneo-User-Name"]
         assert "\n" not in headers["X-Eneo-User-Name"]
 
-    def test_non_latin1_value_is_encodable(self):
-        # Emoji is not latin-1; the value must still encode as a request header.
-        user = _user(username="anna \U0001f600")
+    def test_values_are_ascii_and_decode_back_to_the_original(self):
+        # httpx encodes str header values as ASCII, so every emitted value must
+        # be ASCII; percent-encoding keeps it lossless (unquote round-trips).
+        user = _user(
+            username="Åsa Öberg \U0001f600",
+            tenant=SimpleNamespace(name="Härnösands kommun"),
+        )
         headers = build_identity_headers(user, user.tenant)
-        headers["X-Eneo-User-Name"].encode("latin-1")  # must not raise
+        for value in headers.values():
+            value.encode("ascii")  # must not raise
+        assert unquote(headers["X-Eneo-User-Name"]) == "Åsa Öberg \U0001f600"
+        assert unquote(headers["X-Eneo-Tenant-Name"]) == "Härnösands kommun"
+
+    @pytest.mark.asyncio
+    async def test_headers_construct_the_actual_http_clients(self):
+        # The mapping is handed verbatim to create_mcp_http_client (MCP
+        # transport) and to a plain httpx request (the connect diagnostic).
+        # Client/request construction is where httpx encodes headers, so it
+        # must succeed for Swedish and non-latin-1 identity values.
+        user = _user(
+            username="Åsa Öberg \U0001f600",
+            tenant=SimpleNamespace(name="Härnösands kommun"),
+        )
+        headers = build_identity_headers(user, user.tenant)
+
+        async with create_mcp_http_client(headers=headers) as client:
+            request = client.build_request(
+                "POST",
+                "http://localhost:9000",
+                headers={**headers, "Content-Type": "application/json"},
+            )
+        assert unquote(request.headers["X-Eneo-User-Name"]) == "Åsa Öberg \U0001f600"
+
+        httpx.Headers(headers)  # must not raise
 
     def test_empty_values_are_omitted(self):
         user = _user(username=None, email=None, roles=[], tenant=None, tenant_id=None)

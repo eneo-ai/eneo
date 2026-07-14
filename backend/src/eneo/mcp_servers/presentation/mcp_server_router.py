@@ -400,6 +400,14 @@ async def update_mcp_server(
         }
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
+    if (
+        data.forward_identity is not None
+        and data.forward_identity != old_server.forward_identity
+    ):
+        changes["forward_identity"] = {
+            "old": old_server.forward_identity,
+            "new": data.forward_identity,
+        }
     if data.http_auth_config_schema is not None:
         changes["credentials_updated"] = True
 
