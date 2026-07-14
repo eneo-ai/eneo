@@ -2,7 +2,8 @@
   import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
-  import { Button } from "$lib/components/ui/button/index.js";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import { getAppContext } from "$lib/core/AppContext.js";
   import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import MentionInput from "../mentions/MentionInput.svelte";
@@ -18,7 +19,7 @@
   import { track } from "$lib/core/helpers/track";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { AlertTriangle, X } from "lucide-svelte";
+  import { AlertTriangle, Bug, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
@@ -32,6 +33,7 @@
   };
 
   const chat = getChatService();
+  const { featureFlags } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -486,6 +488,19 @@
           disabledServerIds={disabledMcpServerIds}
           bind:autoAcceptTools
         />
+      {/if}
+
+      {#if featureFlags.chatDebugPanel && chat.partner.type !== "group-chat"}
+        <button
+          type="button"
+          class={buttonVariants({ variant: "ghost", size: "icon" }) + " size-9 rounded-lg"}
+          title={chat.debugPanelVisible ? m.debug_panel_hide() : m.debug_panel_show()}
+          aria-label={chat.debugPanelVisible ? m.debug_panel_hide() : m.debug_panel_show()}
+          aria-pressed={chat.debugPanelVisible}
+          onclick={() => chat.toggleDebugPanel()}
+        >
+          <Bug class="size-5 {chat.debugPanelVisible ? '' : 'text-muted'}" />
+        </button>
       {/if}
     </PromptInput.Tools>
 
