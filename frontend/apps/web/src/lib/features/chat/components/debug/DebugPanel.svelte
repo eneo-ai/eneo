@@ -3,12 +3,14 @@
 
   Licensed under the MIT License.
 
-  Debug panel for the ongoing chat (deploy-flag gated). Shows, per turn, what
-  the model actually received: the rendered system prompt and provider message
-  array (captured server-side when the turn is asked with debug=true),
-  model settings, knowledge references, tool calls with lazily loaded
-  results, and token counts. Renders as an inline column next to the
-  conversation so the chat stays usable while inspecting a live turn.
+  Debug panel for the ongoing chat (deploy-flag gated). Shows, per turn, the
+  full message chain the model worked with: the captured provider payload
+  (rendered system prompt, replayed history, user question) followed by the
+  turn's tool calls, tool results and final answer, reconstructed from the
+  persisted turn in the same shape the next turn replays. Meta sections
+  (model settings, knowledge references, tokens, raw payload) collapse below.
+  Renders as an inline column next to the conversation so the chat stays
+  usable while inspecting a live turn.
 -->
 
 <script lang="ts">
@@ -17,19 +19,12 @@
   import { toastError } from "$lib/core/errors";
   import { downloadJson } from "$lib/core/helpers/downloadJson";
   import { CodeBlock } from "@eneo/ui";
-  import { ChevronRight, Download, X } from "lucide-svelte";
+  import { Download, X } from "lucide-svelte";
   import type { MessageLogging } from "@eneo/eneo-js";
-  import { SvelteSet } from "svelte/reactivity";
   import DebugSection from "./DebugSection.svelte";
-  import ToolCallDetailsPanel from "../conversation/ToolCallDetailsPanel.svelte";
-  import { toolDisplayName } from "../../internalToolLabels";
+  import DebugChainEntry from "./DebugChainEntry.svelte";
 
   const chat = getChatService();
-
-  // Expanded tool calls, keyed per turn + call so switching turns collapses.
-  const expandedToolCalls = new SvelteSet<string>();
-  const toggleToolCall = (key: string) =>
-    expandedToolCalls.has(key) ? expandedToolCalls.delete(key) : expandedToolCalls.add(key);
 
   const messages = $derived(chat.currentConversation.messages ?? []);
 
@@ -71,22 +66,15 @@
     };
   });
 
-  type ProviderMessage = { role?: string; content?: unknown };
+  type ProviderToolCall = { id?: string; function?: { name?: string; arguments?: string } };
+  type ProviderMessage = {
+    role?: string;
+    content?: unknown;
+    tool_calls?: ProviderToolCall[];
+  };
   const providerMessages = $derived.by(() => {
     const body = logging?.logging_details?.json_body;
     return Array.isArray(body) ? (body as ProviderMessage[]) : null;
-  });
-  const systemPrompt = $derived.by(() => {
-    const system = providerMessages?.find((entry) => entry.role === "system");
-    if (!system) return null;
-    if (typeof system.content === "string") return system.content;
-    // Vision models carry content as block arrays; keep the text blocks.
-    if (Array.isArray(system.content)) {
-      return system.content
-        .map((block) => (typeof block === "object" && block && "text" in block ? block.text : ""))
-        .join("");
-    }
-    return null;
   });
 
   const toolCalls = $derived(
@@ -94,6 +82,97 @@
       message?.tool_calls ??
       []) as NonNullable<(typeof messages)[number]["tool_calls"]>
   );
+
+  const stringify = (value: unknown) => JSON.stringify(value, null, 2);
+
+  const contentToText = (content: unknown): string => {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      // Vision models carry content as block arrays; keep the text blocks.
+      return content
+        .map((block) => {
+          if (block && typeof block === "object" && "text" in block) {
+            return String(block.text ?? "");
+          }
+          if (block && typeof block === "object" && "image_url" in block) {
+            return "[image]";
+          }
+          return "";
+        })
+        .join("");
+    }
+    return content == null ? "" : stringify(content);
+  };
+
+  const prettyArgs = (args: string | undefined) => {
+    if (!args) return "";
+    try {
+      return stringify(JSON.parse(args));
+    } catch {
+      return args;
+    }
+  };
+
+  // The chain: the captured turn-start payload (system prompt, replayed
+  // history, user question) followed by this turn's tool rounds and final
+  // answer, rebuilt from the persisted turn — the same shape the next turn's
+  // replay sends. Without capture, the chain still shows question, tool
+  // rounds and answer.
+  type ChainEntry = {
+    key: string;
+    role: string;
+    label?: string | null;
+    content?: string | null;
+    toolCallId?: string;
+  };
+  const chain = $derived.by<ChainEntry[]>(() => {
+    const entries: ChainEntry[] = [];
+    if (providerMessages) {
+      providerMessages.forEach((entry, index) => {
+        const role = entry.role ?? "?";
+        const calls = entry.tool_calls ?? [];
+        for (const [callIndex, call] of calls.entries()) {
+          entries.push({
+            key: `p${index}c${callIndex}`,
+            role,
+            label: `${m.debug_panel_tool_call()} · ${call.function?.name ?? "?"}`,
+            content: prettyArgs(call.function?.arguments)
+          });
+        }
+        const text = contentToText(entry.content);
+        if (text || calls.length === 0) {
+          entries.push({
+            key: `p${index}`,
+            role,
+            label: role === "tool" ? m.debug_panel_tool_result() : null,
+            content: text
+          });
+        }
+      });
+    } else if (message) {
+      entries.push({ key: "question", role: "user", content: message.question });
+    }
+    toolCalls.forEach((toolCall, index) => {
+      const name = toolCall.mcp_tool_name ?? toolCall.tool_name;
+      entries.push({
+        key: `call${index}`,
+        role: "assistant",
+        label: `${m.debug_panel_tool_call()} · ${name}`,
+        content: toolCall.arguments ? stringify(toolCall.arguments) : ""
+      });
+      entries.push({
+        key: `result${index}`,
+        role: "tool",
+        label: `${m.debug_panel_tool_result()} · ${name}`,
+        content: toolCall.result ?? null,
+        toolCallId: toolCall.tool_call_id ?? undefined
+      });
+    });
+    if (message?.answer) {
+      entries.push({ key: "answer", role: "assistant", content: message.answer });
+    }
+    return entries;
+  });
 
   const tokenRows = $derived.by(() => {
     if (!message) return [];
@@ -103,8 +182,6 @@
       { label: m.context_size(), value: message.num_tokens_context }
     ].filter((row) => row.value != null);
   });
-
-  const stringify = (value: unknown) => JSON.stringify(value, null, 2);
 
   async function downloadExport() {
     const id = chat.currentConversation.id;
@@ -162,27 +239,24 @@
         <p class="text-muted px-3 py-2 text-xs">{m.debug_panel_not_captured()}</p>
       {/if}
 
-      {#if logging?.logging_details}
-        <DebugSection title={m.debug_panel_system_prompt()} defaultOpen={true}>
-          {#if systemPrompt}
-            <pre
-              class="border-dimmer bg-secondary/40 max-h-80 overflow-auto rounded-md border p-2 text-xs whitespace-pre-wrap">{systemPrompt}</pre>
-          {:else}
-            <p class="text-muted text-xs">{m.debug_panel_empty_section()}</p>
-          {/if}
-        </DebugSection>
-
-        <DebugSection
-          title={m.debug_panel_provider_messages()}
-          count={providerMessages?.length ?? null}
-        >
-          <p class="text-muted text-xs">{m.debug_panel_snapshot_note()}</p>
-          <CodeBlock
-            source={stringify(logging.logging_details.json_body)}
-            class="max-h-[50vh] text-xs"
+      <div class="border-dimmer flex flex-col gap-1.5 border-b px-3 py-2.5">
+        <p class="text-default text-xs font-semibold">{m.debug_panel_chain()}</p>
+        {#if toolCalls.length > 0 || message.answer}
+          <p class="text-muted text-xs">{m.debug_panel_chain_reconstructed_note()}</p>
+        {/if}
+        {#each chain as entry (`${effectiveIndex}:${entry.key}`)}
+          <DebugChainEntry
+            role={entry.role}
+            label={entry.label}
+            content={entry.content}
+            onLoadResult={entry.toolCallId
+              ? () => chat.getToolCallResult(entry.toolCallId!)
+              : undefined}
           />
-        </DebugSection>
+        {/each}
+      </div>
 
+      {#if logging?.logging_details}
         <DebugSection title={m.debug_panel_model_settings()}>
           {#if message.completion_model?.name}
             <p class="text-default text-xs font-medium">{message.completion_model.name}</p>
@@ -219,49 +293,6 @@
         {/if}
       </DebugSection>
 
-      <DebugSection title={m.debug_panel_tools()} count={toolCalls.length}>
-        {#if toolCalls.length === 0}
-          <p class="text-muted text-xs">{m.debug_panel_empty_section()}</p>
-        {:else}
-          {#each toolCalls as toolCall, index (toolCall.tool_call_id ?? index)}
-            {@const key = `${effectiveIndex}:${toolCall.tool_call_id ?? index}`}
-            {@const displayName = toolDisplayName(
-              toolCall.tool_name,
-              toolCall.server_name,
-              toolCall.title,
-              toolCall.arguments ?? undefined
-            )}
-            <div class="border-dimmer rounded-md border">
-              <button
-                type="button"
-                class="text-default flex w-full items-center gap-1.5 px-2 py-1.5 text-xs font-medium"
-                onclick={() => toggleToolCall(key)}
-                aria-expanded={expandedToolCalls.has(key)}
-              >
-                <ChevronRight
-                  class="text-muted h-3 w-3 shrink-0 transition-transform {expandedToolCalls.has(
-                    key
-                  )
-                    ? 'rotate-90'
-                    : ''}"
-                />
-                <span class="truncate">{displayName}</span>
-                <span class="text-muted shrink-0 font-normal">· {toolCall.server_name}</span>
-              </button>
-              <ToolCallDetailsPanel
-                open={expandedToolCalls.has(key)}
-                toolName={displayName}
-                args={toolCall.arguments ?? undefined}
-                toolCallId={toolCall.tool_call_id ?? undefined}
-                onLoadResult={toolCall.tool_call_id
-                  ? () => chat.getToolCallResult(toolCall.tool_call_id!)
-                  : undefined}
-              />
-            </div>
-          {/each}
-        {/if}
-      </DebugSection>
-
       {#if message.reasoning}
         <DebugSection title={m.reasoning()}>
           <pre
@@ -283,6 +314,16 @@
           </ul>
         {/if}
       </DebugSection>
+
+      {#if logging?.logging_details}
+        <DebugSection title={m.debug_panel_raw_payload()}>
+          <p class="text-muted text-xs">{m.debug_panel_snapshot_note()}</p>
+          <CodeBlock
+            source={stringify(logging.logging_details.json_body)}
+            class="max-h-[50vh] text-xs"
+          />
+        </DebugSection>
+      {/if}
     {/if}
   </div>
 

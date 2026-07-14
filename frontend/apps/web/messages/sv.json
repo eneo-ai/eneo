@@ -3647,16 +3647,19 @@
   "debug_panel_hide": "Dölj felsökningspanel",
   "debug_panel_turn_label": "Tur {number}",
   "debug_panel_live_turn": "Pågående tur",
-  "debug_panel_system_prompt": "Systemprompt",
-  "debug_panel_provider_messages": "Meddelanden till modellen",
   "debug_panel_model_settings": "Modell och inställningar",
   "debug_panel_knowledge": "Kunskapsreferenser",
-  "debug_panel_tools": "Verktygsanrop",
   "debug_panel_tokens": "Tokens",
   "debug_panel_not_captured": "Ingen fångst för denna tur. Panelen var inte aktiv när frågan ställdes och assistenten har inte loggning aktiverad.",
   "debug_panel_capture_pending": "Detaljerna hämtas när turen är klar.",
   "debug_panel_snapshot_note": "Ögonblicksbild från turens start: mellanliggande verktygsrundor ingår inte i meddelandelistan.",
   "debug_panel_no_messages": "Inga meddelanden i den här konversationen ännu.",
   "debug_panel_download_export": "Ladda ner bevisexport",
-  "debug_panel_empty_section": "Inget att visa"
+  "debug_panel_empty_section": "Inget att visa",
+  "debug_panel_chain": "Meddelandekedja",
+  "debug_panel_chain_reconstructed_note": "Posterna efter användarfrågan är rekonstruerade från turens sparade verktygsanrop och svar, samma form som spelas upp för modellen i nästa tur.",
+  "debug_panel_raw_payload": "Rå payload",
+  "debug_panel_tool_call": "verktygsanrop",
+  "debug_panel_tool_result": "verktygssvar",
+  "debug_panel_result_loading": "Hämtar svar …"
 }

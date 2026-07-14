@@ -3647,16 +3647,19 @@
   "debug_panel_hide": "Hide debug panel",
   "debug_panel_turn_label": "Turn {number}",
   "debug_panel_live_turn": "Ongoing turn",
-  "debug_panel_system_prompt": "System prompt",
-  "debug_panel_provider_messages": "Messages sent to the model",
   "debug_panel_model_settings": "Model and settings",
   "debug_panel_knowledge": "Knowledge references",
-  "debug_panel_tools": "Tool calls",
   "debug_panel_tokens": "Tokens",
   "debug_panel_not_captured": "Nothing captured for this turn. The panel was not active when the question was asked and the assistant does not have logging enabled.",
   "debug_panel_capture_pending": "Details are fetched once the turn completes.",
   "debug_panel_snapshot_note": "Snapshot from the start of the turn: intermediate tool rounds are not part of the message list.",
   "debug_panel_no_messages": "No messages in this conversation yet.",
   "debug_panel_download_export": "Download proof export",
-  "debug_panel_empty_section": "Nothing to show"
+  "debug_panel_empty_section": "Nothing to show",
+  "debug_panel_chain": "Message chain",
+  "debug_panel_chain_reconstructed_note": "Entries after the user question are reconstructed from the turn's persisted tool calls and answer, the same shape replayed to the model on the next turn.",
+  "debug_panel_raw_payload": "Raw payload",
+  "debug_panel_tool_call": "tool call",
+  "debug_panel_tool_result": "tool result",
+  "debug_panel_result_loading": "Loading result …"
 }
