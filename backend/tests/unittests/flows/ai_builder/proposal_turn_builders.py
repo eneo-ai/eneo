@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     FlowBuilderEditApproval,
@@ -58,6 +65,17 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
     turn_override = overrides.pop("turn", None)
     session_id_override = overrides.pop("session_id", None)
     base_version_override = overrides.pop("base_planning_state_version", 0)
+    litellm_model = overrides.pop("litellm_model", "openai/gpt-5.4")
+    litellm_kwargs = overrides.pop("litellm_kwargs", {})
+    if not isinstance(litellm_model, str) or not isinstance(litellm_kwargs, dict):
+        raise TypeError(
+            "Proposal test route requires a model name and provider kwargs."
+        )
+    provider_kwargs = {
+        key: value for key, value in litellm_kwargs.items() if isinstance(key, str)
+    }
+    if len(provider_kwargs) != len(litellm_kwargs):
+        raise TypeError("Proposal test provider kwargs require string keys.")
     turn = (
         turn_override
         if isinstance(turn_override, SessionSendTurn)
@@ -76,8 +94,13 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "new_messages_start": 0,
         "llm_messages": [],
         "tool_schemas": [],
-        "litellm_model": "openai/gpt-5.4",
-        "litellm_kwargs": {},
+        "route": ResolvedCompletionModelRoute(
+            litellm_model=litellm_model,
+            litellm_kwargs=provider_kwargs,
+            supported_model_kwargs=SupportedModelKwargs(
+                temperature=ModelKwargCapability(supported=True)
+            ),
+        ),
         "available_model_refs": None,
         "available_kb_refs": None,
         "resource_catalog": None,

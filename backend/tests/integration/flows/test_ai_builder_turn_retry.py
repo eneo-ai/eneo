@@ -19,6 +19,13 @@ import pytest
 from httpx import ASGITransport, AsyncClient, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.flows.ai_builder.ai_builder_api_models import (
     SendMessageRequest,
@@ -42,6 +49,20 @@ _PROCESS_DEADLINE_SECONDS = 20.0
 _RECOVERY_DEADLINE_SECONDS = 45.0
 _POLL_INTERVAL_SECONDS = 0.1
 _COMPACTION_SETUP_TURNS = (MAX_SESSION_MESSAGES // 2) + 1
+
+
+def _route(
+    *,
+    model: str = "openai/gpt-4o-mini",
+    kwargs: dict[str, object] | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
 
 
 class _CrashMode(StrEnum):
@@ -185,10 +206,8 @@ def _deterministic_provider(*, marker_path: Path, marker: str) -> Iterator[None]
             new=AsyncMock(side_effect=completion),
         ),
         patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(
-                return_value=("openai/gpt-4o-mini", {"api_key": "test-only"})
-            ),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "test-only"})),
         ),
     ):
         yield
@@ -792,10 +811,8 @@ async def _run_child(command: _ChildCommand) -> NoReturn:
             new=AsyncMock(side_effect=fake_completion),
         ),
         patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(
-                return_value=("openai/gpt-4o-mini", {"api_key": "test-only"})
-            ),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "test-only"})),
         ),
         failure_patch,
     ):

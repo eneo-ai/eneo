@@ -79,6 +79,9 @@ from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
     from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
     from eneo.flows.domain.flow import Flow
     from eneo.users.user import UserInDB
@@ -132,8 +135,7 @@ class AIBuilderPlanner:
         conversation: list[ConversationMessage],
         new_messages_start: int,
         proposal_request: ProposalPrepared,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
+        completion_model_route: ResolvedCompletionModelRoute,
         max_output_tokens: int,
         request_id: str,
         flow: "Flow | None",
@@ -147,8 +149,7 @@ class AIBuilderPlanner:
                 conversation=conversation,
                 new_messages_start=new_messages_start,
                 llm_messages=proposal_request.llm_messages,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
+                completion_model_route=completion_model_route,
                 available_model_refs=proposal_request.resource_catalog.model_refs,
                 available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
                 resource_catalog=proposal_request.resource_catalog,
@@ -185,8 +186,7 @@ class AIBuilderPlanner:
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
+        completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
         flow: "Flow | None" = None,
@@ -216,6 +216,7 @@ class AIBuilderPlanner:
 
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
+        litellm_model = completion_model_route.litellm_model
         bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
         defaults = lookup_model_defaults(litellm_model, bare_name)
         if max_input_tokens is None:
@@ -332,8 +333,7 @@ class AIBuilderPlanner:
                 message=message,
                 question_answer=question_answer,
                 ui_language=ui_language,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
+                completion_model_route=completion_model_route,
                 prepared=prepared_metadata,
                 before_provider_call=mark_provider_work_started,
             )
@@ -356,8 +356,7 @@ class AIBuilderPlanner:
                     conversation=conversation,
                     message=message,
                     litellm_client=self.litellm_client,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
+                    completion_model_route=completion_model_route,
                     available_models=available_models,
                     available_kbs=available_kbs,
                     flow=flow,
@@ -399,8 +398,7 @@ class AIBuilderPlanner:
                         conversation=conversation,
                         new_messages_start=new_messages_start,
                         proposal_request=proposal_request,
-                        litellm_model=litellm_model,
-                        litellm_kwargs=litellm_kwargs,
+                        completion_model_route=completion_model_route,
                         max_output_tokens=max_output_tokens,
                         request_id=request_id,
                         flow=flow,
@@ -486,8 +484,7 @@ class AIBuilderPlanner:
                                     conversation=conversation,
                                     new_messages_start=len(conversation),
                                     proposal_request=proposal_request,
-                                    litellm_model=litellm_model,
-                                    litellm_kwargs=litellm_kwargs,
+                                    completion_model_route=completion_model_route,
                                     max_output_tokens=max_output_tokens,
                                     request_id=request_id,
                                     flow=flow,

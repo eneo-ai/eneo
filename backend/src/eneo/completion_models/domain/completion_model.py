@@ -152,6 +152,10 @@ class CompletionModel(AIModel):
             tenant_id=self.tenant_id,
         )
 
+    @property
+    def supported_model_kwargs(self) -> SupportedModelKwargs:
+        return self.get_supported_model_kwargs()
+
     @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""

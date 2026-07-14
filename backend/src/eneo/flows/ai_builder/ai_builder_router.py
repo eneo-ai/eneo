@@ -279,13 +279,6 @@ async def _current_usage_event(
     return build_usage_event(SessionTelemetrySummary.model_validate(telemetry))
 
 
-async def _resolve_litellm_params(
-    service: Any, model: Any
-) -> tuple[str, dict[str, object]]:
-    """Compatibility seam for tests and thin router-level planner resolution."""
-    return await service.resolve_planner_params(model)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -872,9 +865,6 @@ async def send_message(
                                 tenant.flow_settings if tenant else None
                             ),
                             message_file_ids=body.file_ids,
-                            planner_params_resolver=(
-                                lambda model: _resolve_litellm_params(service, model)
-                            ),
                         )
                     )
             except Exception:
@@ -923,8 +913,7 @@ async def send_message(
                     question_answer=body.question_answer,
                     edit_context=body.edit_context,
                     ui_language=body.ui_language,
-                    litellm_model=prepared_context.litellm_model,
-                    litellm_kwargs=prepared_context.litellm_kwargs,
+                    completion_model_route=prepared_context.completion_model_route,
                     available_models=(
                         prepared_context.planner_context.available_models
                     ),

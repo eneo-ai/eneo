@@ -34,6 +34,13 @@ def _make_repo_mock() -> AsyncMock:
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -120,6 +127,20 @@ def _test_request_snapshot(message: str) -> FlowPersistedJsonObject:
         "client_turn_id": str(_TEST_CLIENT_TURN_ID),
         "message": message,
     }
+
+
+def _route(
+    *,
+    model: str = "openai/gpt-4",
+    kwargs: dict[str, object] | None = None,
+    supported: SupportedModelKwargs | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=supported
+        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -945,8 +966,7 @@ class TestServiceComposition:
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
                     request_snapshot=_test_request_snapshot("Build a flow"),
                     message="Build a flow",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1020,11 +1040,16 @@ class TestPlannerContextPreparation:
         snapshots = {uuid4(): {"name": "Assistant"}}
         flow_service.get_flow.return_value = flow
         flow_service.get_flow_assistant_snapshots.return_value = snapshots
-        completion_service.resolve_litellm_params.return_value = (
-            "azure/gpt-4",
-            {
+        completion_service.resolve_model_route.return_value = _route(
+            model="azure/gpt-4",
+            kwargs={
                 "api_key": "sk-test",
                 "api_base": "https://azure.example.com",
+                "temperature": 0.7,
+                "additional_drop_params": ["top_p"],
+                "tools": [{"type": "function"}],
+                "tool_choice": "auto",
+                "function_call": "auto",
             },
         )
 
@@ -1043,10 +1068,12 @@ class TestPlannerContextPreparation:
         )
 
         assert isinstance(result, PreparedMessageContext)
-        assert result.litellm_model == "azure/gpt-4"
-        assert result.litellm_kwargs == {
+        assert result.completion_model_route.litellm_model == "azure/gpt-4"
+        assert result.completion_model_route.litellm_kwargs == {
             "api_key": "sk-test",
             "api_base": "https://azure.example.com",
+            "temperature": 0.7,
+            "additional_drop_params": ["top_p"],
         }
         assert result.flow is flow
         assert result.assistant_snapshots == snapshots
@@ -1059,7 +1086,7 @@ class TestPlannerContextPreparation:
                 "provider": "openai",
             }
         ]
-        completion_service.resolve_litellm_params.assert_awaited_once_with(model)
+        completion_service.resolve_model_route.assert_awaited_once_with(model)
         flow_service.get_flow.assert_awaited_once_with(session.flow_id)
         flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
 
@@ -1089,12 +1116,15 @@ class TestPlannerContextPreparation:
         file_service.get_files_by_ids.side_effect = lambda file_ids: [
             files_by_id[file_id] for file_id in file_ids
         ]
-        planner_params_resolver = AsyncMock(return_value=("openai/gpt-test", {}))
+        completion_service = AsyncMock()
+        completion_service.resolve_model_route.return_value = _route(
+            model="openai/gpt-test"
+        )
         service = AIBuilderService(
             user=user,
             repo=repo,
             flow_service=AsyncMock(),
-            completion_service=AsyncMock(),
+            completion_service=completion_service,
             space_service=AsyncMock(),
             file_service=file_service,
         )
@@ -1105,7 +1135,6 @@ class TestPlannerContextPreparation:
             model_id=None,
             tenant_flow_settings=None,
             message_file_ids=[current_file.id],
-            planner_params_resolver=planner_params_resolver,
         )
 
         assert len(context.attachment_files) == AI_BUILDER_MAX_ATTACHMENTS
@@ -1131,12 +1160,12 @@ class TestPlannerContextPreparation:
             uuid4() for _ in range(AI_BUILDER_MAX_ATTACHMENTS - 1)
         ]
         current_file_ids = [uuid4(), uuid4()]
-        planner_params_resolver = AsyncMock(return_value=("openai/gpt-test", {}))
+        completion_service = AsyncMock()
         service = AIBuilderService(
             user=user,
             repo=repo,
             flow_service=AsyncMock(),
-            completion_service=AsyncMock(),
+            completion_service=completion_service,
             space_service=AsyncMock(),
             file_service=file_service,
         )
@@ -1151,13 +1180,12 @@ class TestPlannerContextPreparation:
                 model_id=None,
                 tenant_flow_settings=None,
                 message_file_ids=current_file_ids,
-                planner_params_resolver=planner_params_resolver,
             )
 
         assert error.value.code is AIBuilderErrorCode.BAD_REQUEST
         assert "Detach an existing attachment" in str(error.value)
         file_service.get_files_by_ids.assert_not_awaited()
-        planner_params_resolver.assert_not_awaited()
+        completion_service.resolve_model_route.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_prepare_message_context_rejects_flow_space_mismatch(self):
@@ -1182,9 +1210,8 @@ class TestPlannerContextPreparation:
             id=session.flow_id,
             space_id=uuid4(),
         )
-        completion_service.resolve_litellm_params.return_value = (
-            "openai/gpt-4",
-            {"api_key": "sk-test"},
+        completion_service.resolve_model_route.return_value = _route(
+            kwargs={"api_key": "sk-test"}
         )
 
         service = _make_service(
@@ -1201,117 +1228,6 @@ class TestPlannerContextPreparation:
                 model_id=model.id,
                 tenant_flow_settings=None,
             )
-
-    @pytest.mark.anyio
-    async def test_resolve_planner_params_falls_back_to_adapter_credentials(self):
-        completion_service = MagicMock()
-        adapter = _make_adapter()
-        adapter.credential_resolver.get_credential_field.side_effect = (
-            lambda *, field: {
-                "endpoint": "https://azure.example.com",
-                "api_version": "2024-02-15-preview",
-                "api_type": "azure",
-                "organization": "org-123",
-                "deployment_name": "gpt4-prod",
-            }.get(field)
-        )
-        completion_service._get_adapter = AsyncMock(return_value=adapter)
-
-        service = _make_service(completion_service=completion_service)
-
-        model = _make_model()
-        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
-
-        assert litellm_model == "openai/gpt-4"
-        assert litellm_kwargs == {
-            "api_key": "sk-test",
-            "api_base": "https://azure.example.com",
-            "api_version": "2024-02-15-preview",
-            "api_type": "azure",
-            "organization": "org-123",
-            "deployment_name": "gpt4-prod",
-        }
-        completion_service._get_adapter.assert_awaited_once_with(model)
-
-    @pytest.mark.anyio
-    async def test_resolve_planner_params_returns_sync_resolver_tuple(self):
-        completion_service = MagicMock()
-        completion_service.resolve_litellm_params = MagicMock(
-            return_value=("anthropic/claude-3-7-sonnet", {"api_key": "sk-sync"})
-        )
-        completion_service._get_adapter = AsyncMock()
-
-        service = _make_service(completion_service=completion_service)
-
-        model = _make_model()
-        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
-
-        assert litellm_model == "anthropic/claude-3-7-sonnet"
-        assert litellm_kwargs == {"api_key": "sk-sync"}
-        completion_service.resolve_litellm_params.assert_called_once_with(model)
-        completion_service._get_adapter.assert_not_awaited()
-
-    @pytest.mark.anyio
-    async def test_resolve_planner_params_preserves_reasoning_model_sampling_configuration(
-        self,
-    ):
-        completion_service = MagicMock()
-        completion_service.resolve_litellm_params = MagicMock(
-            return_value=(
-                "openai/gpt-reasoning",
-                {
-                    "api_key": "sk-sync",
-                    "temperature": 0.7,
-                    "additional_drop_params": ["top_p"],
-                    "tools": [{"type": "function"}],
-                },
-            )
-        )
-        completion_service._get_adapter = AsyncMock()
-
-        service = _make_service(completion_service=completion_service)
-
-        model = _make_model()
-        model.reasoning = True
-        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
-
-        assert litellm_model == "openai/gpt-reasoning"
-        assert litellm_kwargs == {
-            "api_key": "sk-sync",
-            "temperature": 0.7,
-            "additional_drop_params": ["top_p"],
-        }
-        completion_service.resolve_litellm_params.assert_called_once_with(model)
-        completion_service._get_adapter.assert_not_awaited()
-
-    @pytest.mark.anyio
-    async def test_resolve_planner_params_strips_provider_tool_call_controls(self):
-        completion_service = MagicMock()
-        completion_service.resolve_litellm_params = MagicMock(
-            return_value=(
-                "openai/gpt-5.4",
-                {
-                    "api_key": "sk-sync",
-                    "tools": [{"type": "function", "function": {"name": "external"}}],
-                    "tool_choice": "auto",
-                    "function_call": "auto",
-                    "api_base": "https://api.example.com",
-                },
-            )
-        )
-        completion_service._get_adapter = AsyncMock()
-
-        service = _make_service(completion_service=completion_service)
-
-        model = _make_model()
-        litellm_model, litellm_kwargs = await service.resolve_planner_params(model)
-
-        assert litellm_model == "openai/gpt-5.4"
-        assert litellm_kwargs == {
-            "api_key": "sk-sync",
-            "api_base": "https://api.example.com",
-        }
-        completion_service._get_adapter.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -1339,8 +1255,7 @@ class TestSendMessage:
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
                     request_snapshot=_test_request_snapshot("Hello"),
                     message="Hello",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1375,8 +1290,7 @@ class TestSendMessage:
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
                     request_snapshot=_test_request_snapshot("Change step 2"),
                     message="Change step 2",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1429,8 +1343,7 @@ class TestSendMessage:
                         request_snapshot=_test_request_snapshot("Hello"),
                         message="Hello",
                         question_answer=_make_requirements_confirmation(),
-                        litellm_model="openai/gpt-4",
-                        litellm_kwargs={"api_key": "sk-test"},
+                        completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                     )
                 )
 
@@ -1498,8 +1411,7 @@ class TestSendMessageToolCall:
                         "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och skapa "
                         "en DOCX-rapport."
                     ),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1634,8 +1546,7 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1685,8 +1596,7 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -1758,8 +1668,7 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot("Build it"),
                     message="Build it",
                     question_answer=_make_requirements_confirmation(),
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -2043,8 +1952,7 @@ class TestSendMessageStructuredQuestion:
                         "answer": "docx_generated",
                         "ui_language": "sv",
                     },
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -2102,8 +2010,7 @@ class TestSendMessageStructuredQuestion:
                         "Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten."
                     ),
                     message="Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten.",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -2208,8 +2115,7 @@ class TestSendMessageStructuredQuestion:
                         "selected_values": ["single_case"],
                         "ui_language": "sv",
                     },
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -2266,8 +2172,7 @@ class TestSendMessageStructuredQuestion:
                         "Bygg ett flöde som sammanfattar ett dokument."
                     ),
                     message="Bygg ett flöde som sammanfattar ett dokument.",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 )
             )
 
@@ -2390,9 +2295,9 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
         file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
     )
     file_service.get_files_by_ids.return_value = [attached_file]
-    completion_service.resolve_litellm_params.return_value = (
-        "openai/gpt-5.4",
-        {"api_key": "test"},
+    completion_service.resolve_model_route.return_value = _route(
+        model="openai/gpt-5.4",
+        kwargs={"api_key": "test"},
     )
     repo.list_session_file_ids.return_value = []
 
@@ -2442,9 +2347,9 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
         file_id=file_id, tenant_id=user.tenant_id, user_id=user.id
     )
     file_service.get_files_by_ids.return_value = [attached_file]
-    completion_service.resolve_litellm_params.return_value = (
-        "openai/gpt-5.4",
-        {"api_key": "test"},
+    completion_service.resolve_model_route.return_value = _route(
+        model="openai/gpt-5.4",
+        kwargs={"api_key": "test"},
     )
     repo.list_session_file_ids.return_value = []
 
@@ -2489,7 +2394,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
     space.get_default_completion_model.return_value = model
     space.completion_models = [model]
     space.collections = []
-    completion_service.resolve_litellm_params.return_value = ("openai/gpt-5.4", {})
+    completion_service.resolve_model_route.return_value = _route(model="openai/gpt-5.4")
     file_service.get_files_by_ids.return_value = []
 
     with pytest.raises(BadRequestException, match="referenced files are unavailable"):

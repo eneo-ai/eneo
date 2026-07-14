@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -16,6 +18,11 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,11 +42,10 @@ class PendingQuestionResolution:
 async def adjudicate_pending_question_answer(
     *,
     litellm_client: Any,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
+    completion_model_route: ResolvedCompletionModelRoute,
     conversation: list[ConversationMessage],
     user_message: str,
-    raise_provider_errors: bool = False,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> PendingQuestionResolution | None:
     pending = latest_pending_structured_question(conversation)
     if not isinstance(pending, dict):
@@ -70,9 +76,14 @@ async def adjudicate_pending_question_answer(
     if not valid_option_ids:
         return None
 
+    completion_kwargs = completion_model_route.filter_unsupported_model_kwargs(
+        ModelKwargs(temperature=0.0)
+    )
+    if before_provider_call is not None:
+        await before_provider_call()
     try:
         response = await litellm_client.acompletion(
-            model=litellm_model,
+            model=completion_model_route.litellm_model,
             messages=[
                 {
                     "role": "system",
@@ -94,14 +105,11 @@ async def adjudicate_pending_question_answer(
             stream=False,
             drop_params=True,
             max_tokens=120,
-            temperature=0.0,
-            **litellm_kwargs,
+            **completion_kwargs,
         )
     except Exception as error:
         logger.warning("Pending-question adjudication failed", exc_info=error)
-        if raise_provider_errors:
-            raise AIBuilderProviderOutcomeUnknownException() from error
-        return None
+        raise AIBuilderProviderOutcomeUnknownException() from error
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():

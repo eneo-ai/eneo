@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
 )
@@ -69,24 +70,24 @@ async def call_proposal_completion(
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
-    provider_kwargs = dict(request.litellm_kwargs)
+    provider_kwargs = request.route.filter_unsupported_model_kwargs(
+        ModelKwargs(temperature=request.temperature)
+    )
     provider_kwargs.pop("drop_params", None)
     dropped_response_format = provider_kwargs.pop("response_format", None)
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
-
     if before_provider_call is not None:
         await before_provider_call()
     try:
         raw_response = await litellm_client.acompletion(
-            model=request.litellm_model,
+            model=request.route.litellm_model,
             messages=request.messages,
             tools=request.tool_schemas,
             tool_choice=request.tool_choice,
             stream=False,
             drop_params=True,
             max_tokens=request.max_output_tokens,
-            temperature=request.temperature,
             **provider_kwargs,
         )
     except Exception as error:
@@ -98,7 +99,7 @@ async def call_proposal_completion(
         completion_text, finish_reason = _first_text_and_finish_reason(response)
         metadata = _completion_metadata_from_response(
             response,
-            litellm_model=usage_tracker.model,
+            litellm_model=request.route.litellm_model,
             messages=request.messages,
             completion_text=completion_text,
             finish_reason=finish_reason,

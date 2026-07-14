@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
@@ -37,6 +37,11 @@ from eneo.flows.ai_builder.question_catalog import (
     legal_slot_values,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+
+if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,8 +110,7 @@ async def resolve_user_question_metadata(
     message: str,
     question_answer: AIBuilderQuestionAnswerInput | None,
     ui_language: str | None = None,
-    litellm_model: str,
-    litellm_kwargs: dict[str, object],
+    completion_model_route: ResolvedCompletionModelRoute,
     prepared: PreparedUserQuestionMetadata | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> UserQuestionMetadataResolution:
@@ -119,15 +123,12 @@ async def resolve_user_question_metadata(
     metadata = prepared.metadata
     used_auxiliary_llm = False
     if prepared.needs_auxiliary_llm:
-        if before_provider_call is not None:
-            await before_provider_call()
         adjudicated_answer = await adjudicate_pending_question_answer(
             litellm_client=litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            completion_model_route=completion_model_route,
             conversation=conversation,
             user_message=message,
-            raise_provider_errors=before_provider_call is not None,
+            before_provider_call=before_provider_call,
         )
         if adjudicated_answer is not None:
             metadata = {

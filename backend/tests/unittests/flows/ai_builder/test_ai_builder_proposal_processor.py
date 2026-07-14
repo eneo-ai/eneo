@@ -10,6 +10,13 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder import (
     ai_builder_proposal_processor as proposal_processor_module,
 )
@@ -86,6 +93,16 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_usage,
     _store_compiled_plan,
 )
+
+
+def _route(model: str = "openai/gpt-5.4") -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
 
 
 def _empty_catalog() -> AIBuilderResourceCatalog:
@@ -266,8 +283,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -329,8 +345,7 @@ async def test_propose_plan_create_compile_bug_preserves_provider_outcome_unknow
                     ],
                     new_messages_start=1,
                     llm_messages=[{"role": "system", "content": "Prompt"}],
-                    litellm_model="openai/gpt-5.4",
-                    litellm_kwargs={},
+                    completion_model_route=_route(),
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=_empty_catalog(),
@@ -415,8 +430,7 @@ async def test_propose_plan_edit_compile_bug_preserves_provider_outcome_unknown(
                     ],
                     new_messages_start=1,
                     llm_messages=[{"role": "system", "content": "Prompt"}],
-                    litellm_model="openai/gpt-5.4",
-                    litellm_kwargs={},
+                    completion_model_route=_route(),
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=_empty_catalog(),
@@ -452,8 +466,7 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -503,8 +516,7 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -575,8 +587,7 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
                 ],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "PROMPT SECRET"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -640,8 +651,7 @@ async def test_propose_plan_missing_tool_after_forced_retry_logs_failed_turn() -
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -738,8 +748,7 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
                 ],
                 new_messages_start=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -814,8 +823,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
                 ],
                 new_messages_start=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -883,8 +891,7 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
                 ],
                 new_messages_start=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -963,8 +970,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
                 ],
                 new_messages_start=1,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
-                litellm_model="openai/gpt-5.4-nano",
-                litellm_kwargs={},
+                completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -1067,8 +1073,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
                 ],
                 new_messages_start=1,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
-                litellm_model="openai/gpt-5.4-nano",
-                litellm_kwargs={},
+                completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),
@@ -1172,8 +1177,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                 ],
                 new_messages_start=1,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
-                litellm_model="openai/gpt-5.4-nano",
-                litellm_kwargs={},
+                completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=_empty_catalog(),

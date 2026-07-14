@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 
 import redis.asyncio as aioredis
@@ -11,6 +12,9 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
     ResponseType,
+)
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
@@ -31,6 +35,9 @@ from eneo.tokens.token_utils import log_token_count_drift
 from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
+    from eneo.completion_models.domain.completion_model import (
+        CompletionModel as DomainCompletionModel,
+    )
     from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
         TenantModelAdapter,
     )
@@ -42,6 +49,29 @@ if TYPE_CHECKING:
     from eneo.tenants.tenant import TenantInDB
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCompletionModelRoute:
+    litellm_model: str
+    litellm_kwargs: dict[str, object]
+    supported_model_kwargs: SupportedModelKwargs
+
+    def filter_unsupported_model_kwargs(
+        self,
+        requested: ModelKwargs,
+    ) -> dict[str, object]:
+        provider_kwargs = {
+            key: value
+            for key, value in self.litellm_kwargs.items()
+            if key not in SupportedModelKwargs.model_fields
+        }
+        provider_kwargs.update(
+            requested.filter_unsupported(self.supported_model_kwargs).model_dump(
+                exclude_none=True
+            )
+        )
+        return provider_kwargs
 
 
 async def generate_image(prompt: str):
@@ -76,7 +106,10 @@ class CompletionService:
         )
         super().__init__()
 
-    async def _get_adapter(self, model: CompletionModel) -> "TenantModelAdapter":
+    async def _get_adapter(
+        self,
+        model: CompletionModel | DomainCompletionModel,
+    ) -> "TenantModelAdapter":
         """
         Get the adapter for the given model.
 
@@ -144,12 +177,17 @@ class CompletionService:
             provider_type=provider.provider_type,
         )
 
-    async def resolve_litellm_params(
+    async def resolve_model_route(
         self,
-        model: CompletionModel,
-    ) -> tuple[str, dict[str, object]]:
+        model: CompletionModel | DomainCompletionModel,
+    ) -> ResolvedCompletionModelRoute:
         adapter = await self._get_adapter(model)
-        return adapter.resolve_litellm_params()
+        litellm_model, litellm_kwargs = adapter.resolve_litellm_params()
+        return ResolvedCompletionModelRoute(
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            supported_model_kwargs=model.supported_model_kwargs,
+        )
 
     async def resolve_structured_output_capability(
         self,
@@ -435,7 +473,7 @@ class CompletionService:
 
         return CompletionModelResponse(
             completion=completion,
-            model=model_adapter.model,
+            model=model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
             usage=usage,

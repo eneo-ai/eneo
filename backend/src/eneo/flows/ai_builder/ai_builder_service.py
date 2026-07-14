@@ -6,10 +6,8 @@ conversation loop and plan lifecycle live in focused collaborators.
 
 from __future__ import annotations
 
-import inspect
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Protocol, cast
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID
 
 import litellm
@@ -88,6 +86,7 @@ from eneo.model_providers.infrastructure.litellm_runtime_config import (
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
+        ResolvedCompletionModelRoute,
     )
     from eneo.files.file_service import FileService
     from eneo.flows.application.flow_service import FlowService
@@ -135,24 +134,12 @@ def _sanitize_ai_builder_litellm_kwargs(
     }
 
 
-class _CredentialResolverProtocol(Protocol):
-    def get_api_key(self) -> str | None: ...
-
-    def get_credential_field(self, *, field: str) -> str | None: ...
-
-
-class _CompletionModelAdapterProtocol(Protocol):
-    credential_resolver: _CredentialResolverProtocol
-    litellm_model: str
-
-
 @dataclass(frozen=True)
 class PreparedMessageContext:
     """Pre-fetched planner and flow context for AI Builder message handling."""
 
     planner_context: AIBuilderPlannerContext
-    litellm_model: str
-    litellm_kwargs: dict[str, object]
+    completion_model_route: ResolvedCompletionModelRoute
     flow: "Flow | None"
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
@@ -335,57 +322,6 @@ class AIBuilderService:
         )
         return await self.get_session(session_id)
 
-    async def resolve_planner_params(self, model: Any) -> tuple[str, dict[str, object]]:
-        """Resolve LiteLLM model name and provider kwargs for the planner model."""
-        resolve_params = getattr(
-            self.completion_service, "resolve_litellm_params", None
-        )
-        if callable(resolve_params):
-            resolved_candidate = resolve_params(model)
-            if inspect.isawaitable(resolved_candidate):
-                resolved_candidate = await resolved_candidate
-            resolved_tuple = (
-                cast(tuple[object, ...], resolved_candidate)
-                if isinstance(resolved_candidate, tuple)
-                else None
-            )
-            if (
-                resolved_tuple is not None
-                and len(resolved_tuple) == 2
-                and isinstance(resolved_tuple[0], str)
-                and isinstance(resolved_tuple[1], dict)
-            ):
-                litellm_model = resolved_tuple[0]
-                litellm_kwargs = cast(dict[str, object], resolved_tuple[1])
-                return litellm_model, _sanitize_ai_builder_litellm_kwargs(
-                    litellm_kwargs
-                )
-
-        adapter = cast(
-            _CompletionModelAdapterProtocol,
-            await self.completion_service._get_adapter(model),  # pyright: ignore[reportPrivateUsage]
-        )
-        litellm_kwargs: dict[str, object] = {}
-        api_key = adapter.credential_resolver.get_api_key()
-        if api_key:
-            litellm_kwargs["api_key"] = api_key
-
-        field_mapping = {
-            "endpoint": "api_base",
-            "api_version": "api_version",
-            "api_type": "api_type",
-            "organization": "organization",
-            "deployment_name": "deployment_name",
-        }
-        for field, key in field_mapping.items():
-            value = adapter.credential_resolver.get_credential_field(field=field)
-            if value:
-                litellm_kwargs[key] = value
-
-        return adapter.litellm_model, _sanitize_ai_builder_litellm_kwargs(
-            litellm_kwargs
-        )
-
     async def prepare_message_context(
         self,
         *,
@@ -394,10 +330,6 @@ class AIBuilderService:
         model_id: UUID | None,
         tenant_flow_settings: dict[str, Any] | None,
         message_file_ids: list[UUID] | None = None,
-        planner_params_resolver: Callable[
-            [Any], Awaitable[tuple[str, dict[str, object]]]
-        ]
-        | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
         session_file_ids = await self.repo.list_session_file_ids(
@@ -417,9 +349,12 @@ class AIBuilderService:
             model_id=model_id,
             tenant_flow_settings=tenant_flow_settings,
         )
-        resolve_planner_params = planner_params_resolver or self.resolve_planner_params
-        litellm_model, litellm_kwargs = await resolve_planner_params(
-            planner_context.model
+        route = await self.completion_service.resolve_model_route(
+            planner_context.model,
+        )
+        route = replace(
+            route,
+            litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
         )
 
         flow = None
@@ -460,8 +395,7 @@ class AIBuilderService:
 
         return PreparedMessageContext(
             planner_context=planner_context,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            completion_model_route=route,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files,
@@ -489,8 +423,7 @@ class AIBuilderService:
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
+        completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
         flow: "Flow | None" = None,
@@ -521,8 +454,7 @@ class AIBuilderService:
             question_answer=question_answer,
             edit_context=edit_context,
             ui_language=ui_language,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            completion_model_route=completion_model_route,
             available_models=available_models,
             available_kbs=available_kbs,
             flow=flow,

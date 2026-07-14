@@ -6,6 +6,13 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
@@ -52,6 +59,20 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def _route(
+    *,
+    model: str = "gpt-test",
+    kwargs: dict[str, object] | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
 
 
 def _cited(quote: str, *, message_id: str = "user-1") -> dict[str, str]:
@@ -366,8 +387,7 @@ async def test_runtime_planning_state_skips_model_when_resolvable_slots_are_stro
         await build_runtime_discovery_context(
             [ConversationMessage(role="user", content="Skapa ett komplett flöde.")],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
         )
     ).planning_state
@@ -422,8 +442,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
         )
     ).planning_state
@@ -441,8 +460,7 @@ async def test_runtime_planning_state_skips_model_when_freeform_text_is_empty() 
     await build_runtime_discovery_context(
         [ConversationMessage(role="user", content="   ")],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
     )
 
@@ -479,8 +497,7 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
         await build_runtime_discovery_context(
             [ConversationMessage(role="user", content="   ")],
             litellm_client=AsyncMock(),
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             attachment_context=attachment_context,
         )
@@ -506,8 +523,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
         await build_runtime_discovery_context(
             conversation,
             litellm_client=AsyncMock(),
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
             allow_classification=False,
@@ -566,8 +582,7 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
     await build_runtime_discovery_context(
         [ConversationMessage(role="user", content="Bygg ett sammanfattningsflöde.")],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         allow_classification=False,
     )
@@ -616,8 +631,7 @@ async def test_runtime_planning_state_overlays_heuristic_slots_with_model_eviden
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
         )
@@ -679,8 +693,7 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
         )
@@ -710,8 +723,7 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
             )
         ],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         ui_language="sv",
         attachment_context=_attachment_context(),
@@ -760,8 +772,7 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
             attachment_context=AIBuilderAttachmentContext(
@@ -869,8 +880,7 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
     context = await build_runtime_discovery_context(
         conversation,
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
@@ -936,8 +946,7 @@ async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_t
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
             attachment_context=_attachment_context(),
@@ -992,8 +1001,7 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
         )
@@ -1064,8 +1072,7 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
                 )
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
         )
@@ -1128,8 +1135,7 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
                 ),
             ],
             litellm_client=litellm_client,
-            litellm_model="gpt-test",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             tenant_id=uuid4(),
             ui_language="sv",
         )
@@ -1197,8 +1203,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             )
         ],
         litellm_client=litellm_client,
-        litellm_model="azure/gpt-test",
-        litellm_kwargs=provider_kwargs,
+        completion_model_route=_route(model="azure/gpt-test", kwargs=provider_kwargs),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -1256,8 +1261,7 @@ async def test_runtime_discovery_blocks_output_classification_when_user_is_uncer
             )
         ],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -1329,8 +1333,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
             )
         ],
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -1397,8 +1400,7 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
     result = await build_discovery_runtime_result(
         conversation,
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         tenant_id=uuid4(),
         ui_language="sv",
     )

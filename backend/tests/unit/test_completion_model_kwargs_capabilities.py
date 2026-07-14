@@ -21,6 +21,7 @@ from eneo.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
     snapshot_supported_model_kwargs,
 )
 from eneo.completion_models.presentation.completion_model_assembler import (
@@ -49,23 +50,17 @@ def _completion_model_sparse(**overrides: object) -> CompletionModelSparse:
     return CompletionModelSparse(**values)
 
 
-def test_completion_models_describe_user_configurable_kwargs():
+def test_missing_capability_snapshot_omits_optional_kwargs():
     model = _completion_model_sparse()
 
-    assert model.supported_model_kwargs.temperature.supported is True
-    assert model.supported_model_kwargs.temperature.minimum == 0
-    assert model.supported_model_kwargs.temperature.maximum == 2
+    assert model.supported_model_kwargs.temperature.supported is False
     assert model.supported_model_kwargs.reasoning_effort.supported is False
 
 
-def test_tenant_models_expose_advanced_sampling_kwargs():
+def test_provider_type_does_not_widen_missing_capability_snapshot():
     model = _completion_model_sparse(provider_type="vllm")
 
-    assert model.supported_model_kwargs.temperature.supported is True
-    assert model.supported_model_kwargs.top_p.supported is True
-    assert model.supported_model_kwargs.presence_penalty.supported is True
-    assert model.supported_model_kwargs.frequency_penalty.supported is True
-    assert model.supported_model_kwargs.top_k.supported is True
+    assert model.supported_model_kwargs == SupportedModelKwargs()
 
 
 def test_discovered_capabilities_are_snapshotted_explicitly():
@@ -144,7 +139,19 @@ def test_reasoning_flag_disables_stored_reasoning_effort_capability():
 
 
 def test_filter_unsupported_strips_disabled_kwargs():
-    model = _completion_model_sparse(name="gpt-5.1", reasoning=False)
+    model = _completion_model_sparse(
+        name="gpt-5.1",
+        reasoning=False,
+        model_kwargs_capabilities={
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0,
+                "maximum": 2,
+                "step": 0.01,
+            }
+        },
+    )
     kwargs = ModelKwargs(temperature=0.4, reasoning_effort="high", verbosity="low")
 
     filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
@@ -155,7 +162,17 @@ def test_filter_unsupported_strips_disabled_kwargs():
 
 
 def test_filter_unsupported_returns_self_when_all_supported():
-    model = _completion_model_sparse(name="gpt-5.1", reasoning=True)
+    model = _completion_model_sparse(
+        name="gpt-5.1",
+        reasoning=True,
+        model_kwargs_capabilities={
+            "reasoning_effort": {
+                "supported": True,
+                "control": "select",
+                "options": ["low", "medium", "high"],
+            }
+        },
+    )
     kwargs = ModelKwargs(reasoning_effort="medium")
 
     filtered = kwargs.filter_unsupported(model.supported_model_kwargs)
@@ -172,16 +189,11 @@ def test_filter_unsupported_preserves_response_format():
     assert filtered.response_format == {"type": "json_object"}
 
 
-def test_reasoning_fallback_is_name_agnostic():
+def test_reasoning_flag_does_not_widen_missing_capability_snapshot():
     model = _completion_model_sparse(name="gpt-5.1", reasoning=True)
 
     assert model.supported_model_kwargs.temperature.supported is False
-    assert model.supported_model_kwargs.reasoning_effort.supported is True
-    assert model.supported_model_kwargs.reasoning_effort.options == [
-        "low",
-        "medium",
-        "high",
-    ]
+    assert model.supported_model_kwargs.reasoning_effort.supported is False
     assert model.supported_model_kwargs.verbosity.supported is False
 
 
@@ -220,7 +232,7 @@ def test_invalid_api_capability_metadata_is_rejected():
         )
 
 
-def test_invalid_stored_capability_metadata_falls_back(
+def test_invalid_stored_capability_metadata_omits_optional_kwargs(
     caplog: pytest.LogCaptureFixture,
 ):
     now = datetime.now(timezone.utc)
@@ -263,7 +275,7 @@ def test_invalid_stored_capability_metadata_falls_back(
         logger.disabled = was_disabled
 
     assert model.model_kwargs_capabilities is None
-    assert model.supported_model_kwargs.temperature.supported is True
+    assert model.supported_model_kwargs.temperature.supported is False
     assert "Invalid completion model kwargs capabilities" in caplog.text
 
 
@@ -315,7 +327,7 @@ def test_domain_model_normalizes_invalid_capabilities_before_public_assembly():
     )
 
     assert domain_model.model_kwargs_capabilities is None
-    assert public_model.supported_model_kwargs.temperature.supported is True
+    assert public_model.supported_model_kwargs.temperature.supported is False
 
 
 def test_completion_model_input_schemas_accept_explicit_capability_metadata():
@@ -338,7 +350,7 @@ def test_completion_model_response_schemas_expose_resolved_capabilities():
         assert "supported_model_kwargs" in properties
 
 
-def test_sparse_completion_model_preserves_provider_capabilities():
+def test_sparse_completion_model_preserves_provider_identity_without_widening():
     now = datetime.now(timezone.utc)
     source_model = SimpleNamespace(
         id=uuid4(),
@@ -373,11 +385,11 @@ def test_sparse_completion_model_preserves_provider_capabilities():
 
     assert sparse_model.provider_type == "vllm"
     assert sparse_model.litellm_model_name == "vllm/meta-llama/Llama-3.1-70B-Instruct"
-    assert sparse_model.supported_model_kwargs.top_p.supported is True
-    assert sparse_model.supported_model_kwargs.top_k.supported is True
+    assert sparse_model.supported_model_kwargs.top_p.supported is False
+    assert sparse_model.supported_model_kwargs.top_k.supported is False
 
 
-def test_sparse_projection_preserves_admin_completion_model_provider_type():
+def test_sparse_projection_preserves_provider_type_without_widening():
     now = datetime.now(timezone.utc)
     admin_model = CompletionModel(
         id=uuid4(),
@@ -409,8 +421,8 @@ def test_sparse_projection_preserves_admin_completion_model_provider_type():
     sparse_model = CompletionModelSparse.model_validate(admin_model)
 
     assert sparse_model.provider_type == "vllm"
-    assert sparse_model.supported_model_kwargs.top_p.supported is True
-    assert sparse_model.supported_model_kwargs.top_k.supported is True
+    assert sparse_model.supported_model_kwargs.top_p.supported is False
+    assert sparse_model.supported_model_kwargs.top_k.supported is False
 
 
 def test_public_completion_model_preserves_litellm_capabilities():

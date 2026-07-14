@@ -13,6 +13,13 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -99,6 +106,21 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.main.exceptions import BadRequestException
+
+
+def _route(
+    *,
+    model: str = "openai/gpt-5.4",
+    kwargs: dict[str, object] | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
+
 
 _TEST_CLIENT_TURN_ID = UUID("11111111-1111-4111-8111-111111111111")
 _TEST_REQUEST_FINGERPRINT = "a" * 64
@@ -242,8 +264,7 @@ async def _prepare_planner_request_for_test(
     *,
     conversation: list[ConversationMessage],
     message: str,
-    litellm_model: str = "openai/gpt-5.4",
-    litellm_kwargs: dict[str, object] | None = None,
+    completion_model_route: ResolvedCompletionModelRoute,
     available_models: list[AIBuilderAvailableModelResource] | None = None,
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
     flow: object = None,
@@ -263,8 +284,7 @@ async def _prepare_planner_request_for_test(
             conversation=conversation,
             message=message,
             litellm_client=planner.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=dict(litellm_kwargs or {}),
+            completion_model_route=completion_model_route,
             available_models=available_models,
             available_kbs=available_kbs,
             flow=cast(Any, flow),
@@ -397,8 +417,7 @@ async def _collect_send_message_events(
                 "message": "Build a flow",
             },
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -446,8 +465,7 @@ async def test_resolve_user_question_metadata_uses_freeform_inference_before_adj
             conversation=[],
             message="Use uploaded documents.",
             question_answer=None,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
         )
 
     assert result.is_requirements_confirmation is False
@@ -472,8 +490,7 @@ async def test_resolve_user_question_metadata_preserves_requirements_confirmatio
             "requirements_version": "req-v2",
             "ui_language": "en",
         },
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
     )
 
     assert result.is_requirements_confirmation is True
@@ -498,8 +515,7 @@ async def test_resolve_user_question_metadata_ingests_structured_slot_answer() -
             "question_id": "primary_runtime_input",
             "selected_values": ["documents"],
         },
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
     )
 
     assert result.metadata == {
@@ -602,8 +618,7 @@ async def test_resolve_user_question_metadata_rejects_uningestable_structured_an
             conversation=[],
             message="documents",
             question_answer=question_answer,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
@@ -629,8 +644,7 @@ async def test_resolve_user_question_metadata_keeps_supported_non_slot_questions
             "question_id": question_id,
             "selected_values": ["banana"],
         },
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
     )
 
     assert result.metadata == {
@@ -664,8 +678,7 @@ async def test_resolve_user_question_metadata_does_not_adjudicate_without_pendin
             conversation=[],
             message="Bygg ett flöde som skapar en DOCX-rapport från ljud.",
             question_answer=None,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
         )
 
     assert result.metadata is None
@@ -722,8 +735,7 @@ async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_a
             conversation=conversation,
             message="Make it a PDF",
             question_answer=None,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
         )
 
     assert result.used_auxiliary_llm is True
@@ -766,8 +778,7 @@ async def test_resolve_user_question_metadata_infers_final_output_answer_from_st
         conversation=conversation,
         message="PDF-dokument",
         question_answer=None,
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
     )
 
     assert result.is_requirements_confirmation is False
@@ -807,8 +818,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
             planner,
             conversation=conversation,
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -866,8 +876,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             planner,
             conversation=conversation,
             message=conversation[0].content,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -939,8 +948,7 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             planner,
             conversation=conversation,
             message=conversation[0].content,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1022,8 +1030,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             planner,
             conversation=conversation,
             message=conversation[0].content,
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1120,8 +1127,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             planner,
             conversation=conversation,
             message="Build from this file",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1206,8 +1212,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             planner,
             conversation=conversation,
             message="Build a report flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1252,8 +1257,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             planner,
             conversation=conversation,
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1332,8 +1336,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             planner,
             conversation=conversation,
             message="Build a report flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1375,8 +1378,7 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
             request_fingerprint=_TEST_REQUEST_FINGERPRINT,
             request_snapshot=_test_request_snapshot("Build a flow"),
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -1687,8 +1689,7 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
         request_fingerprint=_TEST_REQUEST_FINGERPRINT,
         request_snapshot=_test_request_snapshot("Build a flow"),
         message="Build a flow",
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         available_models=None,
         available_kbs=None,
         flow=None,
@@ -1739,8 +1740,7 @@ async def test_send_message_rejects_legacy_mcp_revision_before_provider_work(
             scope="whole_plan",
             plan_id=plan_id,
         ),
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         available_models=None,
         available_kbs=None,
         flow=None,
@@ -1804,8 +1804,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
         request_fingerprint=_TEST_REQUEST_FINGERPRINT,
         request_snapshot=_test_request_snapshot("Build a flow"),
         message="Build a flow",
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         available_models=None,
         available_kbs=None,
         flow=None,
@@ -1894,8 +1893,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             request_fingerprint=_TEST_REQUEST_FINGERPRINT,
             request_snapshot=_test_request_snapshot("Revise the plan"),
             message="Revise the plan",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=[_model_resource(str(local_model_id), "Renamed model")],
             available_kbs=[],
             flow=None,
@@ -1932,8 +1930,7 @@ async def test_send_message_rejects_closed_session_before_claiming_lock() -> Non
             request_fingerprint=_TEST_REQUEST_FINGERPRINT,
             request_snapshot=_test_request_snapshot("Build a flow"),
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             available_models=None,
             available_kbs=None,
             flow=None,
@@ -2000,8 +1997,7 @@ async def test_send_message_replays_the_exact_committed_error_without_provider_w
             request_fingerprint=_TEST_REQUEST_FINGERPRINT,
             request_snapshot=_test_request_snapshot("Build a flow"),
             message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            completion_model_route=_route(),
             turn_preflight=preflight,
         )
     ]

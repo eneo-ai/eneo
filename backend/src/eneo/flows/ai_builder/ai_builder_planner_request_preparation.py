@@ -80,6 +80,9 @@ from eneo.observability.failure_events import stable_hash
 from eneo.tokens.token_utils import count_message_tokens
 
 if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -91,8 +94,7 @@ class PlannerRequestPreparationInput:
     conversation: list[ConversationMessage]
     message: str
     litellm_client: Any
-    litellm_model: str
-    litellm_kwargs: dict[str, Any]
+    completion_model_route: ResolvedCompletionModelRoute
     available_models: list[AIBuilderAvailableModelResource] | None
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None
     flow: Flow | None
@@ -161,8 +163,7 @@ async def prepare_planner_request(
         request.conversation,
         flow=request.flow,
         litellm_client=request.litellm_client,
-        litellm_model=request.litellm_model,
-        litellm_kwargs=request.litellm_kwargs,
+        completion_model_route=request.completion_model_route,
         ui_language=ui_language,
         allow_semantic_adjudication=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
@@ -235,7 +236,7 @@ async def prepare_planner_request(
         resource_catalog=resource_catalog,
         plan_edit_context=request.plan_edit_context,
         prior_plan_for_revision=request.prior_plan_for_revision,
-        litellm_model=request.litellm_model,
+        litellm_model=request.completion_model_route.litellm_model,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
         budget_policy=request.budget_policy,

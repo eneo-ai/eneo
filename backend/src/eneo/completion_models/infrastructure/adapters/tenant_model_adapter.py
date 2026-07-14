@@ -12,6 +12,7 @@ from typing import (
     NoReturn,
     Optional,
     Protocol,
+    TypeAlias,
     TypedDict,
     cast,
 )
@@ -344,11 +345,18 @@ def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
-        CompletionModel,
+        CompletionModel as APICompletionModel,
+    )
+    from eneo.ai_models.completion_models.completion_model import (
         Context,
+    )
+    from eneo.completion_models.domain.completion_model import (
+        CompletionModel as DomainCompletionModel,
     )
     from eneo.mcp_servers.infrastructure.proxy import MCPProxySession
     from eneo.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
+
+    CompletionModel: TypeAlias = APICompletionModel | DomainCompletionModel
 
 
 class TenantModelAdapter(CompletionModelAdapter):
@@ -388,7 +396,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 "TenantModelAdapter requires a tenant model with provider_id"
             )
 
-        super().__init__(model)
+        self.model = model
         self.credential_resolver = credential_resolver
 
         # Construct LiteLLM model name with provider prefix
@@ -805,7 +813,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
-            # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = cast(
                 _LiteLLMResponse,
                 await _acompletion_call(
@@ -996,9 +1003,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
-            # Create stream with drop_params=True to handle unsupported params gracefully
-            # Request usage info on the final chunk (providers that don't support it
-            # will silently ignore this thanks to drop_params=True)
+            # Request usage info on the final chunk when the provider returns it.
             stream = cast(
                 AsyncIterator[_LiteLLMStreamChunk],
                 await _acompletion_call(

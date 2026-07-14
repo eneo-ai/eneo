@@ -22,6 +22,13 @@ from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
@@ -99,6 +106,20 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
+
+
+def _route(
+    *,
+    model: str = "openai/gpt-4o-mini",
+    kwargs: dict[str, object] | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
 
 
 @pytest.fixture
@@ -1429,8 +1450,8 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
         new=AsyncMock(side_effect=observe_durable_turn_before_provider),
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -1533,8 +1554,8 @@ async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             first_events = await _send_builder_message(
                 client=client,
@@ -1719,8 +1740,8 @@ async def test_ai_builder_disconnect_after_committed_event_replays_without_provi
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             async with db_container() as identity_container:
                 route_user = identity_container.user()
@@ -1832,8 +1853,8 @@ async def test_ai_builder_latest_turn_replay_and_conflict_survive_compaction(
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             first_events = await _send_builder_message(
                 client=client,
@@ -1906,8 +1927,8 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             first_events = await _send_builder_message(
                 client=client,
@@ -1966,8 +1987,8 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             with patch(
                 "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
@@ -2070,8 +2091,8 @@ async def test_ai_builder_pre_provider_failure_resumes_same_durable_turn(
         new=completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             with patch(
                 "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
@@ -3088,8 +3109,7 @@ async def test_send_message_status_jump_under_lock_uses_lease(
                     "ui_language": "sv",
                 },
                 message="Bygg vidare.",
-                litellm_model="openai/gpt-4o-mini",
-                litellm_kwargs={"api_key": "sk-test"},
+                completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                 available_models=[],
                 available_kbs=[],
                 flow=None,
@@ -4458,8 +4478,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     conversation=[],
                     new_messages_start=0,
                     llm_messages=[],
-                    litellm_model="openai/gpt-4o-mini",
-                    litellm_kwargs={"api_key": "sk-test"},
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=resource_catalog,
@@ -5177,10 +5196,8 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
             new=mock_completion,
         ):
             with patch(
-                "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-                new=AsyncMock(
-                    return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})
-                ),
+                "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+                new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
             ):
                 session_id = await _create_ai_builder_session(
                     client=client,
@@ -5301,8 +5318,8 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
         new=mock_completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -5347,8 +5364,8 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
     )
 
     with patch(
-        "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-        new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+        "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+        new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
     ):
         session_id = await _create_ai_builder_session(
             client=client,
@@ -5555,8 +5572,8 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
         new=mock_completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -5703,8 +5720,8 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
         new=mock_completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -5942,8 +5959,8 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
         new=mock_completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -6065,8 +6082,8 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
         new=mock_completion,
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,
@@ -6325,8 +6342,8 @@ async def test_ai_builder_api_audio_report_prompt_reaches_requirements_summary_w
         ),
     ):
         with patch(
-            "eneo.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
         ):
             session_id = await _create_ai_builder_session(
                 client=client,

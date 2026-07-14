@@ -91,6 +91,9 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -184,8 +187,7 @@ class ProposalSubmissionOwner:
         conversation: list[ConversationMessage],
         new_messages_start: int,
         llm_messages: list[LLMMessageParam],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
+        completion_model_route: ResolvedCompletionModelRoute,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog,
@@ -207,7 +209,7 @@ class ProposalSubmissionOwner:
         )
         usage_tracker = ProposalTurnTelemetry(
             request_id=request_id,
-            model=litellm_model,
+            model=completion_model_route.litellm_model,
             target_kind=target_kind,
         )
         ctx = ProposalTurnContext(
@@ -216,8 +218,7 @@ class ProposalSubmissionOwner:
             new_messages_start=new_messages_start,
             llm_messages=llm_messages,
             tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
+            route=completion_model_route,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,

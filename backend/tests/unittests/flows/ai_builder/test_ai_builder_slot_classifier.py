@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
@@ -15,6 +25,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     parse_slot_classification_response,
     slot_classification_prompt_hash,
 )
+from eneo.model_providers.infrastructure.litellm_provider import (
+    ResolvedLiteLLMProvider,
+)
+from eneo.tenants.tenant import TenantInDB
 
 
 def _classification_input(
@@ -46,6 +60,20 @@ def _make_response(content: str) -> MagicMock:
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def _route(
+    *,
+    model: str = "gpt-test",
+    kwargs: dict[str, object] | None = None,
+    supported: SupportedModelKwargs | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=supported
+        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
 
 
 def test_parse_slot_classification_response_uses_canonical_slots_shape_only() -> None:
@@ -562,6 +590,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_serialization() -> None:
         },
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     assert prompt_hash == slot_classification_prompt_hash(
@@ -573,6 +602,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_serialization() -> None:
         },
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
 
@@ -583,6 +613,7 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     changed_hash = slot_classification_prompt_hash(
@@ -591,6 +622,7 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
         allowed_slot_values={"terminal_output": {"pdf_document", "structured_text"}},
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     assert changed_hash != base_hash
@@ -605,6 +637,7 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     biased_hash = slot_classification_prompt_hash(
@@ -613,6 +646,7 @@ def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
         bias=classifier.SlotClassificationBias(
             target_slot_name="terminal_output",
             asked_question_id="final_output_mode",
@@ -632,6 +666,7 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     source_hash = slot_classification_prompt_hash(
@@ -640,6 +675,7 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-test",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
     model_hash = slot_classification_prompt_hash(
         classification_input=_classification_input("filename: mall.docx"),
@@ -647,6 +683,7 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-next",
         provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
     provider_hash = slot_classification_prompt_hash(
         classification_input=_classification_input("filename: mall.docx"),
@@ -654,6 +691,7 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         allowed_slot_values=allowed,
         litellm_model="openai/gpt-test",
         provider="azure",
+        supported_model_kwargs=_route().supported_model_kwargs,
     )
 
     assert source_hash != base_hash
@@ -746,16 +784,20 @@ async def test_classification_cache_separates_provider_execution_targets(
 
     first = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="azure/gpt-test",
-        litellm_kwargs={**common_kwargs, field: first_value},
+        completion_model_route=_route(
+            model="azure/gpt-test",
+            kwargs={**common_kwargs, field: first_value},
+        ),
         classification_input=_classification_input(text),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
     )
     second = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="azure/gpt-test",
-        litellm_kwargs={**common_kwargs, field: second_value},
+        completion_model_route=_route(
+            model="azure/gpt-test",
+            kwargs={**common_kwargs, field: second_value},
+        ),
         classification_input=_classification_input(text),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
@@ -796,26 +838,30 @@ async def test_classification_cache_ignores_credential_only_differences() -> Non
 
     first = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="azure/gpt-test",
-        litellm_kwargs={
-            **common_kwargs,
-            "api_key": "secret-key-a",
-            "extra_headers": {"X-Secret": "secret-header-a"},
-        },
+        completion_model_route=_route(
+            model="azure/gpt-test",
+            kwargs={
+                **common_kwargs,
+                "api_key": "secret-key-a",
+                "extra_headers": {"X-Secret": "secret-header-a"},
+            },
+        ),
         classification_input=_classification_input(text),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
     )
     second = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="azure/gpt-test",
-        litellm_kwargs={
-            **common_kwargs,
-            "api_key": "secret-key-b",
-            "authorization": "Bearer secret-token-b",
-            "cookie": "session=secret-cookie-b",
-            "extra_headers": {"X-Secret": "secret-header-b"},
-        },
+        completion_model_route=_route(
+            model="azure/gpt-test",
+            kwargs={
+                **common_kwargs,
+                "api_key": "secret-key-b",
+                "authorization": "Bearer secret-token-b",
+                "cookie": "session=secret-cookie-b",
+                "extra_headers": {"X-Secret": "secret-header-b"},
+            },
+        ),
         classification_input=_classification_input(text),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
@@ -826,6 +872,60 @@ async def test_classification_cache_ignores_credential_only_differences() -> Non
     assert first.cached is False
     assert second.cached is True
     assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_classification_cache_separates_effective_optional_kwargs() -> None:
+    litellm_client = AsyncMock()
+    text = f"optional-kwargs-{uuid4()}"
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                        "evidence": [_evidence(text)],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+    supported_temperature = SupportedModelKwargs(
+        temperature=ModelKwargCapability(supported=True)
+    )
+
+    first = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(
+            model="openai/gpt-test",
+            supported=SupportedModelKwargs(),
+        ),
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+    second = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(
+            model="openai/gpt-test",
+            supported=supported_temperature,
+        ),
+        classification_input=_classification_input(text),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cached is False
+    assert second.cached is False
+    assert litellm_client.acompletion.await_count == 2
+    assert "temperature" not in litellm_client.acompletion.await_args_list[0].kwargs
+    assert litellm_client.acompletion.await_args_list[1].kwargs["temperature"] == 0.0
 
 
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
@@ -944,8 +1044,7 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
 
     first = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         classification_input=_classification_input(text),
         allowed_slot_values=allowed_values,
         tenant_id=uuid4(),
@@ -953,8 +1052,7 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
     )
     second = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         classification_input=_classification_input(text),
         allowed_slot_values=allowed_values,
         tenant_id=uuid4(),
@@ -985,8 +1083,7 @@ async def test_classify_slots_refuses_duplicate_source_ids() -> None:
 
     result = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="openai/gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(model="openai/gpt-test"),
         classification_input=SlotClassificationInput(
             sources=(duplicate_source, duplicate_source)
         ),
@@ -1016,8 +1113,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
 
     await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         classification_input=_classification_input(f"json-format-target-{uuid4()}"),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=uuid4(),
@@ -1079,6 +1175,110 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         schema["properties"]["assumptions"]["items"]["maxLength"]
         == classifier.CLASSIFICATION_NOTE_MAX_LENGTH
     )
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(
+            model="openai/gpt-test",
+            supported=SupportedModelKwargs(),
+        ),
+        classification_input=_classification_input(f"unsupported-temp-{uuid4()}"),
+        allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+        tenant_id=uuid4(),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert "temperature" not in call_kwargs
+    assert call_kwargs["response_format"]["type"] == "json_schema"
+
+
+@pytest.mark.asyncio
+async def test_classification_uses_real_resolved_route_without_discovery_call() -> None:
+    tenant = TenantInDB.model_construct(id=uuid4(), name="Test tenant")
+    now = datetime.now(timezone.utc)
+    model = CompletionModel(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="gpt-test",
+        nickname="GPT test",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        is_deprecated=False,
+        vision=False,
+        reasoning=False,
+        tenant_id=tenant.id,
+        provider_id=uuid4(),
+        provider_type="openai",
+        model_kwargs_capabilities=None,
+    )
+    provider = ResolvedLiteLLMProvider(
+        id=model.provider_id,
+        tenant_id=tenant.id,
+        name="Test provider",
+        provider_type="openai",
+        credentials={"api_key": "test-only"},
+        config={},
+    )
+    encryption_service = MagicMock()
+    encryption_service.is_active.return_value = False
+    completion_service = CompletionService(
+        context_builder=MagicMock(),
+        tenant=tenant,
+        session=AsyncMock(),
+        encryption_service=encryption_service,
+    )
+    provider_loader = AsyncMock(return_value=provider)
+    with patch(
+        "eneo.model_providers.infrastructure.litellm_provider.load_active_litellm_provider",
+        new=provider_loader,
+    ):
+        route = await completion_service.resolve_model_route(model)
+
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "form_intake": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        )
+    )
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=route,
+        classification_input=_classification_input(f"real-route-{uuid4()}"),
+        allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+        tenant_id=tenant.id,
+    )
+
+    assert provider_loader.await_count == 1
+    assert litellm_client.acompletion.await_count == 1
+    outgoing = litellm_client.acompletion.await_args.kwargs
+    assert outgoing["api_key"] == "test-only"
+    assert "temperature" not in outgoing
+    assert outgoing["response_format"]["type"] == "json_schema"
 
 
 def test_slot_classification_prompt_separates_source_material_from_artifacts() -> None:
@@ -1201,8 +1401,7 @@ async def test_classify_slots_logs_tenant_context(
 
     await classify_slots(
         litellm_client=litellm_client,
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=_route(),
         classification_input=_classification_input(f"log-target-{uuid4()}"),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=tenant_id,

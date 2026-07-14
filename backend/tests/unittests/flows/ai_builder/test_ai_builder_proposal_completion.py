@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
@@ -18,6 +29,68 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.model_providers.infrastructure.litellm_provider import (
+    ResolvedLiteLLMProvider,
+)
+from eneo.tenants.tenant import TenantInDB
+
+
+def _route(
+    *,
+    model: str = "openai/gpt-5.4",
+    kwargs: dict[str, object] | None = None,
+    supported: SupportedModelKwargs | None = None,
+) -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model=model,
+        litellm_kwargs=kwargs or {},
+        supported_model_kwargs=supported
+        or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
+
+
+async def _resolved_route(
+    capabilities: dict[str, object] | None,
+) -> ResolvedCompletionModelRoute:
+    now = datetime.now(timezone.utc)
+    tenant = TenantInDB.model_construct(id=uuid4(), name="Test tenant")
+    model = CompletionModel(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="gpt-test",
+        nickname="GPT test",
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        is_deprecated=False,
+        vision=False,
+        reasoning=False,
+        tenant_id=tenant.id,
+        provider_id=uuid4(),
+        provider_type="openai",
+        model_kwargs_capabilities=capabilities,
+    )
+    provider = ResolvedLiteLLMProvider(
+        id=model.provider_id,
+        tenant_id=tenant.id,
+        name="Test provider",
+        provider_type="openai",
+        credentials={"api_key": "test-only"},
+        config={},
+    )
+    encryption_service = MagicMock()
+    encryption_service.is_active.return_value = False
+    completion_service = CompletionService(
+        context_builder=MagicMock(),
+        tenant=tenant,
+        session=AsyncMock(),
+        encryption_service=encryption_service,
+    )
+    with patch(
+        "eneo.model_providers.infrastructure.litellm_provider.load_active_litellm_provider",
+        new=AsyncMock(return_value=provider),
+    ):
+        return await completion_service.resolve_model_route(model)
 
 
 def _make_response_with_text(
@@ -52,6 +125,60 @@ def test_forced_tool_choice_builds_provider_shape_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_proposal_omits_temperature_without_persisted_route_capability() -> None:
+    route = await _resolved_route(None)
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            route=route,
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["model"] == "openai/gpt-test"
+    assert call_kwargs["api_key"] == "test-only"
+    assert "temperature" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_proposal_passes_supported_temperature_unchanged() -> None:
+    route = await _resolved_route(
+        {
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0,
+                "maximum": 2,
+                "step": 0.01,
+            }
+        }
+    )
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            route=route,
+            max_output_tokens=1024,
+            temperature=0.27,
+        ),
+    )
+
+    assert litellm_client.acompletion.await_count == 1
+    assert litellm_client.acompletion.await_args.kwargs["temperature"] == 0.27
+
+
+@pytest.mark.asyncio
 async def test_call_proposal_completion_strips_planner_response_format_kwargs() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
@@ -61,12 +188,13 @@ async def test_call_proposal_completion_strips_planner_response_format_kwargs() 
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={
-                "response_format": {"type": "json_object"},
-                "drop_params": False,
-                "api_base": "http://provider.example",
-            },
+            route=_route(
+                kwargs={
+                    "response_format": {"type": "json_object"},
+                    "drop_params": False,
+                    "api_base": "http://provider.example",
+                }
+            ),
             max_output_tokens=1024,
             temperature=0.2,
         ),
@@ -91,8 +219,7 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={"drop_params": False},
+            route=_route(kwargs={"drop_params": False}),
             max_output_tokens=1024,
             temperature=0.2,
         ),
@@ -112,8 +239,7 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
             tool_choice="auto",
@@ -135,8 +261,7 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
             tool_choice=tool_choice,
@@ -158,8 +283,7 @@ async def test_call_proposal_completion_ignores_malformed_usage_shape() -> None:
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
         ),
@@ -196,8 +320,7 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
         ),
@@ -237,8 +360,7 @@ async def test_call_proposal_completion_normalizes_object_tool_calls() -> None:
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
         ),
@@ -273,8 +395,7 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
         ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
             counts_as_repair=False,
@@ -313,8 +434,7 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
         ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Repair the proposal"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
+            route=_route(),
             max_output_tokens=1024,
             temperature=0.2,
             counts_as_repair=True,

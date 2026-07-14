@@ -37,6 +37,9 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
     from eneo.flows.ai_builder.ai_builder_litellm_completion import (
         LLMCompletionResponse,
     )
@@ -94,8 +97,7 @@ class ProposalCompletionFn(Protocol):
 class ProposalCompletionRequest:
     messages: list[LLMMessageParam]
     tool_schemas: list[dict[str, Any]]
-    litellm_model: str
-    litellm_kwargs: dict[str, Any]
+    route: ResolvedCompletionModelRoute
     max_output_tokens: int
     temperature: float
     tool_choice: ToolChoiceParam | None = None
@@ -153,8 +155,7 @@ class ProposalTurnContext:
     new_messages_start: int
     llm_messages: list[LLMMessageParam]
     tool_schemas: list[dict[str, Any]]
-    litellm_model: str
-    litellm_kwargs: dict[str, Any]
+    route: ResolvedCompletionModelRoute
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
     resource_catalog: AIBuilderResourceCatalog | None
@@ -190,8 +191,7 @@ class ProposalTurnContext:
         return ProposalCompletionRequest(
             messages=self.llm_messages if messages is None else messages,
             tool_schemas=self.tool_schemas if tool_schemas is None else tool_schemas,
-            litellm_model=self.litellm_model,
-            litellm_kwargs=self.litellm_kwargs,
+            route=self.route,
             max_output_tokens=self.max_output_tokens,
             temperature=temperature,
             tool_choice=tool_choice,

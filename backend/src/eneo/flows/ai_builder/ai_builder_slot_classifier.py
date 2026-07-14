@@ -5,9 +5,13 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import UUID
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentCoverage,
 )
@@ -23,6 +27,11 @@ from eneo.flows.ai_builder.planning_state import FileRole
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
 SlotClassificationEvidenceLevel = Literal["explicit", "inferred"]
@@ -138,8 +147,7 @@ class SlotClassificationBias:
 async def classify_slots(
     *,
     litellm_client: Any,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
+    completion_model_route: ResolvedCompletionModelRoute,
     classification_input: SlotClassificationInput,
     allowed_slot_values: Mapping[str, Collection[str]],
     tenant_id: UUID,
@@ -154,9 +162,10 @@ async def classify_slots(
         return None
 
     slot_names = tuple(slot_values.keys())
+    litellm_model = completion_model_route.litellm_model
     provider = slot_classification_provider_identity(
         litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
+        litellm_kwargs=completion_model_route.litellm_kwargs,
     )
     messages = _build_slot_classification_prompt(
         classification_input=classification_input,
@@ -171,6 +180,7 @@ async def classify_slots(
         allowed_slot_values=slot_values,
         litellm_model=litellm_model,
         provider=provider,
+        supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
@@ -187,10 +197,10 @@ async def classify_slots(
         return replace(cached, cached=True)
 
     started_at = time.perf_counter()
-    completion_kwargs = {
-        **litellm_kwargs,
-        "response_format": response_format,
-    }
+    completion_kwargs = completion_model_route.filter_unsupported_model_kwargs(
+        ModelKwargs(temperature=0.0)
+    )
+    completion_kwargs["response_format"] = response_format
     if before_provider_call is not None:
         await before_provider_call()
     try:
@@ -200,7 +210,6 @@ async def classify_slots(
             stream=False,
             drop_params=True,
             max_tokens=900,
-            temperature=0.0,
             **completion_kwargs,
         )
     except Exception as error:
@@ -214,9 +223,7 @@ async def classify_slots(
                 cached=False,
             ),
         )
-        if before_provider_call is not None:
-            raise AIBuilderProviderOutcomeUnknownException() from error
-        return None
+        raise AIBuilderProviderOutcomeUnknownException() from error
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():
@@ -789,6 +796,7 @@ def slot_classification_prompt_hash(
     allowed_slot_values: Mapping[str, Collection[str]],
     litellm_model: str,
     provider: str,
+    supported_model_kwargs: SupportedModelKwargs,
     bias: SlotClassificationBias | None = None,
 ) -> str:
     return hashlib.sha256(
@@ -798,6 +806,11 @@ def slot_classification_prompt_hash(
             allowed_slot_values=allowed_slot_values,
             litellm_model=litellm_model,
             provider=provider,
+            effective_optional_kwargs_fingerprint=(
+                _effective_optional_kwargs_fingerprint(
+                    _effective_slot_classification_model_kwargs(supported_model_kwargs)
+                )
+            ),
             bias=bias,
         ).encode("utf-8")
     ).hexdigest()
@@ -1023,6 +1036,7 @@ def _classification_cache_payload(
     allowed_slot_values: Mapping[str, Collection[str]],
     litellm_model: str,
     provider: str,
+    effective_optional_kwargs_fingerprint: str,
     bias: SlotClassificationBias | None = None,
 ) -> str:
     normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
@@ -1038,12 +1052,31 @@ def _classification_cache_payload(
             for slot_name, values in sorted(normalized_values.items())
         },
         "classification_input": _classification_input_payload(classification_input),
+        "effective_optional_kwargs_fingerprint": (
+            effective_optional_kwargs_fingerprint
+        ),
         "model": litellm_model,
         "prompt": prompt,
         "provider": provider,
         "response_format": _slot_classification_response_format(normalized_values),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _effective_slot_classification_model_kwargs(
+    supported_model_kwargs: SupportedModelKwargs,
+) -> ModelKwargs:
+    return ModelKwargs(temperature=0.0).filter_unsupported(supported_model_kwargs)
+
+
+def _effective_optional_kwargs_fingerprint(model_kwargs: ModelKwargs) -> str:
+    payload = json.dumps(
+        model_kwargs.model_dump(exclude_none=True, exclude={"response_format"}),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _classification_input_payload(

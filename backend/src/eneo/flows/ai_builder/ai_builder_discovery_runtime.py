@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
@@ -57,6 +57,11 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.domain.flow import Flow
+
+if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
 
 _MAX_CLASSIFICATION_TRANSCRIPT_CHARS = 12_000
 _MAX_CLASSIFICATION_TRANSCRIPT_SOURCES = 120
@@ -289,8 +294,7 @@ async def build_runtime_discovery_context(
     *,
     flow: Flow | None = None,
     litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
+    completion_model_route: ResolvedCompletionModelRoute | None = None,
     ui_language: str | None = None,
     tenant_id: UUID,
     allow_classification: bool = True,
@@ -299,7 +303,11 @@ async def build_runtime_discovery_context(
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(conversation, flow=flow)
     apply_attachment_file_roles_to_planning_state(state, attachment_context)
-    if not allow_classification or litellm_client is None or litellm_model is None:
+    if (
+        not allow_classification
+        or litellm_client is None
+        or completion_model_route is None
+    ):
         return RuntimeDiscoveryContext(planning_state=state)
 
     text = aggregate_freeform_user_text(conversation)
@@ -331,8 +339,7 @@ async def build_runtime_discovery_context(
     )
     result = await classify_slots(
         litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs or {},
+        completion_model_route=completion_model_route,
         classification_input=classification_input,
         allowed_slot_values=allowed_values,
         tenant_id=tenant_id,
@@ -344,15 +351,16 @@ async def build_runtime_discovery_context(
         return RuntimeDiscoveryContext(planning_state=state)
 
     provider = slot_classification_provider_identity(
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs or {},
+        litellm_model=completion_model_route.litellm_model,
+        litellm_kwargs=completion_model_route.litellm_kwargs,
     )
     prompt_hash = slot_classification_prompt_hash(
         classification_input=classification_input,
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
-        litellm_model=litellm_model,
+        litellm_model=completion_model_route.litellm_model,
         provider=provider,
+        supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
     )
     merge_llm_resolved_slots(
@@ -370,7 +378,7 @@ async def build_runtime_discovery_context(
             result,
             prompt_hash=prompt_hash,
             classification_input=classification_input,
-            model=litellm_model,
+            model=completion_model_route.litellm_model,
             provider=provider,
         ),
     )
@@ -381,8 +389,7 @@ async def build_discovery_runtime_result(
     *,
     flow: Flow | None = None,
     litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
+    completion_model_route: ResolvedCompletionModelRoute | None = None,
     ui_language: str | None = None,
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
@@ -393,8 +400,7 @@ async def build_discovery_runtime_result(
         conversation,
         flow=flow,
         litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
+        completion_model_route=completion_model_route,
         ui_language=ui_language,
         tenant_id=tenant_id,
         allow_classification=allow_semantic_adjudication,
