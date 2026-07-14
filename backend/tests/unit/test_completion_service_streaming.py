@@ -17,7 +17,6 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
-    persist_parameter_presence_model_kwargs_capabilities,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -223,43 +222,6 @@ async def test_streaming_omits_kwargs_for_invalid_capability_evidence():
     )
 
     adapter_loader.assert_awaited_once_with(completion_model)
-    assert len(adapter.streaming_model_kwargs) == 1
-    effective_kwargs = adapter.streaming_model_kwargs[0]
-    assert effective_kwargs is not None
-    assert effective_kwargs.model_dump(exclude_none=True) == {
-        "response_format": response_format
-    }
-
-
-@pytest.mark.asyncio
-async def test_streaming_omits_parameter_presence_sampling_evidence():
-    completion_model = _make_completion_model()
-    object.__setattr__(
-        completion_model,
-        "model_kwargs_capabilities",
-        persist_parameter_presence_model_kwargs_capabilities(
-            SupportedModelKwargs(temperature=ModelKwargCapability(supported=True))
-        ),
-    )
-    adapter = _DummyAdapter(model=completion_model)
-    service = CompletionService(
-        context_builder=_DummyContextBuilder(),
-        tenant=SimpleNamespace(id=uuid4()),
-        session=AsyncMock(),
-    )
-    service._get_adapter = AsyncMock(return_value=adapter)
-    response_format = {"type": "json_object"}
-
-    await service.get_response(
-        model=completion_model,
-        text_input="hi",
-        model_kwargs=ModelKwargs(
-            temperature=0.0,
-            response_format=response_format,
-        ),
-        stream=True,
-    )
-
     assert len(adapter.streaming_model_kwargs) == 1
     effective_kwargs = adapter.streaming_model_kwargs[0]
     assert effective_kwargs is not None

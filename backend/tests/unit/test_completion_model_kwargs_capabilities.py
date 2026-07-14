@@ -24,7 +24,6 @@ from eneo.completion_models.domain.completion_model import (
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
-    snapshot_supported_model_kwargs,
 )
 from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
@@ -90,14 +89,6 @@ def test_explicit_capability_evidence_round_trips_without_public_marker():
     assert "_evidence" not in public_projection.model_dump()
 
 
-def test_parameter_presence_discovery_does_not_authorize_value_domains():
-    snapshot = snapshot_supported_model_kwargs(
-        ["temperature", "top_p", "reasoning_effort"], reasoning=True
-    )
-
-    assert snapshot == SupportedModelKwargs()
-
-
 def test_untagged_persisted_capabilities_fail_closed():
     resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
         model_kwargs_capabilities={
@@ -110,22 +101,6 @@ def test_untagged_persisted_capabilities_fail_closed():
             }
         },
         reasoning=True,
-    )
-
-    assert resolved == SupportedModelKwargs()
-
-
-def test_parameter_presence_evidence_fails_closed():
-    discovered = SupportedModelKwargs(temperature=ModelKwargCapability(supported=True))
-    persisted = (
-        model_kwargs_capabilities.persist_parameter_presence_model_kwargs_capabilities(
-            discovered
-        )
-    )
-
-    resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
-        model_kwargs_capabilities=persisted,
-        reasoning=False,
     )
 
     assert resolved == SupportedModelKwargs()
