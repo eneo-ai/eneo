@@ -37,9 +37,7 @@ def test_create_group_chat_from_db_skips_missing_member_assistant():
     missing_id = uuid4()
     present_assistant = SimpleNamespace(id=present_id)
 
-    group_chat_db = _group_chat_db(
-        [_mapping(present_id), _mapping(missing_id)]
-    )
+    group_chat_db = _group_chat_db([_mapping(present_id), _mapping(missing_id)])
 
     group_chat = GroupChatFactory.create_group_chat_from_db(
         group_chat_db=group_chat_db,

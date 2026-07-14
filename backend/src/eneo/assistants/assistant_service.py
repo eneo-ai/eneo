@@ -168,7 +168,6 @@ class AssistantService:
         repo: AssistantRepository,
         space_repo: "SpaceRepository",
         user: UserInDB,
-        auth_service: AuthService,
         service_repo: ServiceRepository,
         step_repo: StepRepository,
         completion_model_crud_service: "CompletionModelCRUDService",
@@ -185,6 +184,7 @@ class AssistantService:
         icon_repo: IconRepository,
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
+        auth_service: AuthService,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
@@ -193,7 +193,6 @@ class AssistantService:
         self.space_repo = space_repo
         self.factory = factory
         self.user = user
-        self.auth_service = auth_service
         self.service_repo = service_repo
         self.step_repo = step_repo
         self.completion_model_crud_service = completion_model_crud_service
@@ -211,6 +210,7 @@ class AssistantService:
         self.help_assistant_assignment_history_repo = (
             help_assistant_assignment_history_repo
         )
+        self.auth_service = auth_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
@@ -1147,27 +1147,6 @@ class AssistantService:
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
-
-    @validate_permissions(Permission.ADMIN)
-    async def generate_api_key(self, assistant_id: UUID):
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        assert space.id is not None
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
-
-        if not actor.can_edit_assistants():
-            raise UnauthorizedException(
-                "You do not have permission to manage assistant API keys.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "assistant",
-                    "action": "manage_api_keys",
-                    "auth_layer": "domain_policy",
-                },
-            )
-
-        return await self.auth_service.create_assistant_api_key(
-            "ina", assistant_id=assistant_id
-        )
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)

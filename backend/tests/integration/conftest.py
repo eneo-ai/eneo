@@ -136,6 +136,7 @@ from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.main import get_application
 from init_db import add_tenant_user
+from tests.fixtures import mint_v2_api_key
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -696,13 +697,15 @@ async def admin_user(db_container):
 @pytest.fixture
 async def admin_user_api_key(admin_user, db_container):
     """
-    Create an API key for the admin user.
+    Create a v2 API key for the admin user.
     This fixture creates a fresh API key for each test.
     """
     async with db_container() as container:
-        auth_service = container.auth_service()
-        api_key = await auth_service.create_user_api_key(
-            prefix="test", user_id=admin_user.id, delete_old=True
+        api_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            prefix="test",
         )
     return api_key
 

@@ -31,27 +31,6 @@ export function initUser(client) {
     },
 
     /**
-     * Generate a new api-key for the currently logged in user.
-     * WARNING: Will delete any old api-key!
-     * @returns {Promise<{truncated_key: string; key: string;}>}
-     * @throws {EneoError}
-     * */
-    generateApiKey: async () => {
-      const res = await client.fetch("/api/v1/users/api-keys/", { method: "get" });
-      return res;
-    },
-
-    /**
-     * Revoke the caller's legacy (v1) API key. Permanent action.
-     * @returns {Promise<boolean>} Returns true on success
-     * @throws {EneoError}
-     * */
-    revokeLegacyApiKey: async () => {
-      await client.fetch("/api/v1/users/api-keys/legacy", { method: "delete" });
-      return true;
-    },
-
-    /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
      * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} options

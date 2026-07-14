@@ -18,9 +18,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import auth_dependencies
-from eneo.authentication.api_key_router_helpers import (
-    error_responses as api_key_error_responses,
-)
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
@@ -29,7 +26,6 @@ from eneo.authentication.auth_dependencies import (
 )
 from eneo.authentication.auth_models import (
     AccessToken,
-    ApiKey,
     ApiKeyPermission,
     OpenIdConnectLogin,
 )
@@ -67,12 +63,6 @@ class _ProvisioningService(Protocol):
     """Minimal protocol for the user provisioning service (container.user_creation_service)."""
 
     async def provision_user(self, *, access_token: str) -> None: ...
-
-
-_LEGACY_USER_API_KEY_EXAMPLE = {
-    "key": "inp_3f5f2f7f7f...d9a1",
-    "truncated_key": "d9a1",
-}
 
 
 async def _load_single_tenant_allowed_origins(
@@ -769,142 +759,9 @@ async def get_currently_authenticated_user(
         tenant_id=current_user.tenant_id, owner_user_id=current_user.id
     )
     truncated_key = latest_key.key_suffix if latest_key is not None else None
-    if truncated_key is None and current_user.api_key is not None:
-        truncated_key = current_user.api_key.truncated_key
-    legacy_suffix = (
-        current_user.api_key.truncated_key if current_user.api_key is not None else None
-    )
     return UserPublic(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
-        legacy_api_key_suffix=legacy_suffix,
-    )
-
-
-@users_admin_router.post(
-    "/api-keys/",
-    response_model=ApiKey,
-    tags=["Legacy API Keys"],
-    summary="Generate legacy user API key",
-    deprecated=True,
-    description=(
-        "Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. "
-        "This endpoint rotates the old legacy key immediately."
-    ),
-    responses={
-        200: {
-            "description": "Legacy API key created and returned once.",
-            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
-        },
-        410: {
-            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": "deprecated_endpoint",
-                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
-                    }
-                }
-            },
-        },
-        **api_key_error_responses([401, 403]),
-    },
-)
-async def generate_api_key(
-    current_user: Annotated[
-        UserInDB, Depends(auth_dependencies.get_current_active_user)
-    ],
-    container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    """Generating a new api key will delete the old key.
-    Make sure to copy the key since it will only be showed once,
-    after which only the truncated key will be shown."""
-    validate_permission(current_user, Permission.ADMIN)
-    settings = config.get_settings()
-    if not settings.api_key_legacy_endpoints_enabled:
-        raise HTTPException(
-            status_code=410,
-            detail={
-                "code": "deprecated_endpoint",
-                "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
-            },
-        )
-    service = container.user_service()
-
-    # Generate API key
-    api_key = await service.generate_api_key(current_user.id)
-
-    # Build extra context for API key generation
-    extra = {
-        "truncated_key": api_key.truncated_key,
-        "key_type": "user",
-        "tenant_id": str(current_user.tenant_id),
-        "tenant_name": current_user.tenant.display_name or current_user.tenant.name
-        if current_user.tenant
-        else None,
-    }
-
-    # Audit logging for API key generation
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.API_KEY_GENERATED,
-        entity_type=EntityType.API_KEY,
-        entity_id=current_user.id,  # Use user ID as entity ID for user API keys
-        description=f"Generated new API key for user '{current_user.email}'",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=current_user,  # Self-action: user is both actor and target
-            extra=extra,
-        ),
-    )
-
-    return api_key
-
-
-@users_admin_router.delete(
-    "/api-keys/legacy",
-    status_code=204,
-    tags=["Legacy API Keys"],
-    summary="Revoke legacy user API key",
-    description="Permanently revokes the caller's legacy (v1) API key.",
-    responses={
-        404: {"description": "No legacy API key found."},
-        **api_key_error_responses([401, 403]),
-    },
-)
-async def revoke_legacy_api_key(
-    current_user: Annotated[
-        UserInDB, Depends(auth_dependencies.get_current_active_user)
-    ],
-    container: Annotated[Container, Depends(get_container())],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    if current_user.api_key is None:
-        raise HTTPException(status_code=404, detail="No legacy API key found.")
-
-    api_key_repo = container.api_key_repo()
-    await api_key_repo.delete_by_user(current_user.id)
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.API_KEY_REVOKED,
-        entity_type=EntityType.API_KEY,
-        entity_id=current_user.id,
-        description=f"Revoked legacy API key for user '{current_user.email}'",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=current_user,
-            extra={
-                "key_type": "legacy",
-                "truncated_key": current_user.api_key.truncated_key,
-                "tenant_id": str(current_user.tenant_id),
-            },
-        ),
     )
 
 

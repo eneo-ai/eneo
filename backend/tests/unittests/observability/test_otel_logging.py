@@ -14,7 +14,7 @@ import logging
 
 import pytest
 
-from eneo.main.logging import OTELJSONFormatter, _SEVERITY_NUMBER
+from eneo.main.logging import _SEVERITY_NUMBER, OTELJSONFormatter
 from eneo.main.observability import redact_url_query
 from eneo.main.request_context import clear_request_context, set_request_context
 
@@ -130,7 +130,9 @@ def test_severity_number_map_complete():
 
 
 def test_request_context_goes_into_attributes():
-    set_request_context(tenant_slug="acme", user_email="user@example.com", status_code=200)
+    set_request_context(
+        tenant_slug="acme", user_email="user@example.com", status_code=200
+    )
     attrs = _parse(_make_record("msg"))["attributes"]
     assert attrs["tenant_slug"] == "acme"
     assert attrs["user_email"] == "user@example.com"
@@ -138,7 +140,9 @@ def test_request_context_goes_into_attributes():
 
 
 def test_extra_fields_go_into_attributes():
-    out = _parse(_make_record("msg", extra={"error_id": "ab12cd34", "path": "/api/test"}))
+    out = _parse(
+        _make_record("msg", extra={"error_id": "ab12cd34", "path": "/api/test"})
+    )
     assert out["attributes"]["error_id"] == "ab12cd34"
     assert out["attributes"]["path"] == "/api/test"
 

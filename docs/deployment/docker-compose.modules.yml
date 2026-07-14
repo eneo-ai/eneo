@@ -1,0 +1,77 @@
+# ============================================================================
+# ENEO OPTIONAL MODULES - Docker Compose Overlay
+# ============================================================================
+# Optional module containers, deployed ON TOP of the core stack:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.modules.yml \
+#     --profile <module-id> up -d
+#
+# This file is INERT by default: every module is gated behind a Compose
+# profile, so plain `docker compose up -d` never starts any of them.
+#
+# WHAT A MODULE IS:
+#   A self-contained web app on its own domain. It joins module_net only,
+#   calls the Eneo backend at http://backend:8000 with a scoped service key
+#   (sk_), and can never reach PostgreSQL or Redis. See MODULES.md for the
+#   full operator guide (DNS, API key, env files, verification).
+#
+# ADDING A NEW MODULE:
+#   Copy the mod-tal-till-text service below and change: service name,
+#   profile, image, MODULE_ID, public domain (3 label locations + 1 env),
+#   Traefik router/service names, and the module env file.
+#
+# NETWORK NOTE:
+#   module_net is internal: modules have NO outbound internet access. All
+#   module traffic goes to backend:8000, and user login is handed off from
+#   the user's Eneo session (SSO) - the browser does the redirect legs, so
+#   the module itself never needs to reach an IdP. A module that genuinely
+#   needs an external API must go through the backend.
+# ============================================================================
+
+x-module-common: &module-common
+  restart: unless-stopped
+  networks:
+    - module_net
+  depends_on:
+    backend:
+      condition: service_healthy
+
+services:
+  mod-tal-till-text:
+    <<: *module-common
+    profiles: ["tal-till-text", "all-modules"]
+    image: ghcr.io/eneo-ai/eneo-mod-tal-till-text:${MODULE_TTT_VERSION:-latest}
+    container_name: eneo_mod_tal_till_text
+    environment:
+      - ENEO_BACKEND_URL=http://backend:8000
+      - ENEO_PUBLIC_URL=https://your-domain.com                # CHANGE THIS
+      - MODULE_PUBLIC_URL=https://ttt.your-domain.com          # CHANGE THIS
+      - MODULE_ID=tal-till-text
+    env_file:
+      - env_modules.env
+      - env_module_ttt.env
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      # Modules are routed over module_net, overriding Traefik's default
+      # provider network (proxy_tier) from the core compose file.
+      - "traefik.docker.network=eneo_module_net"
+      - "traefik.http.routers.mod-ttt.rule=Host(`ttt.your-domain.com`)"  # CHANGE THIS
+      - "traefik.http.routers.mod-ttt.entrypoints=web"
+      - "traefik.http.routers.mod-ttt.middlewares=redirect-to-https"
+      - "traefik.http.routers.mod-ttt-secure.rule=Host(`ttt.your-domain.com`)"  # CHANGE THIS
+      - "traefik.http.routers.mod-ttt-secure.entrypoints=websecure"
+      - "traefik.http.routers.mod-ttt-secure.tls=true"
+      - "traefik.http.routers.mod-ttt-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mod-ttt-secure.service=mod-ttt-svc"
+      - "traefik.http.services.mod-ttt-svc.loadbalancer.server.port=3000"
+
+networks:
+  module_net:
+    driver: bridge
+    internal: true  # must match the declaration in docker-compose.yml
