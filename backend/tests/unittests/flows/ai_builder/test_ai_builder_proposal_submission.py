@@ -207,6 +207,109 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
 
 
 @pytest.mark.asyncio
+async def test_create_propose_flow_ambiguous_structured_source_returns_event_without_repair() -> (
+    None
+):
+    submission = _make_submission()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-ambiguous-structured-source",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Ambiguous report",
+            "plan_rationale": "Two structured stages precede section writers.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_facts",
+                            "field_type": "string",
+                            "description": "Facts from the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Prepare report facts",
+                    "instructions": "Prepare report facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "report_facts",
+                            "field_type": "string",
+                            "description": "Facts prepared for the report.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write findings",
+                    "instructions": "Write the findings section.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Write recommendations",
+                    "instructions": "Write the recommendations section.",
+                    "output_type": "text",
+                },
+            ],
+        },
+        tool_call_id="call-ambiguous-structured-source",
+    )
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Build a report")],
+        usage_tracker=tracker,
+        request_id="req-ambiguous-structured-source",
+        text_content="",
+    )
+
+    async def _unexpected_repair_events(_request):
+        yield build_status_event(AIBuilderStatus.REPAIRING)
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
+        side_effect=_unexpected_repair_events,
+    ) as repair:
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = _wire_events([event async for event in dispatched])
+
+    repair.assert_not_called()
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    assert payload["phase"] == "proposal"
+    assert payload["details"]["architecture_error_code"] == (
+        "architecture_materialization_failed"
+    )
+    assert payload["details"]["architecture_error_detail"] == (
+        "Step 3: Consolidate the required facts into one structured preparation "
+        "step, or use one supported terminal aggregate before adding section writers."
+    )
+    assert payload["details"]["failure_code"] == (
+        "section_writer_structured_source_ambiguous"
+    )
+    assert payload["details"]["reason"] == (
+        "section_writer_structured_source_ambiguous"
+    )
+    assert payload["details"]["step_index"] == 3
+
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_success"] is False
+    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
+    assert telemetry["proposal_repair_invocation_count"] == 0
+    assert telemetry["proposal_repair_invocation_reasons"] == []
+    assert telemetry["llm_calls_made"] == 0
+    assert telemetry["repair_attempts"] == 0
+
+
+@pytest.mark.asyncio
 async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair() -> (
     None
 ):

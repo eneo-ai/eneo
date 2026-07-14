@@ -57,7 +57,10 @@ PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Do not answer with prose."
 )
 _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
-    {"assembly_unsupported_architecture_hints"}
+    {
+        "assembly_unsupported_architecture_hints",
+        "section_writer_structured_source_ambiguous",
+    }
 )
 
 
