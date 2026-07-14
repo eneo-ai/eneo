@@ -1513,6 +1513,62 @@ class TestSlotClassificationMetadataReplay:
         assert slot.value == "structured_json"
         assert slot.source == "structured_answer"
 
+    def test_structured_report_answer_wins_after_classifier_prerequisite_replay(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Create a report from the supplied material.",
+                    metadata=_slot_classification_metadata(
+                        _classified("primary_runtime_input", "documents", "high"),
+                        _classified(
+                            "document_material_scope",
+                            "multiple_documents_case",
+                            "high",
+                        ),
+                        _classified("terminal_output", "pdf_document", "high"),
+                        _classified(
+                            "report_disposition",
+                            "synthesized_overview",
+                            "medium",
+                        ),
+                    ),
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="PDF",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "final_output_mode",
+                            "selected_option_ids": ["pdf_document"],
+                            "selected_values": ["pdf_document"],
+                        }
+                    },
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="Sections per source",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "report_disposition",
+                            "selected_option_ids": ["per_source_sections"],
+                            "selected_values": ["per_source_sections"],
+                        }
+                    },
+                ),
+            ]
+        )
+
+        terminal_output = state.resolved_slots["terminal_output"]
+        report_disposition = state.resolved_slots["report_disposition"]
+        assert terminal_output.value == "pdf_document"
+        assert terminal_output.source == "structured_answer"
+        assert report_disposition.value == "per_source_sections"
+        assert report_disposition.source == "structured_answer"
+        assert report_disposition.confidence == "high"
+
     def test_replays_metadata_in_conversation_order_without_replacing_model_slots(
         self,
     ) -> None:

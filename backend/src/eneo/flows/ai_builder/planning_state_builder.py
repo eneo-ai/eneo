@@ -245,6 +245,7 @@ def build_planning_state_from_conversation(
         output_schema_evidence=output_schema_evidence,
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
+    _reconcile_report_disposition_after_classifier_replay(state, conversation)
     _reconcile_output_schema_evidence(state, conversation)
     return state
 
@@ -276,6 +277,37 @@ def _replay_slot_classification_metadata(
         replayed = True
     if replayed:
         apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
+
+
+def _reconcile_report_disposition_after_classifier_replay(
+    state: PlanningState,
+    conversation: list[ConversationMessage],
+) -> None:
+    """Apply an explicit report choice after its prerequisites are replayed.
+
+    Report disposition is the only structured answer whose relevance depends on
+    classifier-owned input cardinality. It cannot be resolved during the first
+    deterministic pass when those facts exist only in persisted classifier
+    metadata. Re-checking this one answer after replay lets explicit user intent
+    outrank an older model inference without carrying unrelated slots forward.
+    """
+    if not has_explicit_structured_answer(conversation, "report_disposition"):
+        return
+    values = extract_answer_signals(conversation).get("report_disposition")
+    if values is None or len(values) != 1:
+        return
+    value = next(iter(values))
+    if value not in legal_slot_values("report_disposition"):
+        return
+    if not _report_disposition_slot_is_relevant(state):
+        return
+    state.resolved_slots["report_disposition"] = ResolvedSlot(
+        name="report_disposition",
+        value=value,
+        source="structured_answer",
+        evidence=["question_answer:report_disposition"],
+        confidence="high",
+    )
 
 
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(

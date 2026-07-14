@@ -77,6 +77,12 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
     SessionTurnAcceptance,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
+    ClassifiedSlot,
+    SlotClassificationInput,
+    SlotClassificationResult,
+)
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import (
@@ -5130,116 +5136,160 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         space_name="AI Builder report-disposition monotonicity",
     )
 
-    initial_question = _make_tool_call(
-        tool_call_id="call_q1",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "report_disposition",
-            "question": "Hur ska rapporten hantera flera källdokument?",
-            "options": [
-                {
-                    "id": "per_source_sections",
-                    "label": "Avsnitt per källa",
-                },
-                {"id": "synthesized_overview", "label": "Samlad översikt"},
-                {"id": "both", "label": "Både avsnitt och översikt"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    repeated_question = _make_tool_call(
-        tool_call_id="call_q2",
-        name="ask_structured_question",
-        arguments={
-            "question_id": "report_disposition",
-            "question": "Hur ska rapporten hantera flera källdokument?",
-            "options": [
-                {"id": "per_source_sections", "label": "Avsnitt per källa"},
-                {"id": "both", "label": "Båda"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    requirements_summary = _make_tool_call(
-        tool_call_id="call_requirements",
-        name="confirm_requirements",
-        arguments={
-            "summary": "En PDF-rapport från flera dokument.",
-            "key_decisions": [
-                {"topic": "Input", "decision": "Flera dokument"},
-                {"topic": "Output", "decision": "PDF"},
-                {
-                    "topic": "Rapportstruktur",
-                    "decision": "Källavsnitt och samlad översikt",
-                },
-            ],
-            "input_description": "Användaren laddar upp flera dokument.",
-            "output_description": "Flödet producerar en PDF-rapport.",
-        },
-    )
+    classification_call_count = 0
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion"
-    ) as mock_completion:
-        mock_completion = AsyncMock(
-            side_effect=[
-                _make_llm_response(tool_calls=[initial_question]),
-                _make_llm_response(tool_calls=[repeated_question]),
-                _make_llm_response(tool_calls=[requirements_summary]),
-            ]
+    async def classify_report_shape(**kwargs: object) -> SlotClassificationResult:
+        nonlocal classification_call_count
+        classification_input = kwargs.get("classification_input")
+        assert isinstance(classification_input, SlotClassificationInput)
+        source = classification_input.sources[-1]
+        evidence = (
+            ClassifiedEvidence(
+                source_id=source.source_id,
+                quote=source.text[:80],
+            ),
+        )
+        classification_call_count += 1
+        if classification_call_count == 1:
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="primary_runtime_input",
+                        value="documents",
+                        confidence="high",
+                        reason="The flow reads several uploaded documents.",
+                        evidence=evidence,
+                    ),
+                    ClassifiedSlot(
+                        slot_name="document_material_scope",
+                        value="multiple_documents_case",
+                        confidence="high",
+                        reason="Each run handles a document set.",
+                        evidence=evidence,
+                    ),
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="structure_key_information",
+                        confidence="high",
+                        reason="The requested result is a structured report.",
+                        evidence=evidence,
+                    ),
+                )
+            )
+        return SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="report_disposition",
+                    value="synthesized_overview",
+                    confidence="medium",
+                    reason="Older classifier inference from the whole transcript.",
+                    evidence=evidence,
+                ),
+            )
         )
 
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-            new=mock_completion,
-        ):
-            with patch(
-                "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
-                new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
-            ):
-                session_id = await _create_ai_builder_session(
-                    client=client,
-                    bearer_token=bearer_token,
-                    space_id=space_id,
-                )
-                first_events = await _send_builder_message(
-                    client=client,
-                    bearer_token=bearer_token,
-                    session_id=session_id,
-                    message="Skapa en PDF-rapport från flera uppladdade dokument.",
-                )
-                second_events = await _send_builder_message(
-                    client=client,
-                    bearer_token=bearer_token,
-                    session_id=session_id,
-                    message="Både avsnitt och översikt",
-                    question_answer={
-                        "question_id": "report_disposition",
-                        "selected_option_ids": ["both"],
-                        "selected_values": ["both"],
-                        "ui_language": "sv",
-                    },
-                )
+    mock_classifier = AsyncMock(side_effect=classify_report_shape)
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=mock_classifier,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ),
+    ):
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+        first_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Skapa ett flöde för rapportering.",
+        )
+        second_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="PDF",
+            question_answer={
+                "question_id": "terminal_output",
+                "selected_option_ids": ["pdf_document"],
+                "selected_values": ["pdf_document"],
+                "ui_language": "sv",
+            },
+        )
+        third_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Strukturera materialet",
+            question_answer={
+                "question_id": "post_processing_goal",
+                "selected_option_ids": ["structure_key_information"],
+                "selected_values": ["structure_key_information"],
+                "ui_language": "sv",
+            },
+        )
+        fourth_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Avsnitt per källa",
+            question_answer={
+                "question_id": "report_disposition",
+                "selected_option_ids": ["per_source_sections"],
+                "selected_values": ["per_source_sections"],
+                "ui_language": "sv",
+            },
+        )
 
     assert any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
-        == "report_disposition"
+        == "terminal_output"
         for event in first_events
     )
-    assert not any(event["event"] == "error" for event in second_events), second_events
     assert any(
-        event["event"] in {"requirements_summary", "question"}
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "post_processing_goal"
         for event in second_events
+    ), [
+        (
+            event["event"],
+            cast(dict[str, object], event["data"]).get("question_id"),
+        )
+        for event in second_events
+    ]
+    assert any(
+        event["event"] == "question"
+        and cast(dict[str, object], event["data"]).get("question_id")
+        == "report_disposition"
+        for event in third_events
     )
+    assert not any(event["event"] == "error" for event in fourth_events), fourth_events
     assert not any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
         == "report_disposition"
-        for event in second_events
+        for event in fourth_events
     )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        loaded_state = await repo.load_planning_state(
+            session_id=UUID(session_id),
+            tenant_id=user.tenant_id,
+        )
+
+    assert loaded_state is not None
+    report_disposition = loaded_state.resolved_slots["report_disposition"]
+    assert report_disposition.value == "per_source_sections"
+    assert report_disposition.source == "structured_answer"
 
 
 @pytest.mark.asyncio
