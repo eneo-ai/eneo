@@ -38,9 +38,6 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "terminal_renderer_must_not_consume_review_only_step": (
         "Lägg inte ett granskningssteg som bara producerar anteckningar direkt före DOCX/PDF. Sista textsteget före renderern ska vara den färdiga dokumenttexten: flytta granskningen före slutlig sammanställning, eller låt granskningssteget skriva en reviderad slutversion av hela dokumentet."
     ),
-    "section_text_steps_must_reference_source_json_fields": (
-        "Låt varje avsnittssteg beskriva vilka namngivna fält från den strukturerade extraktionen som behövs för just det avsnittet, så att varje rubrik får relevant underlag utan att läsa allt tidigare innehåll."
-    ),
     "requested_output_sections_require_section_writers": (
         "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i intentionen, och gruppera bara närliggande rubriker när det behövs."
     ),

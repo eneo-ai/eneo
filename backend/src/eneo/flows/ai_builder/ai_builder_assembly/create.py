@@ -121,6 +121,7 @@ CreateAssemblyRejectionReason = Literal[
     "plan_invariant_failed",
     "pure_audio_transcription_requires_no_reader_fields",
     "pure_audio_transcription_shape_unsupported",
+    "section_writer_structured_source_ambiguous",
     "source_file_first_step_requires_json",
     "step_output_type_mismatch",
     "terminal_schema_requires_json_terminal",
@@ -170,6 +171,10 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
         "Pure audio transcription requires one plain text semantic step and no "
         "runtime form fields."
     ),
+    "section_writer_structured_source_ambiguous": (
+        "Consolidate the required facts into one structured preparation step, "
+        "or use one supported terminal aggregate before adding section writers."
+    ),
     "source_file_first_step_requires_json": (
         "For document and file inputs, the first semantic step must extract JSON "
         "before text-writing steps consume it."
@@ -207,6 +212,8 @@ class CreateAssemblyRejection:
 
     @property
     def failure_code(self) -> str:
+        if self.reason == "section_writer_structured_source_ambiguous":
+            return self.reason
         return f"assembly_{self.reason}"
 
     @property
@@ -567,6 +574,12 @@ def _assemble_create_intent(
         report_disposition=report_disposition,
         ui_language=ui_language,
     )
+    section_writer_material = _resolve_section_writer_structured_sources(
+        completed_steps
+    )
+    if isinstance(section_writer_material, CreateAssemblyRejection):
+        return section_writer_material
+    completed_steps = section_writer_material
     completed_steps, admitted_form_fields = (
         _drop_planned_source_contract_shadow_form_fields(
             planned_steps=completed_steps,
@@ -1078,6 +1091,68 @@ def _derived_terminal_text_previous_field_refs(
         for from_step, step in json_steps
         for field in step.output_fields
     )
+
+
+def _resolve_section_writer_structured_sources(
+    planned_steps: tuple[PlannedStep, ...],
+) -> tuple[PlannedStep, ...] | CreateAssemblyRejection:
+    terminal_content_index = next(
+        (
+            index
+            for index in range(len(planned_steps) - 1, -1, -1)
+            if planned_steps[index].role not in {"renderer", "template_fill"}
+        ),
+        None,
+    )
+    structured_producer_indexes: list[int] = []
+    writer_indexes_by_producer: dict[int, list[int]] = {}
+    for index, step in enumerate(planned_steps):
+        if step.output_type == OutputType.JSON and step.output_fields:
+            structured_producer_indexes.append(index)
+            continue
+        if not (
+            step.role in {"transform", "body_writer"}
+            and step.input_source == InputSource.PREVIOUS_STEP
+            and step.input_type == InputType.TEXT
+            and step.output_type == OutputType.TEXT
+            and step.output_mode == OutputMode.PASS_THROUGH
+        ):
+            continue
+        if len(structured_producer_indexes) > 1 and index != terminal_content_index:
+            return _reject(
+                "section_writer_structured_source_ambiguous",
+                step_index=index + 1,
+            )
+        if len(structured_producer_indexes) != 1:
+            continue
+        producer_index = structured_producer_indexes[0]
+        writer_indexes_by_producer.setdefault(producer_index, []).append(index)
+
+    updated_steps = list(planned_steps)
+    for producer_index, writer_indexes in writer_indexes_by_producer.items():
+        if len(writer_indexes) < 2:
+            continue
+        producer = planned_steps[producer_index]
+        previous_field_refs = tuple(
+            PreviousFieldRef(
+                from_step=producer_index + 1,
+                field_path=field.name,
+            )
+            for field in producer.output_fields
+        )
+        for writer_index in writer_indexes:
+            writer = updated_steps[writer_index]
+            updated_steps[writer_index] = replace(
+                writer,
+                previous_field_refs=previous_field_refs,
+                underlag_channel=derive_underlag_channel(
+                    input_source=writer.input_source,
+                    input_type=writer.input_type,
+                    previous_step=planned_steps[writer_index - 1],
+                    previous_field_refs=previous_field_refs,
+                ),
+            )
+    return tuple(updated_steps)
 
 
 def _aggregate_terminal_previous_structured_refs(

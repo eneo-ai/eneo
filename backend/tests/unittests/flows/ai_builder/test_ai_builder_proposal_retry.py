@@ -820,10 +820,7 @@ async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes()
         max_retries=0,
         failure_kind="quality",
         failure_codes=frozenset(
-            {
-                "section_text_steps_must_reference_source_json_fields",
-                "final_text_step_must_reference_relevant_structured_outputs",
-            }
+            {"final_text_step_must_reference_relevant_structured_outputs"}
         ),
     )
 
@@ -832,8 +829,7 @@ async def test_run_tool_self_correction_surfaces_bounded_quality_failure_codes()
     assert payload["code"] == "self_correction_quality_failure"
     assert payload["details"] == {
         "quality_failure_codes": (
-            "final_text_step_must_reference_relevant_structured_outputs,"
-            "section_text_steps_must_reference_source_json_fields"
+            "final_text_step_must_reference_relevant_structured_outputs"
         ),
     }
     assert "still bad" not in json.dumps(payload["details"])
@@ -1003,10 +999,7 @@ async def test_run_tool_self_correction_forced_text_quality_failure_surfaces_cod
             feedback="still bad",
             failure_kind="quality",
             failure_codes=frozenset(
-                {
-                    "section_text_steps_must_reference_source_json_fields",
-                    "final_text_step_must_reference_relevant_structured_outputs",
-                }
+                {"final_text_step_must_reference_relevant_structured_outputs"}
             ),
         )
 
@@ -1031,8 +1024,7 @@ async def test_run_tool_self_correction_forced_text_quality_failure_surfaces_cod
     assert payload["code"] == "self_correction_quality_failure"
     assert payload["details"] == {
         "quality_failure_codes": (
-            "final_text_step_must_reference_relevant_structured_outputs,"
-            "section_text_steps_must_reference_source_json_fields"
+            "final_text_step_must_reference_relevant_structured_outputs"
         )
     }
     assert "still bad" not in json.dumps(payload["details"])

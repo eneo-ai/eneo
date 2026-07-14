@@ -241,6 +241,13 @@ def _validate_step_order(
     *,
     aggregation_intent: AggregationIntent,
 ) -> None:
+    structured_field_paths_by_step = tuple(
+        frozenset(
+            field_path for field_path, _ in _structured_field_paths(step.output_fields)
+        )
+        for step in steps
+    )
+    source_reader_steps = tuple(planned_step_is_source_reader(step) for step in steps)
     for index, step in enumerate(steps):
         if index == 0:
             if step.input_source != InputSource.FLOW_INPUT:
@@ -259,7 +266,12 @@ def _validate_step_order(
             raise ValueError(
                 "FlowAssemblyPlan fan-in requires aggregate or compare intent."
             )
-        _validate_previous_refs(step, expected_from_step=index)
+        _validate_previous_refs(
+            step,
+            expected_from_step=index,
+            structured_field_paths_by_step=structured_field_paths_by_step,
+            source_reader_steps=source_reader_steps,
+        )
         previous_step = steps[index - 1]
         expected_underlag_channel = derive_underlag_channel(
             input_source=step.input_source,
@@ -291,12 +303,27 @@ def _validate_step_order(
             )
 
 
-def _validate_previous_refs(step: PlannedStep, *, expected_from_step: int) -> None:
+def _validate_previous_refs(
+    step: PlannedStep,
+    *,
+    expected_from_step: int,
+    structured_field_paths_by_step: tuple[frozenset[str], ...],
+    source_reader_steps: tuple[bool, ...],
+) -> None:
     for ref in step.previous_field_refs:
         if ref.from_step < 1 or ref.from_step > expected_from_step:
             raise ValueError(
                 f"Planned step {step.name!r} references step {ref.from_step}; "
                 f"expected an earlier step no later than {expected_from_step}."
+            )
+        source_index = ref.from_step - 1
+        if (
+            not source_reader_steps[source_index]
+            and ref.field_path not in structured_field_paths_by_step[source_index]
+        ):
+            raise ValueError(
+                f"Planned step {step.name!r} references undeclared structured "
+                f"field {ref.field_path!r} on step {ref.from_step}."
             )
 
 

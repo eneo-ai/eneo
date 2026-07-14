@@ -215,7 +215,11 @@ def test_plan_rejects_non_first_flow_input_step() -> None:
 
 
 def test_plan_allows_earlier_previous_field_refs() -> None:
-    first_step = _text_step(name="Extract facts", output_type=OutputType.JSON)
+    first_step = _text_step(
+        name="Extract facts",
+        output_type=OutputType.JSON,
+        output_fields=(_field("summary"),),
+    )
     second_step = _text_step(
         name="Write interim",
         input_source=InputSource.PREVIOUS_STEP,
@@ -238,6 +242,28 @@ def test_plan_allows_earlier_previous_field_refs() -> None:
     plan = _plan(steps=(first_step, second_step, stale_ref_step))
 
     assert plan.steps[-1].previous_field_refs[0].from_step == 1
+
+
+def test_plan_rejects_previous_ref_missing_from_structured_contract() -> None:
+    first_step = _text_step(name="Read source")
+    structured_step = _text_step(
+        name="Extract facts",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.JSON,
+        underlag_channel="implicit_previous",
+        output_fields=(_field("summary"),),
+    )
+    unknown_ref_step = _text_step(
+        name="Write final",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        underlag_channel="field_refs",
+        previous_field_refs=(PreviousFieldRef(from_step=2, field_path="details"),),
+    )
+
+    with pytest.raises(ValueError, match="undeclared structured field 'details'"):
+        _plan(steps=(first_step, structured_step, unknown_ref_step))
 
 
 def test_plan_rejects_future_previous_field_refs() -> None:

@@ -595,6 +595,139 @@ def test_compiler_uses_assembly_path_for_whole_object_underlag() -> None:
     assert validate_spec(compiled).valid
 
 
+def test_assembly_projects_one_structured_contract_to_each_section_writer() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Case report",
+            "flow_description": "Extract facts and write three report sections.",
+            "plan_rationale": "Each section needs the same structured facts.",
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "instructions": "Extract the reusable source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "background",
+                            "field_type": "string",
+                            "description": "Relevant background.",
+                        },
+                        {
+                            "name": "findings",
+                            "field_type": "string",
+                            "description": "Material findings.",
+                        },
+                        {
+                            "name": "recommendations",
+                            "field_type": "string",
+                            "description": "Supported recommendations.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Write background",
+                    "instructions": "Write the background section.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Write findings",
+                    "instructions": "Write the findings section.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Write recommendations",
+                    "instructions": "Write the recommendations section.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(intent)
+
+    expected_source_refs = [
+        [{"step_ref": "step_a", "output": "structured"}],
+        [
+            {"step_ref": "step_b", "output": "text"},
+            {"step_ref": "step_a", "output": "structured"},
+        ],
+        [
+            {"step_ref": "step_c", "output": "text"},
+            {"step_ref": "step_a", "output": "structured"},
+        ],
+    ]
+    assert len(compiled.steps) == 4
+    for writer, source_refs in zip(
+        compiled.steps[1:], expected_source_refs, strict=True
+    ):
+        assert writer.input_source == InputSource.PREVIOUS_STEP
+        assert writer.input_bindings == {"source_refs": source_refs}
+    assert all(
+        step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_assembly_rejects_ambiguous_structured_sources_before_lowering() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Ambiguous report",
+            "flow_description": "Two structured stages precede section writers.",
+            "plan_rationale": "The section source is not uniquely defined.",
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract source facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "source_facts",
+                            "field_type": "string",
+                            "description": "Facts from the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Prepare report facts",
+                    "instructions": "Prepare report facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "report_facts",
+                            "field_type": "string",
+                            "description": "Facts prepared for the report.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write findings",
+                    "instructions": "Write the findings section.",
+                    "output_type": "text",
+                },
+                {
+                    "name": "Write recommendations",
+                    "instructions": "Write the recommendations section.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(intent)
+
+    error = exc_info.value
+    assert error.public_code == "architecture_materialization_failed"
+    assert error.log_context["failure_code"] == (
+        "section_writer_structured_source_ambiguous"
+    )
+    assert error.log_context["reason"] == ("section_writer_structured_source_ambiguous")
+    assert error.log_context["step_index"] == 3
+    assert "one structured preparation step" in error.detail
+    assert "one supported terminal aggregate" in error.detail
+    assert "uses_previous_fields" not in error.detail
+
+
 def test_assembly_derives_terminal_writer_refs_for_multiple_json_priors() -> None:
     intent = parse_create_flow_intent_arguments(
         {
