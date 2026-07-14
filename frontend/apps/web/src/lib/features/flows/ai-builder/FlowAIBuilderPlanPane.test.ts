@@ -6,7 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
-import type { AIBuilderSession, AIBuilderStatus, ProposedPlan, StepSpec } from "./protocol";
+import type {
+  AIBuilderSession,
+  AIBuilderStatus,
+  AIBuilderTelemetrySummary,
+  ProposedPlan,
+  StepSpec
+} from "./protocol";
 import FlowAIBuilderPlanPaneHarness from "./test-harnesses/FlowAIBuilderPlanPaneHarness.svelte";
 
 afterEach(() => {
@@ -192,6 +198,28 @@ describe("FlowAIBuilderPlanPane", () => {
     // The action bar no longer offers "Föreslå planändring" — the refinement
     // composer is that path (§5 glossary).
     expect(screen.queryByRole("button", { name: m.ai_builder_plan_suggest_change() })).toBeNull();
+  });
+
+  it("keeps token usage visible in the proposal metadata in Enkel and Avancerad", () => {
+    const state = {
+      session: makeSession({ telemetry: makeTelemetry() }),
+      currentPlan: makePlan()
+    };
+
+    const enkel = render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state
+    });
+    expect(screen.getByText(m.ai_builder_plan_meta_nothing_created())).toBeTruthy();
+    expect(screen.getByRole("button", { name: m.ai_builder_token_usage_title() })).toBeTruthy();
+    enkel.unmount();
+
+    render(FlowAIBuilderPlanPaneHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state,
+      userMode: "power_user"
+    });
+    expect(screen.getByRole("button", { name: m.ai_builder_token_usage_title() })).toBeTruthy();
   });
 
   it("hides technical assumptions in Enkel and shows them collapsed in Avancerad", async () => {
@@ -444,6 +472,30 @@ function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSessio
     latest_plan_id: null,
     conversation: [],
     ...overrides
+  };
+}
+
+function makeTelemetry(): AIBuilderTelemetrySummary {
+  return {
+    planner_request_count: 1,
+    clarification_question_count: 0,
+    prompt_tokens_total: 1200,
+    completion_tokens_total: 240,
+    total_tokens_total: 1440,
+    tool_call_count_total: 0,
+    auxiliary_llm_call_count: 0,
+    architecture_commit_count: 1,
+    repair_attempts_total: 0,
+    parse_repair_attempts_total: 0,
+    wall_clock_ms_total: 800,
+    llm_calls_made_total: 2,
+    token_usage_estimated: false,
+    last_request_id: "request-1",
+    last_model: "openai/gpt-5.4-nano",
+    last_finish_reason: "stop",
+    last_outcome_kind: "dispatched",
+    last_token_usage_source: "provider",
+    last_token_usage_estimated: false
   };
 }
 

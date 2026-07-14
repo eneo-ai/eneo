@@ -548,9 +548,7 @@
                   {m.ai_builder_plan_updated_receipt()}
                 </span>
               {/if}
-              {#if isPowerUser}
-                <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
-              {/if}
+              <FlowAIBuilderTokenUsage telemetry={service.session?.telemetry} />
             </div>
             <h2
               id="plan-heading"
