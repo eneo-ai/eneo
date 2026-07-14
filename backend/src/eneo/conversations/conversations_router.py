@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Annotated, NoReturn, Optional, cast
 from uuid import UUID
@@ -36,6 +36,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.sessions.session import (
+    SessionDebugExport,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -53,6 +54,7 @@ from eneo.sessions.session import (
     ToolCallResultPublic,
 )
 from eneo.sessions.session_protocol import (
+    to_session_debug_export,
     to_session_public,
     to_sessions_paginated_response,
 )
@@ -556,6 +558,40 @@ async def get_conversation(
     await _authorize_session_access(container, session)
 
     return to_session_public(session)
+
+
+@router.get(
+    "/{session_id}/export/",
+    response_model=SessionDebugExport,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def export_conversation(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+):
+    """Download a self-contained proof of a conversation.
+
+    Bundles the full chat with knowledge references, MCP tool calls including
+    their results, and captured provider payloads for logged turns.
+    """
+    session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
+
+    await _authorize_session_access(container, session)
+
+    user = container.user()
+    logger.info(
+        "Conversation debug export: session=%s exported_by=%s",
+        session_id,
+        user.email,
+    )
+    return to_session_debug_export(
+        session, exported_by=user.email, exported_at=datetime.now(timezone.utc)
+    )
 
 
 @router.get(

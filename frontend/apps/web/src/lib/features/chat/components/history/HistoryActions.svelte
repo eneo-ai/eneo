@@ -1,11 +1,13 @@
 <script lang="ts">
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { Button, Dialog, Input } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { downloadJson } from "$lib/core/helpers/downloadJson";
 
   export let conversation: ConversationSparse;
   export let onConversationDeleted: ((conversation: ConversationSparse) => void) | undefined =
@@ -31,9 +33,24 @@
       toastError(e);
     }
   }
+
+  async function downloadExport() {
+    try {
+      const data = await chat.exportConversation(conversation);
+      const date = new Date().toISOString().slice(0, 10);
+      downloadJson(`eneo-konversation-${conversation.id}-${date}.json`, data);
+    } catch (e) {
+      toastError(e);
+    }
+  }
 </script>
 
 <div class="flex items-center justify-end gap-2">
+  <!-- Proof export -->
+  <Button label={m.debug_panel_download_export()} padding="icon" on:click={downloadExport}>
+    <IconArrowDownToLine />
+  </Button>
+
   <!-- Rename -->
   <Dialog.Root bind:isOpen={renameOpen}>
     <Dialog.Trigger asFragment let:trigger>

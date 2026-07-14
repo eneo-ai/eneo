@@ -230,6 +230,12 @@ export class ChatService {
    * logging enabled) or when the fetch fails; failures are not cached so a
    * later selection retries.
    */
+  /** Self-contained proof export of a conversation (full tool results,
+   * captured provider payloads). The caller turns it into a download. */
+  async exportConversation(conversation: { id: string }) {
+    return this.#eneo.conversations.export(conversation);
+  }
+
   async getLoggingDetails(messageId: string): Promise<MessageLogging | null> {
     const cached = this.#loggingDetailsCache.get(messageId);
     if (cached) return cached;

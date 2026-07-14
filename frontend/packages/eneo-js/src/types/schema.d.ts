@@ -1391,6 +1391,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/export/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Conversation
+     * @description Download a self-contained proof of a conversation.
+     *
+     *     Bundles the full chat with knowledge references, MCP tool calls including
+     *     their results, and captured provider payloads for logged turns.
+     */
+    get: operations["export_conversation_api_v1_conversations__session_id__export__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/": {
     parameters: {
       query?: never;
@@ -10446,6 +10469,16 @@ export interface components {
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
     };
+    /** DebugExportAssistant */
+    DebugExportAssistant: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
     /**
      * DebugInfo
      * @description Raw data for debugging - noisy, not for quick reads.
@@ -12593,6 +12626,59 @@ export interface components {
       num_tokens_answer?: number;
       /** Num Tokens Context */
       num_tokens_context?: number | null;
+    };
+    /**
+     * MessageDebugExport
+     * @description Message shape for the proof export.
+     *
+     *     Unlike the conversation payload, tool-call results are retained in full,
+     *     and the captured provider payload (rendered system prompt, message array,
+     *     model kwargs) rides along for turns that were logged.
+     */
+    MessageDebugExport: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Id */
+      id?: string | null;
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      completion_model?: components["schemas"]["CompletionModel"] | null;
+      /** References */
+      references: components["schemas"]["InfoBlobPublicNoText"][];
+      /** Files */
+      files: components["schemas"]["FilePublic"][];
+      tools: components["schemas"]["UseTools"];
+      /** Generated Files */
+      generated_files: components["schemas"]["FilePublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+      /**
+       * Tool Calls
+       * @default []
+       */
+      tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
+      /** Num Tokens Context */
+      num_tokens_context?: number | null;
+      logging_details?: components["schemas"]["LoggingDetailsPublic"] | null;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -15173,6 +15259,38 @@ export interface components {
        * Format: uuid
        */
       user_id: string;
+    };
+    /**
+     * SessionDebugExport
+     * @description Self-contained proof of a conversation.
+     *
+     *     Bundles the full chat with knowledge references, MCP tool calls including
+     *     their results, and the captured provider payloads, plus who exported it
+     *     and when.
+     */
+    SessionDebugExport: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /** Name */
+      name: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Exported At
+       * Format: date-time
+       */
+      exported_at: string;
+      /** Exported By */
+      exported_by: string;
+      assistant?: components["schemas"]["DebugExportAssistant"] | null;
+      /** Messages */
+      messages: components["schemas"]["MessageDebugExport"][];
+      feedback?: components["schemas"]["SessionFeedback"] | null;
     };
     /** SessionFeedback */
     SessionFeedback: {
@@ -24705,6 +24823,65 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  export_conversation_api_v1_conversations__session_id__export__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionDebugExport"];
+        };
       };
       /** @description Bad Request */
       400: {

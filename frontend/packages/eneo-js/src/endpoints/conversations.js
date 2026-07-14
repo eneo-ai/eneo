@@ -84,6 +84,22 @@ export function initConversations(client) {
     },
 
     /**
+     * Download a self-contained proof of a conversation: the full chat with
+     * knowledge references, MCP tool calls including results, and captured
+     * provider payloads for logged turns.
+     * @param  {{id: string} | Conversation} conversation conversation
+     * @throws {EneoError}
+     * */
+    export: async (conversation) => {
+      const { id: session_id } = conversation;
+      const res = await client.fetch("/api/v1/conversations/{session_id}/export/", {
+        method: "get",
+        params: { path: { session_id } }
+      });
+      return res;
+    },
+
+    /**
      * Lazy-fetch the persisted upstream response of a single tool call.
      * @param  {{ sessionId: string, toolCallId: string }} params
      * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null}>}

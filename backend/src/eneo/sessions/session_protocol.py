@@ -1,13 +1,65 @@
 from datetime import datetime
 
+from eneo.logging import logging_protocol
 from eneo.main.models import CursorPaginatedResponse
 from eneo.questions.question_protocol import to_question_public
 from eneo.sessions.session import (
+    DebugExportAssistant,
+    MessageDebugExport,
+    SessionDebugExport,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
 )
+
+
+def _session_feedback(session: SessionInDB) -> SessionFeedback | None:
+    if session.feedback_value is None:
+        return None
+    return SessionFeedback(value=session.feedback_value, text=session.feedback_text)
+
+
+def to_session_debug_export(
+    session: SessionInDB, exported_by: str, exported_at: datetime
+) -> SessionDebugExport:
+    """Bundle a session into a self-contained proof document.
+
+    Built on the public message shape but with tool-call results retained
+    (the conversation payload strips them for size) and the captured provider
+    payload attached for turns that were logged.
+    """
+    messages: list[MessageDebugExport] = []
+    for question in session.questions:
+        public = to_question_public(question)
+        messages.append(
+            MessageDebugExport(
+                **public.model_dump(exclude={"tool_calls", "logging_details"}),
+                tool_calls=list(question.tool_calls or []),
+                # Un-captured turns persist an empty logging row (json_body
+                # null), which LoggingDetailsPublic cannot represent; export
+                # them as not logged.
+                logging_details=(
+                    logging_protocol.from_domain(question.logging_details)
+                    if question.logging_details is not None
+                    and question.logging_details.json_body is not None
+                    else None
+                ),
+            )
+        )
+
+    return SessionDebugExport(
+        **session.model_dump(exclude={"assistant"}),
+        exported_at=exported_at,
+        exported_by=exported_by,
+        assistant=(
+            DebugExportAssistant(id=session.assistant.id, name=session.assistant.name)
+            if session.assistant is not None
+            else None
+        ),
+        messages=messages,
+        feedback=_session_feedback(session),
+    )
 
 
 def to_session_public(session: SessionInDB):

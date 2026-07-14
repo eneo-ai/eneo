@@ -14,8 +14,10 @@
 <script lang="ts">
   import { getChatService } from "../../ChatService.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
+  import { downloadJson } from "$lib/core/helpers/downloadJson";
   import { CodeBlock } from "@eneo/ui";
-  import { ChevronRight, X } from "lucide-svelte";
+  import { ChevronRight, Download, X } from "lucide-svelte";
   import type { MessageLogging } from "@eneo/eneo-js";
   import { SvelteSet } from "svelte/reactivity";
   import DebugSection from "./DebugSection.svelte";
@@ -103,6 +105,18 @@
   });
 
   const stringify = (value: unknown) => JSON.stringify(value, null, 2);
+
+  async function downloadExport() {
+    const id = chat.currentConversation.id;
+    if (!id) return;
+    try {
+      const data = await chat.exportConversation({ id });
+      const date = new Date().toISOString().slice(0, 10);
+      downloadJson(`eneo-konversation-${id}-${date}.json`, data);
+    } catch (error) {
+      toastError(error);
+    }
+  }
 </script>
 
 <aside
@@ -271,4 +285,17 @@
       </DebugSection>
     {/if}
   </div>
+
+  {#if chat.currentConversation.id}
+    <div class="border-dimmer border-t px-3 py-2">
+      <button
+        type="button"
+        class="text-muted hover:text-default flex items-center gap-1.5 text-xs font-medium transition-colors"
+        onclick={downloadExport}
+      >
+        <Download class="h-3.5 w-3.5 shrink-0" />
+        {m.debug_panel_download_export()}
+      </button>
+    </div>
+  {/if}
 </aside>

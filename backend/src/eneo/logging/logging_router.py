@@ -49,7 +49,9 @@ async def get_logging_details(
         except (NotFoundException, UnauthorizedException, BadRequestException):
             raise NotFoundException("Question not found")
 
-    if question.logging_details is None:
+    # Un-captured turns persist an empty logging row (json_body is null), so
+    # presence of the row alone does not mean the turn was logged.
+    if question.logging_details is None or question.logging_details.json_body is None:
         raise BadRequestException("Question was not logged.")
 
     return to_question_logging(question)

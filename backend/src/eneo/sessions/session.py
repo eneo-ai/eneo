@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.files.file_models import FilePublic
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic
+from eneo.logging.logging import LoggingDetailsPublic
 from eneo.main.models import DateTimeModelMixin, InDB
 from eneo.questions.question import (
     McpToolReferencePublic,
@@ -64,6 +65,37 @@ class SessionMetadataPublic(SessionUpdateRequest, DateTimeModelMixin):
 
 class SessionPublic(SessionMetadataPublic):
     messages: list[Message]
+    feedback: Optional[SessionFeedback] = None
+
+
+class MessageDebugExport(Message):
+    """Message shape for the proof export.
+
+    Unlike the conversation payload, tool-call results are retained in full,
+    and the captured provider payload (rendered system prompt, message array,
+    model kwargs) rides along for turns that were logged.
+    """
+
+    logging_details: Optional[LoggingDetailsPublic] = None
+
+
+class DebugExportAssistant(BaseModel):
+    id: UUID
+    name: str
+
+
+class SessionDebugExport(SessionMetadataPublic):
+    """Self-contained proof of a conversation.
+
+    Bundles the full chat with knowledge references, MCP tool calls including
+    their results, and the captured provider payloads, plus who exported it
+    and when.
+    """
+
+    exported_at: datetime
+    exported_by: str
+    assistant: Optional[DebugExportAssistant] = None
+    messages: list[MessageDebugExport]
     feedback: Optional[SessionFeedback] = None
 
 

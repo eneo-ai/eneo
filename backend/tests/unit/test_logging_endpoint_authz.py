@@ -42,7 +42,9 @@ def _container(
     )
 
 
-def _question(session_id=None, logging_details="captured"):
+def _question(session_id=None, captured=True):
+    # Un-captured turns still persist an empty logging row (json_body null).
+    logging_details = SimpleNamespace(json_body="[]" if captured else None)
     return SimpleNamespace(session_id=session_id, logging_details=logging_details)
 
 
@@ -102,7 +104,10 @@ class TestLoggingEndpointAuthz:
 
     @pytest.mark.asyncio
     async def test_uncaptured_message_is_400_for_authorized_reader(self):
-        question = _question(session_id=uuid4(), logging_details=None)
-
-        with pytest.raises(BadRequestException):
-            await get_logging_details(uuid4(), container=_container(question))
+        # Covers both no row at all and the empty row un-captured turns write.
+        for question in (
+            SimpleNamespace(session_id=uuid4(), logging_details=None),
+            _question(session_id=uuid4(), captured=False),
+        ):
+            with pytest.raises(BadRequestException):
+                await get_logging_details(uuid4(), container=_container(question))
