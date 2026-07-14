@@ -89,7 +89,6 @@ export interface FlowAIBuilderState {
   statusMessage: AIBuilderStatus | null;
   availableModels: AIBuilderModel[];
   selectedModelId: string | null;
-  modelsLoaded: boolean;
   modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
@@ -110,7 +109,6 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     statusMessage: null,
     availableModels: [],
     selectedModelId: null,
-    modelsLoaded: false,
     modelLoadStatus: "idle",
     draftSessions: [],
     pendingOperation: null,
@@ -1211,7 +1209,6 @@ export class FlowAIBuilderDriver {
       if (!this.#ownsSession(owner)) return;
       this.#state.availableModels = result.models;
       this.#state.selectedModelId = result.default_model_id;
-      this.#state.modelsLoaded = true;
       this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {

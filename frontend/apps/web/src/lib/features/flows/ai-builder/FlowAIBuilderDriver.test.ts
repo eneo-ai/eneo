@@ -485,6 +485,70 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.selectedModelId).toBe(currentModelId);
   });
 
+  it("ignores a rejected model request after the session is replaced", async () => {
+    const currentModelId = "11111111-1111-4111-8111-111111111116";
+    const staleSession = makeSession({ session_id: "stale-rejected-model-session" });
+    const currentSession = makeSession({ session_id: "current-model-session" });
+    const staleModels = Promise.withResolvers<{
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string;
+    }>();
+    const staleRequestStarted = Promise.withResolvers<void>();
+    let createCount = 0;
+    const fetch = vi.fn(
+      async (
+        path: string,
+        init?: { method?: string; params?: { path?: { session_id?: string } } }
+      ) => {
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+          createCount += 1;
+          return createCount === 1 ? staleSession : currentSession;
+        }
+        if (path.endsWith("/models")) {
+          if (init?.params?.path?.session_id === staleSession.session_id) {
+            staleRequestStarted.resolve();
+            return await staleModels.promise;
+          }
+          return {
+            models: [{ id: currentModelId, name: "Current model", provider: "openai" }],
+            default_model_id: currentModelId
+          };
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+          return init?.params?.path?.session_id === staleSession.session_id
+            ? staleSession
+            : currentSession;
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+          return { sessions: [] };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }
+    );
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const staleCreate = driver.createSession("edit");
+    await staleRequestStarted.promise;
+    await driver.createSession("edit");
+
+    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
+    expect(driver.state.modelLoadStatus).toBe("loaded");
+    expect(driver.state.availableModels).toEqual([
+      { id: currentModelId, name: "Current model", provider: "openai" }
+    ]);
+    expect(driver.state.selectedModelId).toBe(currentModelId);
+
+    staleModels.reject(new Error("stale model request failed"));
+    await staleCreate;
+
+    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
+    expect(driver.state.modelLoadStatus).toBe("loaded");
+    expect(driver.state.availableModels).toEqual([
+      { id: currentModelId, name: "Current model", provider: "openai" }
+    ]);
+    expect(driver.state.selectedModelId).toBe(currentModelId);
+  });
+
   it("initializes edit mode by creating or resuming the session immediately", async () => {
     const fetch = vi
       .fn()

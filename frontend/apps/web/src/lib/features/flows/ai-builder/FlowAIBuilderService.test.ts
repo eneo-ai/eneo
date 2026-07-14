@@ -136,7 +136,7 @@ describe("FlowAIBuilderService", () => {
       statusMessage: "repairing",
       availableModels,
       selectedModelId: "model-1",
-      modelsLoaded: true,
+      modelLoadStatus: "loaded",
       draftSessions
     });
 
@@ -152,7 +152,13 @@ describe("FlowAIBuilderService", () => {
     expect(service.statusMessage).toBe("repairing");
     expect(service.availableModels).toBe(availableModels);
     expect(service.selectedModelId).toBe("model-1");
+    expect(service.modelLoadStatus).toBe("loaded");
     expect(service.modelsLoaded).toBe(true);
+
+    service.seedState({ modelLoadStatus: "failed" });
+
+    expect(service.modelLoadStatus).toBe("failed");
+    expect(service.modelsLoaded).toBe(false);
     expect(service.draftSessions).toBe(draftSessions);
     expect(service.sessionStatus).toBe("awaiting_approval");
   });

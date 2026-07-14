@@ -154,7 +154,7 @@ export class FlowAIBuilderService {
   }
 
   get modelsLoaded(): boolean {
-    return this.#state.modelsLoaded;
+    return this.#state.modelLoadStatus === "loaded";
   }
 
   get draftSessions(): AIBuilderDraftSession[] {
