@@ -17,6 +17,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -93,6 +96,7 @@ def _make_request(**overrides: object) -> ScopedPlanRevisionRequest:
             model="openai/gpt-5.4",
             target_kind=TargetKind.CREATE,
         ),
+        "requested_output_sections": RequestedOutputSections.empty(),
         "assistant_metadata": None,
         "flow": None,
     }

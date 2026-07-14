@@ -137,6 +137,7 @@ class AIBuilderProposalProcessor:
                         model=completion_model_route.litellm_model,
                         target_kind=TargetKind.CREATE,
                     ),
+                    requested_output_sections=requested_output_sections,
                     assistant_metadata=assistant_metadata,
                     flow=flow,
                 ),

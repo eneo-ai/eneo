@@ -905,6 +905,10 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
     None
 ):
     processor = _make_processor()
+    requested_output_sections = RequestedOutputSections(
+        sections=("Summary", "Findings", "Risks", "Recommendations"),
+        confidence="high",
+    )
     catalog = build_ai_builder_resource_catalog(
         available_models=[
             _model_resource("model-old", "gpt-4o mini"),
@@ -952,6 +956,7 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-scoped-feedback-terminal",
+                requested_output_sections=requested_output_sections,
                 plan_edit_context=AIBuilderPlanEditContext(
                     scope="step",
                     plan_id=prior_plan.id,
@@ -972,6 +977,7 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
     finalize.assert_awaited_once()
     scoped_request = finalize.await_args_list[0].args[0]
     assert scoped_request.arguments["revision_kind"] == "scoped_step_direct"
+    assert scoped_request.requested_output_sections is requested_output_sections
 
 
 @pytest.mark.asyncio
