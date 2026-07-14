@@ -11,13 +11,11 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
+    record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
 )
-from eneo.main.logging import get_logger
-
-logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -108,7 +106,10 @@ async def adjudicate_pending_question_answer(
             **completion_kwargs,
         )
     except Exception as error:
-        logger.warning("Pending-question adjudication failed", exc_info=error)
+        record_ai_builder_provider_failure(
+            error,
+            stage="semantic_adjudication",
+        )
         raise AIBuilderProviderOutcomeUnknownException() from error
 
     content = response.choices[0].message.content if response.choices else None

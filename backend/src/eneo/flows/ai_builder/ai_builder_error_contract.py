@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Literal, TypeAlias, TypeGuard, cast
-from uuid import uuid4
+from typing import TYPE_CHECKING, Literal, TypeAlias, TypeGuard, cast
+from uuid import UUID, uuid4
 
+from litellm.exceptions import (
+    APIConnectionError,
+    AuthenticationError,
+    BadGatewayError,
+    BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+    UnprocessableEntityError,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.main.exceptions import (
@@ -16,8 +30,31 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.main.logging import get_logger
+from eneo.observability.failure_events import (
+    log_failure_event,
+    make_failure_fingerprint,
+)
+
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+        ProposalTurnTelemetry,
+    )
 
 JsonScalar: TypeAlias = str | int | float | bool | None
+AIBuilderProviderFailureKind = Literal[
+    "rejected",
+    "rate_limited",
+    "timeout",
+    "transport_ambiguous",
+    "unknown",
+]
+AIBuilderProviderFailureStage = Literal[
+    "proposal_completion",
+    "slot_classification",
+    "semantic_adjudication",
+]
+AIBuilderProviderStatusClass = Literal["1xx", "2xx", "3xx", "4xx", "5xx"]
 
 _MAX_DETAILS_KEYS = 10
 _MAX_DETAILS_STRING_LENGTH = 256
@@ -25,6 +62,18 @@ _MAX_DETAILS_JSON_BYTES = 1024
 _MAX_MESSAGE_LENGTH = 4096
 _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
+_PROVIDER_REJECTION_ERRORS = (
+    AuthenticationError,
+    BadGatewayError,
+    BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    ServiceUnavailableError,
+    UnprocessableEntityError,
+)
+
+logger = get_logger(__name__)
 
 
 class AIBuilderErrorCode(StrEnum):
@@ -127,6 +176,111 @@ class AIBuilderProviderOutcomeUnknownException(AIBuilderBadRequestException):
             "The provider outcome is unknown. Explicitly acknowledge possible duplicate provider work before retrying this turn.",
             code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderProviderFailure:
+    """Bounded internal diagnosis for a provider call that already started."""
+
+    kind: AIBuilderProviderFailureKind
+    stage: AIBuilderProviderFailureStage
+    status_code: int | None
+    status_class: AIBuilderProviderStatusClass | None
+    fingerprint: str
+
+
+def classify_ai_builder_provider_failure(
+    error: Exception,
+    *,
+    stage: AIBuilderProviderFailureStage,
+) -> AIBuilderProviderFailure:
+    """Classify only adapter types whose semantics are part of our dependency."""
+
+    status_code: int | None = None
+    if isinstance(error, RateLimitError):
+        kind: AIBuilderProviderFailureKind = "rate_limited"
+        status_code = _bounded_provider_status(error.status_code)
+    elif isinstance(error, Timeout):
+        kind = "timeout"
+        status_code = _bounded_provider_status(error.status_code)
+    elif isinstance(error, APIConnectionError):
+        kind = "transport_ambiguous"
+    elif isinstance(error, _PROVIDER_REJECTION_ERRORS):
+        kind = "rejected"
+        status_code = _bounded_provider_status(error.status_code)
+    else:
+        kind = "unknown"
+
+    return AIBuilderProviderFailure(
+        kind=kind,
+        stage=stage,
+        status_code=status_code,
+        status_class=_provider_status_class(status_code),
+        fingerprint=make_failure_fingerprint(
+            "ai_builder_provider",
+            stage,
+            kind,
+            status_code,
+        ),
+    )
+
+
+def record_ai_builder_provider_failure(
+    error: Exception,
+    *,
+    stage: AIBuilderProviderFailureStage,
+    usage_tracker: ProposalTurnTelemetry | None = None,
+    request_id: str | None = None,
+    tenant_id: UUID | str | None = None,
+    event_logger: logging.Logger = logger,
+) -> AIBuilderProviderFailure:
+    """Record one safe event while preserving coarse persisted turn telemetry."""
+
+    failure = classify_ai_builder_provider_failure(error, stage=stage)
+    if usage_tracker is not None:
+        usage_tracker.record_attempt_failure(failure_kind="provider_error")
+    safe_detail: dict[str, object] | None = None
+    if failure.status_code is not None and failure.status_class is not None:
+        safe_detail = {
+            "provider_status_code": failure.status_code,
+            "provider_status_class": failure.status_class,
+        }
+    log_failure_event(
+        event_logger,
+        event="ai_builder.provider.failure",
+        component="ai_builder",
+        operation=failure.stage,
+        failure_kind=failure.kind,
+        failure_code=failure.status_class,
+        failure_fingerprint=failure.fingerprint,
+        request_id=request_id,
+        tenant_id=None if tenant_id is None else str(tenant_id),
+        safe_detail=safe_detail,
+    )
+    return failure
+
+
+def _bounded_provider_status(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
+    return None
+
+
+def _provider_status_class(
+    status_code: int | None,
+) -> AIBuilderProviderStatusClass | None:
+    if status_code is None:
+        return None
+    status_class = f"{status_code // 100}xx"
+    if status_class == "1xx":
+        return "1xx"
+    if status_class == "2xx":
+        return "2xx"
+    if status_class == "3xx":
+        return "3xx"
+    if status_class == "4xx":
+        return "4xx"
+    return "5xx"
 
 
 class AIBuilderNotFoundException(NotFoundException):

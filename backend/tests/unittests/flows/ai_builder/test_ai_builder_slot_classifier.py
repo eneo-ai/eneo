@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from litellm.exceptions import RateLimitError
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -17,7 +18,13 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
     ResolvedCompletionModelRoute,
 )
+from eneo.flows.ai_builder import (
+    ai_builder_error_contract as error_contract_module,
+)
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedEvidence,
     SlotClassificationInput,
@@ -75,6 +82,46 @@ def _route(
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
     )
+
+
+@pytest.mark.asyncio
+async def test_slot_classification_post_start_failure_emits_one_safe_event() -> None:
+    tenant_id = uuid4()
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(
+        side_effect=RateLimitError(
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        )
+    )
+    before_provider_call = AsyncMock()
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+            await classify_slots(
+                litellm_client=litellm_client,
+                completion_model_route=_route(model="private-model"),
+                classification_input=_classification_input(
+                    f"private-user-content-{uuid4()}"
+                ),
+                allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+                tenant_id=tenant_id,
+                before_provider_call=before_provider_call,
+            )
+
+    before_provider_call.assert_awaited_once_with()
+    assert litellm_client.acompletion.await_count == 1
+    event_log.assert_called_once()
+    payload = event_log.call_args.kwargs["extra"]
+    assert payload["operation"] == "slot_classification"
+    assert payload["failure_kind"] == "rate_limited"
+    assert payload["tenant_id"] == str(tenant_id)
+    encoded = str(payload)
+    assert "sensitive-provider-material" not in encoded
+    assert "private-user-content" not in encoded
+    assert "private-model" not in encoded
+    assert "private-provider" not in encoded
 
 
 def test_parse_slot_classification_response_uses_canonical_slots_shape_only() -> None:

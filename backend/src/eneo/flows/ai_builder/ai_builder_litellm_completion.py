@@ -9,6 +9,7 @@ from typing import Any, cast
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
+    record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
@@ -91,6 +92,12 @@ async def call_proposal_completion(
             **provider_kwargs,
         )
     except Exception as error:
+        record_ai_builder_provider_failure(
+            error,
+            stage="proposal_completion",
+            usage_tracker=usage_tracker,
+            request_id=usage_tracker.request_id if usage_tracker is not None else None,
+        )
         if before_provider_call is not None:
             raise AIBuilderProviderOutcomeUnknownException() from error
         raise

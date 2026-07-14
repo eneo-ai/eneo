@@ -8,10 +8,22 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from litellm.exceptions import (
+    APIConnectionError,
+    APIError,
+    BadRequestError,
+    RateLimitError,
+    Timeout,
+)
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderFailureKind,
+    classify_ai_builder_provider_failure,
+    record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_LOG_KEY,
@@ -33,6 +45,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
+from eneo.observability.failure_events import (
+    FAILURE_EVENT_SCHEMA_VERSION,
+    make_failure_fingerprint,
+)
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -159,6 +175,153 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             token_usage_source="provider",
             prompt="raw prompt must not be accepted",
         )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_kind", "expected_status_code", "expected_status_class"),
+    [
+        (
+            BadRequestError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+            400,
+            "4xx",
+        ),
+        (
+            RateLimitError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rate_limited",
+            429,
+            "4xx",
+        ),
+        (
+            Timeout(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "timeout",
+            408,
+            "4xx",
+        ),
+        (
+            APIConnectionError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+            None,
+            None,
+        ),
+        (
+            APIError(
+                503,
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "unknown",
+            None,
+            None,
+        ),
+    ],
+)
+def test_provider_failure_classification_uses_only_known_adapter_evidence(
+    error: Exception,
+    expected_kind: AIBuilderProviderFailureKind,
+    expected_status_code: int | None,
+    expected_status_class: str | None,
+) -> None:
+    failure = classify_ai_builder_provider_failure(
+        error,
+        stage="proposal_completion",
+    )
+
+    assert failure.kind == expected_kind
+    assert failure.stage == "proposal_completion"
+    assert failure.status_code == expected_status_code
+    assert failure.status_class == expected_status_class
+    assert failure.fingerprint == make_failure_fingerprint(
+        "ai_builder_provider",
+        "proposal_completion",
+        expected_kind,
+        expected_status_code,
+    )
+
+
+def test_provider_failure_unknown_shape_fails_closed_without_status() -> None:
+    class UnknownAdapterError(Exception):
+        status_code = 429
+        response = {"status_code": 429, "body": "sensitive-provider-material"}
+
+    failure = classify_ai_builder_provider_failure(
+        UnknownAdapterError("sensitive-provider-material"),
+        stage="slot_classification",
+    )
+
+    assert failure.kind == "unknown"
+    assert failure.status_code is None
+    assert failure.status_class is None
+
+
+def test_provider_failure_event_is_one_bounded_content_free_row() -> None:
+    event_logger = MagicMock()
+    tenant_id = uuid4()
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-provider-failure",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+    telemetry.start_attempt(counts_as_repair=False)
+
+    failure = record_ai_builder_provider_failure(
+        RateLimitError(
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="proposal_completion",
+        usage_tracker=telemetry,
+        request_id="req-provider-failure",
+        tenant_id=tenant_id,
+        event_logger=event_logger,
+    )
+
+    event_logger.info.assert_called_once()
+    assert event_logger.info.call_args.args == ("failure_event",)
+    payload = event_logger.info.call_args.kwargs["extra"]
+    assert payload == {
+        "event": "ai_builder.provider.failure",
+        "schema_version": FAILURE_EVENT_SCHEMA_VERSION,
+        "component": "ai_builder",
+        "operation": "proposal_completion",
+        "failure_kind": "rate_limited",
+        "failure_code": "4xx",
+        "failure_fingerprint": failure.fingerprint,
+        "request_id": "req-provider-failure",
+        "session_id": None,
+        "tenant_id": str(tenant_id),
+        "replay_handle": None,
+        "safe_detail": {
+            "provider_status_code": 429,
+            "provider_status_class": "4xx",
+        },
+    }
+    attempts = telemetry.build_planner_telemetry()["proposal_attempts"]
+    assert attempts[0]["failure_kind"] == "provider_error"
+    assert "provider_failure_kind" not in attempts[0]
+    assert "provider_status_code" not in attempts[0]
+    encoded = json.dumps(payload)
+    assert "sensitive-provider-material" not in encoded
+    assert "private-model" not in encoded
+    assert "private-provider" not in encoded
 
 
 def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:

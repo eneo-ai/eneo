@@ -9,8 +9,18 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+    ResolvedCompletionModelRoute,
+)
+from eneo.flows.ai_builder import (
+    ai_builder_error_contract as error_contract_module,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     PreparedUserQuestionMetadata,
     resolve_user_question_metadata,
@@ -45,6 +55,47 @@ def _pending_question_conversation() -> list[ConversationMessage]:
             ],
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_auxiliary_adjudication_post_start_failure_emits_one_safe_event() -> None:
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(
+        side_effect=RuntimeError("sensitive-provider-material")
+    )
+    before_provider_call = AsyncMock()
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+            await resolve_user_question_metadata(
+                litellm_client=litellm_client,
+                conversation=_pending_question_conversation(),
+                message="private-user-content",
+                question_answer=None,
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="private-model",
+                    litellm_kwargs={"api_key": "private-credential"},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
+                prepared=PreparedUserQuestionMetadata(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    needs_auxiliary_llm=True,
+                ),
+                before_provider_call=before_provider_call,
+            )
+
+    before_provider_call.assert_awaited_once_with()
+    assert litellm_client.acompletion.await_count == 1
+    event_log.assert_called_once()
+    payload = event_log.call_args.kwargs["extra"]
+    assert payload["operation"] == "semantic_adjudication"
+    assert payload["failure_kind"] == "unknown"
+    encoded = str(payload)
+    assert "sensitive-provider-material" not in encoded
+    assert "private-user-content" not in encoded
+    assert "private-model" not in encoded
+    assert "private-credential" not in encoded
 
 
 @pytest.mark.asyncio

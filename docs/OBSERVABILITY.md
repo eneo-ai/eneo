@@ -142,6 +142,45 @@ Most log aggregation systems separate fields that are indexed for fast filtering
 
 How this is configured is an infrastructure concern, but the NDJSON format is designed to make the mapping natural: the `resource` block is low-cardinality metadata; `attributes` carries the high-cardinality, request-specific data.
 
+### AI Builder provider-failure events
+
+After an AI Builder provider call has started, a caught failure emits exactly one
+`failure_event` log row with `attributes.event` set to
+`ai_builder.provider.failure`. This is an internal diagnostic contract; the API
+continues to return the generic `session_turn_provider_outcome_unknown` error and
+requires explicit duplicate-spend acknowledgement before another attempt.
+
+The bounded fields are:
+
+| Field | Allowed values or shape | Aggregation guidance |
+|---|---|---|
+| `operation` | `proposal_completion`, `slot_classification`, `semantic_adjudication` | Low cardinality; safe to index. |
+| `failure_kind` | `rejected`, `rate_limited`, `timeout`, `transport_ambiguous`, `unknown` | Low cardinality; safe to index. |
+| `failure_code` | HTTP status class such as `4xx`, or `null` | Low cardinality; safe to index. |
+| `safe_detail.provider_status_code` | Integer `100`–`599`, only from a recognized typed provider status/timeout exception | Medium cardinality; parse on demand unless an operator has a specific status dashboard. |
+| `safe_detail.provider_status_class` | Same bounded status class as `failure_code` | Low cardinality; safe to index. |
+| `failure_fingerprint` | Stable 12-character hash of the fixed component, stage, class, and safely exposed status | Parse on demand. It clusters equivalent failures; it is not a replay-safety signal. |
+| `request_id`, `tenant_id` | Present when that boundary owns the correlation value; otherwise `null` | High cardinality; do not pre-index. |
+
+Only recognized adapter exception types can supply a status. An exception that
+merely resembles an adapter error—for example, an arbitrary object with a
+`status_code` attribute—fails closed to `unknown` with no status. Timeout and
+transport ambiguity remain provider-outcome-unknown even when their internal
+class is known; no failure class enables automatic retry.
+
+These events never contain prompts, user messages, model or provider names,
+request/response bodies, raw provider responses, exception text or tracebacks,
+headers, credentials, DSNs, or local file paths. The proposal-attempt metadata
+that can be persisted with a conversation retains only its existing coarse
+`provider_error` value; the internal class, status, and fingerprint stay in the
+failure-event log.
+
+Example query:
+
+```
+{service="eneo"} | json | event = "ai_builder.provider.failure" | failure_kind = "rate_limited"
+```
+
 ---
 
 ## 5. ID Contract

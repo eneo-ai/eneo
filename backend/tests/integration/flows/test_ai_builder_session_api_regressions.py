@@ -12,6 +12,12 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
+from litellm.exceptions import (
+    APIConnectionError,
+    BadRequestError,
+    RateLimitError,
+    Timeout,
+)
 from pydantic import ValidationError
 from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
@@ -46,6 +52,7 @@ from eneo.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.ai_builder import ai_builder_error_contract as error_contract_module
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
@@ -1964,12 +1971,52 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("provider_error", "expected_failure_kind"),
+    [
+        (
+            BadRequestError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+        ),
+        (
+            RateLimitError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rate_limited",
+        ),
+        (
+            Timeout(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "timeout",
+        ),
+        (
+            APIConnectionError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+        ),
+        (RuntimeError("sensitive-provider-material"), "unknown"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledgement(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
+    provider_error: Exception,
+    expected_failure_kind: str,
 ):
     space_id = await _create_space_with_planner_model(
         client=client,
@@ -1985,20 +2032,20 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
     )
     client_turn_id = uuid4()
     completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+        side_effect=[
+            provider_error,
+            _make_llm_response(content="Jag kan hjälpa dig bygga flödet."),
+        ]
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=completion,
-    ):
+    with patch.object(error_contract_module.logger, "info") as provider_failure_log:
         with patch(
-            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
-            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+            "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+            new=completion,
         ):
             with patch(
-                "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
-                new=AsyncMock(side_effect=RuntimeError("fail after provider return")),
+                "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+                new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
             ):
                 failed_events = await _send_builder_message(
                     client=client,
@@ -2009,7 +2056,16 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
                 )
 
             calls_after_unknown_outcome = completion.await_count
-            assert calls_after_unknown_outcome > 0
+            assert calls_after_unknown_outcome == 1
+            provider_failure_log.assert_called_once()
+            failure_payload = provider_failure_log.call_args.kwargs["extra"]
+            assert failure_payload["operation"] == "slot_classification"
+            assert failure_payload["failure_kind"] == expected_failure_kind
+            assert len(failure_payload["failure_fingerprint"]) == 12
+            encoded_failure = str(failure_payload)
+            assert "sensitive-provider-material" not in encoded_failure
+            assert "private-model" not in encoded_failure
+            assert "private-provider" not in encoded_failure
             failed_error = cast(dict[str, object], failed_events[0]["data"])
             assert failed_error["code"] == "session_turn_provider_outcome_unknown"
 
@@ -2042,16 +2098,20 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
             assert blocked_error["code"] == "session_turn_provider_outcome_unknown"
             assert completion.await_count == calls_after_unknown_outcome
 
-            retry_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Hjälp mig bygga ett flöde.",
-                client_turn_id=client_turn_id,
-                acknowledge_duplicate_provider_spend=True,
-            )
+            with patch(
+                "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+                new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+            ):
+                retry_events = await _send_builder_message(
+                    client=client,
+                    bearer_token=bearer_token,
+                    session_id=session_id,
+                    message="Hjälp mig bygga ett flöde.",
+                    client_turn_id=client_turn_id,
+                    acknowledge_duplicate_provider_spend=True,
+                )
             assert any(event["event"] == "text" for event in retry_events)
-            assert completion.await_count > calls_after_unknown_outcome
+            assert completion.await_count == calls_after_unknown_outcome + 1
 
             committed_session = await client.get(
                 f"/api/v1/flows/ai-builder/sessions/{session_id}",

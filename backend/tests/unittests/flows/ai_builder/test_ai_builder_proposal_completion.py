@@ -6,6 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from litellm.exceptions import (
+    APIConnectionError,
+    APIError,
+    BadRequestError,
+    RateLimitError,
+    Timeout,
+)
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -16,7 +23,14 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
     ResolvedCompletionModelRoute,
 )
+from eneo.flows.ai_builder import (
+    ai_builder_error_contract as error_contract_module,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
@@ -270,6 +284,102 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["tool_choice"] == tool_choice
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_kind"),
+    [
+        (
+            BadRequestError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+        ),
+        (
+            RateLimitError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rate_limited",
+        ),
+        (
+            Timeout(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "timeout",
+        ),
+        (
+            APIConnectionError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+        ),
+        (
+            APIError(
+                503,
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "unknown",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_proposal_post_start_failure_keeps_unknown_public_contract(
+    error: Exception,
+    expected_kind: str,
+) -> None:
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(side_effect=error))
+    before_provider_call = AsyncMock()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-provider-failure",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+    tracker.start_attempt(counts_as_repair=False)
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+            await call_proposal_completion(
+                litellm_client=litellm_client,
+                request=ProposalCompletionRequest(
+                    messages=[{"role": "user", "content": "private-user-content"}],
+                    tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+                    route=_route(),
+                    max_output_tokens=1024,
+                    temperature=0.2,
+                ),
+                usage_tracker=tracker,
+                before_provider_call=before_provider_call,
+            )
+
+    assert exc_info.value.code == (
+        AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
+    )
+    before_provider_call.assert_awaited_once_with()
+    assert litellm_client.acompletion.await_count == 1
+    event_log.assert_called_once()
+    payload = event_log.call_args.kwargs["extra"]
+    assert payload["event"] == "ai_builder.provider.failure"
+    assert payload["operation"] == "proposal_completion"
+    assert payload["failure_kind"] == expected_kind
+    assert len(payload["failure_fingerprint"]) == 12
+    encoded = str(payload)
+    assert "sensitive-provider-material" not in encoded
+    assert "private-user-content" not in encoded
+    assert "private-model" not in encoded
+    assert "private-provider" not in encoded
+    attempts = tracker.build_planner_telemetry()["proposal_attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["failure_kind"] == "provider_error"
 
 
 @pytest.mark.asyncio
