@@ -1,0 +1,17 @@
+# ============================================================================
+# TAL TILL TEXT MODULE - per-module secrets and configuration
+# ============================================================================
+# Copy to env_module_ttt.env. See MODULES.md for how to mint the API key.
+#
+# SECURITY: everything in this file stays server-side in the module
+# container. None of these values are ever sent to the browser.
+#
+# USER LOGIN: modules have no IdP configuration of their own. Users log in
+# via their Eneo session (SSO handoff from the backend) - see MODULES.md.
+
+# Scoped Eneo service key (sk_...) - mint per MODULES.md, narrowest scope
+# that covers the module's needs. Rotate via the API keys admin UI/API.
+ENEO_MODULE_API_KEY=sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Session cookie signing secret (32+ chars): openssl rand -hex 32
+SESSION_SECRET=

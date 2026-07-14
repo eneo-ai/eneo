@@ -47,7 +47,6 @@ from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_maintenance import ApiKeyMaintenanceService
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_rate_limiter import ApiKeyRateLimiter
-from eneo.authentication.api_key_repo import ApiKeysRepository
 from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
@@ -659,7 +658,6 @@ class Container(containers.DeclarativeContainer):
         ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
     )
 
-    api_key_repo = providers.Factory(ApiKeysRepository, session=session)
     api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
@@ -913,11 +911,7 @@ class Container(containers.DeclarativeContainer):
         TranscriptionModelService,
         transcription_model_repo=transcription_model_repo,
     )
-    auth_service = providers.Factory(
-        AuthService,
-        api_key_repo=api_key_repo,
-        api_key_v2_repo=api_key_v2_repo,
-    )
+    auth_service = providers.Factory(AuthService)
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,
@@ -951,8 +945,6 @@ class Container(containers.DeclarativeContainer):
     api_key_auth_resolver = providers.Factory(
         ApiKeyAuthResolver,
         api_key_repo=api_key_v2_repo,
-        legacy_repo=api_key_repo,
-        audit_service=audit_service,
     )
     audit_export_service = providers.Factory(
         AuditExportService,
@@ -1197,7 +1189,6 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=assistant_repo,
         space_repo=space_repo,
-        auth_service=auth_service,
         service_repo=service_repo,
         step_repo=step_repo,
         completion_model_crud_service=completion_model_crud_service,
@@ -1214,6 +1205,7 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         org_space_assistant_role_repo=org_space_assistant_role_repo,
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
+        auth_service=auth_service,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
     )

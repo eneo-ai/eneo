@@ -7,9 +7,10 @@ Tests the heartbeat module's behavior:
 - Preemption detection
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from eneo.worker.crawl.heartbeat import (
     HeartbeatFailedError,
@@ -222,9 +223,7 @@ class TestHeartbeatMonitorPreemption:
         with patch.dict(
             "sys.modules",
             {
-                "eneo.database.database": MagicMock(
-                    sessionmanager=mock_sessionmanager
-                ),
+                "eneo.database.database": MagicMock(sessionmanager=mock_sessionmanager),
                 "eneo.jobs.job_repo": MagicMock(
                     JobRepository=MagicMock(return_value=mock_repo)
                 ),

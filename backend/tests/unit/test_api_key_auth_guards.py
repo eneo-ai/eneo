@@ -994,28 +994,12 @@ class TestReadOverrideConstants:
 
 
 # ---------------------------------------------------------------------------
-# Legacy split mapping tests (Phase 7F)
+# Permission mapping tests (Phase 7F)
 # ---------------------------------------------------------------------------
 
 
-class TestLegacySplitMapping:
-    """Verify legacy migration creates correct permission levels."""
-
-    def test_user_key_migration_creates_admin(self):
-        """User key migration → permission=ADMIN."""
-        from eneo.authentication.auth_models import ApiKeyPermission
-
-        # The code at api_key_resolver.py sets permission=ApiKeyPermission.ADMIN.value
-        # for user keys (scope_type=tenant). Verify constant value.
-        assert ApiKeyPermission.ADMIN.value == "admin"
-
-    def test_assistant_key_migration_creates_read(self):
-        """Assistant key migration → permission=READ."""
-        from eneo.authentication.auth_models import ApiKeyPermission
-
-        # The code at api_key_resolver.py sets permission=ApiKeyPermission.READ.value
-        # for assistant keys (scope_type=assistant). Verify constant value.
-        assert ApiKeyPermission.READ.value == "read"
+class TestPermissionMapping:
+    """Verify permission level mapping constants."""
 
     def test_method_permission_map_completeness(self):
         """METHOD_PERMISSION_MAP covers all standard HTTP methods."""

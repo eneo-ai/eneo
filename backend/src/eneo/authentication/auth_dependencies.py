@@ -9,9 +9,7 @@ from eneo.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
-from eneo.authentication.auth_factory import get_auth_service
-from eneo.authentication.auth_models import ApiKeyInDB, ApiKeyPermission
-from eneo.authentication.auth_service import AuthService
+from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import UnauthorizedException
@@ -105,16 +103,6 @@ async def get_user_from_token_or_assistant_api_key_without_assistant_id(
         _raise_api_key_http_error(exc, request=request)
 
 
-def get_api_key(hashed: bool = True) -> Callable[..., Awaitable[ApiKeyInDB | None]]:
-    async def _get_api_key(
-        api_key: Annotated[str, Security(_get_api_key_from_header)],
-        auth_service: Annotated[AuthService, Depends(get_auth_service)],
-    ) -> ApiKeyInDB | None:
-        return await auth_service.get_api_key(api_key, hash_key=hashed)
-
-    return _get_api_key
-
-
 def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]:
     async def _dep(
         user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -125,13 +113,6 @@ def require_permission(permission: Permission) -> Callable[..., Awaitable[None]]
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
     return _dep
-
-
-def get_api_key_context(request: Request) -> ApiKeyInDB | None:
-    api_key = getattr(request.state, "api_key", None)
-    if isinstance(api_key, ApiKeyInDB):
-        return api_key
-    return None
 
 
 def require_api_key_permission(

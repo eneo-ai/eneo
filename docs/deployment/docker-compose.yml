@@ -31,8 +31,11 @@
 #   data_net   (internal) - PostgreSQL and Redis. No internet egress, and only
 #                           backend, worker and db-init can reach them. Frontend,
 #                           Traefik and future module containers cannot.
-#   module_net            - Traefik and backend. Reserved for optional module
-#                           containers (see docs/plans/modules-platform/).
+#   module_net (internal) - Traefik and backend. Reserved for optional module
+#                           containers. Modules get no internet egress; all
+#                           their calls go to backend:8000, and user login is
+#                           handed off from the Eneo session (SSO) rather than
+#                           the module talking to an IdP itself.
 #   Backend is the only service on all three networks - the single gateway
 #   between the outside world, the data layer, and modules.
 #
@@ -124,6 +127,14 @@ services:
       - "traefik.http.routers.eneo-backend-secure.service=eneo-backend-svc"
       - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
       - "traefik.http.routers.eneo-backend-secure.priority=10"
+    healthcheck:
+      # Module containers (docker-compose.modules.yml) gate their startup on
+      # this. /version is unauthenticated and does not depend on the worker.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/version', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy
@@ -207,6 +218,7 @@ networks:
     internal: true  # no internet egress; unreachable from Traefik/frontend/modules
   module_net:
     driver: bridge
+    internal: true  # modules have no internet egress; ingress arrives via Traefik
 
 volumes:
   eneo_postgres_data:

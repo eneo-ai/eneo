@@ -4,11 +4,6 @@
       "count": 1
     }
   },
-  "src/lib/assets/EneoWordMark.svelte": {
-    "eneo/no-raw-color": {
-      "count": 1
-    }
-  },
   "src/lib/components/layout/Page/Header.svelte": {
     "eneo/no-raw-color": {
       "count": 1
@@ -152,11 +147,6 @@
   "src/routes/(app)/+layout.svelte": {
     "eneo/no-raw-color": {
       "count": 3
-    }
-  },
-  "src/routes/(app)/account/api-keys/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
     }
   },
   "src/routes/(app)/account/api-keys/ApiKeyTable.svelte": {

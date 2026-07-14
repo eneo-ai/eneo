@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from eneo.database.tables.users_table import Users
+from tests.fixtures import mint_v2_api_key
 
 
 @pytest.fixture
@@ -27,7 +28,6 @@ async def test_user(db_session, test_tenant):
 @pytest.fixture
 async def auth_headers(admin_user_api_key):
     """Return HTTP headers with valid admin API key for audit endpoints."""
-    # admin_user_api_key is an ApiKeyCreated object, extract the actual key string
     return {"X-API-Key": admin_user_api_key.key}
 
 
@@ -207,9 +207,11 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
         user_repo = container.user_repo()
         user = await user_repo.get_user_by_email("test2@example.com")
 
-        auth_service = container.auth_service()
-        api_key = await auth_service.create_user_api_key(
-            prefix="test2", user_id=user.id, delete_old=True
+        api_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            prefix="test2",
         )
 
         return TestUser2(
