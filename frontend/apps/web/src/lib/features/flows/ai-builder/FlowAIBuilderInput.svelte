@@ -578,8 +578,23 @@
         </button>
 
         <!-- Model choice is a technical control: visible only in Avancerad. -->
-        {#if service.modelsLoaded && $userMode === "power_user"}
-          {#if hasMultipleModels}
+        {#if $userMode === "power_user"}
+          {#if service.modelLoadStatus === "loading"}
+            <span class="model-load-status" role="status" aria-live="polite" aria-busy="true">
+              {m.loading()}
+            </span>
+          {:else if service.modelLoadStatus === "failed"}
+            <span class="model-load-error" role="alert">
+              <span>{m.failed_to_load_models()}</span>
+              <button
+                type="button"
+                class="model-load-retry"
+                onclick={() => void service.retryModelLoad()}
+              >
+                {m.retry()}
+              </button>
+            </span>
+          {:else if service.modelLoadStatus === "loaded" && hasMultipleModels}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
                 {#snippet child({ props })}
@@ -623,7 +638,7 @@
                 {/each}
               </DropdownMenu.Content>
             </DropdownMenu.Root>
-          {:else}
+          {:else if service.modelLoadStatus === "loaded"}
             <Tooltip.Root>
               <Tooltip.Trigger>
                 {#snippet child({ props })}
@@ -1065,6 +1080,8 @@
   @media (max-width: 639px) {
     .composer-attach,
     .model-pill,
+    .model-load-status,
+    .model-load-error,
     .composer :global(.composer-send) {
       min-height: 2.75rem;
     }
@@ -1081,6 +1098,53 @@
   }
 
   /* --- Model pill --- */
+
+  .model-load-status,
+  .model-load-error {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.75rem;
+    max-width: 100%;
+    font-size: 0.75rem;
+    line-height: 1.3;
+  }
+
+  .model-load-status {
+    padding: 0 0.625rem;
+    border-radius: 999px;
+    color: var(--text-secondary);
+    background: var(--background-secondary);
+  }
+
+  .model-load-error {
+    flex-wrap: wrap;
+    gap: 0.125rem 0.375rem;
+    padding: 0 0.25rem;
+    color: var(--negative-stronger);
+  }
+
+  .model-load-retry {
+    min-height: 1.75rem;
+    padding: 0 0.25rem;
+    border: 0;
+    border-radius: 0.25rem;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.125rem;
+    cursor: pointer;
+  }
+
+  .model-load-retry:hover {
+    text-decoration: none;
+  }
+
+  .model-load-retry:focus-visible {
+    outline: 2px solid var(--negative-stronger);
+    outline-offset: 1px;
+  }
 
   .model-pill {
     display: inline-flex;

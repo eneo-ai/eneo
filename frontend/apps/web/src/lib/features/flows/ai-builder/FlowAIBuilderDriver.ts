@@ -74,6 +74,8 @@ export interface PendingPlanOperation {
  *  must not claim anything about persistence. */
 export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
+export type ModelLoadStatus = "idle" | "loading" | "loaded" | "failed";
+
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
   messages: ChatMessage[];
@@ -88,6 +90,7 @@ export interface FlowAIBuilderState {
   availableModels: AIBuilderModel[];
   selectedModelId: string | null;
   modelsLoaded: boolean;
+  modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
@@ -108,6 +111,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     availableModels: [],
     selectedModelId: null,
     modelsLoaded: false,
+    modelLoadStatus: "idle",
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null
@@ -273,6 +277,13 @@ export class FlowAIBuilderDriver {
   selectModel(modelId: string): void {
     this.#state.selectedModelId = modelId;
     this.#notify();
+  }
+
+  async retryModelLoad(): Promise<void> {
+    if (this.#state.modelLoadStatus !== "failed") return;
+    const owner = this.#currentSessionOwner();
+    if (!owner) return;
+    await this.#fetchModels(owner);
   }
 
   async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
@@ -1189,6 +1200,9 @@ export class FlowAIBuilderDriver {
     if (!this.#state.session) return;
     if (!this.#ownsSession(owner)) return;
 
+    this.#state.modelLoadStatus = "loading";
+    this.#notify();
+
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
         method: "get",
@@ -1198,9 +1212,12 @@ export class FlowAIBuilderDriver {
       this.#state.availableModels = result.models;
       this.#state.selectedModelId = result.default_model_id;
       this.#state.modelsLoaded = true;
+      this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {
-      // Non-critical — model selector just won't appear
+      if (!this.#ownsSession(owner)) return;
+      this.#state.modelLoadStatus = "failed";
+      this.#notify();
     }
   }
 

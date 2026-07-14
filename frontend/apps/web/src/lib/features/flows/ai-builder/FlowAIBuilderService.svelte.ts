@@ -5,7 +5,8 @@ import {
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
   type CreateFailureOutcome,
-  type FlowAIBuilderState
+  type FlowAIBuilderState,
+  type ModelLoadStatus
 } from "./FlowAIBuilderDriver";
 import type {
   AIBuilderDraftSession,
@@ -146,6 +147,10 @@ export class FlowAIBuilderService {
 
   get selectedModelId(): string | null {
     return this.#state.selectedModelId;
+  }
+
+  get modelLoadStatus(): ModelLoadStatus {
+    return this.#state.modelLoadStatus;
   }
 
   get modelsLoaded(): boolean {
@@ -289,6 +294,10 @@ export class FlowAIBuilderService {
 
   selectModel(modelId: string): void {
     this.#driver.selectModel(modelId);
+  }
+
+  async retryModelLoad(): Promise<void> {
+    await this.#driver.retryModelLoad();
   }
 
   clearError(): void {

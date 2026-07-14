@@ -869,6 +869,67 @@ describe("FlowAIBuilder generation failure (E1)", () => {
 });
 
 describe("FlowAIBuilder", () => {
+  it("keeps model loading visible and recovers in place after a failed first request", async () => {
+    localStorage.setItem("eneo:flow-user-mode", "power_user");
+    const modelId = "11111111-1111-4111-8111-111111111113";
+    const session = {
+      session_id: "model-session",
+      space_id: "space-1",
+      status: "chatting" as const,
+      target_kind: "create" as const,
+      flow_id: null,
+      latest_plan_id: null,
+      conversation: []
+    };
+    let rejectInitialModelRequest!: (reason: Error) => void;
+    const initialModelRequest = new Promise<never>((_resolve, reject) => {
+      rejectInitialModelRequest = reject;
+    });
+    let modelRequestCount = 0;
+    function makeTransport(): AIBuilderClientTransport {
+      const fetch = vi.fn();
+      fetch.mockImplementation(async (path: string, init?: { method?: string }) => {
+        if (path.endsWith("/models")) {
+          modelRequestCount += 1;
+          if (modelRequestCount === 1) return await initialModelRequest;
+          return {
+            models: [{ id: modelId, name: "GPT-5.4", provider: "openai" }],
+            default_model_id: modelId
+          };
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+          return session;
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+          return session;
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+          return { sessions: [] };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      return { fetch, stream: vi.fn() };
+    }
+
+    render(FlowAIBuilderHarness, { transport: makeTransport() });
+
+    const loading = await screen.findByRole("status");
+    expect(loading.textContent).toContain(m.loading());
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    rejectInitialModelRequest(new Error("model endpoint unavailable"));
+    expect((await screen.findByRole("alert")).textContent).toContain(m.failed_to_load_models());
+
+    await fireEvent.click(screen.getByRole("button", { name: m.retry() }));
+
+    expect(
+      await screen.findByRole("button", {
+        name: `${m.ai_builder_model_label()}: GPT-5.4`
+      })
+    ).toBeTruthy();
+    expect(screen.queryByText(m.failed_to_load_models())).toBeNull();
+    expect(modelRequestCount).toBe(2);
+  });
+
   it("auto-resumes a single matching create draft instead of starting a new chat", async () => {
     const draft = {
       session_id: "draft-1",

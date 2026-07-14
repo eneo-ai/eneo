@@ -359,6 +359,132 @@ describe("FlowAIBuilderDriver", () => {
     expect(fetch.mock.calls[1]?.[0]).toBe("/api/v1/flows/ai-builder/sessions");
   });
 
+  it("recovers a failed model load with one bounded user retry", async () => {
+    const modelId = "11111111-1111-4111-8111-111111111113";
+    let modelRequestCount = 0;
+    let resolveRetry!: (value: {
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string;
+    }) => void;
+    const retryResponse = new Promise<{
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string;
+    }>((resolve) => {
+      resolveRetry = resolve;
+    });
+    const session = makeSession({ session_id: "model-session" });
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/models")) {
+        modelRequestCount += 1;
+        if (modelRequestCount === 1) throw new Error("model endpoint unavailable");
+        return await retryResponse;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        return session;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await driver.createSession("edit");
+
+    expect(driver.state.modelLoadStatus).toBe("failed");
+    const retry = driver.retryModelLoad();
+    expect(driver.state.modelLoadStatus).toBe("loading");
+    const duplicateRetry = driver.retryModelLoad();
+    resolveRetry({
+      models: [{ id: modelId, name: "GPT-5.4", provider: "openai" }],
+      default_model_id: modelId
+    });
+    await Promise.all([retry, duplicateRetry]);
+
+    expect(driver.state.modelLoadStatus).toBe("loaded");
+    expect(driver.state.availableModels).toEqual([
+      { id: modelId, name: "GPT-5.4", provider: "openai" }
+    ]);
+    expect(driver.state.selectedModelId).toBe(modelId);
+    expect(modelRequestCount).toBe(2);
+  });
+
+  it("does not install a late model response after the session is replaced", async () => {
+    const staleModelId = "11111111-1111-4111-8111-111111111114";
+    const currentModelId = "11111111-1111-4111-8111-111111111115";
+    const staleSession = makeSession({ session_id: "stale-model-session" });
+    const currentSession = makeSession({ session_id: "current-model-session" });
+    let createCount = 0;
+    let markStaleRequestStarted!: () => void;
+    const staleRequestStarted = new Promise<void>((resolve) => {
+      markStaleRequestStarted = resolve;
+    });
+    let resolveStaleModels!: (value: {
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string;
+    }) => void;
+    const staleModels = new Promise<{
+      models: { id: string; name: string; provider: string }[];
+      default_model_id: string;
+    }>((resolve) => {
+      resolveStaleModels = resolve;
+    });
+    const fetch = vi.fn(
+      async (
+        path: string,
+        init?: { method?: string; params?: { path?: { session_id?: string } } }
+      ) => {
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+          createCount += 1;
+          return createCount === 1 ? staleSession : currentSession;
+        }
+        if (path.endsWith("/models")) {
+          if (init?.params?.path?.session_id === staleSession.session_id) {
+            markStaleRequestStarted();
+            return await staleModels;
+          }
+          return {
+            models: [{ id: currentModelId, name: "Current model", provider: "openai" }],
+            default_model_id: currentModelId
+          };
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+          return init?.params?.path?.session_id === staleSession.session_id
+            ? staleSession
+            : currentSession;
+        }
+        if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+          return { sessions: [] };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }
+    );
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    const staleCreate = driver.createSession("edit");
+    await staleRequestStarted;
+    await driver.createSession("edit");
+
+    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
+    expect(driver.state.modelLoadStatus).toBe("loaded");
+    expect(driver.state.selectedModelId).toBe(currentModelId);
+    resolveStaleModels({
+      models: [{ id: staleModelId, name: "Stale model", provider: "openai" }],
+      default_model_id: staleModelId
+    });
+    await staleCreate;
+
+    expect(driver.state.session?.session_id).toBe(currentSession.session_id);
+    expect(driver.state.modelLoadStatus).toBe("loaded");
+    expect(driver.state.availableModels).toEqual([
+      { id: currentModelId, name: "Current model", provider: "openai" }
+    ]);
+    expect(driver.state.selectedModelId).toBe(currentModelId);
+  });
+
   it("initializes edit mode by creating or resuming the session immediately", async () => {
     const fetch = vi
       .fn()
