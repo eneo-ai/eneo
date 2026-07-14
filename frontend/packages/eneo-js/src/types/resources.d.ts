@@ -149,6 +149,7 @@ export namespace SSE {
   export type Text = Omit<components["schemas"]["SSEText"], "$defs">;
   export type Reasoning = Omit<components["schemas"]["SSEReasoning"], "$defs">;
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
+  export type DebugPayload = Omit<components["schemas"]["SSEDebugPayload"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Eneo = Omit<components["schemas"]["SSEEneoEvent"], "$defs">;
   export type ToolCall = Omit<components["schemas"]["SSEToolCall"], "$defs">;

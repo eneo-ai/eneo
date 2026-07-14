@@ -2045,6 +2045,10 @@ class AssistantService:
             description=assistant_to_ask.description,
             question_id=question_id,
             mcp_tool_references=mcp_tool_references,
+            # Streamed to the client at turn start only when this turn
+            # explicitly requested debug capture; assistant-level logging
+            # stays a persistence-only concern.
+            logging_details=response.extended_logging if debug else None,
         )
 
         return final_response

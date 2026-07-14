@@ -220,6 +220,18 @@ class SSETokenUsage(SSEBase):
     usage: TokenUsageEvent
 
 
+class SSEDebugPayload(SSEBase):
+    """Captured provider payload for a debug-requested turn.
+
+    Emitted right after first_chunk (the payload is finalized before the
+    provider call), so debug clients can render the system prompt and message
+    array while the turn is still streaming.
+    """
+
+    id: UUID
+    logging_details: LoggingDetailsPublic
+
+
 class SSEFirstChunk(AskChatResponse):
     pass
 
@@ -248,6 +260,7 @@ SSE_MODELS = [
     SSETokenUsage,
     SSEFiles,
     SSEFirstChunk,
+    SSEDebugPayload,
     SSEError,
 ]
 

@@ -18680,6 +18680,27 @@ export interface components {
        */
       mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
+    /**
+     * SSEDebugPayload
+     * @description Captured provider payload for a debug-requested turn.
+     *
+     *     Emitted right after first_chunk (the payload is finalized before the
+     *     provider call), so debug clients can render the system prompt and message
+     *     array while the turn is still streaming.
+     */
+    SSEDebugPayload: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      logging_details: components["schemas"]["LoggingDetailsPublic"];
+    };
     /** SSEError */
     SSEError: {
       /**

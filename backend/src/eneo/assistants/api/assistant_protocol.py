@@ -16,6 +16,7 @@ from eneo.info_blobs.info_blob import (
     InfoBlobAskAssistantPublic,
     InfoBlobMetadata,
 )
+from eneo.logging.logging import LoggingDetailsPublic
 from eneo.main.logging import get_logger
 from eneo.questions.question import (
     McpToolReferencePublic,
@@ -26,6 +27,7 @@ from eneo.sessions.session import (
     AskResponse,
     EneoEventType,
     SessionInDB,
+    SSEDebugPayload,
     SSEEneoEvent,
     SSEError,
     SSEFiles,
@@ -408,6 +410,26 @@ async def to_conversation_response(
             yield ServerSentEvent(
                 data.model_dump_json(), event=ResponseType.FIRST_CHUNK.value
             )
+
+            # Debug-requested turns get the captured provider payload up
+            # front: it is finalized before the provider call, so the client
+            # can render the system prompt while the answer streams.
+            if (
+                response.logging_details is not None
+                and response.logging_details.json_body is not None
+                and response.question_id is not None
+            ):
+                debug_payload = SSEDebugPayload(
+                    session_id=response.session.id,
+                    id=response.question_id,
+                    logging_details=LoggingDetailsPublic(
+                        **response.logging_details.model_dump()
+                    ),
+                )
+                yield ServerSentEvent(
+                    debug_payload.model_dump_json(),
+                    event=ResponseType.DEBUG_PAYLOAD.value,
+                )
 
             assert not isinstance(response.answer, str)
             async for chunk in response.answer:

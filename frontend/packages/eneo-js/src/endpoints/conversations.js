@@ -145,6 +145,7 @@ export function initConversations(client) {
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
+     * @param {(data: import("../types/resources").SSE.DebugPayload) => void} [params.callbacks.onDebugPayload] Callback to run when the captured provider payload arrives for a debug-requested turn
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
@@ -223,6 +224,10 @@ export function initConversations(client) {
                 case "first_chunk":
                   response = data;
                   callbacks?.onFirstChunk?.(data);
+                  break;
+
+                case "debug_payload":
+                  callbacks?.onDebugPayload?.(data);
                   break;
 
                 case "text":

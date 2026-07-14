@@ -66,6 +66,16 @@
     };
   });
 
+  // Captured payload for the selected turn: the persisted row once the turn
+  // completed, or the payload streamed at turn start (debug_payload event)
+  // while it is still running.
+  const capturedDetails = $derived.by(() => {
+    if (logging?.logging_details) return logging.logging_details;
+    const live = chat.liveLoggingDetails;
+    if (live && message?.id === live.messageId) return live.details;
+    return null;
+  });
+
   type ProviderToolCall = { id?: string; function?: { name?: string; arguments?: string } };
   type ProviderMessage = {
     role?: string;
@@ -73,7 +83,7 @@
     tool_calls?: ProviderToolCall[];
   };
   const providerMessages = $derived.by(() => {
-    const body = logging?.logging_details?.json_body;
+    const body = capturedDetails?.json_body;
     return Array.isArray(body) ? (body as ProviderMessage[]) : null;
   });
 
@@ -233,9 +243,9 @@
     {#if !message}
       <p class="text-muted px-3 py-4 text-sm">{m.debug_panel_no_messages()}</p>
     {:else}
-      {#if isLiveTurn}
+      {#if isLiveTurn && !capturedDetails}
         <p class="text-muted px-3 py-2 text-xs">{m.debug_panel_capture_pending()}</p>
-      {:else if !loggingLoading && !logging?.logging_details}
+      {:else if !isLiveTurn && !loggingLoading && !capturedDetails}
         <p class="text-muted px-3 py-2 text-xs">{m.debug_panel_not_captured()}</p>
       {/if}
 
@@ -256,13 +266,13 @@
         {/each}
       </div>
 
-      {#if logging?.logging_details}
+      {#if capturedDetails}
         <DebugSection title={m.debug_panel_model_settings()}>
           {#if message.completion_model?.name}
             <p class="text-default text-xs font-medium">{message.completion_model.name}</p>
           {/if}
           <CodeBlock
-            source={stringify(logging.logging_details.model_kwargs ?? {})}
+            source={stringify(capturedDetails.model_kwargs ?? {})}
             class="max-h-60 text-xs"
           />
         </DebugSection>
@@ -315,13 +325,10 @@
         {/if}
       </DebugSection>
 
-      {#if logging?.logging_details}
+      {#if capturedDetails}
         <DebugSection title={m.debug_panel_raw_payload()}>
           <p class="text-muted text-xs">{m.debug_panel_snapshot_note()}</p>
-          <CodeBlock
-            source={stringify(logging.logging_details.json_body)}
-            class="max-h-[50vh] text-xs"
-          />
+          <CodeBlock source={stringify(capturedDetails.json_body)} class="max-h-[50vh] text-xs" />
         </DebugSection>
       {/if}
     {/if}

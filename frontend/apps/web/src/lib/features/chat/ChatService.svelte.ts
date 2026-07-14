@@ -56,6 +56,13 @@ export class ChatService {
   // per-turn capture of the exact provider payload (debug=true).
   debugPanelVisible = $state<boolean>(false);
   #loggingDetailsCache = new SvelteMap<string, Promise<MessageLogging | null>>();
+  // Provider payload streamed at turn start (debug_payload event), so the
+  // panel can show the system prompt while the answer streams. Keyed by the
+  // question id from the event; superseded by the persisted fetch post-turn.
+  liveLoggingDetails = $state<{
+    messageId: string;
+    details: SSE.DebugPayload["logging_details"];
+  } | null>(null);
 
   // Context-window usage for the most recent turn. Split into input vs output
   // so the bar can show what was sent to the LLM (system + MCP + RAG + history
@@ -623,6 +630,13 @@ export class ChatService {
           // debug capture for them.
           debug: this.debugPanelVisible && this.#chatPartner?.type !== "group-chat",
           callbacks: {
+            onDebugPayload: (payload) => {
+              if (isStale()) return;
+              this.liveLoggingDetails = {
+                messageId: payload.id,
+                details: payload.logging_details
+              };
+            },
             onFirstChunk: (chunk) => {
               if (isStale()) return;
               // Add the message to the conversation only after backend confirms

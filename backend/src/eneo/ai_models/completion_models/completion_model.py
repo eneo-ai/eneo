@@ -51,6 +51,9 @@ class ResponseType(str, Enum):
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     TOKEN_USAGE = "token_usage"
+    # Captured provider payload for a debug-requested turn, emitted right
+    # after first_chunk so debug clients can show it while the turn runs.
+    DEBUG_PAYLOAD = "debug_payload"
     ERROR = "error"
 
 

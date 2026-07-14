@@ -31,6 +31,7 @@ from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.logging.logging import LoggingDetails
 from eneo.main.models import (
     NOT_PROVIDED,
     InDB,
@@ -316,6 +317,9 @@ class AssistantResponse(BaseModel):
     mcp_tool_references: list[McpToolReference] = Field(
         default_factory=_empty_mcp_tool_reference_list
     )
+    # Captured provider payload, set only for debug-requested turns so the
+    # protocol can stream it to the client at turn start.
+    logging_details: Optional[LoggingDetails] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     description: Optional[str] = None
