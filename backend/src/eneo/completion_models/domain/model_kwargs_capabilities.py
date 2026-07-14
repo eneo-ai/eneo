@@ -94,7 +94,7 @@ def coerce_model_kwargs_capabilities(
                     },
                 )
             else:
-                logger.warning(
+                logger.debug(
                     "Untagged completion model kwargs capabilities are untrusted; omitting optional controls",
                     extra={
                         "completion_model_id": str(completion_model_id)

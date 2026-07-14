@@ -106,6 +106,37 @@ def test_untagged_persisted_capabilities_fail_closed():
     assert resolved == SupportedModelKwargs()
 
 
+def test_repeated_valid_untagged_capabilities_fail_closed_without_warning_burst(
+    caplog: pytest.LogCaptureFixture,
+):
+    logger_name = "eneo.completion_models.domain.model_kwargs_capabilities"
+    logger = logging.getLogger(logger_name)
+    was_disabled = logger.disabled
+    logger.disabled = False
+    try:
+        with caplog.at_level(logging.WARNING, logger=logger_name):
+            resolved = [
+                model_kwargs_capabilities.resolve_supported_model_kwargs(
+                    model_kwargs_capabilities={
+                        "temperature": {
+                            "supported": True,
+                            "control": "slider",
+                            "minimum": 0,
+                            "maximum": 2,
+                            "step": 0.01,
+                        }
+                    },
+                    reasoning=True,
+                )
+                for _ in range(5)
+            ]
+    finally:
+        logger.disabled = was_disabled
+
+    assert resolved == [SupportedModelKwargs()] * 5
+    assert caplog.records == []
+
+
 def test_capability_override_wins_over_model_name_and_reasoning_flag():
     model = _completion_model_sparse(
         name="gpt-5.1",
