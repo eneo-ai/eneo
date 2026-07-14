@@ -49,7 +49,6 @@ class UsersRepository:
         return [
             selectinload(Users.roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
-            selectinload(Users.api_key),
             selectinload(Users.user_groups),
         ]
 
@@ -409,7 +408,6 @@ class UsersRepository:
         query = query.options(
             selectinload(Users.roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
-            selectinload(Users.api_key),
             selectinload(Users.user_groups),
         )
 

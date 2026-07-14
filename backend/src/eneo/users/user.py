@@ -8,7 +8,6 @@ from pydantic import EmailStr, Field, computed_field, field_serializer, field_va
 
 from eneo.authentication.auth_models import (
     AccessToken,
-    ApiKey,
     ApiKeyV2InDB,
 )
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
@@ -275,7 +274,6 @@ class UserInDB(UserInDBBase):
 
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
-    api_key: Optional[ApiKey] = None
     active_api_key: Optional[ApiKeyV2InDB] = None
     roles: list[RoleInDB] = []
     quota_used: int = 0
@@ -323,7 +321,6 @@ class UserPublicBase(InDB, UserBase):
 
 class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
-    legacy_api_key_suffix: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]

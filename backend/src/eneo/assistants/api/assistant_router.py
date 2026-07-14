@@ -21,17 +21,12 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
-from eneo.authentication.api_key_router_helpers import (
-    error_responses as api_key_error_responses,
-)
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
     require_user_for_creation,
-    require_user_identity,
 )
 from eneo.authentication.auth_models import (
-    ApiKey,
     ApiKeyNotificationTargetType,
     audit_actor_for,
 )
@@ -66,11 +61,6 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-_LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
-    "key": "ina_6f2c9b3a8f...7b31",
-    "truncated_key": "7b31",
-}
 
 
 @router.post(
@@ -1062,98 +1052,6 @@ async def leave_feedback(
     )
 
     return to_session_public(session)
-
-
-@router.get(
-    "/{id}/api-keys/",
-    response_model=ApiKey,
-    tags=["Legacy API Keys"],
-    summary="Generate legacy assistant API key",
-    deprecated=True,
-    description=(
-        "Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys."
-        " This returns a legacy assistant-scoped key."
-    ),
-    responses={
-        200: {
-            "description": "Legacy assistant API key created and returned once.",
-            "content": {
-                "application/json": {"example": _LEGACY_ASSISTANT_API_KEY_EXAMPLE}
-            },
-        },
-        410: {
-            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "code": "deprecated_endpoint",
-                        "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
-                    }
-                }
-            },
-        },
-        **api_key_error_responses([401, 403]),
-    },
-)
-async def generate_read_only_assistant_key(
-    id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_identity_guard: None = Depends(require_user_identity),
-):
-    """Generates a read-only api key for this assistant.
-
-    This api key can only be used on `POST /api/v1/assistants/{id}/sessions/`
-    and `POST /api/v1/assistants/{id}/sessions/{session_id}/`."""
-    settings = get_settings()
-    if not settings.api_key_legacy_endpoints_enabled:
-        raise HTTPException(
-            status_code=410,
-            detail={
-                "code": "deprecated_endpoint",
-                "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys.",
-            },
-        )
-    service = container.assistant_service()
-    user = container.user()
-
-    # Generate API key
-    api_key = await service.generate_api_key(id)
-
-    # Get assistant info for audit log
-    assistant, _ = await service.get_assistant(id)
-
-    # Get space for context
-    space = None
-    if assistant.space_id:
-        try:
-            space_service = container.space_service()
-            space = await space_service.get_space(assistant.space_id)
-        except Exception:
-            space = None
-
-    # Build extra context for API key generation
-    extra = {
-        "truncated_key": api_key.truncated_key,
-        "key_type": "assistant_read_only",
-    }
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.API_KEY_GENERATED,
-        entity_type=EntityType.API_KEY,
-        entity_id=id,  # Use assistant ID as entity ID for assistant API keys
-        description=f"Generated read-only API key for assistant '{assistant.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=assistant,
-            space=space,
-            extra=extra,
-        ),
-    )
-
-    return api_key
 
 
 @router.post(

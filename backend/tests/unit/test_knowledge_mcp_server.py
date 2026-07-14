@@ -157,16 +157,14 @@ class TestTokenScoping:
 
     def test_scoped_token_round_trips_assistant_id(self):
         assistant_id = uuid4()
-        token = AuthService(api_key_repo=MagicMock()).create_scoped_mcp_token(
+        token = AuthService().create_scoped_mcp_token(
             self._user(), assistant_id=assistant_id
         )
 
         assert assistant_id_from_token(token) == assistant_id
 
     def test_unscoped_access_token_is_rejected(self):
-        token = AuthService(api_key_repo=MagicMock()).create_access_token_for_user(
-            self._user()
-        )
+        token = AuthService().create_access_token_for_user(self._user())
 
         with pytest.raises(ValueError):
             assistant_id_from_token(token)
