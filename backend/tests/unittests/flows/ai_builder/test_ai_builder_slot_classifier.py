@@ -11,6 +11,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
+    resolve_supported_model_kwargs,
 )
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
@@ -1197,7 +1198,18 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
         litellm_client=litellm_client,
         completion_model_route=_route(
             model="openai/gpt-test",
-            supported=SupportedModelKwargs(),
+            supported=resolve_supported_model_kwargs(
+                model_kwargs_capabilities={
+                    "temperature": {
+                        "supported": True,
+                        "control": "slider",
+                        "minimum": 0,
+                        "maximum": 2,
+                        "step": 0.01,
+                    }
+                },
+                reasoning=True,
+            ),
         ),
         classification_input=_classification_input(f"unsupported-temp-{uuid4()}"),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
@@ -1205,6 +1217,7 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert litellm_client.acompletion.await_count == 1
     assert "temperature" not in call_kwargs
     assert call_kwargs["response_format"]["type"] == "json_schema"
 

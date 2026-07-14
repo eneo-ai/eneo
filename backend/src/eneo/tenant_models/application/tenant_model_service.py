@@ -32,6 +32,8 @@ from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    persist_explicit_model_kwargs_capabilities,
+    persist_parameter_presence_model_kwargs_capabilities,
     snapshot_supported_model_kwargs,
 )
 from eneo.database.tables.ai_models_table import (
@@ -138,9 +140,9 @@ def _snapshot_completion_capabilities(
             exc_info=True,
         )
         supported_params = None
-    return snapshot_supported_model_kwargs(
-        supported_params, reasoning=reasoning
-    ).model_dump()
+    return persist_parameter_presence_model_kwargs_capabilities(
+        snapshot_supported_model_kwargs(supported_params, reasoning=reasoning)
+    )
 
 
 def _ensure_tenant_owned(model: Any) -> None:
@@ -256,7 +258,9 @@ class TenantCompletionModelService:
         new_model.deployment_name = None
         new_model.base_url = None
         new_model.model_kwargs_capabilities = (
-            payload.model_kwargs_capabilities.model_dump()
+            persist_explicit_model_kwargs_capabilities(
+                payload.model_kwargs_capabilities
+            )
             if payload.model_kwargs_capabilities is not None
             else _snapshot_completion_capabilities(
                 provider.provider_type,
@@ -356,7 +360,9 @@ class TenantCompletionModelService:
             )
         if "model_kwargs_capabilities" in provided:
             model.model_kwargs_capabilities = (
-                payload.model_kwargs_capabilities.model_dump()
+                persist_explicit_model_kwargs_capabilities(
+                    payload.model_kwargs_capabilities
+                )
                 if payload.model_kwargs_capabilities is not None
                 else None
             )

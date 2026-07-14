@@ -17,10 +17,12 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelUpdate,
     ModelKwargs,
 )
+from eneo.completion_models.domain import model_kwargs_capabilities
 from eneo.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
     SupportedModelKwargs,
     snapshot_supported_model_kwargs,
 )
@@ -63,37 +65,70 @@ def test_provider_type_does_not_widen_missing_capability_snapshot():
     assert model.supported_model_kwargs == SupportedModelKwargs()
 
 
-def test_discovered_capabilities_are_snapshotted_explicitly():
-    snapshot = snapshot_supported_model_kwargs(
-        ["temperature", "top_p", "reasoning_effort"], reasoning=False
+def test_explicit_capability_evidence_round_trips_without_public_marker():
+    explicit = SupportedModelKwargs(
+        temperature=ModelKwargCapability(
+            supported=True,
+            control="slider",
+            minimum=1,
+            maximum=1,
+            step=1,
+        )
     )
 
-    assert snapshot.temperature.supported is True
-    assert snapshot.top_p.supported is True
-    assert snapshot.reasoning_effort.supported is True
-    assert snapshot.frequency_penalty.supported is False
-    assert snapshot.top_k.supported is False
+    persisted = model_kwargs_capabilities.persist_explicit_model_kwargs_capabilities(
+        explicit
+    )
+    resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
+        model_kwargs_capabilities=persisted,
+        reasoning=True,
+    )
+    public_projection = SupportedModelKwargs.model_validate(persisted)
+
+    assert resolved == explicit
+    assert public_projection == explicit
+    assert "_evidence" not in public_projection.model_dump()
 
 
-def test_snapshot_honors_reasoning_flag_when_discovery_misses_it():
-    snapshot = snapshot_supported_model_kwargs(["temperature"], reasoning=True)
+def test_parameter_presence_discovery_does_not_authorize_value_domains():
+    snapshot = snapshot_supported_model_kwargs(
+        ["temperature", "top_p", "reasoning_effort"], reasoning=True
+    )
 
-    assert snapshot.reasoning_effort.supported is True
-    assert snapshot.reasoning_effort.options == ["low", "medium", "high"]
-    assert snapshot.temperature.supported is True
-
-
-def test_snapshot_fallback_honors_reasoning_flag():
-    snapshot = snapshot_supported_model_kwargs(None, reasoning=True)
-
-    assert snapshot.reasoning_effort.supported is True
-    assert snapshot.temperature.supported is False
+    assert snapshot == SupportedModelKwargs()
 
 
-def test_snapshot_keeps_discovered_reasoning_options_over_fallback():
-    snapshot = snapshot_supported_model_kwargs(["reasoning_effort"], reasoning=True)
+def test_untagged_persisted_capabilities_fail_closed():
+    resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
+        model_kwargs_capabilities={
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0,
+                "maximum": 2,
+                "step": 0.01,
+            }
+        },
+        reasoning=True,
+    )
 
-    assert snapshot.reasoning_effort.options == ["none", "low", "medium", "high"]
+    assert resolved == SupportedModelKwargs()
+
+
+def test_parameter_presence_evidence_fails_closed():
+    discovered = SupportedModelKwargs(temperature=ModelKwargCapability(supported=True))
+    persisted = (
+        model_kwargs_capabilities.persist_parameter_presence_model_kwargs_capabilities(
+            discovered
+        )
+    )
+
+    resolved = model_kwargs_capabilities.resolve_supported_model_kwargs(
+        model_kwargs_capabilities=persisted,
+        reasoning=False,
+    )
+
+    assert resolved == SupportedModelKwargs()
 
 
 def test_capability_override_wins_over_model_name_and_reasoning_flag():

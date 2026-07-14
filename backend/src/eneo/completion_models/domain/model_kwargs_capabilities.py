@@ -37,32 +37,38 @@ class SupportedModelKwargs(BaseModel):
     top_k: ModelKwargCapability = Field(default_factory=ModelKwargCapability)
 
 
-def _slider_capability(
-    *, minimum: float, maximum: float, step: float
-) -> ModelKwargCapability:
-    return ModelKwargCapability(
-        supported=True,
-        control="slider",
-        minimum=minimum,
-        maximum=maximum,
-        step=step,
+class _PersistedSupportedModelKwargs(SupportedModelKwargs):
+    evidence: Literal["admin_explicit", "parameter_presence"] = Field(alias="_evidence")
+
+
+def _persist_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+    *,
+    evidence: Literal["admin_explicit", "parameter_presence"],
+) -> dict[str, object]:
+    persisted = _PersistedSupportedModelKwargs.model_validate(
+        {**capabilities.model_dump(), "_evidence": evidence}
+    )
+    return persisted.model_dump(by_alias=True)
+
+
+def persist_explicit_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+) -> dict[str, object]:
+    """Tag admin-authored value-domain evidence before JSONB persistence."""
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="admin_explicit",
     )
 
 
-def _reasoning_effort_select() -> ModelKwargCapability:
-    return ModelKwargCapability(
-        supported=True,
-        control="select",
-        options=["low", "medium", "high"],
-    )
-
-
-def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
-    if reasoning:
-        return SupportedModelKwargs(reasoning_effort=_reasoning_effort_select())
-
-    return SupportedModelKwargs(
-        temperature=_slider_capability(minimum=0, maximum=2, step=0.01)
+def persist_parameter_presence_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+) -> dict[str, object]:
+    """Tag discovery output as non-authoritative before JSONB persistence."""
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="parameter_presence",
     )
 
 
@@ -71,77 +77,13 @@ def snapshot_supported_model_kwargs(
     *,
     reasoning: bool,
 ) -> SupportedModelKwargs:
-    """Convert LiteLLM discovery data into persisted Eneo capabilities.
+    """Resolve parameter-name discovery without authorizing value domains.
 
-    This is intended for model creation/update, not request-time lookup. The
-    resulting snapshot keeps UI and execution behavior stable across dependency
-    upgrades.
-
-    `reasoning` is the admin-declared model flag. It must be honored here:
-    discovery is name-based, so opaque routes (e.g. Azure deployment names)
-    miss reasoning support entirely, and the persisted snapshot acts as an
-    explicit override at resolve time which is never widened again.
+    LiteLLM reports parameter presence, not which values a route accepts. The
+    inputs remain part of the admin-owned discovery interface, but cannot enable
+    optional request controls without explicit administrator evidence.
     """
-    if supported_params is None:
-        return _default_supported_model_kwargs(reasoning=reasoning)
-
-    supported = set(supported_params)
-    snapshot = SupportedModelKwargs(
-        temperature=(
-            _slider_capability(minimum=0, maximum=2, step=0.01)
-            if "temperature" in supported
-            else ModelKwargCapability()
-        ),
-        top_p=(
-            _slider_capability(minimum=0, maximum=1, step=0.01)
-            if "top_p" in supported
-            else ModelKwargCapability()
-        ),
-        reasoning_effort=(
-            ModelKwargCapability(
-                supported=True,
-                control="select",
-                options=["none", "low", "medium", "high"],
-            )
-            if "reasoning_effort" in supported
-            else ModelKwargCapability()
-        ),
-        verbosity=(
-            ModelKwargCapability(
-                supported=True,
-                control="select",
-                options=["low", "medium", "high"],
-            )
-            if "verbosity" in supported
-            else ModelKwargCapability()
-        ),
-        presence_penalty=(
-            _slider_capability(minimum=-2, maximum=2, step=0.1)
-            if "presence_penalty" in supported
-            else ModelKwargCapability()
-        ),
-        frequency_penalty=(
-            _slider_capability(minimum=-2, maximum=2, step=0.1)
-            if "frequency_penalty" in supported
-            else ModelKwargCapability()
-        ),
-        top_k=(
-            ModelKwargCapability(
-                supported=True,
-                control="slider",
-                minimum=1,
-                maximum=100,
-                step=1,
-            )
-            if "top_k" in supported
-            else ModelKwargCapability()
-        ),
-    )
-    if reasoning and not snapshot.reasoning_effort.supported:
-        snapshot = snapshot.model_copy(
-            update={"reasoning_effort": _reasoning_effort_select()}
-        )
-    return snapshot
+    return SupportedModelKwargs()
 
 
 def _apply_model_capability_flags(
@@ -166,22 +108,46 @@ def coerce_model_kwargs_capabilities(
     if model_kwargs_capabilities is None:
         return None
 
-    if isinstance(model_kwargs_capabilities, SupportedModelKwargs):
+    if isinstance(model_kwargs_capabilities, _PersistedSupportedModelKwargs):
+        persisted = model_kwargs_capabilities
+    elif isinstance(model_kwargs_capabilities, SupportedModelKwargs):
         return model_kwargs_capabilities
+    else:
+        try:
+            persisted = _PersistedSupportedModelKwargs.model_validate(
+                model_kwargs_capabilities
+            )
+        except ValidationError:
+            try:
+                SupportedModelKwargs.model_validate(model_kwargs_capabilities)
+            except ValidationError:
+                logger.warning(
+                    "Invalid completion model kwargs capabilities; omitting optional controls",
+                    extra={
+                        "completion_model_id": str(completion_model_id)
+                        if completion_model_id
+                        else None,
+                        "tenant_id": str(tenant_id) if tenant_id else None,
+                    },
+                )
+            else:
+                logger.warning(
+                    "Untagged completion model kwargs capabilities are untrusted; omitting optional controls",
+                    extra={
+                        "completion_model_id": str(completion_model_id)
+                        if completion_model_id
+                        else None,
+                        "tenant_id": str(tenant_id) if tenant_id else None,
+                    },
+                )
+            return None
 
-    try:
-        return SupportedModelKwargs.model_validate(model_kwargs_capabilities)
-    except ValidationError:
-        logger.warning(
-            "Invalid completion model kwargs capabilities; omitting optional controls",
-            extra={
-                "completion_model_id": str(completion_model_id)
-                if completion_model_id
-                else None,
-                "tenant_id": str(tenant_id) if tenant_id else None,
-            },
-        )
+    if persisted.evidence != "admin_explicit":
         return None
+
+    return SupportedModelKwargs.model_validate(
+        persisted.model_dump(exclude={"evidence"})
+    )
 
 
 def resolve_supported_model_kwargs(

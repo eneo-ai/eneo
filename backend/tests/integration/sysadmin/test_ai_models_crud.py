@@ -13,6 +13,7 @@ Tests the system-wide AI model management endpoints that require super admin API
 import pytest
 import sqlalchemy as sa
 
+from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
 
 
@@ -243,6 +244,88 @@ async def test_update_completion_model_metadata(
         assert db_model.description == "Updated description"
         assert db_model.is_deprecated is True
         assert db_model.max_input_tokens == 16000
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sysadmin_explicit_capabilities_survive_create_update_reload(
+    client,
+    super_admin_token,
+    db_container,
+):
+    create_response = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json={
+            "name": "capability-evidence-round-trip",
+            "nickname": "Capability evidence round trip",
+            "family": "openai",
+            "max_input_tokens": 8000,
+            "max_output_tokens": 4096,
+            "is_deprecated": False,
+            "stability": "stable",
+            "hosting": "usa",
+            "vision": False,
+            "reasoning": False,
+            "model_kwargs_capabilities": {
+                "temperature": {
+                    "supported": True,
+                    "control": "slider",
+                    "minimum": 1,
+                    "maximum": 1,
+                    "step": 1,
+                }
+            },
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    model_id = created["id"]
+    assert created["supported_model_kwargs"]["temperature"]["supported"] is True
+    assert "_evidence" not in created["model_kwargs_capabilities"]
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.model_kwargs_capabilities["_evidence"] == "admin_explicit"
+        reloaded = CompletionModel.model_validate(db_model)
+        assert reloaded.supported_model_kwargs.temperature.supported is True
+
+    update_response = await client.put(
+        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={
+            "model_kwargs_capabilities": {
+                "top_p": {
+                    "supported": True,
+                    "control": "slider",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "step": 0.01,
+                }
+            }
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["supported_model_kwargs"]["top_p"]["supported"] is True
+    assert "_evidence" not in updated["model_kwargs_capabilities"]
+
+    async with db_container() as container:
+        session = container.session()
+        db_model = await session.scalar(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert db_model is not None
+        assert db_model.model_kwargs_capabilities["_evidence"] == "admin_explicit"
+        reloaded = CompletionModel.model_validate(db_model)
+        assert reloaded.supported_model_kwargs.temperature.supported is False
+        assert reloaded.supported_model_kwargs.top_p.supported is True
 
 
 @pytest.mark.integration

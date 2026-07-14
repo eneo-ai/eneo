@@ -8,6 +8,9 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelCreate,
     CompletionModelUpdate,
 )
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    persist_explicit_model_kwargs_capabilities,
+)
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -67,7 +70,18 @@ class CompletionModelsRepository:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE)
+        if model.model_kwargs_capabilities is None:
+            return await self.delegate.add(
+                model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
+            )
+
+        return await self.delegate.add(
+            model,
+            exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE | {"model_kwargs_capabilities"},
+            model_kwargs_capabilities=persist_explicit_model_kwargs_capabilities(
+                model.model_kwargs_capabilities
+            ),
+        )
 
     async def enable_completion_model(
         self,
@@ -93,6 +107,21 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
+        if "model_kwargs_capabilities" in model.model_fields_set:
+            persisted_capabilities = (
+                persist_explicit_model_kwargs_capabilities(
+                    model.model_kwargs_capabilities
+                )
+                if model.model_kwargs_capabilities is not None
+                else None
+            )
+            return await self.delegate.update(
+                model,
+                exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
+                | {"model_kwargs_capabilities"},
+                model_kwargs_capabilities=persisted_capabilities,
+            )
+
         return await self.delegate.update(
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
