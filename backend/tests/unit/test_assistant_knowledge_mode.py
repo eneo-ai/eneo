@@ -180,6 +180,15 @@ class TestKnowledgeCatalog:
         assert "only partly answered" in catalog
         assert "never ask the user for permission" in catalog
 
+    def test_catalog_routes_outside_world_subquestions_to_external_tools(self):
+        # "Compare with other companies" style sub-questions are outside the
+        # attached sources even when a knowledge search returns tangential
+        # chunks; they belong to an external tool when one is available.
+        catalog = _assistant().build_knowledge_catalog()
+
+        assert "outside the attached sources" in catalog
+        assert "tangential passages" in catalog
+
     def test_catalog_states_knowledge_tools_win_ties(self):
         # When another server exposes a similarly named search tool, the
         # catalog must resolve the tie toward the built-in knowledge tools.
