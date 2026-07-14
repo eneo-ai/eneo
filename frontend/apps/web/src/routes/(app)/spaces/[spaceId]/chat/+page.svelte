@@ -10,6 +10,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Button } from "@eneo/ui";
+  import { Bug } from "lucide-svelte";
   import { fade } from "svelte/transition";
   import DebugPanel from "$lib/features/chat/components/debug/DebugPanel.svelte";
   import InsightsPage from "./insights/InsightsPage.svelte";
@@ -139,8 +140,12 @@
 
       <Page.Flex>
         {#if featureFlags.chatDebugPanel && chat.partner.type !== "group-chat"}
-          <Button on:click={() => chat.toggleDebugPanel()}>
-            {chat.debugPanelVisible ? m.debug_panel_hide() : m.debug_panel_show()}
+          <Button
+            padding="icon"
+            label={chat.debugPanelVisible ? m.debug_panel_hide() : m.debug_panel_show()}
+            on:click={() => chat.toggleDebugPanel()}
+          >
+            <Bug class="h-5 w-5 {chat.debugPanelVisible ? '' : 'text-muted'}" />
           </Button>
         {/if}
         {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
