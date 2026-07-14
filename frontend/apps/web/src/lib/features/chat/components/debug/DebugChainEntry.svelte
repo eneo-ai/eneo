@@ -5,7 +5,10 @@
 
   One entry of the debug panel's message chain: a role-badged card that shows
   a one-line preview when collapsed and the full content when expanded. Tool
-  results without inline content are lazily fetched on first expand.
+  rounds are a single card holding both the call arguments and the response;
+  responses without inline content are fetched on expand, and a fruitless
+  attempt is retried on the next expand (mid-stream the result is not
+  persisted yet).
 -->
 
 <script lang="ts">
@@ -16,12 +19,15 @@
   let {
     role,
     label = null,
+    args = null,
     content = null,
     onLoadResult = undefined
   }: {
     role: string;
     /** Extra context next to the badge, e.g. the tool name. */
     label?: string | null;
+    /** Call arguments for tool rounds, rendered as their own block. */
+    args?: string | null;
     content?: string | null;
     /** Lazy source for content that is not inline (persisted tool results). */
     onLoadResult?: () => Promise<string | null>;
@@ -30,10 +36,10 @@
   let open = $state(false);
   let loadedResult = $state<string | null>(null);
   let loading = $state(false);
-  let loadAttempted = $state(false);
 
   const text = $derived(content ?? loadedResult ?? "");
-  const preview = $derived(text.replace(/\s+/g, " ").trim());
+  const isToolRound = $derived(args !== null);
+  const preview = $derived((isToolRound ? (args ?? "") : text).replace(/\s+/g, " ").trim());
 
   const ROLE_STYLES: Record<string, string> = {
     system: "bg-secondary text-secondary border-default",
@@ -44,14 +50,15 @@
 
   async function toggle() {
     open = !open;
-    if (!open || content !== null || !onLoadResult || loadAttempted || loading) return;
+    // Re-expanding after a failed or empty attempt retries: mid-stream the
+    // result is simply not persisted yet.
+    if (!open || content !== null || !onLoadResult || loading || loadedResult) return;
     loading = true;
     try {
       loadedResult = (await onLoadResult()) ?? "";
     } catch (error) {
       toastError(error, m.mcp_tool_response_load_error());
     } finally {
-      loadAttempted = true;
       loading = false;
     }
   }
@@ -82,9 +89,26 @@
     {/if}
   </button>
   {#if open}
-    <div class="border-dimmer border-t px-2 py-1.5">
-      {#if loading}
-        <p class="text-muted text-xs">{m.debug_panel_result_loading()}</p>
+    <div class="border-dimmer flex flex-col gap-2 border-t px-2 py-1.5">
+      {#if isToolRound}
+        <div class="flex flex-col gap-1">
+          <p class="text-muted text-xs font-semibold">{m.chat_reasoning_parameters()}</p>
+          <pre
+            class="bg-secondary/40 max-h-60 overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{args}</pre>
+        </div>
+        <div class="flex flex-col gap-1">
+          <p class="text-muted text-xs font-semibold">
+            {m.mcp_tool_response_title({ toolName: label ?? role })}
+          </p>
+          {#if loading}
+            <p class="text-muted text-xs">{m.debug_panel_result_loading()}</p>
+          {:else if text}
+            <pre
+              class="bg-secondary/40 max-h-96 overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{text}</pre>
+          {:else}
+            <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
+          {/if}
+        </div>
       {:else if text}
         <pre
           class="bg-secondary/40 max-h-96 overflow-auto rounded-md p-2 text-xs break-words whitespace-pre-wrap">{text}</pre>

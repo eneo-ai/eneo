@@ -3659,7 +3659,5 @@
   "debug_panel_chain": "Meddelandekedja",
   "debug_panel_chain_reconstructed_note": "Posterna efter användarfrågan är rekonstruerade från turens sparade verktygsanrop och svar, samma form som spelas upp för modellen i nästa tur.",
   "debug_panel_raw_payload": "Rå payload",
-  "debug_panel_tool_call": "verktygsanrop",
-  "debug_panel_tool_result": "verktygssvar",
   "debug_panel_result_loading": "Hämtar svar …"
 }

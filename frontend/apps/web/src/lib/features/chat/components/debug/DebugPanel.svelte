@@ -81,6 +81,7 @@
     role?: string;
     content?: unknown;
     tool_calls?: ProviderToolCall[];
+    tool_call_id?: string;
   };
   const providerMessages = $derived.by(() => {
     const body = capturedDetails?.json_body;
@@ -126,54 +127,57 @@
   // The chain: the captured turn-start payload (system prompt, replayed
   // history, user question) followed by this turn's tool rounds and final
   // answer, rebuilt from the persisted turn — the same shape the next turn's
-  // replay sends. Without capture, the chain still shows question, tool
-  // rounds and answer.
+  // replay sends. Each tool round is one card carrying both the call
+  // arguments and the response. Without capture, the chain still shows
+  // question, tool rounds and answer.
   type ChainEntry = {
     key: string;
     role: string;
     label?: string | null;
+    args?: string | null;
     content?: string | null;
     toolCallId?: string;
   };
   const chain = $derived.by<ChainEntry[]>(() => {
     const entries: ChainEntry[] = [];
     if (providerMessages) {
+      // Replayed history carries calls on the assistant message and results
+      // as separate role:tool messages; pair them by tool_call_id so each
+      // round renders as one card at the result's position.
+      const pendingCalls: Record<string, { name: string; args: string }> = {};
       providerMessages.forEach((entry, index) => {
         const role = entry.role ?? "?";
-        const calls = entry.tool_calls ?? [];
-        for (const [callIndex, call] of calls.entries()) {
-          entries.push({
-            key: `p${index}c${callIndex}`,
-            role,
-            label: `${m.debug_panel_tool_call()} · ${call.function?.name ?? "?"}`,
-            content: prettyArgs(call.function?.arguments)
-          });
+        for (const call of entry.tool_calls ?? []) {
+          if (call.id) {
+            pendingCalls[call.id] = {
+              name: call.function?.name ?? "?",
+              args: prettyArgs(call.function?.arguments)
+            };
+          }
         }
         const text = contentToText(entry.content);
-        if (text || calls.length === 0) {
+        if (role === "tool") {
+          const call = entry.tool_call_id ? pendingCalls[entry.tool_call_id] : undefined;
           entries.push({
             key: `p${index}`,
             role,
-            label: role === "tool" ? m.debug_panel_tool_result() : null,
+            label: call?.name ?? null,
+            args: call?.args ?? "",
             content: text
           });
+        } else if (text || !entry.tool_calls?.length) {
+          entries.push({ key: `p${index}`, role, content: text });
         }
       });
     } else if (message) {
       entries.push({ key: "question", role: "user", content: message.question });
     }
     toolCalls.forEach((toolCall, index) => {
-      const name = toolCall.mcp_tool_name ?? toolCall.tool_name;
       entries.push({
-        key: `call${index}`,
-        role: "assistant",
-        label: `${m.debug_panel_tool_call()} · ${name}`,
-        content: toolCall.arguments ? stringify(toolCall.arguments) : ""
-      });
-      entries.push({
-        key: `result${index}`,
+        key: `round${index}`,
         role: "tool",
-        label: `${m.debug_panel_tool_result()} · ${name}`,
+        label: toolCall.mcp_tool_name ?? toolCall.tool_name,
+        args: toolCall.arguments ? stringify(toolCall.arguments) : "",
         content: toolCall.result ?? null,
         toolCallId: toolCall.tool_call_id ?? undefined
       });
@@ -258,6 +262,7 @@
           <DebugChainEntry
             role={entry.role}
             label={entry.label}
+            args={entry.args}
             content={entry.content}
             onLoadResult={entry.toolCallId
               ? () => chat.getToolCallResult(entry.toolCallId!)

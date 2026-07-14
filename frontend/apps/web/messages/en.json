@@ -3659,7 +3659,5 @@
   "debug_panel_chain": "Message chain",
   "debug_panel_chain_reconstructed_note": "Entries after the user question are reconstructed from the turn's persisted tool calls and answer, the same shape replayed to the model on the next turn.",
   "debug_panel_raw_payload": "Raw payload",
-  "debug_panel_tool_call": "tool call",
-  "debug_panel_tool_result": "tool result",
   "debug_panel_result_loading": "Loading result …"
 }
