@@ -12,6 +12,7 @@ from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -356,9 +357,15 @@ class MCPServerService:
                 f"Testing connection to MCP server: {mcp_server.name} at {mcp_server.http_url}"
             )
 
-            # Connect with shorter timeout for faster feedback during creation
+            # Connect with shorter timeout for faster feedback during creation.
+            # The acting admin's identity rides along so a forward_identity
+            # server sees the same headers here as on runtime chat requests;
+            # the client drops them unless the server opted in.
             async with MCPClient(
-                mcp_server, auth_credentials, timeout=timeout
+                mcp_server,
+                auth_credentials,
+                timeout=timeout,
+                identity_headers=build_identity_headers(self.user, None),
             ) as client:
                 tool_defs = await client.list_tools()
 
@@ -402,8 +409,15 @@ class MCPServerService:
         try:
             logger.info(f"Discovering tools for MCP server: {mcp_server.name}")
 
-            # Connect to MCP server and list tools
-            async with MCPClient(mcp_server, auth_credentials) as client:
+            # Connect to MCP server and list tools. As with connection
+            # validation, discovery carries the acting admin's identity so an
+            # opted-in server exposes the same tool set it will serve at
+            # runtime; the client drops the headers unless the server opted in.
+            async with MCPClient(
+                mcp_server,
+                auth_credentials,
+                identity_headers=build_identity_headers(self.user, None),
+            ) as client:
                 tool_defs = await client.list_tools()
 
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")

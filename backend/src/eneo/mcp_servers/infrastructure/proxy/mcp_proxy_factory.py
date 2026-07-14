@@ -105,8 +105,15 @@ class MCPProxySessionFactory:
         self,
         mcp_server: "MCPServer",
         mcp_session_id: str,
+        identity_headers: dict[str, str] | None = None,
     ) -> None:
-        """Terminate one persisted protocol session using server credentials."""
+        """Terminate one persisted protocol session using server credentials.
+
+        ``identity_headers`` mirrors ``create``: the caller builds the acting
+        user's X-Eneo-* headers and the client sends them only when this
+        server has ``forward_identity=True``, so the DELETE carries the same
+        identity as the requests that created the session.
+        """
         credentials: dict[str, str] | None = None
         if mcp_server.http_auth_config_schema:
             decrypted = self._decrypt_auth_config(mcp_server.http_auth_config_schema)
@@ -116,5 +123,6 @@ class MCPProxySessionFactory:
         client = MCPClient(
             mcp_server=mcp_server,
             auth_credentials=credentials,
+            identity_headers=identity_headers,
         )
         await client.terminate_protocol_session(mcp_session_id)

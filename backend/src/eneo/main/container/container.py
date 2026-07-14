@@ -1139,6 +1139,7 @@ class Container(containers.DeclarativeContainer):
         state_repo=chat_session_mcp_state_repo,
         mcp_server_repo=mcp_server_repo,
         proxy_factory=mcp_proxy_session_factory,
+        user=user,
     )
     session_service = providers.Factory(
         SessionService,
