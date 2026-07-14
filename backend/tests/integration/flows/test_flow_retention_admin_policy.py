@@ -25,6 +25,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
 from eneo.main.models import ModelId
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
@@ -277,24 +278,91 @@ async def test_preview_has_constant_read_only_statement_cardinality(
         )
         await container.session().flush()
 
+        previewed_at = datetime.now(timezone.utc)
+        legacy_effective_days = sa.func.least(
+            sa.func.coalesce(
+                Flows.data_retention_days,
+                Spaces.data_retention_days,
+            ),
+            FlowClassificationRetentionPolicies.data_retention_days,
+        )
+        legacy_child_only_candidates = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRuns)
+            .join(Flows, FlowRuns.flow_id == Flows.id)
+            .join(Spaces, Flows.space_id == Spaces.id)
+            .outerjoin(
+                FlowClassificationRetentionPolicies,
+                sa.and_(
+                    FlowClassificationRetentionPolicies.security_classification_id
+                    == Spaces.security_classification_id,
+                    FlowClassificationRetentionPolicies.tenant_id == Spaces.tenant_id,
+                ),
+            )
+            .where(
+                FlowRuns.flow_id == flow_id,
+                FlowRuns.status == "completed",
+                legacy_effective_days.is_not(None),
+                sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
+                <= sa.literal(previewed_at)
+                - sa.func.make_interval(0, 0, 0, legacy_effective_days),
+            )
+        )
+        retention_service = DataRetentionService(container.session())
+        canonical_off_candidates = list(
+            (
+                await container.session().scalars(
+                    retention_service._build_due_flow_run_history_purge_query(
+                        now=previewed_at
+                    ).where(FlowRuns.flow_id == flow_id)
+                )
+            ).all()
+        )
+
         bind = container.session().sync_session.bind
         assert bind is not None
         event.listen(bind, "before_cursor_execute", record_statement)
         try:
-            preview = await DataRetentionService(
-                container.session()
-            ).preview_flow_retention_organization_change(
-                tenant_id=admin_user.tenant_id,
-                proposal=FlowRetentionOrganizationProposal(
-                    flow_run_history_retention_days=30,
-                    flow_runtime_upload_abandonment_days=30,
-                ),
+            enabled_preview = (
+                await retention_service.preview_flow_retention_organization_change(
+                    tenant_id=admin_user.tenant_id,
+                    proposal=FlowRetentionOrganizationProposal(
+                        flow_run_history_retention_days=30,
+                        flow_runtime_upload_abandonment_days=30,
+                    ),
+                    previewed_at=previewed_at,
+                )
             )
         finally:
             event.remove(bind, "before_cursor_execute", record_statement)
 
-        assert len(statements) == 6
-        impact_statements = statements[-2:]
+        enable_statements = list(statements)
+        await container.session().execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(
+                flow_run_history_retention_days=30,
+                flow_runtime_upload_abandonment_days=30,
+            )
+        )
+        statements.clear()
+        event.listen(bind, "before_cursor_execute", record_statement)
+        try:
+            disabled_preview = (
+                await retention_service.preview_flow_retention_organization_change(
+                    tenant_id=admin_user.tenant_id,
+                    proposal=FlowRetentionOrganizationProposal(
+                        flow_run_history_retention_days=None,
+                        flow_runtime_upload_abandonment_days=None,
+                    ),
+                    previewed_at=previewed_at,
+                )
+            )
+        finally:
+            event.remove(bind, "before_cursor_execute", record_statement)
+
+        disable_statements = list(statements)
+        impact_statements = enable_statements[-2:] + disable_statements[-2:]
         await container.session().execute(sa.text("SET LOCAL enable_seqscan = off"))
         connection = await container.session().connection()
         plans: list[str] = []
@@ -305,15 +373,34 @@ async def test_preview_has_constant_read_only_statement_cardinality(
             )
             plans.append("\n".join(row[0] for row in result))
 
-    assert preview.run_history.newly_eligible_count == 256
-    assert preview.runtime_uploads.newly_eligible_count == 64
-    assert len(statements) == 6
+    assert legacy_child_only_candidates == 256
+    assert canonical_off_candidates == []
+    assert enabled_preview.run_history.newly_eligible_count == 256
+    assert enabled_preview.run_history.no_longer_eligible_count == 0
+    assert enabled_preview.runtime_uploads.newly_eligible_count == 64
+    assert enabled_preview.runtime_uploads.newly_eligible_bytes == 64 * 128
+    assert enabled_preview.lifecycle_blockers.undelivered_audit_count == 0
+    assert enabled_preview.lifecycle_blockers.unresolved_webhook_count == 0
+    assert enabled_preview.lifecycle_blockers.active_rerun_count == 0
+    assert enabled_preview.latent_space_retention_days == (7,)
+    assert enabled_preview.latent_flow_retention_days == (3,)
+    assert disabled_preview.run_history.newly_eligible_count == 0
+    assert disabled_preview.run_history.no_longer_eligible_count == 256
+    assert disabled_preview.runtime_uploads.newly_eligible_count == 0
+    assert disabled_preview.runtime_uploads.no_longer_eligible_count == 64
+    assert disabled_preview.runtime_uploads.proposed_eligible_bytes == 0
+    assert disabled_preview.latent_space_retention_days == (7,)
+    assert disabled_preview.latent_flow_retention_days == (3,)
+    assert len(enable_statements) == 6
+    assert len(disable_statements) == 6
     assert all(
         statement.lstrip().startswith(("SELECT", "WITH"))
-        for statement, _parameters in statements
+        for statement, _parameters in enable_statements + disable_statements
     )
     assert "ix_flow_runs_tenant_created_at" in plans[0]
     assert "ix_flow_runtime_uploaded_files_tenant_id" in plans[1]
+    assert "ix_flow_runs_tenant_created_at" in plans[2]
+    assert "ix_flow_runtime_uploaded_files_tenant_id" in plans[3]
     assert all("Buffers:" in plan for plan in plans)
 
 

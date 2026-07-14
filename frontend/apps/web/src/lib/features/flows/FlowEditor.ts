@@ -25,7 +25,11 @@ import {
   getUnifiedFlowSaveStatus,
   type FlowWizardMetadata
 } from "./flowEditorMetadata";
-import { isFlowRetentionDays, parseFlowRetentionDaysInput } from "./flowEditorRetention";
+import {
+  canEditFlowRetentionContribution,
+  isFlowRetentionDays,
+  parseFlowRetentionDaysInput
+} from "./flowEditorRetention";
 import { stripTemporaryStepId, isValidStepIndex, buildBlankStep } from "./flowStepPayloadShaping";
 import {
   computeStepConfigValidationIssues,
@@ -132,6 +136,11 @@ function createFlowEditor(data: FlowEditorInitData) {
   const isPublished = derived(editor.state.resource, ($resource) => {
     return $resource.published_version != null;
   });
+  const canEditDataRetentionDays = derived(
+    [editor.state.resource, isPublished],
+    ([$resource, $isPublished]) =>
+      canEditFlowRetentionContribution($resource.run_history_retention, $isPublished)
+  );
 
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
@@ -336,6 +345,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function setDataRetentionDays(days: number | null): void {
+    if (!get(canEditDataRetentionDays)) return;
     if (days !== null && !isFlowRetentionDays(days)) return;
 
     editor.state.update.update((resource) => ({
@@ -841,7 +851,8 @@ function createFlowEditor(data: FlowEditorInitData) {
       newStepOpenIntent: readonly(newStepOpenIntent),
       validationErrors,
       saveStatus: unifiedSaveStatus,
-      isPublished
+      isPublished,
+      canEditDataRetentionDays
     },
     setResource: editor.setResource,
     addStep,

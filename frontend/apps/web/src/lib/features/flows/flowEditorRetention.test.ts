@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canEditFlowRetentionContribution,
   isFlowRetentionDays,
   parseFlowRetentionDaysInput,
   FLOW_RETENTION_MIN_DAYS,
@@ -21,7 +22,7 @@ describe("isFlowRetentionDays", () => {
 });
 
 describe("parseFlowRetentionDaysInput", () => {
-  it("maps empty input to null (no limit)", () => {
+  it("maps empty input to a removed Flow contribution", () => {
     expect(parseFlowRetentionDaysInput("")).toBeNull();
     expect(parseFlowRetentionDaysInput("   ")).toBeNull();
   });
@@ -35,5 +36,33 @@ describe("parseFlowRetentionDaysInput", () => {
     expect(parseFlowRetentionDaysInput("90d")).toBeUndefined();
     expect(parseFlowRetentionDaysInput("-1")).toBeUndefined();
     expect(parseFlowRetentionDaysInput("1.5")).toBeUndefined();
+  });
+});
+
+describe("canEditFlowRetentionContribution", () => {
+  it("requires an active envelope and an unpublished Flow", () => {
+    const contributors = {
+      organization_days: 30,
+      classification_days: null,
+      space_days: null,
+      flow_days: 14
+    };
+
+    expect(
+      canEditFlowRetentionContribution({ state: "days", effective_days: 14, contributors }, false)
+    ).toBe(true);
+    expect(
+      canEditFlowRetentionContribution({ state: "days", effective_days: 14, contributors }, true)
+    ).toBe(false);
+    expect(
+      canEditFlowRetentionContribution(
+        {
+          state: "off",
+          effective_days: null,
+          contributors: { ...contributors, organization_days: null }
+        },
+        false
+      )
+    ).toBe(false);
   });
 });

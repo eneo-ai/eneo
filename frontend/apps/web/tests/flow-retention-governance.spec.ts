@@ -26,7 +26,7 @@ test("tenant admin confirms organization and classification retention through th
   await page.goto("/admin/flow-data-retention");
   await expect(page.getByRole("heading", { name: "Gallring av flödesdata" })).toBeVisible();
   await expect(page.getByText("Nuvarande gallringshölje")).toBeVisible();
-  await expect(page.getByText("Körningshistorik: Av")).toBeVisible();
+  await expect(page.getByText("Körningshistorik: Automatisk radering är avstängd")).toBeVisible();
   await expect(page.getByText("Aldrig anslutna uppladdningar använder created_at")).toBeVisible();
   await expect(
     page.getByText("Varje policyaktivering registrerar administratörens identitet")
@@ -34,8 +34,8 @@ test("tenant admin confirms organization and classification retention through th
 
   const runHistory = page.getByRole("spinbutton", { name: "Körningshistorik" });
   const uploads = page.getByRole("spinbutton", { name: "Aldrig anslutna uppladdningar" });
-  await expect(runHistory).toHaveAttribute("placeholder", "Av");
-  await expect(uploads).toHaveAttribute("placeholder", "Av");
+  await expect(runHistory).toHaveAttribute("placeholder", "Automatisk radering är avstängd");
+  await expect(uploads).toHaveAttribute("placeholder", "Automatisk radering är avstängd");
 
   await runHistory.fill("30");
   await page.getByRole("button", { name: "Spara" }).click();
@@ -47,10 +47,8 @@ test("tenant admin confirms organization and classification retention through th
   await expect(dialog).toContainText("Livscykelhinder och vilande värden");
   await expect(dialog).toContainText("Klockfält: finished_at_or_created_at");
   await expect(dialog).toContainText("Klockfält: created_at");
-  await expect(dialog).toContainText("Arkivspärrar och rättsliga spärrar tillämpas inte");
-  await expect(dialog).toContainText(
-    "Den här versionen tillämpar inte arkivspärrar eller rättsliga spärrar."
-  );
+  await expect(dialog).toContainText("Implementerade raderingshinder");
+  await expect(dialog).toContainText("Radering skjuts upp");
   await expect(dialog).toContainText("Ej levererad granskning");
   await expect(dialog).toContainText("Olöst webhook");
   await expect(dialog).toContainText("Aktiv omkörning");
@@ -88,11 +86,8 @@ test("tenant admin confirms organization and classification retention through th
   await expect(page.getByRole("heading", { name: "Flow data retention" })).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "Never-attached uploads" })).toHaveAttribute(
     "placeholder",
-    "Off"
+    "Automatic deletion is off"
   );
-  await expect(page.getByText("Records and legal holds are not enforced")).toBeVisible();
-  await expect(
-    page.getByText(/This release does not enforce records or legal holds/)
-  ).toBeVisible();
-  await expect(page.getByText(/Automatic deletion must not be enabled/)).toBeVisible();
+  await expect(page.getByText("Implemented deletion blockers")).toBeVisible();
+  await expect(page.getByText(/Deletion is deferred for undelivered audit delivery/)).toBeVisible();
 });

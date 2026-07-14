@@ -28,10 +28,14 @@ from eneo.database.tables.flow_tables import (
     BuilderPlans,
     BuilderSessionFiles,
     BuilderSessions,
+    FlowRuns,
+    Flows,
+    FlowVersions,
 )
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
     SessionStatus,
@@ -566,6 +570,120 @@ async def test_space_level_app_retention_fallback(
 
     assert old_exists is None, "App run older than space retention should be deleted"
     assert recent_exists is not None, "App run within space retention should be kept"
+
+
+@pytest.mark.asyncio
+async def test_space_conversation_and_app_retention_does_not_activate_flow_deletion(
+    async_session: AsyncSession,
+    test_space: Spaces,
+    test_app: Apps,
+    test_tenant,
+    admin_user,
+    retention_service: DataRetentionService,
+) -> None:
+    anchor = datetime.now(timezone.utc)
+    old = anchor - timedelta(days=60)
+    test_space.data_retention_days = 30
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_run_history_retention_days=None)
+    )
+    async_session.add(test_space)
+
+    assistant = Assistants(
+        name="Space-independent retention assistant",
+        description="Conversation retention remains Space-owned",
+        user_id=admin_user.id,
+        space_id=test_space.id,
+        completion_model_id=test_app.completion_model_id,
+        completion_model_kwargs={},
+        logging_enabled=True,
+        is_default=False,
+        published=False,
+        data_retention_days=None,
+    )
+    async_session.add(assistant)
+    await async_session.flush()
+    question = await create_old_question(
+        async_session,
+        assistant.id,
+        test_tenant.id,
+        admin_user.id,
+        days_old=60,
+    )
+    app_run = await create_old_app_run(
+        async_session,
+        test_app.id,
+        test_tenant.id,
+        admin_user.id,
+        test_app.completion_model_id,
+        days_old=60,
+    )
+    flow = Flows(
+        name=f"Latent child Flow retention {uuid4()}",
+        description="Space retention remains independent",
+        tenant_id=test_tenant.id,
+        space_id=test_space.id,
+        created_by_user_id=admin_user.id,
+        owner_user_id=admin_user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=7,
+        created_at=old,
+        updated_at=old,
+    )
+    async_session.add(flow)
+    await async_session.flush()
+    async_session.add(
+        FlowVersions(
+            flow_id=flow.id,
+            version=1,
+            tenant_id=test_tenant.id,
+            definition_checksum=f"independent-retention-{uuid4()}",
+            definition_json={"schema_version": 1, "steps": []},
+            created_at=old,
+            updated_at=old,
+        )
+    )
+    await async_session.flush()
+    flow_run = FlowRuns(
+        flow_id=flow.id,
+        flow_version=1,
+        principal_type="user",
+        principal_user_id=admin_user.id,
+        principal_service_id=None,
+        runtime_service_permission=None,
+        tenant_id=test_tenant.id,
+        trace_id=uuid4(),
+        status="completed",
+        started_at=old,
+        finished_at=old,
+        input_payload_json={},
+        output_payload_json={},
+        created_at=old,
+        updated_at=old,
+    )
+    async_session.add(flow_run)
+    await async_session.flush()
+
+    flow_candidates = list(
+        (
+            await async_session.scalars(
+                retention_service._build_due_flow_run_history_purge_query(now=anchor)
+            )
+        ).all()
+    )
+    deleted_questions = await retention_service.delete_old_questions()
+    deleted_app_runs = await retention_service.delete_old_app_runs()
+    await async_session.flush()
+
+    assert flow_run.id not in flow_candidates
+    assert deleted_questions == 1
+    assert deleted_app_runs == 1
+    assert await async_session.get(FlowRuns, flow_run.id) is not None
+    assert await async_session.get(Questions, question.id) is None
+    assert await async_session.get(AppRuns, app_run.id) is None
 
 
 @pytest.mark.asyncio

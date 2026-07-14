@@ -2445,6 +2445,44 @@ def test_openapi_flow_retention_days_documents_public_range(
         )
 
 
+def test_openapi_flow_read_models_expose_discriminated_retention_projection(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+
+    for schema_name in ("FlowSparsePublic", "FlowPublic"):
+        flow_schema = schemas[schema_name]
+        assert "run_history_retention" in flow_schema.get("required", [])
+        projection = flow_schema["properties"]["run_history_retention"]
+        assert projection["discriminator"] == {
+            "propertyName": "state",
+            "mapping": {
+                "days": "#/components/schemas/FlowRunRetentionDays",
+                "off": "#/components/schemas/FlowRunRetentionOff",
+            },
+        }
+        assert {option["$ref"] for option in projection["oneOf"]} == {
+            "#/components/schemas/FlowRunRetentionDays",
+            "#/components/schemas/FlowRunRetentionOff",
+        }
+
+    off = schemas["FlowRunRetentionOff"]
+    days = schemas["FlowRunRetentionDays"]
+    contributors = schemas["FlowRunRetentionContributors"]
+    assert set(off["required"]) == {"state", "effective_days", "contributors"}
+    assert set(days["required"]) == {"state", "effective_days", "contributors"}
+    assert off["properties"]["state"]["const"] == "off"
+    assert off["properties"]["effective_days"]["type"] == "null"
+    assert days["properties"]["state"]["const"] == "days"
+    assert days["properties"]["effective_days"]["type"] == "integer"
+    assert set(contributors["required"]) == {
+        "organization_days",
+        "classification_days",
+        "space_days",
+        "flow_days",
+    }
+
+
 def test_openapi_create_flow_run_documents_top_level_file_ids_error(
     openapi_spec: dict,
 ) -> None:

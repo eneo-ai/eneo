@@ -16,6 +16,16 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     published_version: null,
     metadata_json: metadataJson,
     data_retention_days: null,
+    run_history_retention: {
+      state: "days",
+      effective_days: 30,
+      contributors: {
+        organization_days: 30,
+        classification_days: null,
+        space_days: null,
+        flow_days: null
+      }
+    },
     created_at: null,
     updated_at: null,
     steps: [],
@@ -301,6 +311,36 @@ describe("FlowEditor basic settings commands", () => {
 
       editor.setDataRetentionDaysFromInput("");
       expect(get(editor.state.update).data_retention_days).toBeNull();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("keeps a latent Flow contribution read-only while automatic deletion is off", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, {
+        data_retention_days: 30,
+        run_history_retention: {
+          state: "off",
+          effective_days: null,
+          contributors: {
+            organization_days: null,
+            classification_days: null,
+            space_days: 14,
+            flow_days: 30
+          }
+        }
+      }),
+      eneo: makeEneo()
+    });
+    try {
+      expect(get(editor.state.canEditDataRetentionDays)).toBe(false);
+
+      editor.setDataRetentionDays(7);
+      editor.setDataRetentionDaysFromInput("");
+
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
     } finally {
       editor.destroy();
     }

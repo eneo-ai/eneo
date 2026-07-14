@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Optional, Self, TypeAlias, cast
+from typing import Annotated, Any, Literal, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
@@ -133,6 +133,37 @@ class FlowTemplateAsset(BaseModel):
     updated_at: datetime | None = None
 
 
+class FlowRunRetentionContributors(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    organization_days: int | None
+    classification_days: int | None
+    space_days: int | None
+    flow_days: int | None
+
+
+class FlowRunRetentionOff(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    state: Literal["off"]
+    effective_days: None
+    contributors: FlowRunRetentionContributors
+
+
+class FlowRunRetentionDays(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    state: Literal["days"]
+    effective_days: int
+    contributors: FlowRunRetentionContributors
+
+
+FlowRunRetentionProjection: TypeAlias = Annotated[
+    FlowRunRetentionOff | FlowRunRetentionDays,
+    Field(discriminator="state"),
+]
+
+
 class FlowSparse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -146,6 +177,7 @@ class FlowSparse(BaseModel):
     published_version: Optional[int] = None
     metadata_json: FlowPersistedJsonObject | None = None
     data_retention_days: Optional[int] = None
+    run_history_retention: FlowRunRetentionProjection | None = None
     draft_revision: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None

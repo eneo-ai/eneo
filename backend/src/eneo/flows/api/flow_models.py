@@ -20,6 +20,7 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import FilePublic, FileRestrictions
+from eneo.flows.domain.flow import FlowRunRetentionProjection
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -99,8 +100,14 @@ from eneo.websites.presentation.website_models import WebsitePublic
 
 FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
     "Number of days to retain full Flow run and step history. "
-    "Set to null to inherit the space retention policy. "
+    "This value can only tighten an active organization or matching "
+    "classification policy; null removes the Flow contribution. "
     f"Valid range: {MIN_RETENTION_DAYS}-{MAX_RETENTION_DAYS} days."
+)
+FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
+    "Effective automatic Flow run-history deletion state. The organization or "
+    "matching classification value activates deletion; space and Flow values "
+    "can only tighten the active window."
 )
 FlowDataRetentionDays: TypeAlias = Annotated[
     int,
@@ -183,6 +190,16 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "published_version": 3,
     "metadata_json": {"wizard": {"transcription_enabled": True}},
     "data_retention_days": 30,
+    "run_history_retention": {
+        "state": "days",
+        "effective_days": 14,
+        "contributors": {
+            "organization_days": 90,
+            "classification_days": 30,
+            "space_days": 14,
+            "flow_days": 30,
+        },
+    },
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T10:00:00Z",
 }
@@ -613,6 +630,9 @@ class FlowSparsePublic(BaseModel):
     data_retention_days: FlowDataRetentionDays | None = Field(
         default=None,
         description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
+    )
+    run_history_retention: FlowRunRetentionProjection = Field(
+        description=FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION,
     )
     created_at: datetime | None = None
     updated_at: datetime | None = None

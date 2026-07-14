@@ -168,7 +168,6 @@
     <div class="text-secondary flex flex-col gap-2 text-sm leading-relaxed">
       <p>{m.flow_classification_retention_full_history_hint()}</p>
       <p>{m.flow_classification_retention_tighten_hint()}</p>
-      <p>{m.flow_retention_preservation_hold_caveat()}</p>
       {#if !isSecurityEnabled}
         <p class="border-default bg-secondary rounded-md border px-3 py-2">
           {m.flow_classification_retention_security_disabled_hint()}

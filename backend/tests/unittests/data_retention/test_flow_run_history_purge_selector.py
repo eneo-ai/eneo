@@ -57,12 +57,21 @@ def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate()
     assert "flow_classification_retention_policies.tenant_id = spaces.tenant_id" in (
         compiled
     )
-    effective_retention_sql = (
-        "least(coalesce(flows.data_retention_days, spaces.data_retention_days), "
+    assert "JOIN tenants ON flow_runs.tenant_id = tenants.id" in compiled
+    activation_sql = (
+        "least(tenants.flow_run_history_retention_days, "
         "flow_classification_retention_policies.data_retention_days)"
     )
-    assert f"{effective_retention_sql} IS NOT NULL" in compiled
+    effective_retention_sql = (
+        f"CASE WHEN ({activation_sql} IS NOT NULL) THEN "
+        f"least({activation_sql}, spaces.data_retention_days, "
+        "flows.data_retention_days) ELSE NULL END"
+    )
+    assert f"{activation_sql} IS NOT NULL" in compiled
     assert f"make_interval(0, 0, 0, {effective_retention_sql})" in compiled
+    assert "coalesce(flows.data_retention_days, spaces.data_retention_days)" not in (
+        compiled
+    )
 
 
 @pytest.mark.asyncio

@@ -3637,9 +3637,7 @@ def test_flow_api_guide_does_not_teach_stale_run_response_shape() -> None:
     assert "flow as a whole, not one step at a time" not in guide
 
 
-def test_flow_docs_distinguish_existing_runtime_from_gated_retention_control_plane() -> (
-    None
-):
+def test_flow_docs_describe_the_canonical_retention_envelope() -> None:
     overview = _read(FLOW_OVERVIEW)
     guide = _read(FLOW_API_GUIDE)
 
@@ -3665,9 +3663,12 @@ def test_flow_docs_distinguish_existing_runtime_from_gated_retention_control_pla
     assert "preview hash" in guide
     assert "produces `409`" in guide
     assert "null` means **Off**" in guide
-    assert "cannot be deployed or described as launch-complete" in guide
-    assert "canonical run-history purge selector adopts" in guide
-    assert "do not themselves delete data" in guide
+    assert "Let `A` be the shortest configured organization value" in guide
+    assert "automatic Flow-run deletion is **Off**" in guide
+    assert "cannot activate, loosen, or disable it" in guide
+    assert "required `run_history_retention` projection" in guide
+    assert "There is no absent third state." in guide
+    assert "canonical run-history purge selector consumes" in guide
     assert "upload sweeping" in guide
     assert "does not enforce records or legal holds" in guide
     assert "There is no API for raw per-step deletion intervals yet." in guide

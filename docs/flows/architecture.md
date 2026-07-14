@@ -53,7 +53,7 @@ Use this split when changing code:
 | Webhook delivery outbox | `FlowRunWebhookDeliveryRepository` and `FlowRunWebhookDeliveryService` | `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:38`, `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:88` | Executor only inserts delivery intents. The outbox worker claims, delivers, retries, dead-letters, and finalizes. |
 | Runtime lifecycle audit outbox | `FlowRunAuditOutboxDeliveryService` | `backend/src/eneo/flows/application/flow_run_audit_outbox_delivery.py:43` | Lifecycle audit is committed runtime state and is delivered outside tenant audit feature flags. |
 | Evidence and artifacts | `FlowRunEvidenceService`, `flow_run_evidence.py`, `flow_run_export_json.py` | `backend/src/eneo/flows/application/flow_run_evidence_service.py:33`, `backend/src/eneo/flows/flow_run_evidence.py:74`, `backend/src/eneo/flows/flow_run_export_json.py:218` | Evidence assembly, export, redaction, artifact availability, and retention summaries belong here. |
-| Retention control plane | Nullable tenant columns, `FlowClassificationRetentionPolicyService`, and `DataRetentionService` | `backend/src/eneo/database/tables/tenant_table.py`, `backend/src/eneo/flows/application/flow_classification_retention_policy_service.py`, `backend/src/eneo/data_retention/infrastructure/data_retention_service.py` | Tenant columns own organization run-history and never-attached-upload inputs. Classification and settings services are ADMIN-only audited adapters. `DataRetentionService` owns bounded set-based previews and exact-preview/CAS confirmation. The default is Off. This control plane is not independently deployable until the canonical purge selector adopts its activation envelope. |
+| Retention control plane | Nullable tenant columns, `FlowClassificationRetentionPolicyService`, and `DataRetentionService` | `backend/src/eneo/database/tables/tenant_table.py`, `backend/src/eneo/flows/application/flow_classification_retention_policy_service.py`, `backend/src/eneo/data_retention/infrastructure/data_retention_service.py` | Tenant columns own organization run-history and never-attached-upload inputs. Classification, settings, Space, and Flow services are adapters that expose configured and effective state. `DataRetentionService` owns one set-based SQL envelope for purge, preview, and effective reads, plus exact-preview/CAS confirmation. Automatic Flow deletion is Off until an organization or matching-classification value activates the envelope. |
 | Retention tombstones | `flow_retention_tombstone.py` | `backend/src/eneo/flows/flow_retention_tombstone.py:8`, `backend/src/eneo/flows/flow_retention_tombstone.py:50` | Tombstones preserve cleanup evidence. They do not activate the tenant retention control plane or replace its preview/confirmation contract. |
 | Review checkpoints | `FlowRunReviewCheckpointService` and `FlowRunReviewCheckpointRepository` | `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py:28`, `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py:115` | Service owns active checkpoint use cases and API translation. Repository owns checkpoint persistence, state transitions, audit outbox writes, expiry reconciliation, and run-first lock ordering. |
 | Step rerun | `FlowRunRerunService` | `backend/src/eneo/flows/application/flow_run_rerun_service.py:52`, `backend/src/eneo/database/tables/flow_tables.py:777` | Rerun remains user-principal-only in persistence and API policy. |
@@ -375,13 +375,20 @@ Runtime file ownership is principal-aware:
    evidence or generated artifacts are purged. See
    `backend/src/eneo/flows/flow_retention_tombstone.py:50`.
 
-Run-history retention is implemented incrementally. Purge eligibility is owned
-by `DataRetentionService`, while outbox claims, retries, delivery, and
-dead-letter transitions remain owned by the webhook repository and service.
-Pending terminal-webhook intent is purge-protected regardless of claim timing;
-terminal delivery state is purge-permitted at the run-history horizon. Safe
-candidate locking and final file/reference cleanup remain separate retention
-work. Do not fill those gaps with compatibility code.
+Run-history retention eligibility is owned by one SQL envelope in
+`DataRetentionService`. Let `A` be the shortest configured organization value
+and matching classification value. With no `A`, automatic Flow-run deletion is
+Off even when a Space or Flow has a configured value. With `A`, the effective
+window is the shortest of `A`, Space, and Flow; child values can tighten the
+window but cannot activate, loosen, or disable deletion. Purge selection,
+administrative preview, and public Flow reads all consume this envelope.
+
+Outbox claims, retries, delivery, and dead-letter transitions remain owned by
+the webhook repository and service. Pending terminal-webhook intent is
+purge-protected regardless of claim timing; terminal delivery state is
+purge-permitted at the run-history horizon. Safe candidate locking and final
+file/reference cleanup remain separate retention work. Do not fill those gaps
+with compatibility code.
 
 ## Review, Rerun, And Service-Key Decisions
 

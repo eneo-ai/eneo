@@ -5,7 +5,7 @@ from runpy import run_path
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
@@ -17,6 +17,7 @@ from eneo.database.tables.flow_tables import FlowRuns, Flows
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.domain.flow import FlowRunRetentionProjection
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.tenants.tenant import TenantUpdate
 
@@ -128,6 +129,44 @@ def test_tenant_flow_retention_model_is_strict_and_bounded(field_name: str) -> N
     for rejected in (0, 2556, "30"):
         with pytest.raises(ValidationError):
             TenantUpdate(id=uuid4(), **{field_name: rejected})
+
+
+def test_flow_run_retention_projection_is_a_strict_state_union() -> None:
+    adapter = TypeAdapter(FlowRunRetentionProjection)
+    contributors = {
+        "organization_days": None,
+        "classification_days": None,
+        "space_days": 7,
+        "flow_days": 3,
+    }
+
+    off = adapter.validate_python(
+        {
+            "state": "off",
+            "effective_days": None,
+            "contributors": contributors,
+        }
+    )
+    days = adapter.validate_python(
+        {
+            "state": "days",
+            "effective_days": 3,
+            "contributors": contributors,
+        }
+    )
+
+    assert off.state == "off"
+    assert off.effective_days is None
+    assert days.state == "days"
+    assert days.effective_days == 3
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "state": "off",
+                "effective_days": 3,
+                "contributors": contributors,
+            }
+        )
 
 
 def test_classification_retention_policy_table_has_tenant_paired_contract() -> None:

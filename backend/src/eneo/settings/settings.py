@@ -459,9 +459,19 @@ class FlowEvidencePolicyUpdate(BaseModel):
 
 
 class FlowRetentionEffectiveStatePublic(BaseModel):
-    run_history_deletion_active: bool
-    runtime_upload_abandonment_active: bool
-    classification_policy_count: int = Field(ge=0)
+    run_history_deletion_active: bool = Field(
+        description=(
+            "Whether an organization policy or at least one classification policy "
+            "can activate automatic Flow run-history deletion."
+        )
+    )
+    runtime_upload_abandonment_active: bool = Field(
+        description="Whether automatic abandoned runtime-upload deletion is active."
+    )
+    classification_policy_count: int = Field(
+        ge=0,
+        description="Number of configured classification activation policies.",
+    )
 
     @classmethod
     def from_domain(
@@ -600,6 +610,10 @@ class FlowRetentionOrganizationPreviewRequest(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=(
+            "Organization Flow run-history activation window. Null leaves automatic "
+            "deletion off except for spaces with a matching classification policy."
+        ),
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
         ...,
@@ -619,6 +633,9 @@ class FlowClassificationRetentionPolicyPreviewRequest(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=(
+            "Proposed matching-classification Flow run-history activation window."
+        ),
     )
 
 
@@ -633,6 +650,10 @@ class FlowRetentionPolicyPublic(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=(
+            "Organization Flow run-history activation window. Null leaves automatic "
+            "deletion off except for spaces with a matching classification policy."
+        ),
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
         ...,
@@ -658,6 +679,10 @@ class FlowRetentionPolicyUpdate(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=(
+            "Organization Flow run-history activation window. Null leaves automatic "
+            "deletion off except for spaces with a matching classification policy."
+        ),
         json_schema_extra=_strip_json_schema_default,
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
@@ -683,7 +708,11 @@ class FlowClassificationRetentionPolicyPublic(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
-        description="Full Flow run and step history retention window in days.",
+        description=(
+            "Matching-classification Flow run-history activation window in days. "
+            "The effective window is the minimum of this value, the organization "
+            "value, and configured Space or Flow tightening values."
+        ),
     )
 
 
@@ -707,7 +736,11 @@ class FlowClassificationRetentionPolicyUpdate(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
-        description="Full Flow run and step history retention window in days.",
+        description=(
+            "Matching-classification Flow run-history activation window in days. "
+            "The effective window is the minimum of this value, the organization "
+            "value, and configured Space or Flow tightening values."
+        ),
     )
     confirmation: FlowRetentionChangeConfirmationPublic | None = Field(
         default=None,

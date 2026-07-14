@@ -167,6 +167,7 @@ export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type FlowStep = components["schemas"]["FlowStepPublic"];
 export type FlowSparse = components["schemas"]["FlowSparsePublic"];
 export type Flow = components["schemas"]["FlowPublic"];
+export type FlowRunRetention = Flow["run_history_retention"];
 export type FlowTemplatePlaceholder = components["schemas"]["FlowTemplatePlaceholderPublic"];
 export type FlowTemplateInspection = components["schemas"]["FlowTemplateInspectionPublic"];
 export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"];

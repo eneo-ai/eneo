@@ -61,6 +61,7 @@ import type {
   FlowRunReviewCheckpointState,
   FlowRunResult,
   FlowRunResultFile,
+  FlowRunRetention,
   FlowRunStatusCapabilities,
   FlowRunStatusCapability,
   FlowRunStep,
@@ -166,6 +167,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowRunRerunOperation: FlowRunRerunOperation;
   FlowRunResult: FlowRunResult;
   FlowRunResultFile: FlowRunResultFile;
+  FlowRunRetention: FlowRunRetention;
   FlowRunReviewCheckpoint: FlowRunReviewCheckpoint;
   FlowRunReviewCheckpointResumeResponse: FlowRunReviewCheckpointResumeResponse;
   FlowRunReviewCheckpointState: FlowRunReviewCheckpointState;
@@ -247,6 +249,16 @@ const validFlow: Flow = {
   space_id: "00000000-0000-0000-0000-000000000020",
   name: "Contract smoke flow",
   description: null,
+  run_history_retention: {
+    state: "days",
+    effective_days: 14,
+    contributors: {
+      organization_days: 90,
+      classification_days: 30,
+      space_days: 14,
+      flow_days: null
+    }
+  },
   steps: [validFlowStep],
   created_at: isoTimestamp,
   updated_at: isoTimestamp

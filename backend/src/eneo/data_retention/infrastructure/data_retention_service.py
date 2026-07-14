@@ -3,7 +3,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, TypedDict, cast
+from typing import Any, TypeAlias, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -311,6 +311,21 @@ class _FlowRetentionSqlProposal:
     classification_days: int | None = None
 
 
+FlowRetentionSqlDays: TypeAlias = sa.ColumnElement[int] | sa.ColumnElement[int | None]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunHistoryRetentionSqlEnvelope:
+    """SQL expressions for the complete Flow run-history retention envelope."""
+
+    organization_days: FlowRetentionSqlDays
+    classification_days: FlowRetentionSqlDays
+    space_days: FlowRetentionSqlDays
+    flow_days: FlowRetentionSqlDays
+    activation_days: sa.ColumnElement[int | None]
+    effective_days: sa.ColumnElement[int | None]
+
+
 def _datetime_hash_value(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -329,6 +344,38 @@ class DataRetentionService:
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.session = session
+
+    @staticmethod
+    def flow_run_history_retention_sql_envelope(
+        *,
+        organization_days: FlowRetentionSqlDays,
+        classification_days: FlowRetentionSqlDays,
+        space_days: FlowRetentionSqlDays,
+        flow_days: FlowRetentionSqlDays,
+    ) -> FlowRunHistoryRetentionSqlEnvelope:
+        """Build the sole SQL policy envelope used by reads and deletion paths."""
+        activation_days = cast(
+            sa.ColumnElement[int | None],
+            sa.func.least(organization_days, classification_days),
+        )
+        effective_days = cast(
+            sa.ColumnElement[int | None],
+            sa.case(
+                (
+                    activation_days.is_not(None),
+                    sa.func.least(activation_days, space_days, flow_days),
+                ),
+                else_=sa.null(),
+            ),
+        )
+        return FlowRunHistoryRetentionSqlEnvelope(
+            organization_days=organization_days,
+            classification_days=classification_days,
+            space_days=space_days,
+            flow_days=flow_days,
+            activation_days=activation_days,
+            effective_days=effective_days,
+        )
 
     async def get_flow_retention_control_plane_state(
         self,
@@ -741,49 +788,35 @@ class DataRetentionService:
                 else_=current_classification_days,
             )
 
-        current_activation_days = (
-            current_classification_days
-            if state.organization_run_history_days is None
-            else sa.func.least(
-                sa.literal(
-                    state.organization_run_history_days,
-                    type_=sa.Integer(),
-                ),
-                current_classification_days,
-            )
+        current_envelope = self.flow_run_history_retention_sql_envelope(
+            organization_days=sa.literal(
+                state.organization_run_history_days,
+                type_=sa.Integer(),
+            ),
+            classification_days=current_classification_days,
+            space_days=Spaces.data_retention_days.__clause_element__(),
+            flow_days=Flows.data_retention_days.__clause_element__(),
         )
-        proposed_activation_days = (
-            proposed_classification_days
-            if proposal.organization_run_history_days is None
-            else sa.func.least(
-                sa.literal(
-                    proposal.organization_run_history_days,
-                    type_=sa.Integer(),
-                ),
-                proposed_classification_days,
-            )
-        )
-        current_effective_days = sa.func.least(
-            current_activation_days,
-            Spaces.data_retention_days,
-            Flows.data_retention_days,
-        )
-        proposed_effective_days = sa.func.least(
-            proposed_activation_days,
-            Spaces.data_retention_days,
-            Flows.data_retention_days,
+        proposed_envelope = self.flow_run_history_retention_sql_envelope(
+            organization_days=sa.literal(
+                proposal.organization_run_history_days,
+                type_=sa.Integer(),
+            ),
+            classification_days=proposed_classification_days,
+            space_days=Spaces.data_retention_days.__clause_element__(),
+            flow_days=Flows.data_retention_days.__clause_element__(),
         )
         current_due = sa.and_(
-            current_activation_days.is_not(None),
+            current_envelope.activation_days.is_not(None),
             anchor
             <= sa.literal(previewed_at)
-            - sa.func.make_interval(0, 0, 0, current_effective_days),
+            - sa.func.make_interval(0, 0, 0, current_envelope.effective_days),
         )
         proposed_due = sa.and_(
-            proposed_activation_days.is_not(None),
+            proposed_envelope.activation_days.is_not(None),
             anchor
             <= sa.literal(previewed_at)
-            - sa.func.make_interval(0, 0, 0, proposed_effective_days),
+            - sa.func.make_interval(0, 0, 0, proposed_envelope.effective_days),
         )
         candidates = (
             sa.select(
@@ -1520,17 +1553,21 @@ class DataRetentionService:
         self, *, now: datetime
     ) -> sa.Select[tuple[UUID]]:
         anchor = self._flow_run_history_retention_anchor()
-        effective_retention_days = sa.func.coalesce(
-            Flows.data_retention_days, Spaces.data_retention_days
-        )
-        effective_retention_days = sa.func.least(
-            effective_retention_days,
-            FlowClassificationRetentionPolicies.data_retention_days,
+        envelope = self.flow_run_history_retention_sql_envelope(
+            organization_days=(
+                Tenants.flow_run_history_retention_days.__clause_element__()
+            ),
+            classification_days=(
+                FlowClassificationRetentionPolicies.data_retention_days.__clause_element__()
+            ),
+            space_days=Spaces.data_retention_days.__clause_element__(),
+            flow_days=Flows.data_retention_days.__clause_element__(),
         )
         return (
             sa.select(FlowRuns.id.label("run_id"))
             .join(Flows, FlowRuns.flow_id == Flows.id)
             .join(Spaces, Flows.space_id == Spaces.id)
+            .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .outerjoin(
                 FlowClassificationRetentionPolicies,
                 sa.and_(
@@ -1542,7 +1579,7 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
-                    effective_retention_days.isnot(None),
+                    envelope.activation_days.is_not(None),
                     # Constant lower bound for ix_flow_runs_terminal_retention_anchor;
                     # safe because every retention source is >= MIN_RETENTION_DAYS.
                     anchor
@@ -1550,7 +1587,7 @@ class DataRetentionService:
                     - sa.func.make_interval(0, 0, 0, MIN_RETENTION_DAYS),
                     anchor
                     <= sa.literal(now)
-                    - sa.func.make_interval(0, 0, 0, effective_retention_days),
+                    - sa.func.make_interval(0, 0, 0, envelope.effective_days),
                 )
             )
         )

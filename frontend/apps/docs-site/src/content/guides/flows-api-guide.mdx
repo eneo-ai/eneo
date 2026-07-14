@@ -233,17 +233,19 @@ Each policy stores:
 - `security_classification_id`
 - `data_retention_days`
 
-Organization or classification policy activates run-history deletion. Once active, the shortest applicable organization, classification, Space, and Flow value is the proposed effective window. Existing Space and Flow values remain visible as latent preview evidence while both activation sources are Off; they must not independently activate deletion.
+`DataRetentionService` owns the policy calculation used by preview, deletion, and Flow reads. Let `A` be the shortest configured organization value and matching classification value. If neither value is configured, `A` is absent and automatic Flow-run deletion is **Off**, even when the Space or Flow contains a retention value. If `A` is present, the effective window is the shortest of `A`, the Space value, and the Flow value. Space and Flow values can only tighten an active envelope; they cannot activate, loosen, or disable it. Admin preview always returns the latent Space and Flow values so an activation decision shows its full impact.
 
-Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference, which can loosen future dynamic retention back to the Flow/space policy. Use this deliberately when retiring a classification.
+Every Flow response includes the required `run_history_retention` projection. Its `state` is either `off`, with `effective_days: null`, or `days`, with the positive effective window. `contributors` exposes the configured organization, matching-classification, Space, and Flow values that produced that state. There is no absent third state.
+
+Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference. The organization value then remains the only possible activation source; if it is also Off, child Space and Flow values become latent and automatic Flow-run deletion turns Off.
 
 This release does not enforce records or legal holds. Automatic deletion must not be enabled for material under an active hold or preservation obligation until a separately governed blocker exists. The preview reports only three implemented lifecycle blockers: undelivered audit delivery, unresolved webhook delivery, and active rerun work.
 
-Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. For classification-3 or other sensitive workflows, use a stricter Flow/space `data_retention_days` window or a classification retention policy for full run-history purge, and use tenant evidence policy for export controls.
+Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. When the organization or matching-classification envelope is active, a stricter Flow/Space `data_retention_days` value can shorten the full run-history window. A Flow/Space value cannot activate deletion by itself. Use tenant evidence policy for export controls.
 
 The never-attached-upload input is only a control-plane value in this slice. Upload sweeping remains a separate implementation step and is not performed by these endpoints.
 
-> **Deployment gate:** this control-plane slice cannot be deployed or described as launch-complete until the canonical run-history purge selector adopts the activation envelope and exact effective-policy semantics. The settings and preview endpoints do not themselves delete data, change worker cadence, or implement upload sweeping.
+The settings and preview endpoints do not change worker cadence or implement upload sweeping. The canonical run-history purge selector consumes the same activation envelope as preview and public Flow reads.
 
 This is the intended operator-facing seam for sensitive care-data workflows. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 

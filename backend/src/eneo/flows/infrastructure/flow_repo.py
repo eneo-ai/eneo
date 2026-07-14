@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -17,6 +17,9 @@ from eneo.database.tables.assistant_table import (
     AssistantsGroups,
 )
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.flow_classification_retention_policy_table import (
+    FlowClassificationRetentionPolicies,
+)
 from eneo.database.tables.flow_tables import (
     FlowResourceBindings,
     FlowRuns,
@@ -26,13 +29,22 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from eneo.flows.domain.flow import Flow, FlowSparse, FlowStep, FlowStepResult
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowRunRetentionContributors,
+    FlowRunRetentionDays,
+    FlowRunRetentionOff,
+    FlowSparse,
+    FlowStep,
+    FlowStepResult,
+)
 from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -68,6 +80,40 @@ class _AssistantAuthoringSnapshotBuilder:
         )
 
 
+_FlowReadModel = TypeVar("_FlowReadModel", Flow, FlowSparse)
+
+
+def _attach_run_history_retention(
+    flow: _FlowReadModel,
+    *,
+    organization_days: int | None,
+    classification_days: int | None,
+    space_days: int | None,
+    flow_days: int | None,
+    effective_days: int | None,
+) -> _FlowReadModel:
+    contributors = FlowRunRetentionContributors(
+        organization_days=organization_days,
+        classification_days=classification_days,
+        space_days=space_days,
+        flow_days=flow_days,
+    )
+    retention = (
+        FlowRunRetentionOff(
+            state="off",
+            effective_days=None,
+            contributors=contributors,
+        )
+        if effective_days is None
+        else FlowRunRetentionDays(
+            state="days",
+            effective_days=effective_days,
+            contributors=contributors,
+        )
+    )
+    return flow.model_copy(update={"run_history_retention": retention})
+
+
 def _resource_binding_from_row(row: FlowResourceBindings) -> LocalResourceBinding:
     return LocalResourceBinding(
         slot_ref=ResourceSlotRef(
@@ -86,6 +132,47 @@ class FlowRepository:
     def __init__(self, session: AsyncSession, factory: FlowFactory):
         self.session = session
         self.factory = factory
+
+    @staticmethod
+    def _select_flows_with_run_history_retention() -> sa.Select[
+        tuple[Flows, int | None, int | None, int | None, int | None, int | None]
+    ]:
+        # Local import avoids the infrastructure package's eager exports forming a
+        # module cycle while keeping the SQL policy owned by DataRetentionService.
+        from eneo.data_retention.infrastructure.data_retention_service import (
+            DataRetentionService,
+        )
+
+        envelope = DataRetentionService.flow_run_history_retention_sql_envelope(
+            organization_days=(
+                Tenants.flow_run_history_retention_days.__clause_element__()
+            ),
+            classification_days=(
+                FlowClassificationRetentionPolicies.data_retention_days.__clause_element__()
+            ),
+            space_days=Spaces.data_retention_days.__clause_element__(),
+            flow_days=Flows.data_retention_days.__clause_element__(),
+        )
+        return (
+            sa.select(
+                Flows,
+                envelope.organization_days.label("retention_organization_days"),
+                envelope.classification_days.label("retention_classification_days"),
+                envelope.space_days.label("retention_space_days"),
+                envelope.flow_days.label("retention_flow_days"),
+                envelope.effective_days.label("retention_effective_days"),
+            )
+            .join(Spaces, Flows.space_id == Spaces.id)
+            .join(Tenants, Flows.tenant_id == Tenants.id)
+            .outerjoin(
+                FlowClassificationRetentionPolicies,
+                sa.and_(
+                    FlowClassificationRetentionPolicies.security_classification_id
+                    == Spaces.security_classification_id,
+                    FlowClassificationRetentionPolicies.tenant_id == Spaces.tenant_id,
+                ),
+            )
+        )
 
     async def _get_flow_steps(self, flow_id: UUID, tenant_id: UUID) -> list[FlowSteps]:
         stmt = (
@@ -160,16 +247,31 @@ class FlowRepository:
 
     async def get(self, flow_id: UUID, tenant_id: UUID) -> Flow:
         stmt = (
-            sa.select(Flows)
+            self._select_flows_with_run_history_retention()
             .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
         )
-        flow_in_db = await self.session.scalar(stmt)
-        if flow_in_db is None:
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
             raise NotFoundException("Flow not found.")
+        (
+            flow_in_db,
+            organization_days,
+            classification_days,
+            space_days,
+            flow_days,
+            effective_days,
+        ) = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
-        return self.factory.from_flow_db(flow_in_db=flow_in_db, steps=steps)
+        return _attach_run_history_retention(
+            self.factory.from_flow_db(flow_in_db=flow_in_db, steps=steps),
+            organization_days=organization_days,
+            classification_days=classification_days,
+            space_days=space_days,
+            flow_days=flow_days,
+            effective_days=effective_days,
+        )
 
     async def get_by_space(
         self,
@@ -181,7 +283,7 @@ class FlowRepository:
         offset: int | None = None,
     ) -> list[Flow]:
         stmt = (
-            sa.select(Flows)
+            self._select_flows_with_run_history_retention()
             .where(Flows.space_id == space_id)
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
@@ -193,11 +295,11 @@ class FlowRepository:
             stmt = stmt.offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
-        flow_rows = (await self.session.execute(stmt)).scalars().all()
+        flow_rows = (await self.session.execute(stmt)).all()
         if not flow_rows:
             return []
 
-        flow_ids = [row.id for row in flow_rows]
+        flow_ids = [row[0].id for row in flow_rows]
         steps_rows = (
             (
                 await self.session.execute(
@@ -215,11 +317,18 @@ class FlowRepository:
             steps_by_flow[row.flow_id].append(row)
 
         return [
-            self.factory.from_flow_db(
-                flow_row,
-                steps_by_flow.get(flow_row.id, []),
+            _attach_run_history_retention(
+                self.factory.from_flow_db(
+                    row[0],
+                    steps_by_flow.get(row[0].id, []),
+                ),
+                organization_days=row[1],
+                classification_days=row[2],
+                space_days=row[3],
+                flow_days=row[4],
+                effective_days=row[5],
             )
-            for flow_row in flow_rows
+            for row in flow_rows
         ]
 
     async def get_sparse_by_space(
@@ -232,7 +341,7 @@ class FlowRepository:
         offset: int | None = None,
     ) -> list[FlowSparse]:
         stmt = (
-            sa.select(Flows)
+            self._select_flows_with_run_history_retention()
             .where(Flows.space_id == space_id)
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
@@ -244,8 +353,18 @@ class FlowRepository:
             stmt = stmt.offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
-        flow_rows = (await self.session.execute(stmt)).scalars().all()
-        return [self.factory.from_flow_sparse_db(row) for row in flow_rows]
+        flow_rows = (await self.session.execute(stmt)).all()
+        return [
+            _attach_run_history_retention(
+                self.factory.from_flow_sparse_db(row[0]),
+                organization_days=row[1],
+                classification_days=row[2],
+                space_days=row[3],
+                flow_days=row[4],
+                effective_days=row[5],
+            )
+            for row in flow_rows
+        ]
 
     async def replace_resource_bindings(
         self,

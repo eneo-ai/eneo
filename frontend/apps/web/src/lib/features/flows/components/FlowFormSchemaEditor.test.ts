@@ -20,6 +20,16 @@ function makeFlow(fields: FlowFormField[]): Flow {
     published_version: null,
     metadata_json: { form_schema: { fields } },
     data_retention_days: null,
+    run_history_retention: {
+      state: "off",
+      effective_days: null,
+      contributors: {
+        organization_days: null,
+        classification_days: null,
+        space_days: null,
+        flow_days: null
+      }
+    },
     created_at: null,
     updated_at: null,
     steps: [] as FlowStep[]

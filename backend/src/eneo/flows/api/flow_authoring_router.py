@@ -411,8 +411,10 @@ async def get_published_flow_runtime(
     operation_id="update_flow",
     summary="Update Flow",
     description=(
-        "Update a draft flow definition, including steps, metadata, and retention "
-        f"settings. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+        "Update a draft flow definition, including steps, metadata, and its "
+        "configured retention contribution. The Flow value can tighten but cannot "
+        "activate or loosen automatic run-history deletion. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(

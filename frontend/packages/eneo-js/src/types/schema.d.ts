@@ -4109,7 +4109,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps, metadata, and retention settings. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Update a draft flow definition, including steps, metadata, and its configured retention contribution. The Flow value can tighten but cannot activate or loosen automatic run-history deletion. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
     trace?: never;
@@ -13932,7 +13932,10 @@ export interface components {
      *     }
      */
     FlowClassificationRetentionPolicyPreviewRequest: {
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Proposed matching-classification Flow run-history activation window.
+       */
       data_retention_days: number;
     };
     /**
@@ -13950,7 +13953,7 @@ export interface components {
       security_classification_id: string;
       /**
        * Data Retention Days
-       * @description Full Flow run and step history retention window in days.
+       * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
        */
       data_retention_days: number;
     };
@@ -13963,7 +13966,7 @@ export interface components {
     FlowClassificationRetentionPolicyUpdate: {
       /**
        * Data Retention Days
-       * @description Full Flow run and step history retention window in days.
+       * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
        */
       data_retention_days: number;
       confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
@@ -14004,7 +14007,7 @@ export interface components {
       } | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. Set to null to inherit the space retention policy. Valid range: 1-2555 days.
+       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
     };
@@ -14885,6 +14888,16 @@ export interface components {
      *       "name": "Employee Review Summary",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
+     *       "run_history_retention": {
+     *         "contributors": {
+     *           "classification_days": 30,
+     *           "flow_days": 30,
+     *           "organization_days": 90,
+     *           "space_days": 14
+     *         },
+     *         "effective_days": 14,
+     *         "state": "days"
+     *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
      *       "steps": [
      *         {
@@ -14948,9 +14961,16 @@ export interface components {
       } | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. Set to null to inherit the space retention policy. Valid range: 1-2555 days.
+       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
+      /**
+       * Run History Retention
+       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window.
+       */
+      run_history_retention:
+        | components["schemas"]["FlowRunRetentionOff"]
+        | components["schemas"]["FlowRunRetentionDays"];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -15006,11 +15026,20 @@ export interface components {
     };
     /** FlowRetentionEffectiveStatePublic */
     FlowRetentionEffectiveStatePublic: {
-      /** Run History Deletion Active */
+      /**
+       * Run History Deletion Active
+       * @description Whether an organization policy or at least one classification policy can activate automatic Flow run-history deletion.
+       */
       run_history_deletion_active: boolean;
-      /** Runtime Upload Abandonment Active */
+      /**
+       * Runtime Upload Abandonment Active
+       * @description Whether automatic abandoned runtime-upload deletion is active.
+       */
       runtime_upload_abandonment_active: boolean;
-      /** Classification Policy Count */
+      /**
+       * Classification Policy Count
+       * @description Number of configured classification activation policies.
+       */
       classification_policy_count: number;
     };
     /**
@@ -15104,7 +15133,10 @@ export interface components {
      *     }
      */
     FlowRetentionOrganizationPreviewRequest: {
-      /** Flow Run History Retention Days */
+      /**
+       * Flow Run History Retention Days
+       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
+       */
       flow_run_history_retention_days: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days: number | null;
@@ -15125,7 +15157,10 @@ export interface components {
     FlowRetentionPolicyPublic: {
       /** Run Debug Evidence Days */
       run_debug_evidence_days: number | null;
-      /** Flow Run History Retention Days */
+      /**
+       * Flow Run History Retention Days
+       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
+       */
       flow_run_history_retention_days: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days: number | null;
@@ -15140,7 +15175,10 @@ export interface components {
     FlowRetentionPolicyUpdate: {
       /** Run Debug Evidence Days */
       run_debug_evidence_days?: number | null;
-      /** Flow Run History Retention Days */
+      /**
+       * Flow Run History Retention Days
+       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
+       */
       flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
@@ -17306,6 +17344,39 @@ export interface components {
        */
       file_ids: string[];
     };
+    /** FlowRunRetentionContributors */
+    FlowRunRetentionContributors: {
+      /** Organization Days */
+      organization_days: number | null;
+      /** Classification Days */
+      classification_days: number | null;
+      /** Space Days */
+      space_days: number | null;
+      /** Flow Days */
+      flow_days: number | null;
+    };
+    /** FlowRunRetentionDays */
+    FlowRunRetentionDays: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      state: "days";
+      /** Effective Days */
+      effective_days: number;
+      contributors: components["schemas"]["FlowRunRetentionContributors"];
+    };
+    /** FlowRunRetentionOff */
+    FlowRunRetentionOff: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      state: "off";
+      /** Effective Days */
+      effective_days: null;
+      contributors: components["schemas"]["FlowRunRetentionContributors"];
+    };
     /**
      * FlowRunReviewCheckpointApproveRequest
      * @example {
@@ -18693,6 +18764,16 @@ export interface components {
      *       "name": "Employee Review Summary",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
+     *       "run_history_retention": {
+     *         "contributors": {
+     *           "classification_days": 30,
+     *           "flow_days": 30,
+     *           "organization_days": 90,
+     *           "space_days": 14
+     *         },
+     *         "effective_days": 14,
+     *         "state": "days"
+     *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:00:00Z"
@@ -18730,9 +18811,16 @@ export interface components {
       } | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. Set to null to inherit the space retention policy. Valid range: 1-2555 days.
+       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
+      /**
+       * Run History Retention
+       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window.
+       */
+      run_history_retention:
+        | components["schemas"]["FlowRunRetentionOff"]
+        | components["schemas"]["FlowRunRetentionDays"];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -22445,7 +22533,7 @@ export interface components {
       } | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. Set to null to inherit the space retention policy. Valid range: 1-2555 days.
+       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
     };
@@ -22499,7 +22587,7 @@ export interface components {
       icon_id?: string | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. For Flow run history, this value can only tighten an active organization or matching classification policy. Set to null to disable the space-level conversation policy and remove the Space contribution from the Flow envelope. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
     };
@@ -24468,7 +24556,10 @@ export interface components {
       icon_id?: string | null;
       applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       */
       data_retention_days?: number | null;
     };
     /** SpaceGroupMember */
@@ -24542,7 +24633,10 @@ export interface components {
       icon_id?: string | null;
       applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       */
       data_retention_days?: number | null;
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
@@ -24601,7 +24695,10 @@ export interface components {
       icon_id?: string | null;
       applications?: components["schemas"]["Applications"] | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
-      /** Data Retention Days */
+      /**
+       * Data Retention Days
+       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       */
       data_retention_days?: number | null;
     };
     /**
@@ -42388,6 +42485,16 @@ export interface operations {
            *             }
            *           },
            *           "data_retention_days": 30,
+           *           "run_history_retention": {
+           *             "state": "days",
+           *             "effective_days": 14,
+           *             "contributors": {
+           *               "organization_days": 90,
+           *               "classification_days": 30,
+           *               "space_days": 14,
+           *               "flow_days": 30
+           *             }
+           *           },
            *           "created_at": "2026-03-17T09:30:00Z",
            *           "updated_at": "2026-03-17T10:00:00Z"
            *         }

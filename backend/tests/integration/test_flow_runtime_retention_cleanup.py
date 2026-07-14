@@ -95,6 +95,11 @@ async def flow_retention_service(
 async def flow_retention_space(
     async_session: AsyncSession, test_tenant, admin_user
 ) -> Spaces:
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_run_history_retention_days=2555)
+    )
     space = Spaces(
         name=f"Flow retention space {admin_user.id}",
         description="Flow runtime retention tests",
@@ -1620,7 +1625,7 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_c
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_uses_flow_retention_before_space_default(
+async def test_cleanup_old_flow_runtime_data_flow_days_cannot_loosen_space_days(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1629,7 +1634,7 @@ async def test_cleanup_old_flow_runtime_data_uses_flow_retention_before_space_de
     flow_retention_service: DataRetentionService,
 ):
     flow_retention_space.data_retention_days = 1
-    retained_by_flow_override = await _create_flow_runtime_fixture(
+    larger_flow_value = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
         user=admin_user,
@@ -1638,7 +1643,7 @@ async def test_cleanup_old_flow_runtime_data_uses_flow_retention_before_space_de
         days_old=10,
         flow_retention_days=30,
     )
-    purged_by_flow_override = await _create_flow_runtime_fixture(
+    matching_flow_value = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
         user=admin_user,
@@ -1651,9 +1656,9 @@ async def test_cleanup_old_flow_runtime_data_uses_flow_retention_before_space_de
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
-    assert await async_session.get(FlowRuns, retained_by_flow_override.run.id)
-    assert await async_session.get(FlowRuns, purged_by_flow_override.run.id) is None
+    assert counts["flow_runs_purged"] == 2
+    assert await async_session.get(FlowRuns, larger_flow_value.run.id) is None
+    assert await async_session.get(FlowRuns, matching_flow_value.run.id) is None
 
 
 @pytest.mark.asyncio
@@ -1693,6 +1698,11 @@ async def test_flow_run_history_purge_uses_classification_policy_without_flow_or
     flow_retention_assistant: Assistants,
     flow_retention_service: DataRetentionService,
 ):
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_run_history_retention_days=None)
+    )
     await _assign_space_classification_retention_policy(
         async_session,
         tenant_id=test_tenant.id,
