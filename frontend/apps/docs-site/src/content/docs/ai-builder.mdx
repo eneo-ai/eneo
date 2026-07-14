@@ -35,6 +35,8 @@ AI Builder separates semantic intent from Flow mechanics.
 
 This split keeps generated plans maintainable. The model describes what each step should accomplish; the backend owns deterministic details such as step output mechanics, final artifact rendering, and how previous outputs and form fields become material for later steps.
 
+When the final report or document needs named sections, say which headings must appear in the finished output. You can still use headings to organize a detailed workflow description: headings that describe inputs, tasks, reviews, or delivery stages are treated as authoring guidance rather than as an automatic final-report outline.
+
 For create-plan compilation, supported shapes now pass through an explicit compile-time assembly spine:
 
 | Module                            | Responsibility                                                                                                 |
@@ -175,6 +177,8 @@ behavior.
 ## Token usage
 
 AI Builder shows token usage for the builder work itself. The total includes planning, proposal generation, and any repair attempts needed to produce a valid plan.
+
+Proposal correction is bounded across all attempts. If a correction does not change the proposed plan or the problem it needs to fix, AI Builder stops that correction path instead of repeatedly sending the same work to the model.
 
 The token meter is for transparency:
 

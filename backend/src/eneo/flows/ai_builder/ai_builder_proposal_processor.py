@@ -12,6 +12,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -102,6 +106,9 @@ class AIBuilderProposalProcessor:
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
+        requested_output_sections: RequestedOutputSections = (
+            EMPTY_REQUESTED_OUTPUT_SECTIONS
+        ),
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
@@ -156,6 +163,7 @@ class AIBuilderProposalProcessor:
             assistant_snapshots=assistant_snapshots,
             assistant_metadata=assistant_metadata,
             planning_state=planning_state,
+            requested_output_sections=requested_output_sections,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
             before_provider_call=before_provider_call,

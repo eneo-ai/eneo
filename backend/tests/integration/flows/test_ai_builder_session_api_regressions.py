@@ -5590,11 +5590,6 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
             "steps": [
                 {
-                    "name": "Transkribera ljud",
-                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
-                    "output_type": "text",
-                },
-                {
                     "name": "Skapa PDF-sammanfattning",
                     "instructions": (
                         "Sammanfatta transkriberingen på tydlig svenska med de "
@@ -5641,7 +5636,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 structured_answers={
                     "input_material_mode": "audio",
                     "flow_input_architecture": "audio_primary_input",
-                    "final_output_mode": "pdf_document",
+                    "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
                 },
             )
@@ -5686,12 +5681,11 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     assert flow_response.status_code == 200, flow_response.text
     flow_payload = flow_response.json()
     assert flow_payload["name"] == "Ljudtranskribering till PDF"
-    assert apply_payload["steps_created"] == 4
-    assert len(flow_payload["steps"]) == 4
+    assert apply_payload["steps_created"] == 3
+    assert len(flow_payload["steps"]) == 3
     assert flow_payload["steps"][0]["input_type"] == "audio"
     assert flow_payload["steps"][0]["output_mode"] == "transcribe_only"
     assert flow_payload["steps"][1]["output_type"] == "text"
-    assert flow_payload["steps"][2]["output_type"] == "text"
     assert flow_payload["steps"][-1]["output_type"] == "pdf"
 
 
@@ -5785,7 +5779,11 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
                 bearer_token=bearer_token,
                 session_id=session_id,
                 initial_message="Byt slutformat till DOCX men behåll resten av flödet.",
-                structured_answers={"docx_output_mode": "generated_docx"},
+                structured_answers={
+                    "terminal_output": "docx_document",
+                    "docx_output_mode": "generated_docx",
+                    "report_disposition": "synthesized_overview",
+                },
             )
     assert any(event["event"] == "plan" for event in plan_events)
     plan_id = await _get_latest_plan_id(
@@ -6100,11 +6098,6 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
             "steps": [
                 {
-                    "name": "Transkribera ljud",
-                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
-                    "output_type": "text",
-                },
-                {
                     "name": "Skapa PDF-sammanfattning",
                     "instructions": (
                         "Sammanfatta transkriberingen på tydlig svenska med de "
@@ -6151,7 +6144,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 structured_answers={
                     "input_material_mode": "audio",
                     "flow_input_architecture": "audio_primary_input",
-                    "final_output_mode": "pdf_document",
+                    "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
                 },
             )

@@ -29,6 +29,10 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_answer_signals,
     resolve_output_intent,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
@@ -145,6 +149,9 @@ def format_contextual_quality_feedback(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
 ) -> str | None:
     return build_conversation_aware_quality_feedback(
         conversation,
@@ -153,6 +160,7 @@ def format_contextual_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        requested_output_sections=requested_output_sections,
     )
 
 
@@ -163,6 +171,9 @@ def build_create_contextual_quality_feedback(
     aggregation_intent: AggregationIntent,
     resource_catalog: "AIBuilderResourceCatalog | None",
     planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
 ) -> CreateContextualQualityFeedback:
     context = build_conversation_critic_context(
         conversation,
@@ -171,6 +182,7 @@ def build_create_contextual_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        requested_output_sections=requested_output_sections,
     )
     preflight = run_draft_preflight(context)
     enforce_architecture_critic_invariants(context, issues=preflight.issues)

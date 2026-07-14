@@ -42,6 +42,10 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -57,8 +61,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     run_tool_self_correction,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalAttemptFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
+    ToolProcessingFailureKind,
     log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -198,6 +204,9 @@ class ProposalSubmissionOwner:
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
+        requested_output_sections: RequestedOutputSections = (
+            EMPTY_REQUESTED_OUTPUT_SECTIONS
+        ),
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
@@ -228,11 +237,15 @@ class ProposalSubmissionOwner:
             assistant_snapshots=assistant_snapshots,
             assistant_metadata=assistant_metadata,
             planning_state=planning_state,
+            requested_output_sections=requested_output_sections,
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
             before_provider_call=before_provider_call,
         )
+        if not ctx.proposal_call_budget.try_start_call():
+            raise RuntimeError("Fresh proposal turn exhausted its provider call budget")
+        usage_tracker.start_attempt(counts_as_repair=False)
         try:
             response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
@@ -246,6 +259,7 @@ class ProposalSubmissionOwner:
         except (AIBuilderBadRequestException, AIBuilderProviderOutcomeUnknownException):
             raise
         except Exception as error:
+            usage_tracker.record_attempt_failure(failure_kind="provider_error")
             logger.error("AI Builder proposal task failed", exc_info=error)
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
@@ -263,6 +277,7 @@ class ProposalSubmissionOwner:
             return
 
         if not response.choices:
+            usage_tracker.record_attempt_failure(failure_kind="missing_submission_tool")
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
                 session_id=turn.session_id,
@@ -283,6 +298,7 @@ class ProposalSubmissionOwner:
 
         choice = response.choices[0]
         if choice.finish_reason == "length":
+            usage_tracker.record_attempt_failure(failure_kind="provider_truncation")
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
                 session_id=turn.session_id,
@@ -356,6 +372,7 @@ class ProposalSubmissionOwner:
         plan_edit_context: AIBuilderPlanEditContext | None,
         prior_plan_for_revision: BuilderPlan | None,
         usage_tracker: ProposalTurnTelemetry | None,
+        requested_output_sections: RequestedOutputSections,
     ) -> ToolRetryConfig:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
@@ -369,6 +386,7 @@ class ProposalSubmissionOwner:
                 prior_plan_for_revision=prior_plan_for_revision,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
+                requested_output_sections=requested_output_sections,
             )
 
         return ToolRetryConfig(
@@ -392,6 +410,7 @@ class ProposalSubmissionOwner:
         prior_plan_for_revision: BuilderPlan | None,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
+        requested_output_sections: RequestedOutputSections,
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         if target_kind == TargetKind.CREATE:
@@ -432,6 +451,7 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             metadata_tool_call=metadata_tool_call,
             planning_state=planning_state,
+            requested_output_sections=requested_output_sections,
         )
 
     async def _finalize_invocation_proposal(
@@ -445,6 +465,7 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         metadata_tool_call: RuntimeToolCall | None,
         planning_state: PlanningState | None,
+        requested_output_sections: RequestedOutputSections,
     ) -> ToolProcessingResult:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
@@ -464,6 +485,7 @@ class ProposalSubmissionOwner:
                 request_id=request_id,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
+                requested_output_sections=requested_output_sections,
             )
         )
 
@@ -474,6 +496,7 @@ class ProposalSubmissionOwner:
         error_message: str,
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
+        reason: ProposalRepairReason,
         failure_codes: frozenset[str] = frozenset(),
     ) -> ProposalSelfCorrectionRequest:
         return build_proposal_self_correction_request(
@@ -482,6 +505,7 @@ class ProposalSubmissionOwner:
             tool_call=tool_call,
             retry_config=retry_config,
             failure_codes=failure_codes,
+            initial_failure_kind=_repair_failure_kind(reason),
             self_correction_temperature=self.self_correction_temperature,
             self_correction_bumped_temperature=self.self_correction_bumped_temperature,
             forced_proposal_temperature=self.forced_proposal_temperature,
@@ -498,7 +522,13 @@ class ProposalSubmissionOwner:
         usage_tracker: ProposalTurnTelemetry | None,
         request_id: str,
         reason: ProposalRepairReason,
+        failure_codes: frozenset[str] = frozenset(),
     ) -> None:
+        if usage_tracker is not None:
+            usage_tracker.record_attempt_failure(
+                failure_kind=_attempt_failure_kind(reason),
+                failure_codes=failure_codes,
+            )
         record_proposal_first_attempt(
             usage_tracker,
             request_id=request_id,
@@ -527,6 +557,7 @@ class ProposalSubmissionOwner:
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,
             reason=reason,
+            failure_codes=failure_codes,
         )
         async for event in run_tool_self_correction(
             self._build_self_correction_request(
@@ -534,6 +565,7 @@ class ProposalSubmissionOwner:
                 error_message=error_message,
                 tool_call=tool_call,
                 retry_config=retry_config,
+                reason=reason,
                 failure_codes=failure_codes,
             )
         ):
@@ -558,6 +590,7 @@ class ProposalSubmissionOwner:
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,
+            requested_output_sections=ctx.requested_output_sections,
         )
 
         try:
@@ -592,6 +625,7 @@ class ProposalSubmissionOwner:
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
                 request_id=ctx.request_id,
                 usage_tracker=ctx.usage_tracker,
+                requested_output_sections=ctx.requested_output_sections,
                 metadata_tool_call=tool_call,
             )
             if is_create and result.user_message is not None:
@@ -663,6 +697,7 @@ class ProposalSubmissionOwner:
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,
+            requested_output_sections=ctx.requested_output_sections,
         )
         outcome = await run_forced_tool_retry_after_text(
             ForcedToolAfterTextRequest(
@@ -719,3 +754,19 @@ def _record_proposal_repair_invocation(
         tool_name=tool_name,
         reason=reason,
     )
+
+
+def _repair_failure_kind(
+    reason: ProposalRepairReason,
+) -> ToolProcessingFailureKind:
+    if reason == "parse":
+        return "parse"
+    if reason == "quality":
+        return "quality"
+    return "validation"
+
+
+def _attempt_failure_kind(
+    reason: ProposalRepairReason,
+) -> ProposalAttemptFailureKind:
+    return reason

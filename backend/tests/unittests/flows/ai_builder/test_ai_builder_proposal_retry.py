@@ -31,7 +31,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
-    MAX_SELF_CORRECTION_RETRIES,
     ForcedToolAfterTextRequest,
     ForcedToolRetryOutcome,
     ProposalSelfCorrectionRequest,
@@ -44,6 +43,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    MAX_PROPOSAL_PROVIDER_CALLS,
+    ProposalCallBudget,
     ProposalCompletionFn,
     ProposalCompletionRequest,
     ToolProcessingResult,
@@ -134,7 +135,11 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
         function=SimpleNamespace(
             name=PROPOSE_FLOW_TOOL_NAME,
             arguments=json.dumps(
-                {"flow_name": "T", "plan_rationale": "R", "steps": []}
+                {
+                    "flow_name": f"T {call_index}",
+                    "plan_rationale": "R",
+                    "steps": [],
+                }
             ),
         ),
     )
@@ -217,13 +222,15 @@ def _make_self_correction_request(
             request_id=request_id,
             usage_tracker=usage_tracker,
             assistant_metadata=assistant_metadata,
+            proposal_call_budget=ProposalCallBudget(
+                call_limit=max_self_correction_retries + 1
+            ),
         ),
         error_message=error_message,
         failure_codes=failure_codes,
         tool_call=_original_tool_call() if tool_call is None else tool_call,
         self_correction_temperature=self_correction_temperature,
         self_correction_bumped_temperature=self_correction_bumped_temperature,
-        max_self_correction_retries=max_self_correction_retries,
         repair_completion=repair_completion,
         retry_config=ToolRetryConfig(
             target_kind=target_kind,
@@ -231,6 +238,7 @@ def _make_self_correction_request(
             process_tool_invocation=process_tool_invocation,
         ),
         forced_proposal_temperature=forced_proposal_temperature,
+        initial_failure_kind="validation",
     )
 
 
@@ -681,8 +689,145 @@ async def test_run_forced_tool_retry_after_text_preserves_information_request_em
     call_proposal_completion.assert_not_awaited()
 
 
-def test_max_self_correction_retries_budgets_three_retries() -> None:
-    assert MAX_SELF_CORRECTION_RETRIES == 3
+def test_proposal_provider_call_budget_includes_initial_and_repairs() -> None:
+    assert MAX_PROPOSAL_PROVIDER_CALLS == 4
+
+
+@pytest.mark.asyncio
+async def test_forced_fallback_shares_the_self_correction_call_budget() -> None:
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Här är en korrigerad plan.",
+                    tool_calls=None,
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    forced_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={"flow_name": "Still invalid", "steps": []},
+    )
+    repair_completion = AsyncMock(side_effect=[text_response, forced_response])
+
+    events = _wire_events(
+        [
+            event
+            async for event in run_tool_self_correction(
+                _make_self_correction_request(
+                    repair_completion=repair_completion,
+                    process_tool_invocation=AsyncMock(
+                        return_value=ToolProcessingResult(
+                            feedback="still bad",
+                            failure_kind="validation",
+                        )
+                    ),
+                    self_correction_temperature=0.35,
+                    self_correction_bumped_temperature=0.6,
+                    max_self_correction_retries=0,
+                    forced_proposal_temperature=0.1,
+                    target_kind=TargetKind.CREATE,
+                )
+            )
+        ]
+    )
+
+    assert repair_completion.await_count == 1
+    assert events[-1]["event"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_unchanged_candidate_and_failure_stop_before_another_provider_call() -> (
+    None
+):
+    unchanged_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={},
+    )
+    repair_completion = AsyncMock(return_value=unchanged_response)
+
+    events = _wire_events(
+        [
+            event
+            async for event in run_tool_self_correction(
+                _make_self_correction_request(
+                    repair_completion=repair_completion,
+                    process_tool_invocation=AsyncMock(
+                        return_value=ToolProcessingResult(
+                            feedback="still bad",
+                            failure_kind="validation",
+                        )
+                    ),
+                    self_correction_temperature=0.35,
+                    self_correction_bumped_temperature=0.6,
+                    max_self_correction_retries=3,
+                    forced_proposal_temperature=0.1,
+                    target_kind=TargetKind.CREATE,
+                )
+            )
+        ]
+    )
+
+    assert repair_completion.await_count == 1
+    assert events[-1]["event"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_progressing_edit_repair_can_reach_a_valid_candidate() -> None:
+    repair_completion = AsyncMock(
+        side_effect=[
+            _tool_response(
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                arguments={"plan_rationale": "Rename the analysis step."},
+            ),
+            _tool_response(
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                arguments={
+                    "plan_rationale": "Rename the analysis step.",
+                    "steps": [
+                        {
+                            "kind": "modify",
+                            "existing_step_ref": "existing_step_1",
+                            "name": "Analyze deeply",
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+    process_invocation = AsyncMock(
+        side_effect=[
+            ToolProcessingResult(
+                feedback="The edit needs one concrete operation.",
+                failure_kind="validation",
+                failure_codes=frozenset({"empty_operations"}),
+            ),
+            ToolProcessingResult(events=(_plan_stream_event(),)),
+        ]
+    )
+
+    events = _wire_events(
+        [
+            event
+            async for event in run_tool_self_correction(
+                _make_self_correction_request(
+                    repair_completion=repair_completion,
+                    process_tool_invocation=process_invocation,
+                    self_correction_temperature=0.35,
+                    self_correction_bumped_temperature=0.6,
+                    max_self_correction_retries=3,
+                    forced_proposal_temperature=0.1,
+                    target_kind=TargetKind.EDIT,
+                )
+            )
+        ]
+    )
+
+    assert repair_completion.await_count == 2
+    assert process_invocation.await_count == 2
+    assert [event["event"] for event in events] == ["status", "plan"]
 
 
 async def _run_repair_capturing(
@@ -1010,7 +1155,7 @@ async def test_run_tool_self_correction_forced_text_quality_failure_surfaces_cod
             llm_messages=[{"role": "user", "content": "build flow"}],
             self_correction_temperature=0.35,
             self_correction_bumped_temperature=0.6,
-            max_self_correction_retries=0,
+            max_self_correction_retries=1,
             forced_proposal_temperature=0.1,
             repair_completion=call_proposal_completion,
             process_tool_invocation=process_invocation,
@@ -1088,7 +1233,7 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
         llm_messages=[{"role": "user", "content": "build flow USER SECRET"}],
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=0,
+        max_self_correction_retries=1,
         forced_proposal_temperature=0.1,
         repair_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
@@ -1163,8 +1308,8 @@ async def test_run_tool_self_correction_completion_error_logs_failed_turn() -> N
     assert failed_payload["branch"] == "self_correction_completion_error"
     assert failed_payload["final_failure_kind"] == "provider_error"
     assert failed_payload["final_error_code"] == "planner_upstream_error"
-    assert failed_payload["repair_attempts"] == 0
-    assert failed_payload["llm_calls"] == 0
+    assert failed_payload["repair_attempts"] == 1
+    assert failed_payload["llm_calls"] == 1
 
 
 @pytest.mark.asyncio

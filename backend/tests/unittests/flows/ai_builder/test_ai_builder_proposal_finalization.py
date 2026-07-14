@@ -17,6 +17,9 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -217,9 +220,42 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
             target_kind=TargetKind.CREATE,
         ),
         "planning_state": None,
+        "requested_output_sections": RequestedOutputSections.empty(),
     }
     defaults.update(overrides)
     return CompiledProposalFinalizationRequest(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_finalization_passes_same_requested_output_sections_to_quality() -> None:
+    requested_output_sections = RequestedOutputSections(
+        sections=("Executive summary", "Recommendations"),
+        confidence="high",
+    )
+    finalizer = _make_finalizer()
+    contextual_quality = MagicMock(feedback=None, failure_codes=frozenset())
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+            "build_create_contextual_quality_feedback",
+            return_value=contextual_quality,
+        ) as build_quality,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+            "store_plan_and_update_conversation",
+            new=_store_compiled_plan,
+        ),
+    ):
+        result = await finalizer.finalize_compiled_proposal(
+            _make_request(requested_output_sections=requested_output_sections)
+        )
+
+    assert result.events
+    assert (
+        build_quality.call_args.kwargs["requested_output_sections"]
+        is requested_output_sections
+    )
 
 
 def test_finalization_request_is_frozen_without_retry_snapshot_payload() -> None:

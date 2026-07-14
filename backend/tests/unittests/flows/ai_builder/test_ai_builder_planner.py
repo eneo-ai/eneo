@@ -48,6 +48,9 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_text_event,
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
@@ -1603,6 +1606,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
+            requested_output_sections=RequestedOutputSections.empty(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -1780,6 +1784,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
+            requested_output_sections=RequestedOutputSections.empty(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -1858,6 +1863,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
+            requested_output_sections=RequestedOutputSections.empty(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")

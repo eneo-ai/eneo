@@ -13,6 +13,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import build_plan_event
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
@@ -64,6 +68,7 @@ class CompiledProposalFinalizationRequest:
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
     planning_state: PlanningState | None
+    requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
 
     @property
     def session_id(self) -> UUID:
@@ -169,6 +174,7 @@ class CompiledProposalFinalizer:
                 aggregation_intent=compiled.aggregation_intent,
                 resource_catalog=request.resource_catalog,
                 planning_state=request.planning_state,
+                requested_output_sections=request.requested_output_sections,
             )
             hard_feedback = format_validation_feedback(
                 spec=compiled.content.spec,
@@ -208,6 +214,7 @@ class CompiledProposalFinalizer:
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
             planning_state=request.planning_state,
+            requested_output_sections=request.requested_output_sections,
         )
         quality_failure_codes = quality_failure_codes | contextual_quality.failure_codes
         combined_quality_feedback = (
@@ -263,6 +270,7 @@ class CompiledProposalFinalizer:
             flow=request.flow,
             resource_catalog=request.resource_catalog,
             planning_state=request.planning_state,
+            requested_output_sections=request.requested_output_sections,
         )
         combined_quality_feedback = "\n\n".join(
             feedback

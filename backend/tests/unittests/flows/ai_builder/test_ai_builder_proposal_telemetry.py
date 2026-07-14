@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ApplyFailureTelemetryPayload,
     ChangesetCountSummary,
     MaterializerProgressSnapshot,
+    ProposalAttemptTelemetryPayload,
     ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
@@ -94,6 +95,70 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
     assert payload["proposal_first_attempt_failure_kind"] == "validation"
     assert payload["proposal_repair_invocation_count"] == 1
     assert payload["proposal_repair_invocation_reasons"] == ["validation"]
+
+
+def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-attempts",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
+    telemetry.start_attempt(counts_as_repair=False)
+    telemetry.record_response(
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=11, completion_tokens=7, total_tokens=18),
+    )
+    telemetry.record_attempt_failure(
+        failure_kind="quality",
+        failure_codes=frozenset(
+            {
+                "duplicate_step_name",
+                "requested_output_sections_require_section_writers",
+                "raw user text must never be telemetry",
+            }
+        ),
+    )
+
+    payload = telemetry.build_planner_telemetry()
+    attempts = payload["proposal_attempts"]
+
+    assert attempts == [
+        {
+            "attempt": 1,
+            "kind": "initial",
+            "elapsed_ms": attempts[0]["elapsed_ms"],
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "total_tokens": 18,
+            "token_usage_source": "provider",
+            "token_usage_estimated": False,
+            "failure_kind": "quality",
+            "failure_codes": [
+                "duplicate_step_name",
+                "requested_output_sections_require_section_writers",
+            ],
+            "failure_code_count": 2,
+        }
+    ]
+    assert attempts[0]["elapsed_ms"] >= 0
+    assert payload["wall_clock_ms"] >= attempts[0]["elapsed_ms"]
+    encoded = json.dumps(payload)
+    assert "raw user text must never be telemetry" not in encoded
+    assert "prompt" not in attempts[0]
+    assert "provider_payload" not in attempts[0]
+    assert "secret" not in attempts[0]
+
+
+def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
+    with pytest.raises(ValidationError):
+        ProposalAttemptTelemetryPayload(
+            attempt=1,
+            kind="initial",
+            elapsed_ms=1,
+            token_usage_source="provider",
+            prompt="raw prompt must not be accepted",
+        )
 
 
 def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:

@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
     extract_requested_output_sections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -146,6 +147,7 @@ class ProposalPrepared(_PreparedBase):
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
+    requested_output_sections: RequestedOutputSections
 
 
 PreparedTurnOutcome: TypeAlias = ServerOutputPrepared | ProposalPrepared
@@ -272,6 +274,12 @@ def build_proposal_prepared(
         )
         if part
     )
+    requested_output_sections = extract_requested_output_sections(
+        section_signal_text,
+        model_form_intake_signals=form_intake_signal_values_from_planning_state(
+            planning_state
+        ),
+    )
     proposal_system_prompt = build_plan_proposal_system_prompt(
         planning_state=planning_state,
         confirmed_requirements=confirmed_requirements,
@@ -279,12 +287,7 @@ def build_proposal_prepared(
         flow_context=flow_context,
         is_edit_mode=is_edit_mode,
         resource_catalog=resource_catalog,
-        requested_output_sections=extract_requested_output_sections(
-            section_signal_text,
-            model_form_intake_signals=form_intake_signal_values_from_planning_state(
-                planning_state
-            ),
-        ),
+        requested_output_sections=requested_output_sections,
         plan_revision_context=build_plan_revision_prompt_block(
             context=plan_edit_context,
             prior_plan=prior_plan_for_revision,
@@ -321,6 +324,7 @@ def build_proposal_prepared(
         prior_plan_for_revision=prior_plan_for_revision,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        requested_output_sections=requested_output_sections,
     )
 
 

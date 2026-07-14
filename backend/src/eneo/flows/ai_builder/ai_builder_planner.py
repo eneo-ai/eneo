@@ -160,6 +160,7 @@ class AIBuilderPlanner:
                 assistant_snapshots=assistant_snapshots,
                 assistant_metadata=build_assistant_message_metadata(conversation),
                 planning_state=proposal_request.planning_state,
+                requested_output_sections=(proposal_request.requested_output_sections),
                 plan_edit_context=proposal_request.plan_edit_context,
                 prior_plan_for_revision=proposal_request.prior_plan_for_revision,
                 before_provider_call=before_provider_call,

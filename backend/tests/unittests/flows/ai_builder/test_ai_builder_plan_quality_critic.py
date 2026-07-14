@@ -179,7 +179,32 @@ def _four_section_report_prompt() -> str:
     """
 
 
-def test_build_conversation_critic_context_exposes_requested_output_sections() -> None:
+def _named_output_sections() -> RequestedOutputSections:
+    return RequestedOutputSections(
+        sections=(
+            "problem/nuläge",
+            "lösningsförslag/nyläge",
+            "resursåtgång",
+            "planerad tidplan",
+            "ekonomisk nytta och kostnader",
+            "nyttor",
+            "finansiering",
+            "ansvarig för nyttorealisering",
+            "bedömning av förändringens komplexitet",
+            "plan för nyttorealisering",
+        ),
+        confidence="high",
+    )
+
+
+def _four_output_sections() -> RequestedOutputSections:
+    return RequestedOutputSections(
+        sections=("bakgrund", "bedömning", "åtgärder", "risker"),
+        confidence="high",
+    )
+
+
+def test_build_conversation_critic_context_uses_canonical_requested_sections() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Beslutsunderlag",
         steps=[
@@ -192,11 +217,14 @@ def test_build_conversation_critic_context_exposes_requested_output_sections() -
         ],
     )
 
+    requested_output_sections = _named_output_sections()
     context = build_conversation_critic_context(
         [{"role": "user", "content": _named_section_report_prompt()}],
         spec,
+        requested_output_sections=requested_output_sections,
     )
 
+    assert context.requested_output_sections is requested_output_sections
     assert context.requested_output_sections.high_confidence
     assert context.requested_output_sections.sections == (
         "problem/nuläge",
@@ -343,6 +371,7 @@ def test_named_output_sections_require_enough_section_writers() -> None:
     context = build_conversation_critic_context(
         [{"role": "user", "content": _named_section_report_prompt()}],
         spec,
+        requested_output_sections=_named_output_sections(),
     )
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
@@ -377,6 +406,7 @@ def test_named_output_sections_do_not_count_review_only_step_as_writer() -> None
     context = build_conversation_critic_context(
         [{"role": "user", "content": _four_section_report_prompt()}],
         spec,
+        requested_output_sections=_four_output_sections(),
     )
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
@@ -412,6 +442,7 @@ def test_named_output_sections_count_typed_document_body_writer() -> None:
     context = build_conversation_critic_context(
         [{"role": "user", "content": _four_section_report_prompt()}],
         spec,
+        requested_output_sections=_four_output_sections(),
     )
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
@@ -473,6 +504,7 @@ def test_named_output_sections_allow_grouped_section_writers() -> None:
     context = build_conversation_critic_context(
         [{"role": "user", "content": _named_section_report_prompt()}],
         spec,
+        requested_output_sections=_named_output_sections(),
     )
 
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}

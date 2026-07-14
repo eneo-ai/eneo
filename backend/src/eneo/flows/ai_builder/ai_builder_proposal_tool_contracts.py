@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -22,6 +22,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -77,6 +81,7 @@ class ForcedToolChoiceParam(TypedDict):
 
 
 ToolChoiceParam: TypeAlias = Literal["auto", "none", "required"] | ForcedToolChoiceParam
+MAX_PROPOSAL_PROVIDER_CALLS = 4
 
 
 def forced_tool_choice(tool_name: str) -> ForcedToolChoiceParam:
@@ -91,6 +96,30 @@ class ProposalCompletionFn(Protocol):
         self,
         request: "ProposalCompletionRequest",
     ) -> Awaitable["LLMCompletionResponse"]: ...
+
+
+@dataclass(slots=True)
+class ProposalCallBudget:
+    """One per-turn budget shared by the initial proposal and every repair."""
+
+    call_limit: int = MAX_PROPOSAL_PROVIDER_CALLS
+    calls_started: int = 0
+
+    def __post_init__(self) -> None:
+        if self.call_limit < 1:
+            raise ValueError("Proposal call limit must be positive")
+        if not 0 <= self.calls_started <= self.call_limit:
+            raise ValueError("Started proposal calls must be within the call limit")
+
+    @property
+    def calls_remaining(self) -> int:
+        return self.call_limit - self.calls_started
+
+    def try_start_call(self) -> bool:
+        if self.calls_remaining == 0:
+            return False
+        self.calls_started += 1
+        return True
 
 
 @dataclass(frozen=True)
@@ -170,6 +199,8 @@ class ProposalTurnContext:
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
     before_provider_call: Callable[[], Awaitable[None]] | None = None
+    requested_output_sections: RequestedOutputSections = EMPTY_REQUESTED_OUTPUT_SECTIONS
+    proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
 
     @property
     def session_id(self) -> UUID:

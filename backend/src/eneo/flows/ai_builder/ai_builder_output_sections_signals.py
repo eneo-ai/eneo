@@ -52,6 +52,9 @@ _EXPLICIT_HEADING_RE = re.compile(
     r"(?im)^\s*(?:rubrik|heading)\s*:\s*(?P<title>.+?)\s*$"
 )
 _MARKDOWN_HEADING_RE = re.compile(r"(?m)^\s*#{1,3}\s+(?P<title>[^#\n].*?)\s*$")
+_MARKDOWN_OUTLINE_FENCE_RE = re.compile(
+    r"(?ms)^\s*```(?:markdown|md)?\s*$\n(?P<body>.*?)^\s*```\s*$"
+)
 _LIST_ITEM_RE = re.compile(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+(?P<title>[^\n]+?)\s*$")
 
 
@@ -67,6 +70,9 @@ class RequestedOutputSections:
     @property
     def high_confidence(self) -> bool:
         return self.confidence == "high"
+
+
+EMPTY_REQUESTED_OUTPUT_SECTIONS = RequestedOutputSections()
 
 
 def extract_requested_output_sections(
@@ -163,13 +169,31 @@ def _looks_like_sentence_after_heading_cue(text: str) -> bool:
 
 
 def _markdown_heading_titles(text: str, normalized: str) -> tuple[str, ...]:
+    scoped_outline = _text_after_first_cue(text, normalized, _SECTION_LIST_CUES)
+    if scoped_outline is not None:
+        return _markdown_titles(scoped_outline)
     if not _has_any(normalized, _REPORT_OUTPUT_CUES):
         return ()
+    return _fenced_markdown_outline_titles(text)
+
+
+def _markdown_titles(text: str) -> tuple[str, ...]:
     return tuple(
         title
         for match in _MARKDOWN_HEADING_RE.finditer(text)
         if (title := _clean_title(match.group("title")))
     )
+
+
+def _fenced_markdown_outline_titles(text: str) -> tuple[str, ...]:
+    titles: list[str] = []
+    for match in _MARKDOWN_OUTLINE_FENCE_RE.finditer(text):
+        body = match.group("body")
+        nonempty_lines = [line for line in body.splitlines() if line.strip()]
+        fenced_titles = _markdown_titles(body)
+        if fenced_titles and len(fenced_titles) == len(nonempty_lines):
+            titles.extend(fenced_titles)
+    return tuple(titles)
 
 
 def _text_after_first_cue(
@@ -218,6 +242,7 @@ def _has_any(text: str, markers: tuple[str, ...]) -> bool:
 
 
 __all__ = [
+    "EMPTY_REQUESTED_OUTPUT_SECTIONS",
     "OutputSectionConfidence",
     "RequestedOutputSections",
     "extract_requested_output_sections",

@@ -38,6 +38,9 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -50,6 +53,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_processor import (
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_submission import (
+    ProposalSubmissionOwner,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_TELEMETRY_LOG_KEY,
@@ -215,6 +221,54 @@ def test_self_correction_parse_error_uses_actionable_user_message() -> None:
 
 async def _single_plan_event(**_kwargs):
     yield _plan_stream_event()
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_passes_same_requested_output_sections_to_submission() -> (
+    None
+):
+    requested_output_sections = RequestedOutputSections(
+        sections=("Executive summary", "Recommendations"),
+        confidence="high",
+    )
+    captured_sections: list[RequestedOutputSections] = []
+
+    async def capture_submission(
+        _submission: ProposalSubmissionOwner,
+        **kwargs,
+    ):
+        captured_sections.append(kwargs["requested_output_sections"])
+        if False:
+            yield _plan_stream_event()
+
+    processor = _make_processor()
+    with patch.object(
+        ProposalSubmissionOwner,
+        "run_active_submission_attempt",
+        new=capture_submission,
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                turn=_make_turn(),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                completion_model_route=_route(),
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=_empty_catalog(),
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-outline-carry",
+                flow=MagicMock(),
+                requested_output_sections=requested_output_sections,
+            )
+        ]
+
+    assert events == []
+    assert captured_sections == [requested_output_sections]
+    assert captured_sections[0] is requested_output_sections
 
 
 def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
@@ -488,7 +542,7 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     assert failed_payload["target_kind"] == "create"
     assert failed_payload["branch"] == "provider_completion_error"
     assert failed_payload["repair_attempts"] == 0
-    assert failed_payload["llm_calls"] == 0
+    assert failed_payload["llm_calls"] == 1
     assert failed_payload["final_failure_kind"] == "provider_error"
     assert failed_payload["final_error_code"] == "planner_upstream_error"
 

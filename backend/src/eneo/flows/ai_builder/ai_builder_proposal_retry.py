@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from typing import Any, cast
 from uuid import uuid4
 
@@ -39,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalAttemptFailureKind,
     ProposalFailedTurnBranch,
     ProposalTerminalFailureKind,
     ProposalTurnTelemetry,
@@ -63,7 +65,6 @@ from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
-MAX_SELF_CORRECTION_RETRIES = 3
 _MAX_PUBLIC_FAILURE_CODES = 3
 
 
@@ -73,6 +74,7 @@ class ForcedToolRetryOutcome:
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()
+    failure_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,10 +84,10 @@ class ProposalSelfCorrectionRequest:
     tool_call: RuntimeToolCall
     self_correction_temperature: float
     self_correction_bumped_temperature: float
-    max_self_correction_retries: int
     repair_completion: ProposalCompletionFn
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
+    initial_failure_kind: ToolProcessingFailureKind
     failure_codes: frozenset[str] = frozenset()
 
 
@@ -102,13 +104,25 @@ class ForcedToolAfterTextRequest:
 
 @dataclass(frozen=True, slots=True)
 class _ProposalRepairRetryState:
-    attempts_remaining: int
+    previous_failure_fingerprint: str
+    last_failure_kind: ToolProcessingFailureKind
+    last_failure_codes: frozenset[str]
     text_feedback_retry_available: bool = True
     retry_count: int = 0
 
     @classmethod
-    def initial(cls, *, max_attempts: int) -> "_ProposalRepairRetryState":
-        return cls(attempts_remaining=max_attempts)
+    def initial(
+        cls,
+        *,
+        failure_fingerprint: str,
+        failure_kind: ToolProcessingFailureKind,
+        failure_codes: frozenset[str],
+    ) -> "_ProposalRepairRetryState":
+        return cls(
+            previous_failure_fingerprint=failure_fingerprint,
+            last_failure_kind=failure_kind,
+            last_failure_codes=failure_codes,
+        )
 
     @property
     def use_bumped_temperature(self) -> bool:
@@ -118,25 +132,68 @@ class _ProposalRepairRetryState:
     def next_retry_count(self) -> int:
         return self.retry_count + 1
 
-    def can_retry(self) -> bool:
-        return self.attempts_remaining > 0
+    def progressing_fingerprint(
+        self,
+        *,
+        failure_fingerprint: str | None,
+        calls_remaining: int,
+    ) -> str | None:
+        if (
+            failure_fingerprint is None
+            or failure_fingerprint == self.previous_failure_fingerprint
+            or calls_remaining == 0
+        ):
+            return None
+        return failure_fingerprint
 
-    def can_retry_text_feedback(self) -> bool:
-        return self.text_feedback_retry_available and self.can_retry()
+    def progressing_text_fingerprint(
+        self,
+        *,
+        failure_fingerprint: str | None,
+        calls_remaining: int,
+    ) -> str | None:
+        if not self.text_feedback_retry_available:
+            return None
+        return self.progressing_fingerprint(
+            failure_fingerprint=failure_fingerprint,
+            calls_remaining=calls_remaining,
+        )
 
-    def consume(self) -> "_ProposalRepairRetryState":
-        if self.attempts_remaining > 0:
-            return replace(
-                self,
-                attempts_remaining=self.attempts_remaining - 1,
-                retry_count=self.retry_count + 1,
-            )
-        return self
-
-    def consume_text_feedback(self) -> "_ProposalRepairRetryState":
+    def record_progress(
+        self,
+        *,
+        failure_fingerprint: str,
+        failure_kind: ToolProcessingFailureKind,
+        failure_codes: frozenset[str],
+        consume_text_feedback: bool = False,
+    ) -> "_ProposalRepairRetryState":
         return replace(
-            self.consume(),
-            text_feedback_retry_available=False,
+            self,
+            previous_failure_fingerprint=failure_fingerprint,
+            last_failure_kind=failure_kind,
+            last_failure_codes=failure_codes,
+            text_feedback_retry_available=(
+                False if consume_text_feedback else self.text_feedback_retry_available
+            ),
+            retry_count=self.retry_count + 1,
+        )
+
+
+def _start_repair_attempt(ctx: ProposalTurnContext) -> None:
+    if ctx.usage_tracker is not None:
+        ctx.usage_tracker.start_attempt(counts_as_repair=True)
+
+
+def _record_attempt_failure(
+    ctx: ProposalTurnContext,
+    *,
+    failure_kind: ProposalAttemptFailureKind,
+    failure_codes: frozenset[str] = frozenset(),
+) -> None:
+    if ctx.usage_tracker is not None:
+        ctx.usage_tracker.record_attempt_failure(
+            failure_kind=failure_kind,
+            failure_codes=failure_codes,
         )
 
 
@@ -314,6 +371,33 @@ def _repair_terminal_events(
     return (*result.events, *user_message_events)
 
 
+def _proposal_failure_fingerprint(
+    candidate: object,
+    *,
+    failure_kind: ToolProcessingFailureKind,
+    failure_codes: frozenset[str],
+) -> str:
+    if isinstance(candidate, str):
+        try:
+            parsed_candidate = json.loads(candidate)
+        except json.JSONDecodeError:
+            parsed_candidate = candidate
+        candidate_value: object = parsed_candidate
+    else:
+        candidate_value = candidate
+    fingerprint_payload = json.dumps(
+        {
+            "candidate": candidate_value,
+            "failure_codes": sorted(failure_codes),
+            "failure_kind": failure_kind,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return sha256(fingerprint_payload.encode()).hexdigest()
+
+
 async def _classify_processed_repair_attempt(
     *,
     retry_config: ToolRetryConfig,
@@ -323,10 +407,16 @@ async def _classify_processed_repair_attempt(
     terminal_events = _repair_terminal_events(tool_result)
     if terminal_events:
         return ForcedToolRetryOutcome(events=terminal_events)
+    failure_kind = tool_result.failure_kind or "validation"
     return ForcedToolRetryOutcome(
         feedback=tool_result.feedback,
-        failure_kind=tool_result.failure_kind,
+        failure_kind=failure_kind,
         failure_codes=tool_result.failure_codes,
+        failure_fingerprint=_proposal_failure_fingerprint(
+            invocation.arguments,
+            failure_kind=failure_kind,
+            failure_codes=tool_result.failure_codes,
+        ),
     )
 
 
@@ -452,6 +542,7 @@ def build_proposal_self_correction_request(
     self_correction_bumped_temperature: float,
     forced_proposal_temperature: float,
     repair_completion: ProposalCompletionFn,
+    initial_failure_kind: ToolProcessingFailureKind,
     failure_codes: frozenset[str] = frozenset(),
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
@@ -460,10 +551,10 @@ def build_proposal_self_correction_request(
         tool_call=tool_call,
         self_correction_temperature=self_correction_temperature,
         self_correction_bumped_temperature=self_correction_bumped_temperature,
-        max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
         repair_completion=repair_completion,
         retry_config=retry_config,
         forced_proposal_temperature=forced_proposal_temperature,
+        initial_failure_kind=initial_failure_kind,
         failure_codes=failure_codes,
     )
 
@@ -523,9 +614,29 @@ async def _request_self_correction_events(
     )
 
     retry_state = _ProposalRepairRetryState.initial(
-        max_attempts=request.max_self_correction_retries
+        failure_fingerprint=_proposal_failure_fingerprint(
+            request.tool_call.function.arguments,
+            failure_kind=request.initial_failure_kind,
+            failure_codes=request.failure_codes,
+        ),
+        failure_kind=request.initial_failure_kind,
+        failure_codes=request.failure_codes,
     )
     while True:
+        if not ctx.proposal_call_budget.try_start_call():
+            _log_self_correction_validation_failed_turn(
+                ctx=ctx,
+                branch="self_correction_invalid_tool_result",
+                failure_kind=retry_state.last_failure_kind,
+            )
+            yield build_self_correction_error_event(
+                feedback=None,
+                failure_kind=retry_state.last_failure_kind,
+                failure_codes=retry_state.last_failure_codes,
+                request_id=ctx.request_id,
+            )
+            return
+        _start_repair_attempt(ctx)
         try:
             response = await request.repair_completion(
                 ctx.completion_request(
@@ -541,6 +652,7 @@ async def _request_self_correction_events(
         except AIBuilderProviderOutcomeUnknownException:
             raise
         except Exception as error:
+            _record_attempt_failure(ctx, failure_kind="provider_error")
             logger.error("Self-correction LLM call failed", exc_info=error)
             _log_self_correction_failed_turn(
                 ctx=ctx,
@@ -557,6 +669,7 @@ async def _request_self_correction_events(
             return
 
         if not response.choices:
+            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
             _log_self_correction_failed_turn(
                 ctx=ctx,
                 branch="self_correction_empty_completion_choices",
@@ -573,6 +686,7 @@ async def _request_self_correction_events(
 
         choice = response.choices[0]
         if choice.finish_reason == "length":
+            _record_attempt_failure(ctx, failure_kind="provider_truncation")
             yield _provider_truncation_error_event(
                 ctx=ctx,
                 phase=AIBuilderErrorPhase.SELF_CORRECTION,
@@ -583,7 +697,16 @@ async def _request_self_correction_events(
         assistant_text = _safe_assistant_text(message.content)
 
         if message.tool_calls:
-            retry_feedback: tuple[LLMCompletionToolCall, str] | None = None
+            retry_feedback: (
+                tuple[
+                    LLMCompletionToolCall,
+                    str,
+                    str,
+                    ToolProcessingFailureKind,
+                    frozenset[str],
+                ]
+                | None
+            ) = None
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
                     continue
@@ -592,7 +715,23 @@ async def _request_self_correction_events(
                         correction_tool_call.function.arguments
                     )
                 except ToolArgumentParseError as error:
-                    if retry_state.can_retry():
+                    failure_kind: ToolProcessingFailureKind = "parse"
+                    failure_codes = frozenset[str]()
+                    failure_fingerprint = _proposal_failure_fingerprint(
+                        correction_tool_call.function.arguments,
+                        failure_kind=failure_kind,
+                        failure_codes=failure_codes,
+                    )
+                    _record_attempt_failure(
+                        ctx,
+                        failure_kind=failure_kind,
+                        failure_codes=failure_codes,
+                    )
+                    progressing_fingerprint = retry_state.progressing_fingerprint(
+                        failure_fingerprint=failure_fingerprint,
+                        calls_remaining=ctx.proposal_call_budget.calls_remaining,
+                    )
+                    if progressing_fingerprint is not None:
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
@@ -601,6 +740,9 @@ async def _request_self_correction_events(
                                 failure_codes=frozenset(),
                                 retry_count=retry_state.next_retry_count,
                             ),
+                            progressing_fingerprint,
+                            failure_kind,
+                            failure_codes,
                         )
                         break
                     _log_self_correction_validation_failed_turn(
@@ -626,7 +768,18 @@ async def _request_self_correction_events(
                     ),
                 )
                 if repair_outcome.events is None:
-                    if retry_state.can_retry():
+                    failure_kind = repair_outcome.failure_kind or "validation"
+                    failure_fingerprint = repair_outcome.failure_fingerprint
+                    _record_attempt_failure(
+                        ctx,
+                        failure_kind=failure_kind,
+                        failure_codes=repair_outcome.failure_codes,
+                    )
+                    progressing_fingerprint = retry_state.progressing_fingerprint(
+                        failure_fingerprint=failure_fingerprint,
+                        calls_remaining=ctx.proposal_call_budget.calls_remaining,
+                    )
+                    if progressing_fingerprint is not None:
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
@@ -636,6 +789,9 @@ async def _request_self_correction_events(
                                 failure_codes=repair_outcome.failure_codes,
                                 retry_count=retry_state.next_retry_count,
                             ),
+                            progressing_fingerprint,
+                            failure_kind,
+                            repair_outcome.failure_codes,
                         )
                         break
                     _log_self_correction_validation_failed_turn(
@@ -656,8 +812,18 @@ async def _request_self_correction_events(
                 return
 
             if retry_feedback is not None:
-                correction_tool_call, feedback = retry_feedback
-                retry_state = retry_state.consume()
+                (
+                    correction_tool_call,
+                    feedback,
+                    failure_fingerprint,
+                    failure_kind,
+                    failure_codes,
+                ) = retry_feedback
+                retry_state = retry_state.record_progress(
+                    failure_fingerprint=failure_fingerprint,
+                    failure_kind=failure_kind,
+                    failure_codes=failure_codes,
+                )
                 correction_messages = build_tool_retry_messages(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,
@@ -667,6 +833,7 @@ async def _request_self_correction_events(
                 continue
 
         if assistant_text:
+            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
             if looks_like_information_request(assistant_text):
                 yield build_text_event(assistant_text)
                 return
@@ -686,16 +853,25 @@ async def _request_self_correction_events(
                 return
 
             forced_failure_kind = forced_outcome.failure_kind or "validation"
+            progressing_text_fingerprint = retry_state.progressing_text_fingerprint(
+                failure_fingerprint=forced_outcome.failure_fingerprint,
+                calls_remaining=ctx.proposal_call_budget.calls_remaining,
+            )
             if (
                 forced_outcome.feedback is not None
-                and retry_state.can_retry_text_feedback()
+                and progressing_text_fingerprint is not None
             ):
                 text_retry_feedback = _build_retry_feedback(
                     target_kind=retry_config.target_kind,
                     feedback=forced_outcome.feedback,
                     retry_count=retry_state.next_retry_count,
                 )
-                retry_state = retry_state.consume_text_feedback()
+                retry_state = retry_state.record_progress(
+                    failure_fingerprint=progressing_text_fingerprint,
+                    failure_kind=forced_failure_kind,
+                    failure_codes=forced_outcome.failure_codes,
+                    consume_text_feedback=True,
+                )
                 correction_messages = append_text_retry_feedback_turn(
                     llm_messages=correction_messages,
                     assistant_content=assistant_text,
@@ -762,6 +938,10 @@ async def _execute_forced_tool_retry(
         },
     ]
 
+    if not ctx.proposal_call_budget.try_start_call():
+        return ForcedToolRetryOutcome(failure_kind="validation")
+    _start_repair_attempt(ctx)
+
     try:
         response = await request.repair_completion(
             ctx.completion_request(
@@ -774,6 +954,7 @@ async def _execute_forced_tool_retry(
     except AIBuilderProviderOutcomeUnknownException:
         raise
     except Exception as error:
+        _record_attempt_failure(ctx, failure_kind="provider_error")
         logger.error(
             "Forced proposal retry failed",
             exc_info=error,
@@ -782,10 +963,12 @@ async def _execute_forced_tool_retry(
         return ForcedToolRetryOutcome()
 
     if not response.choices:
+        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
         return ForcedToolRetryOutcome()
 
     choice = response.choices[0]
     if choice.finish_reason == "length":
+        _record_attempt_failure(ctx, failure_kind="provider_truncation")
         return ForcedToolRetryOutcome(
             events=(
                 _provider_truncation_error_event(
@@ -797,6 +980,7 @@ async def _execute_forced_tool_retry(
 
     message = choice.message
     if not message.tool_calls:
+        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
         return ForcedToolRetryOutcome()
 
     for tool_call in message.tool_calls:
@@ -805,10 +989,16 @@ async def _execute_forced_tool_retry(
         try:
             arguments = parse_tool_call_arguments(tool_call.function.arguments)
         except ToolArgumentParseError as error:
+            _record_attempt_failure(ctx, failure_kind="parse")
             logger.warning("Forced proposal retry returned invalid payload: %s", error)
             return ForcedToolRetryOutcome(
                 feedback=_invalid_tool_arguments_message(error),
                 failure_kind="parse",
+                failure_fingerprint=_proposal_failure_fingerprint(
+                    tool_call.function.arguments,
+                    failure_kind="parse",
+                    failure_codes=frozenset(),
+                ),
             )
 
         repair_outcome = await _classify_processed_repair_attempt(
@@ -821,6 +1011,11 @@ async def _execute_forced_tool_retry(
             ),
         )
         if repair_outcome.events is None:
+            _record_attempt_failure(
+                ctx,
+                failure_kind=repair_outcome.failure_kind or "validation",
+                failure_codes=repair_outcome.failure_codes,
+            )
             logger.warning(
                 "Forced tool retry returned %s issue: %s",
                 repair_outcome.failure_kind or "unknown",
@@ -873,6 +1068,12 @@ async def _try_process_json_text_as_tool_arguments(
             PROPOSE_FLOW_TOOL_NAME,
         )
         return repair_outcome
+
+    _record_attempt_failure(
+        ctx,
+        failure_kind=repair_outcome.failure_kind or "validation",
+        failure_codes=repair_outcome.failure_codes,
+    )
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",

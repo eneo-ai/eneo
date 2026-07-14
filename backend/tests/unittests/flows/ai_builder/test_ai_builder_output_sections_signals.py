@@ -88,6 +88,18 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
             """,
             ("Summary", "Current state", "Recommendation", "Risks"),
         ),
+        (
+            """
+            Skapa en rapport med strukturen nedan:
+            ```markdown
+            ## Sammanfattning
+            ## Nuläge
+            ## Rekommendation
+            ## Risker
+            ```
+            """,
+            ("Sammanfattning", "Nuläge", "Rekommendation", "Risker"),
+        ),
     ],
 )
 def test_extracts_requested_output_sections(
@@ -114,6 +126,57 @@ def test_extracts_requested_output_sections(
 )
 def test_does_not_overfire_for_non_report_section_requests(text: str) -> None:
     assert not extract_requested_output_sections(text).high_confidence
+
+
+@pytest.mark.parametrize(
+    "authoring_spec",
+    [
+        """
+        Bygg ett flöde som granskar ljud, strukturerar analysen och levererar
+        en slutrapport som DOCX.
+
+        ## Indata och avgränsning
+        Ljudfilen är flödets primära underlag.
+
+        ## Uppgift 1: transkribera
+        Gör talet sökbart och låt en människa korrigera resultatet.
+
+        ## Uppgift 2: analysera
+        Samla stabila observationer i ett strukturerat resultat.
+
+        ## Uppgift 3: skriv dokumentet
+        Skriv ett sammanhållet dokument från analysen.
+
+        ## Leverans
+        Rendera den färdiga texten till DOCX.
+        """,
+        """
+        Build a flow that examines uploaded evidence and delivers a final report.
+
+        ## Runtime input
+        The uploaded source document is the primary material.
+
+        ## Task 1: extract evidence
+        Extract grounded facts and risks from the source.
+
+        ## Task 2: draft and review
+        Draft the report and let the case owner edit it.
+
+        ## Task 3: quality control
+        Check the claims and let a reviewer approve the result.
+
+        ## Delivery workflow
+        Finalize the complete document and render it as DOCX.
+        """,
+    ],
+)
+def test_authoring_spec_headings_are_not_final_report_sections(
+    authoring_spec: str,
+) -> None:
+    result = extract_requested_output_sections(authoring_spec)
+
+    assert result.sections == ()
+    assert not result.high_confidence
 
 
 def test_three_sections_remains_low_confidence() -> None:

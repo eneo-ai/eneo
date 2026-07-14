@@ -22,7 +22,8 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
-    extract_requested_output_sections,
+    EMPTY_REQUESTED_OUTPUT_SECTIONS,
+    RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
@@ -52,6 +53,9 @@ def build_conversation_aware_quality_feedback(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
 ) -> str | None:
     context = build_conversation_critic_context(
         conversation,
@@ -60,6 +64,7 @@ def build_conversation_aware_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
+        requested_output_sections=requested_output_sections,
     )
     return build_quality_feedback_from_critic_context(
         context,
@@ -75,6 +80,9 @@ def build_conversation_critic_context(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
+    requested_output_sections: RequestedOutputSections = (
+        EMPTY_REQUESTED_OUTPUT_SECTIONS
+    ),
 ) -> CriticContext:
     answer_signals = extract_answer_signals(conversation)
     text = aggregate_freeform_user_text(conversation)
@@ -113,10 +121,7 @@ def build_conversation_critic_context(
         primary_runtime_input=input_intent.primary_runtime_input,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
-        requested_output_sections=extract_requested_output_sections(
-            signal_text,
-            model_form_intake_signals=model_form_intake_signals,
-        ),
+        requested_output_sections=requested_output_sections,
     )
 
 

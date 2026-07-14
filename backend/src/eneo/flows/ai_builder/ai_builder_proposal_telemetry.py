@@ -15,12 +15,14 @@ failures without treating them as repair invocations.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from time import monotonic_ns
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -32,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,
+    TokenUsageSource,
     combine_token_usage,
 )
 from eneo.main.logging import get_logger
@@ -80,6 +83,16 @@ ProposalTerminalFailureKind = Literal[
     "invalid_repair_plan",
     "repair_quality_failure",
 ]
+ProposalAttemptKind = Literal["initial", "repair"]
+ProposalAttemptFailureKind = Literal[
+    "parse",
+    "validation",
+    "quality",
+    "missing_submission_tool",
+    "architecture",
+    "provider_error",
+    "provider_truncation",
+]
 ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[
     "flow_created",
@@ -91,11 +104,13 @@ MaterializerProgressStage = Literal[
 ]
 
 PROPOSAL_TELEMETRY_LOG_KEY = "ai_builder_proposal_telemetry"
-PROPOSAL_TELEMETRY_SCHEMA_VERSION = 1
+PROPOSAL_TELEMETRY_SCHEMA_VERSION = 2
 APPLY_TELEMETRY_LOG_KEY = "ai_builder_apply_telemetry"
 APPLY_TELEMETRY_SCHEMA_VERSION = 1
 
 logger = get_logger(__name__)
+_FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MAX_ATTEMPT_FAILURE_CODES = 3
 
 
 def _safe_str(value: object) -> str | None:
@@ -124,6 +139,28 @@ def _empty_repair_reasons() -> list[ProposalRepairReason]:
     return []
 
 
+def _empty_attempts() -> list[ProposalAttemptTelemetryPayload]:
+    return []
+
+
+class ProposalAttemptTelemetryPayload(BaseModel):
+    """Bounded, content-free facts for one proposal provider attempt."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attempt: int = Field(ge=1)
+    kind: ProposalAttemptKind
+    elapsed_ms: int = Field(ge=0)
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    token_usage_source: TokenUsageSource
+    token_usage_estimated: bool = False
+    failure_kind: ProposalAttemptFailureKind | None = None
+    failure_codes: tuple[str, ...] = ()
+    failure_code_count: int = Field(default=0, ge=0)
+
+
 @dataclass
 class ProposalTurnTelemetry:
     request_id: str
@@ -140,10 +177,24 @@ class ProposalTurnTelemetry:
     proposal_repair_reasons: list[ProposalRepairReason] = field(
         default_factory=_empty_repair_reasons
     )
+    proposal_attempts: list[ProposalAttemptTelemetryPayload] = field(
+        default_factory=_empty_attempts
+    )
+    _turn_started_ns: int = field(default_factory=monotonic_ns, repr=False)
+    _attempt_started_ns: int | None = field(default=None, init=False, repr=False)
+    _attempt_counts_as_repair: bool = field(default=False, init=False, repr=False)
 
     @property
     def llm_calls_made(self) -> int:
-        return len(self.token_usages)
+        return len(self.proposal_attempts) + int(self._attempt_started_ns is not None)
+
+    def start_attempt(self, *, counts_as_repair: bool) -> None:
+        if self._attempt_started_ns is not None:
+            self._complete_attempt(usage=None)
+        self._attempt_started_ns = monotonic_ns()
+        self._attempt_counts_as_repair = counts_as_repair
+        if counts_as_repair:
+            self.repair_attempts += 1
 
     def record_response(
         self,
@@ -152,10 +203,56 @@ class ProposalTurnTelemetry:
         usage: CompletionTokenUsage,
         counts_as_repair: bool = False,
     ) -> None:
+        if self._attempt_started_ns is None:
+            self.start_attempt(counts_as_repair=counts_as_repair)
+        self._complete_attempt(usage=usage)
         self.finish_reason = finish_reason
-        if counts_as_repair:
-            self.repair_attempts += 1
         self.token_usages.append(usage)
+
+    def record_attempt_failure(
+        self,
+        *,
+        failure_kind: ProposalAttemptFailureKind,
+        failure_codes: frozenset[str] = frozenset(),
+    ) -> None:
+        if self._attempt_started_ns is not None:
+            self._complete_attempt(usage=None)
+        if not self.proposal_attempts:
+            return
+        safe_codes = tuple(
+            code for code in sorted(failure_codes) if _FAILURE_CODE_RE.fullmatch(code)
+        )
+        self.proposal_attempts[-1] = self.proposal_attempts[-1].model_copy(
+            update={
+                "failure_kind": failure_kind,
+                "failure_codes": safe_codes[:_MAX_ATTEMPT_FAILURE_CODES],
+                "failure_code_count": len(safe_codes),
+            }
+        )
+
+    def finalize_pending_attempt(self) -> None:
+        self._complete_attempt(usage=None)
+
+    def _complete_attempt(self, *, usage: CompletionTokenUsage | None) -> None:
+        started_ns = self._attempt_started_ns
+        if started_ns is None:
+            return
+        elapsed_ms = max(0, (monotonic_ns() - started_ns) // 1_000_000)
+        attempt_usage = usage or CompletionTokenUsage()
+        self.proposal_attempts.append(
+            ProposalAttemptTelemetryPayload(
+                attempt=len(self.proposal_attempts) + 1,
+                kind="repair" if self._attempt_counts_as_repair else "initial",
+                elapsed_ms=elapsed_ms,
+                prompt_tokens=attempt_usage.prompt_tokens,
+                completion_tokens=attempt_usage.completion_tokens,
+                total_tokens=attempt_usage.total_tokens,
+                token_usage_source=attempt_usage.source,
+                token_usage_estimated=attempt_usage.estimated,
+            )
+        )
+        self._attempt_started_ns = None
+        self._attempt_counts_as_repair = False
 
     def record_first_attempt(
         self,
@@ -164,6 +261,8 @@ class ProposalTurnTelemetry:
         success: bool,
         failure_kind: ProposalFailureKind | None = None,
     ) -> bool:
+        if self._attempt_started_ns is not None:
+            self._complete_attempt(usage=None)
         if self.proposal_first_attempt_success is not None:
             return False
 
@@ -178,6 +277,8 @@ class ProposalTurnTelemetry:
         self.proposal_repair_reasons.append(reason)
 
     def build_planner_telemetry(self, *, tool_call_count: int = 0) -> dict[str, Any]:
+        if self._attempt_started_ns is not None:
+            self._complete_attempt(usage=None)
         usage = combine_token_usage(self.token_usages)
         proposal_repair_reasons: list[str] | None = None
         proposal_repair_count: int | None = None
@@ -186,7 +287,7 @@ class ProposalTurnTelemetry:
             # Dashboards query scalar metadata fields more easily than list length.
             proposal_repair_count = len(self.proposal_repair_reasons)
 
-        return build_planner_telemetry(
+        telemetry = build_planner_telemetry(
             request_id=self.request_id,
             model=self.model,
             finish_reason=self.finish_reason,
@@ -198,7 +299,7 @@ class ProposalTurnTelemetry:
             token_usage_source=usage.source if usage.has_tokens else None,
             token_usage_estimated=usage.estimated,
             outcome_kind="dispatched",
-            wall_clock_ms=0,
+            wall_clock_ms=max(0, (monotonic_ns() - self._turn_started_ns) // 1_000_000),
             llm_calls_made=self.llm_calls_made,
             repair_attempts=self.repair_attempts,
             parse_repair_attempts=0,
@@ -212,6 +313,11 @@ class ProposalTurnTelemetry:
             proposal_repair_invocation_count=proposal_repair_count,
             proposal_repair_invocation_reasons=proposal_repair_reasons,
         )
+        telemetry["proposal_attempts"] = [
+            attempt.model_dump(mode="json", exclude_none=True)
+            for attempt in self.proposal_attempts
+        ]
+        return telemetry
 
 
 def assistant_metadata_with_usage(
@@ -312,6 +418,7 @@ class ProposalFailedTurnTelemetryPayload(BaseModel):
     final_failure_kind: ProposalTerminalFailureKind
     final_error_code: str
     provider_finish_reason: str | None = None
+    proposal_attempts: tuple[ProposalAttemptTelemetryPayload, ...] = ()
 
 
 class ApplyFailureTelemetryPayload(BaseModel):
@@ -339,6 +446,7 @@ def build_proposal_failed_turn_payload(
     final_failure_kind: ProposalTerminalFailureKind,
     final_error_code: str,
 ) -> ProposalFailedTurnTelemetryPayload:
+    usage_tracker.finalize_pending_attempt()
     usage = combine_token_usage(usage_tracker.token_usages)
     return ProposalFailedTurnTelemetryPayload(
         request_id=usage_tracker.request_id,
@@ -355,6 +463,7 @@ def build_proposal_failed_turn_payload(
         final_failure_kind=final_failure_kind,
         final_error_code=final_error_code,
         provider_finish_reason=usage_tracker.finish_reason,
+        proposal_attempts=tuple(usage_tracker.proposal_attempts),
     )
 
 

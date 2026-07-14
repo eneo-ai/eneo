@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter_ns
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -31,6 +39,10 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
     LLMCompletionToolCallFunction,
 )
+from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+    extract_requested_output_sections,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
@@ -39,14 +51,19 @@ from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     build_self_correction_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_submission import (
+    ProposalSubmissionOwner,
     _forced_submission_response,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
     ToolProcessingResult,
     ToolRetryConfig,
+)
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
@@ -66,9 +83,21 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_description,
     _make_response_with_text,
+    _make_response_with_tool_calls,
     _make_submission,
     _make_tool_call,
+    _store_compiled_plan,
 )
+
+
+def _route() -> ResolvedCompletionModelRoute:
+    return ResolvedCompletionModelRoute(
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
 
 
 def _normalized_tool_call(name: str) -> LLMCompletionToolCall:
@@ -90,6 +119,171 @@ def _normalized_message(
     content: str = "text",
 ) -> LLMCompletionMessage:
     return LLMCompletionMessage(content=content, tool_calls=tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
+    authoring_spec = """
+    Create a DOCX decision report from an uploaded audio recording.
+
+    # Transcribe and review the recording
+    Make the recording searchable and let the case owner correct the transcript.
+    # Analyze stable evidence
+    Extract grounded facts, risks, and recommended actions in a stable structure.
+    # Write and review the decision report
+    Write the complete report and let the case owner edit it.
+    # Finalize the document
+    Produce the complete revised document body for delivery.
+    """
+    requested_output_sections = extract_requested_output_sections(authoring_spec)
+    assert not requested_output_sections.high_confidence
+
+    proposal_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Decision report",
+            "plan_rationale": "Ground, draft, review, and finalize one report.",
+            "steps": [
+                {
+                    "name": "Transcribe and review recording",
+                    "instructions": (
+                        "Transcribe the audio recording and let the case owner "
+                        "correct the transcript before analysis."
+                    ),
+                    "output_type": "text",
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Analyze stable decision evidence",
+                    "instructions": (
+                        "Extract grounded facts, risks, and recommended actions "
+                        "from the corrected transcript."
+                    ),
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "facts",
+                            "field_type": "string",
+                            "description": "Grounded facts from the source.",
+                        },
+                        {
+                            "name": "risks",
+                            "field_type": "string",
+                            "description": "Grounded risks from the source.",
+                        },
+                        {
+                            "name": "actions",
+                            "field_type": "string",
+                            "description": "Recommended actions grounded in the source.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Write and review decision report",
+                    "instructions": (
+                        "Write the complete final decision report from the extracted "
+                        "facts, risks, and actions, then let the case owner edit it."
+                    ),
+                    "output_type": "text",
+                    "review_mode": "edit",
+                },
+            ],
+        },
+        tool_call_id="call-complex-authoring-spec",
+    )
+    provider_response = _make_response_with_tool_calls(
+        proposal_call,
+        prompt_tokens=3_200,
+        completion_tokens=1_100,
+        total_tokens=4_300,
+    )
+    submission = _make_submission()
+    assert isinstance(submission, ProposalSubmissionOwner)
+    submission.litellm_client.acompletion = AsyncMock(return_value=provider_response)
+    planning_state = PlanningState.empty()
+    planning_state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+    resource_catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+    )
+    turn = _make_context().turn
+    captured_compiled: list[CompiledProposal] = []
+    captured_telemetry: list[dict[str, object]] = []
+
+    async def store_plan(**kwargs: object):
+        compiled = kwargs["compiled"]
+        assistant_metadata = kwargs["assistant_metadata"]
+        assert isinstance(compiled, CompiledProposal)
+        assert isinstance(assistant_metadata, dict)
+        planner_telemetry = assistant_metadata.get("planner_telemetry")
+        assert isinstance(planner_telemetry, dict)
+        captured_compiled.append(compiled)
+        captured_telemetry.append(
+            {str(key): value for key, value in planner_telemetry.items()}
+        )
+        return await _store_compiled_plan(**kwargs)
+
+    started_ns = perf_counter_ns()
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+        "store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    turn=turn,
+                    conversation=[
+                        ConversationMessage(role="user", content=authoring_spec)
+                    ],
+                    new_messages_start=1,
+                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    completion_model_route=_route(),
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=resource_catalog,
+                    max_output_tokens=8_192,
+                    proposal_temperature=0.2,
+                    request_id="req-complex-authoring-spec",
+                    planning_state=planning_state,
+                    requested_output_sections=requested_output_sections,
+                )
+            ]
+        )
+    elapsed_ms = (perf_counter_ns() - started_ns) // 1_000_000
+
+    assert [event["event"] for event in events] == ["plan"]
+    provider_calls = submission.litellm_client.acompletion.await_count
+    assert provider_calls == 1
+    compiled = captured_compiled[0]
+    step_names = [step.name for step in compiled.content.spec.steps]
+    assert len(step_names) == len({name.casefold() for name in step_names})
+    review_steps = [
+        step for step in compiled.content.spec.steps if step.review_policy is not None
+    ]
+    assert len(review_steps) == 2
+    assert all(step.output_type.value in {"json", "text"} for step in review_steps)
+    planner_telemetry = captured_telemetry[0]
+    assert planner_telemetry["llm_calls_made"] == 1
+    assert planner_telemetry["repair_attempts"] == 0
+    assert planner_telemetry["total_tokens"] == 4_300
+    assert provider_calls < 5
+    assert planner_telemetry["repair_attempts"] < 4
+    assert planner_telemetry["total_tokens"] < 85_009
+    assert elapsed_ms < 155_900
 
 
 @pytest.mark.parametrize(
@@ -709,6 +903,10 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         tool_call_id="call-outline-retry-finalize",
     )
 
+    requested_output_sections = RequestedOutputSections(
+        sections=("Summary", "Findings", "Risks", "Recommendations"),
+        confidence="high",
+    )
     config = submission._proposal_retry_config(
         target_kind=TargetKind.CREATE,
         assistant_snapshots=None,
@@ -717,6 +915,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,
+        requested_output_sections=requested_output_sections,
     )
 
     with (
@@ -750,6 +949,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
     assert request.flow is flow
     assert request.request_id == "req-outline-retry-finalize"
     assert request.usage_tracker is tracker
+    assert request.requested_output_sections is requested_output_sections
 
 
 @pytest.mark.asyncio
@@ -871,6 +1071,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         usage_tracker=None,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
 
     assert isinstance(config, ToolRetryConfig)
@@ -939,6 +1140,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
     invocation = _make_retry_invocation(
         flow=flow,
