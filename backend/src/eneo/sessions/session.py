@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
@@ -79,9 +80,15 @@ class GroupChatInfo(BaseModel):
 
 
 class AskChatResponse(BaseModel):
+    # The persisted question (message) id for this turn. Lets clients fetch
+    # per-message detail endpoints (e.g. logging details) after the turn.
+    id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     session_id: UUID
     question: str
     answer: str
+    completion_model: Optional[CompletionModelPublic] = None
     files: list[FilePublic]
     generated_files: list[FilePublic]
     references: list[InfoBlobAskAssistantPublic]

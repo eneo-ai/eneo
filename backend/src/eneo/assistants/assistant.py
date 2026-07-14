@@ -450,6 +450,7 @@ class Assistant(Entity):
         completion_prompt_files: list["File"] | None = None,
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
+        debug: bool = False,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -542,7 +543,9 @@ class Assistant(Entity):
             info_blob_chunks=datastore_result.chunks,
             session=session,
             stream=stream,
-            extended_logging=self.logging_enabled,
+            # Debug capture (user-requested, per turn) forces the same extended
+            # logging the assistant-level setting would enable.
+            extended_logging=self.logging_enabled or debug,
             model_kwargs=self.completion_model_kwargs,
             version=version,
             use_image_generation=self.is_default,

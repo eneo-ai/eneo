@@ -134,6 +134,10 @@ class ConversationRequest(_ConversationTarget):
     # the otherwise-active set (assistant's own servers, or policy-granted ones
     # for a personal assistant); it can never enable a server that isn't active.
     disabled_mcp_server_ids: list[UUID] = Field(default=[])
+    # Forces capture + persistence of extended logging (the exact provider
+    # payload) for this turn regardless of the assistant's logging_enabled
+    # setting. Read back through the session-scoped logging endpoint.
+    debug: bool = False
 
 
 class ConversationRenameRequest(BaseModel):

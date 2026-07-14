@@ -324,6 +324,15 @@ async def chat(
             },
         )
 
+    if request.debug and request.group_chat_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "not_supported",
+                "message": "Debug capture is not supported for group chats.",
+            },
+        )
+
     session = cast(AsyncSession, container.session())
     async with session.begin():
         # Body-driven scope validation (before service call)
@@ -353,6 +362,7 @@ async def chat(
             version=version,
             require_tool_approval=request.require_tool_approval,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
+            debug=request.debug,
         )
 
     return await to_conversation_response(

@@ -79,6 +79,7 @@ class ConversationService:
         version: int = 1,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
+        debug: bool = False,
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -105,6 +106,9 @@ class ConversationService:
         if require_tool_approval and group_chat_id is not None:
             raise BadRequestException("Tool approval is not supported for group chats.")
 
+        if debug and group_chat_id is not None:
+            raise BadRequestException("Debug capture is not supported for group chats.")
+
         # case 1: continuing a conversation (session_id is provided)
         if session_id:
             # get session information to determine where it belongs
@@ -115,6 +119,10 @@ class ConversationService:
                 if require_tool_approval:
                     raise BadRequestException(
                         "Tool approval is not supported for group chats."
+                    )
+                if debug:
+                    raise BadRequestException(
+                        "Debug capture is not supported for group chats."
                     )
                 # this is a group chat conversation
                 return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
@@ -139,6 +147,7 @@ class ConversationService:
                     version=version,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    debug=debug,
                 )
 
         # case 2: starting a new conversation
@@ -166,6 +175,7 @@ class ConversationService:
                     version=version,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    debug=debug,
                 )
             else:
                 # should never happen due to model validation, but just to be safe

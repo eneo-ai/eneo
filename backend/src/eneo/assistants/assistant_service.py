@@ -1703,6 +1703,7 @@ class AssistantService:
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
+        debug: bool = False,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2001,6 +2002,7 @@ class AssistantService:
             internal_mcp_servers=(
                 [files_mcp_server] if files_mcp_server is not None else []
             ),
+            debug=debug,
         )
 
         # TODO: Separate the response based on stream true or false
