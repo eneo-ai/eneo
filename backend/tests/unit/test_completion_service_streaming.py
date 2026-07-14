@@ -11,7 +11,12 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
+    ModelKwargs,
     ResponseType,
+)
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -26,6 +31,8 @@ class _DummyAdapter:
     def __init__(self, model: CompletionModel):
         self.model = model
         self.litellm_model = "dummy/model"
+        self.response_model_kwargs: list[ModelKwargs | None] = []
+        self.streaming_model_kwargs: list[ModelKwargs | None] = []
 
     def get_token_limit_of_model(self) -> int:
         return self.model.token_limit
@@ -33,7 +40,24 @@ class _DummyAdapter:
     def get_model_route(self) -> str:
         return self.litellm_model
 
-    async def prepare_streaming(self, **kwargs):
+    async def get_response(
+        self,
+        *,
+        context: Context,
+        model_kwargs: ModelKwargs | None,
+        mcp_proxy: object | None,
+    ) -> Completion:
+        self.response_model_kwargs.append(model_kwargs)
+        return Completion(response_type=ResponseType.TEXT, text=context.input)
+
+    async def prepare_streaming(
+        self,
+        *,
+        context: Context,
+        model_kwargs: ModelKwargs | None,
+        mcp_proxy: object | None,
+    ):
+        self.streaming_model_kwargs.append(model_kwargs)
         return SimpleNamespace(_eneo_context={"has_tools": False})
 
     async def iterate_stream(self, **kwargs):
@@ -43,7 +67,10 @@ class _DummyAdapter:
         yield Completion(response_type=ResponseType.TEXT, text="hello")
 
 
-def _make_completion_model() -> CompletionModel:
+def _make_completion_model(
+    *,
+    supported_model_kwargs: SupportedModelKwargs | None = None,
+) -> CompletionModel:
     now = datetime.now(timezone.utc)
     return CompletionModel(
         id=uuid4(),
@@ -64,7 +91,134 @@ def _make_completion_model() -> CompletionModel:
         is_org_default=False,
         tenant_id=uuid4(),
         provider_id=uuid4(),
+        model_kwargs_capabilities=supported_model_kwargs,
     )
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_omits_optional_kwargs_when_capabilities_are_missing():
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    adapter_loader = AsyncMock(return_value=adapter)
+    service._get_adapter = adapter_loader
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(temperature=0.4, top_p=0.7),
+    )
+
+    adapter_loader.assert_awaited_once_with(completion_model)
+    assert len(adapter.response_model_kwargs) == 1
+    effective_kwargs = adapter.response_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {}
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_preserves_supported_kwargs_and_response_format():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        )
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+    response_format = {"type": "json_object"}
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(
+            temperature=0.33,
+            top_p=0.8,
+            response_format=response_format,
+        ),
+    )
+
+    assert len(adapter.response_model_kwargs) == 1
+    effective_kwargs = adapter.response_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {
+        "temperature": 0.33,
+        "response_format": response_format,
+    }
+
+
+@pytest.mark.asyncio
+async def test_streaming_omits_kwargs_for_invalid_capability_evidence():
+    completion_model = _make_completion_model()
+    object.__setattr__(
+        completion_model,
+        "model_kwargs_capabilities",
+        {"temperature": {"supported": "invalid"}},
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    adapter_loader = AsyncMock(return_value=adapter)
+    service._get_adapter = adapter_loader
+    response_format = {"type": "json_object"}
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(
+            temperature=0.4,
+            top_p=0.7,
+            response_format=response_format,
+        ),
+        stream=True,
+    )
+
+    adapter_loader.assert_awaited_once_with(completion_model)
+    assert len(adapter.streaming_model_kwargs) == 1
+    effective_kwargs = adapter.streaming_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {
+        "response_format": response_format
+    }
+
+
+@pytest.mark.asyncio
+async def test_streaming_preserves_supported_optional_kwargs():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        )
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(temperature=0.61),
+        stream=True,
+    )
+
+    assert len(adapter.streaming_model_kwargs) == 1
+    effective_kwargs = adapter.streaming_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {"temperature": 0.61}
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,9 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.database.tables.assistant_table import Assistants
 from eneo.templates.app_template.app_template import AppTemplate
 from eneo.users.user import UserInDB, UserSparse
@@ -109,3 +112,23 @@ def test_create_space_assistant_from_db_pins_optional_user_projection(
 
     assert tenant_scoped_assistant.user is None
     assert user_scoped_assistant.user == UserSparse.model_validate(user)
+
+
+def test_create_space_assistant_preserves_persisted_model_kwargs(
+    factory: AssistantFactory,
+    user: UserInDB,
+):
+    assistant_row = _space_assistant_row(user_id=user.id, space_id=uuid4())
+    completion_model = MagicMock()
+    completion_model.id = uuid4()
+    completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs()
+    assistant_row.completion_model_id = completion_model.id
+    assistant_row.completion_model_kwargs = {"top_p": 0.72}
+
+    assistant = factory.create_space_assistant_from_db(
+        assistant_in_db=assistant_row,
+        user=user,
+        completion_models=[completion_model],
+    )
+
+    assert assistant.completion_model_kwargs.top_p == 0.72

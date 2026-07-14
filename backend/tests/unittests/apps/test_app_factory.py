@@ -167,7 +167,7 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
         space_id=uuid4(),
         name="Provider app",
         description=None,
-        completion_model_kwargs=None,
+        completion_model_kwargs={"top_p": 0.81},
         published=False,
         data_retention_days=None,
         template_id=None,
@@ -184,4 +184,5 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
 
     assert app.completion_model is not None
     assert app.completion_model.provider_type == "vllm"
-    assert app.completion_model.supported_model_kwargs.top_p.supported is True
+    assert app.completion_model.supported_model_kwargs.top_p.supported is False
+    assert app.completion_model_kwargs.top_p == 0.81

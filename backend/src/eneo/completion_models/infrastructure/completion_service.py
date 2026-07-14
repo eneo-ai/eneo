@@ -305,6 +305,8 @@ class CompletionService:
         # (effective_config_service), so re-filtering here is idempotent.
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
+        if model_kwargs is not None:
+            model_kwargs = model_kwargs.filter_unsupported(model.supported_model_kwargs)
 
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()
