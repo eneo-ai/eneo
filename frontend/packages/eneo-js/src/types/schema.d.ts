@@ -8556,6 +8556,12 @@ export interface components {
     };
     /** AskResponse */
     AskResponse: {
+      /** Id */
+      id?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
       /**
        * Session Id
        * Format: uuid
@@ -8565,6 +8571,7 @@ export interface components {
       question: string;
       /** Answer */
       answer: string;
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /** Files */
       files: components["schemas"]["FilePublic"][];
       /** Generated Files */
@@ -9938,6 +9945,11 @@ export interface components {
        * @default []
        */
       disabled_mcp_server_ids?: string[];
+      /**
+       * Debug
+       * @default false
+       */
+      debug?: boolean;
     };
     /** Counts */
     Counts: {
@@ -18512,6 +18524,21 @@ export interface components {
     /** SSEFirstChunk */
     SSEFirstChunk: {
       /**
+       * Id
+       * @default null
+       */
+      id?: string | null;
+      /**
+       * Created At
+       * @default null
+       */
+      created_at?: string | null;
+      /**
+       * Updated At
+       * @default null
+       */
+      updated_at?: string | null;
+      /**
        * Session Id
        * Format: uuid
        */
@@ -18520,6 +18547,8 @@ export interface components {
       question: string;
       /** Answer */
       answer: string;
+      /** @default null */
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
       /** Files */
       files: components["schemas"]["FilePublic"][];
       /** Generated Files */
@@ -22403,6 +22432,12 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
             /**
              * Session Id
              * Format: uuid
@@ -22412,6 +22447,7 @@ export interface operations {
             question: string;
             /** Answer */
             answer: string;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /** Files */
             files: components["schemas"]["FilePublic"][];
             /** Generated Files */
@@ -22810,6 +22846,12 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AskResponse"];
           "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
             /**
              * Session Id
              * Format: uuid
@@ -22819,6 +22861,7 @@ export interface operations {
             question: string;
             /** Answer */
             answer: string;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
             /** Files */
             files: components["schemas"]["FilePublic"][];
             /** Generated Files */
@@ -24176,6 +24219,12 @@ export interface operations {
                 };
               }
             | {
+                /** Id */
+                id?: string | null;
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
                 /**
                  * Session Id
                  * Format: uuid
@@ -24185,6 +24234,7 @@ export interface operations {
                 question: string;
                 /** Answer */
                 answer: string;
+                completion_model?: components["schemas"]["CompletionModelPublic"] | null;
                 /** Files */
                 files: components["schemas"]["FilePublic"][];
                 /** Generated Files */
@@ -24198,6 +24248,103 @@ export interface operations {
                  */
                 mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
+                  /** CompletionModelPublic */
+                  CompletionModelPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Nickname */
+                    nickname?: string | null;
+                    /** Family */
+                    family?: string | null;
+                    /** Max Input Tokens */
+                    max_input_tokens: number;
+                    /** Max Output Tokens */
+                    max_output_tokens: number;
+                    /** Is Deprecated */
+                    is_deprecated: boolean;
+                    /** Nr Billion Parameters */
+                    nr_billion_parameters?: number | null;
+                    /** Hf Link */
+                    hf_link?: string | null;
+                    /** Stability */
+                    stability?: string | null;
+                    /** Hosting */
+                    hosting?: string | null;
+                    /** Open Source */
+                    open_source?: boolean | null;
+                    /** Description */
+                    description?: string | null;
+                    /** Deployment Name */
+                    deployment_name?: string | null;
+                    /** Org */
+                    org?: string | null;
+                    /** Vision */
+                    vision: boolean;
+                    /** Reasoning */
+                    reasoning: boolean;
+                    /**
+                     * Supports Tool Calling
+                     * @default false
+                     */
+                    supports_tool_calling?: boolean;
+                    /** Base Url */
+                    base_url?: string | null;
+                    /** Litellm Model Name */
+                    litellm_model_name?: string | null;
+                    model_kwargs_capabilities?:
+                      components["schemas"]["SupportedModelKwargs"] | null;
+                    /** Input Cost Per Token */
+                    input_cost_per_token?: number | string | null;
+                    /** Output Cost Per Token */
+                    output_cost_per_token?: number | string | null;
+                    /**
+                     * Is Org Enabled
+                     * @default false
+                     */
+                    is_org_enabled?: boolean;
+                    /**
+                     * Is Org Default
+                     * @default false
+                     */
+                    is_org_default?: boolean;
+                    /** Tenant Id */
+                    tenant_id?: string | null;
+                    /** Provider Id */
+                    provider_id?: string | null;
+                    /** Provider Type */
+                    provider_type?: string | null;
+                    /** Migrated To Model Id */
+                    migrated_to_model_id?: string | null;
+                    /**
+                     * Can Access
+                     * @default false
+                     */
+                    can_access?: boolean;
+                    /**
+                     * Is Locked
+                     * @default true
+                     */
+                    is_locked?: boolean;
+                    /** Lock Reason */
+                    lock_reason?: string | null;
+                    /** Credential Provider */
+                    credential_provider?: string | null;
+                    security_classification?:
+                      components["schemas"]["SecurityClassificationPublic"] | null;
+                    /** Provider Name */
+                    provider_name?: string | null;
+                    /** Deprecation Date */
+                    deprecation_date?: string | null;
+                  };
                   /** FilePublic */
                   FilePublic: {
                     /** Created At */
@@ -24294,6 +24441,55 @@ export interface operations {
                     tool_call_id?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                  };
+                  /** ModelKwargCapability */
+                  ModelKwargCapability: {
+                    /**
+                     * Supported
+                     * @default false
+                     */
+                    supported?: boolean;
+                    /** Control */
+                    control?: ("slider" | "select") | null;
+                    /** Minimum */
+                    minimum?: number | null;
+                    /** Maximum */
+                    maximum?: number | null;
+                    /** Step */
+                    step?: number | null;
+                    /** Options */
+                    options?: string[] | null;
+                  };
+                  /**
+                   * SecurityClassificationPublic
+                   * @description Basic security classification information.
+                   */
+                  SecurityClassificationPublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Name */
+                    name: string;
+                    /** Description */
+                    description: string | null;
+                    /** Security Level */
+                    security_level: number;
+                  };
+                  /** SupportedModelKwargs */
+                  SupportedModelKwargs: {
+                    temperature?: components["schemas"]["ModelKwargCapability"];
+                    top_p?: components["schemas"]["ModelKwargCapability"];
+                    reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                    verbosity?: components["schemas"]["ModelKwargCapability"];
+                    presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                    frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                    top_k?: components["schemas"]["ModelKwargCapability"];
                   };
                   /** ToolAssistant */
                   ToolAssistant: {

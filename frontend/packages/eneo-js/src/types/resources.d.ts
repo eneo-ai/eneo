@@ -124,6 +124,10 @@ export type ConversationMessage = components["schemas"]["Message"] & {
   num_tokens_answer?: number;
 };
 export type ConversationTools = components["schemas"]["UseTools"];
+// Message + captured provider payload (system prompt, message array, model
+// kwargs) from the logging endpoint. Only present for turns where the
+// assistant had logging enabled or the client asked with debug=true.
+export type MessageLogging = components["schemas"]["MessageLogging"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;

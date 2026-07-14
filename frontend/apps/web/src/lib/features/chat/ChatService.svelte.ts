@@ -16,6 +16,7 @@ import {
   type ConversationMessage,
   EneoError,
   type ConversationTools,
+  type MessageLogging,
   type SSE
 } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
@@ -24,6 +25,8 @@ export type PendingToolApproval = {
   approvalId: string;
   tools: SSE.ToolApprovalRequired["tools"];
 };
+
+const DEBUG_PANEL_STORAGE_KEY = "chatDebugPanelVisible";
 
 export type ChatPartner = GroupChat | Assistant;
 type SparseCompletionModel = NonNullable<Assistant["completion_model"]>;
@@ -47,6 +50,12 @@ export class ChatService {
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
+
+  // Debug panel (deploy-flag gated in the UI). Visibility is a personal
+  // preference persisted per browser; while the panel is open, asks request
+  // per-turn capture of the exact provider payload (debug=true).
+  debugPanelVisible = $state<boolean>(false);
+  #loggingDetailsCache = new SvelteMap<string, Promise<MessageLogging | null>>();
 
   // Context-window usage for the most recent turn. Split into input vs output
   // so the bar can show what was sent to the LLM (system + MCP + RAG + history
@@ -195,7 +204,42 @@ export class ChatService {
 
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#eneo = data.eneo;
+    if (browser) {
+      try {
+        this.debugPanelVisible = localStorage.getItem(DEBUG_PANEL_STORAGE_KEY) === "true";
+      } catch (error) {
+        console.warn("Unable to read debug panel preference", error);
+      }
+    }
     this.init(data);
+  }
+
+  toggleDebugPanel() {
+    this.debugPanelVisible = !this.debugPanelVisible;
+    if (!browser) return;
+    try {
+      localStorage.setItem(DEBUG_PANEL_STORAGE_KEY, this.debugPanelVisible ? "true" : "false");
+    } catch (error) {
+      console.warn("Unable to persist debug panel preference", error);
+    }
+  }
+
+  /**
+   * Captured provider payload for a completed turn. Returns null when the
+   * turn was not captured (asked without debug on an assistant without
+   * logging enabled) or when the fetch fails; failures are not cached so a
+   * later selection retries.
+   */
+  async getLoggingDetails(messageId: string): Promise<MessageLogging | null> {
+    const cached = this.#loggingDetailsCache.get(messageId);
+    if (cached) return cached;
+
+    const request = this.#eneo.logging.get({ id: messageId }).catch(() => {
+      this.#loggingDetailsCache.delete(messageId);
+      return null;
+    });
+    this.#loggingDetailsCache.set(messageId, request);
+    return request;
   }
 
   init(data: {
@@ -569,6 +613,9 @@ export class ChatService {
           abortController,
           requireToolApproval,
           disabledMcpServerIds,
+          // Group chats have no logging persistence path; the backend rejects
+          // debug capture for them.
+          debug: this.debugPanelVisible && this.#chatPartner?.type !== "group-chat",
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;

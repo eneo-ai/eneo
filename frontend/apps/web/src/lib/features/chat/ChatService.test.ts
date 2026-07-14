@@ -82,3 +82,52 @@ describe("ChatService assistant baseline preflight", () => {
     expect(chat.assistantAttachmentTokens).toBe(0);
   });
 });
+
+describe("ChatService debug capture", () => {
+  function chatServiceWithAsk(ask = vi.fn().mockResolvedValue(undefined)) {
+    const chat = new ChatService({
+      eneo: {
+        conversations: {
+          ask,
+          preflight: vi.fn(),
+          list: vi.fn().mockResolvedValue({
+            items: [],
+            count: 0,
+            total_count: 0,
+            next_cursor: null
+          })
+        }
+      } as never,
+      chatPartner: assistantPartner(),
+      initialConversation: null,
+      initialHistory: { items: [], count: 0, total_count: 0 }
+    });
+    return { chat, ask };
+  }
+
+  it("requests per-turn capture only while the debug panel is open", async () => {
+    const { chat, ask } = chatServiceWithAsk();
+
+    await chat.askQuestion("Hello");
+    expect(ask.mock.calls[0][0].debug).toBe(false);
+
+    chat.toggleDebugPanel();
+    await chat.askQuestion("Hello again");
+    expect(ask.mock.calls[1][0].debug).toBe(true);
+  });
+
+  it("never requests capture for group chat partners", async () => {
+    const { chat, ask } = chatServiceWithAsk();
+    chat.changeChatPartner({
+      id: "group-1",
+      type: "group-chat",
+      name: "Group",
+      tools: { assistants: [] }
+    } as never);
+
+    chat.toggleDebugPanel();
+    await chat.askQuestion("Hello");
+
+    expect(ask.mock.calls[0][0].debug).toBe(false);
+  });
+});

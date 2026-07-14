@@ -3641,5 +3641,22 @@
   "web_search_not_available_here_hint": "Webbsökning är inte tillgänglig här. Aktivera den i utrymmets inställningar, eller be en administratör aktivera en sökleverantör.",
   "mcp_rename_tool": "Byt visningsnamn",
   "mcp_display_name": "Visningsnamn",
-  "mcp_display_name_hint": "Ändrar bara hur verktyget visas för användare, inte verktyget i sig. Lämna tomt för att återställa namnet."
+  "mcp_display_name_hint": "Ändrar bara hur verktyget visas för användare, inte verktyget i sig. Lämna tomt för att återställa namnet.",
+  "debug_panel_title": "Felsökning",
+  "debug_panel_show": "Visa felsökningspanel",
+  "debug_panel_hide": "Dölj felsökningspanel",
+  "debug_panel_turn_label": "Tur {number}",
+  "debug_panel_live_turn": "Pågående tur",
+  "debug_panel_system_prompt": "Systemprompt",
+  "debug_panel_provider_messages": "Meddelanden till modellen",
+  "debug_panel_model_settings": "Modell och inställningar",
+  "debug_panel_knowledge": "Kunskapsreferenser",
+  "debug_panel_tools": "Verktygsanrop",
+  "debug_panel_tokens": "Tokens",
+  "debug_panel_not_captured": "Ingen fångst för denna tur. Panelen var inte aktiv när frågan ställdes och assistenten har inte loggning aktiverad.",
+  "debug_panel_capture_pending": "Detaljerna hämtas när turen är klar.",
+  "debug_panel_snapshot_note": "Ögonblicksbild från turens start: mellanliggande verktygsrundor ingår inte i meddelandelistan.",
+  "debug_panel_no_messages": "Inga meddelanden i den här konversationen ännu.",
+  "debug_panel_download_export": "Ladda ner bevisexport",
+  "debug_panel_empty_section": "Inget att visa"
 }

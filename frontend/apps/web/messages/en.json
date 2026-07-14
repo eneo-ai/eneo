@@ -3641,5 +3641,22 @@
   "web_search_not_available_here_hint": "Web search is not available here. Enable it in the space settings, or ask an administrator to activate a search provider.",
   "mcp_rename_tool": "Change display name",
   "mcp_display_name": "Display name",
-  "mcp_display_name_hint": "Only changes how the tool is shown to users, not the tool itself. Leave empty to restore the original name."
+  "mcp_display_name_hint": "Only changes how the tool is shown to users, not the tool itself. Leave empty to restore the original name.",
+  "debug_panel_title": "Debug",
+  "debug_panel_show": "Show debug panel",
+  "debug_panel_hide": "Hide debug panel",
+  "debug_panel_turn_label": "Turn {number}",
+  "debug_panel_live_turn": "Ongoing turn",
+  "debug_panel_system_prompt": "System prompt",
+  "debug_panel_provider_messages": "Messages sent to the model",
+  "debug_panel_model_settings": "Model and settings",
+  "debug_panel_knowledge": "Knowledge references",
+  "debug_panel_tools": "Tool calls",
+  "debug_panel_tokens": "Tokens",
+  "debug_panel_not_captured": "Nothing captured for this turn. The panel was not active when the question was asked and the assistant does not have logging enabled.",
+  "debug_panel_capture_pending": "Details are fetched once the turn completes.",
+  "debug_panel_snapshot_note": "Snapshot from the start of the turn: intermediate tool rounds are not part of the message list.",
+  "debug_panel_no_messages": "No messages in this conversation yet.",
+  "debug_panel_download_export": "Download proof export",
+  "debug_panel_empty_section": "Nothing to show"
 }

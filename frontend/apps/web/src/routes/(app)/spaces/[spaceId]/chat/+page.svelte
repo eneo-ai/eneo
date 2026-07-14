@@ -11,6 +11,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Button } from "@eneo/ui";
   import { fade } from "svelte/transition";
+  import DebugPanel from "$lib/features/chat/components/debug/DebugPanel.svelte";
   import InsightsPage from "./insights/InsightsPage.svelte";
   import { page } from "$app/state";
   import { writable } from "svelte/store";
@@ -23,6 +24,7 @@
   const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
+    featureFlags,
     state: { userInfo }
   } = getAppContext();
 
@@ -31,6 +33,12 @@
   } = getSpacesManager();
 
   const chat = untrack(() => initChatService(data));
+
+  // A stale localStorage preference must not keep requesting debug capture
+  // on a deployment where the panel flag is off.
+  if (!featureFlags.chatDebugPanel && chat.debugPanelVisible) {
+    untrack(() => chat.toggleDebugPanel());
+  }
 
   let currentTab = writable("chat");
 
@@ -130,6 +138,11 @@
       </Page.Tabbar>
 
       <Page.Flex>
+        {#if featureFlags.chatDebugPanel && chat.partner.type !== "group-chat"}
+          <Button on:click={() => chat.toggleDebugPanel()}>
+            {chat.debugPanelVisible ? m.debug_panel_hide() : m.debug_panel_show()}
+          </Button>
+        {/if}
         {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
           <Button
             href={localizeHref(
@@ -145,12 +158,19 @@
 
     <Page.Main>
       <Page.Tab id="chat">
-        <ConversationView
-          onNewConversation={startNewConversation}
-          children={chat.partner.type === "default-assistant"
-            ? defaultAssistantWelcomeMessage
-            : undefined}
-        ></ConversationView>
+        <div class="flex h-full min-h-0">
+          <div class="h-full min-w-0 flex-1">
+            <ConversationView
+              onNewConversation={startNewConversation}
+              children={chat.partner.type === "default-assistant"
+                ? defaultAssistantWelcomeMessage
+                : undefined}
+            ></ConversationView>
+          </div>
+          {#if featureFlags.chatDebugPanel && chat.debugPanelVisible && chat.partner.type !== "group-chat"}
+            <DebugPanel />
+          {/if}
+        </div>
       </Page.Tab>
 
       <Page.Tab id="history">

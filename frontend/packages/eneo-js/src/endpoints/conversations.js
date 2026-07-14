@@ -125,6 +125,7 @@ export function initConversations(client) {
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
      * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
+     * @param {boolean} [params.debug] Force capture of the exact provider payload for this turn (debug panel)
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
@@ -147,6 +148,7 @@ export function initConversations(client) {
       tools,
       requireToolApproval,
       disabledMcpServerIds,
+      debug,
       abortController,
       callbacks
     }) => {
@@ -184,11 +186,11 @@ export function initConversations(client) {
               tools,
               stream: true,
               require_tool_approval: requireToolApproval,
-              // Spread (not a direct property) so it doesn't trip excess-property
-              // checks until schema.d.ts is regenerated via `bun run update`.
-              ...(disabledMcpServerIds && disabledMcpServerIds.length > 0
-                ? { disabled_mcp_server_ids: disabledMcpServerIds }
-                : {})
+              disabled_mcp_server_ids:
+                disabledMcpServerIds && disabledMcpServerIds.length > 0
+                  ? disabledMcpServerIds
+                  : undefined,
+              debug: debug || undefined
             }
           }
         },
