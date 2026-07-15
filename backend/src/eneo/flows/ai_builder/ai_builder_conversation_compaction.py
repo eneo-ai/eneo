@@ -39,6 +39,7 @@ def compact_ai_builder_conversation(
     max_message_bytes: int = MAX_SESSION_MESSAGE_BYTES,
     max_conversation_bytes: int = MAX_SESSION_CONVERSATION_BYTES,
 ) -> list[ConversationMessage]:
+    retention_units = _conversation_retention_units(conversation)
     message_sizes = [
         _message_serialized_size_bytes(message) for message in conversation
     ]
@@ -50,6 +51,7 @@ def compact_ai_builder_conversation(
 
     compacted = _compact_by_message_count(
         conversation,
+        retention_units=retention_units,
         max_messages=max_messages,
         tail_messages=tail_messages,
     )
@@ -61,18 +63,23 @@ def compact_ai_builder_conversation(
     protected_indices = _required_message_indices(compacted)
     if compacted:
         protected_indices.add(len(compacted) - 1)
-    selected_indices = list(range(len(compacted)))
-    selected_count = len(selected_indices)
-    for index in selected_indices.copy():
-        if index in protected_indices:
+    retention_units = _conversation_retention_units(compacted)
+    retained = [True] * len(compacted)
+    retained_count = len(compacted)
+    for unit in retention_units:
+        if protected_indices.intersection(unit):
             continue
-        selected_indices.remove(index)
-        serialized_size -= compacted_sizes[index]
-        if selected_count > 1:
-            serialized_size -= 1
-        selected_count -= 1
+        remaining_count = retained_count - len(unit)
+        comma_bytes_removed = max(0, retained_count - 1) - max(0, remaining_count - 1)
+        serialized_size -= sum(compacted_sizes[index] for index in unit)
+        serialized_size -= comma_bytes_removed
+        for index in unit:
+            retained[index] = False
+        retained_count = remaining_count
         if serialized_size <= max_conversation_bytes:
-            return [compacted[selected_index] for selected_index in selected_indices]
+            return [
+                message for index, message in enumerate(compacted) if retained[index]
+            ]
 
     raise ValueError(
         "Required AI Builder conversation context exceeds the serialized byte limit."
@@ -107,55 +114,68 @@ def _compact_json_bytes(value: object) -> bytes:
 def _compact_by_message_count(
     conversation: list[ConversationMessage],
     *,
+    retention_units: list[list[int]],
     max_messages: int,
     tail_messages: int,
 ) -> list[ConversationMessage]:
     if len(conversation) <= max_messages:
         return list(conversation)
 
-    preserved_indices = set(
-        range(max(0, len(conversation) - tail_messages), len(conversation))
+    required_indices = _required_message_indices(conversation)
+    required_indices.add(len(conversation) - 1)
+    tail_start = max(0, len(conversation) - tail_messages)
+    selected_units = [
+        unit
+        for unit in retention_units
+        if unit[-1] >= tail_start or required_indices.intersection(unit)
+    ]
+    selected_count = sum(len(unit) for unit in selected_units)
+    required_count = sum(
+        len(unit) for unit in selected_units if required_indices.intersection(unit)
     )
-    required_groups: list[list[int]] = []
-
-    requirements_index = _latest_requirements_summary_index(conversation)
-    if requirements_index is not None:
-        group = [requirements_index]
-        previous_request_index = _latest_user_request_before_index(
-            conversation,
-            requirements_index,
+    if required_count > max_messages:
+        raise ValueError(
+            "Required AI Builder conversation context exceeds the message limit."
         )
-        if previous_request_index is not None:
-            group.insert(0, previous_request_index)
-        confirmation_index = _matching_requirements_confirmation_index(
-            conversation, requirements_index
-        )
-        if confirmation_index is not None:
-            group.append(confirmation_index)
-        preserved_indices.update(group)
-        required_groups.append(group)
 
-    structured_answer_indices = list(_latest_structured_answer_indices(conversation))
-    if structured_answer_indices:
-        preserved_indices.update(structured_answer_indices)
-        required_groups.extend([[index] for index in structured_answer_indices])
+    retained_units: list[list[int]] = []
+    for unit in selected_units:
+        if selected_count > max_messages and not required_indices.intersection(unit):
+            selected_count -= len(unit)
+            continue
+        retained_units.append(unit)
 
-    tool_trace_group = list(_latest_tool_trace_indices(conversation))
-    if tool_trace_group:
-        preserved_indices.update(tool_trace_group)
-        required_groups.append(tool_trace_group)
+    return [conversation[index] for unit in retained_units for index in unit]
 
-    compacted = [conversation[index] for index in sorted(preserved_indices)]
-    if len(compacted) <= max_messages:
-        return compacted
 
-    selected_indices = sorted(preserved_indices)[-max_messages:]
-    selected_indices = _preserve_required_groups(
-        selected_indices=selected_indices,
-        required_groups=required_groups,
-        max_messages=max_messages,
-    )
-    return [conversation[index] for index in selected_indices]
+def _conversation_retention_units(
+    conversation: list[ConversationMessage],
+) -> list[list[int]]:
+    units: list[list[int]] = []
+    index = 0
+    while index < len(conversation):
+        message = conversation[index]
+        if message.role == "tool":
+            raise ValueError(
+                "AI Builder conversation contains an orphan or mismatched tool result."
+            )
+
+        unit = [index]
+        calls = tool_calls_from_message(message)
+        index += 1
+        if message.role == "assistant" and calls:
+            call_ids = tool_call_ids(calls)
+            while index < len(conversation) and conversation[index].role == "tool":
+                tool_result = conversation[index]
+                if tool_result.tool_call_id not in call_ids:
+                    raise ValueError(
+                        "AI Builder conversation contains an orphan or mismatched "
+                        "tool result."
+                    )
+                unit.append(index)
+                index += 1
+        units.append(unit)
+    return units
 
 
 def _required_message_indices(
@@ -259,30 +279,3 @@ def _latest_tool_trace_indices(
                 cursor += 1
             return indices
     return []
-
-
-def _preserve_required_groups(
-    *,
-    selected_indices: list[int],
-    required_groups: list[list[int]],
-    max_messages: int,
-) -> list[int]:
-    selected = list(selected_indices)
-    protected = {index for group in required_groups for index in group}
-
-    for group in required_groups:
-        in_selected = [index for index in group if index in selected]
-        if len(in_selected) == len(group):
-            continue
-
-        selected = [index for index in selected if index not in group]
-        while len(selected) + len(group) > max_messages:
-            drop_index = next(
-                (index for index in selected if index not in protected),
-                selected[0],
-            )
-            selected.remove(drop_index)
-        selected.extend(group)
-        selected.sort()
-
-    return selected[-max_messages:]

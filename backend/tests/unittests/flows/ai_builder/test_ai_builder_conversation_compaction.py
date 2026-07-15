@@ -16,6 +16,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
 from eneo.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+    conversation_message_to_llm_message,
+)
 
 
 def _msg(
@@ -40,8 +43,23 @@ def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
     conversation.insert(
         5,
         _msg(
+            "assistant",
+            content="confirm requirements",
+            tool_calls=[
+                {
+                    "id": "call-requirements",
+                    "name": "confirm_requirements",
+                    "arguments": {},
+                }
+            ],
+        ),
+    )
+    conversation.insert(
+        6,
+        _msg(
             "tool",
             content="requirements",
+            tool_call_id="call-requirements",
             metadata={
                 "requirements_summary": {"summary": "x"},
                 "requirements_version": "req-v1",
@@ -49,7 +67,7 @@ def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
         ),
     )
     conversation.insert(
-        6,
+        7,
         _msg(
             "user",
             content="confirmed",
@@ -462,6 +480,188 @@ def test_compaction_accepts_exact_total_and_compacts_maximum_plus_one() -> None:
     assert (
         conversation_serialized_size_bytes(compacted) <= MAX_SESSION_CONVERSATION_BYTES
     )
+
+
+def test_byte_compaction_drops_complete_older_tool_group() -> None:
+    older_group = [
+        _msg(
+            "assistant",
+            content="older call",
+            tool_calls=[{"id": "call-old", "name": "older", "arguments": {}}],
+        ),
+        _msg("tool", content="older result", tool_call_id="call-old"),
+    ]
+    newer_group = [
+        _msg(
+            "assistant",
+            content="newer call",
+            tool_calls=[{"id": "call-new", "name": "newer", "arguments": {}}],
+        ),
+        _msg("tool", content="newer result", tool_call_id="call-new"),
+    ]
+    final_message = _msg("user", content="continue")
+    conversation = [*older_group, *newer_group, final_message]
+    orphan_boundary = conversation_serialized_size_bytes(conversation[1:])
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_conversation_bytes=orphan_boundary,
+    )
+
+    assert compacted == [*newer_group, final_message]
+    assert conversation_serialized_size_bytes(compacted) <= orphan_boundary
+
+    provider_messages = [
+        conversation_message_to_llm_message(message) for message in compacted
+    ]
+    assert [message["role"] for message in provider_messages] == [
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert provider_messages[1]["tool_call_id"] == "call-new"
+
+
+def test_byte_compaction_accepts_exact_multibyte_total_and_drops_group_at_plus_one() -> (
+    None
+):
+    older_group = [
+        _msg(
+            "assistant",
+            content="äldre anrop 🧰",
+            tool_calls=[{"id": "call-old", "name": "older", "arguments": {}}],
+        ),
+        _msg("tool", content="äldre resultat ✅", tool_call_id="call-old"),
+    ]
+    newer_group = [
+        _msg(
+            "assistant",
+            content="newer call",
+            tool_calls=[{"id": "call-new", "name": "newer", "arguments": {}}],
+        ),
+        _msg("tool", content="newer result", tool_call_id="call-new"),
+    ]
+    final_message = _msg("user", content="continue")
+    conversation = [*older_group, *newer_group, final_message]
+    exact_size = conversation_serialized_size_bytes(conversation)
+
+    assert (
+        compact_ai_builder_conversation(
+            conversation,
+            max_conversation_bytes=exact_size,
+        )
+        == conversation
+    )
+    assert compact_ai_builder_conversation(
+        conversation,
+        max_conversation_bytes=exact_size - 1,
+    ) == [*newer_group, final_message]
+
+
+def test_count_compaction_keeps_tool_group_crossing_tail_boundary() -> None:
+    tool_group = [
+        _msg(
+            "assistant",
+            content="boundary call",
+            tool_calls=[{"id": "call-boundary", "name": "boundary", "arguments": {}}],
+        ),
+        _msg("tool", content="boundary result", tool_call_id="call-boundary"),
+    ]
+    final_messages = [
+        _msg("assistant", content="latest explanation"),
+        _msg("user", content="continue"),
+    ]
+    conversation = [
+        _msg("user", content="drop 0"),
+        _msg("user", content="drop 1"),
+        *tool_group,
+        *final_messages,
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=4,
+        tail_messages=3,
+    )
+
+    assert compacted == [*tool_group, *final_messages]
+
+
+def test_count_compaction_preserves_duplicate_retained_messages() -> None:
+    duplicate = _msg("user", content="same retained message")
+    final_message = _msg("assistant", content="latest response")
+    conversation = [
+        _msg("user", content="drop 0"),
+        _msg("user", content="drop 1"),
+        duplicate,
+        duplicate,
+        final_message,
+    ]
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=3,
+        tail_messages=3,
+    )
+
+    assert compacted == [duplicate, duplicate, final_message]
+
+
+@pytest.mark.parametrize(
+    "conversation",
+    [
+        [_msg("tool", content="orphan", tool_call_id="call-orphan")],
+        [
+            _msg(
+                "assistant",
+                content="call",
+                tool_calls=[{"id": "call-a", "name": "tool", "arguments": {}}],
+            ),
+            _msg("tool", content="mismatch", tool_call_id="call-b"),
+        ],
+    ],
+)
+def test_compaction_rejects_orphan_and_mismatched_tool_results(
+    conversation: list[ConversationMessage],
+) -> None:
+    with pytest.raises(ValueError, match="orphan or mismatched tool result"):
+        compact_ai_builder_conversation(conversation)
+
+
+def test_count_compaction_rejects_required_complete_group_overflow() -> None:
+    required_group = [
+        _msg(
+            "assistant",
+            content="required call",
+            tool_calls=[{"id": "call-required", "name": "tool", "arguments": {}}],
+        ),
+        _msg("tool", content="required result", tool_call_id="call-required"),
+    ]
+
+    with pytest.raises(ValueError, match="exceeds the message limit"):
+        compact_ai_builder_conversation(
+            required_group,
+            max_messages=1,
+            tail_messages=1,
+        )
+
+
+def test_byte_compaction_rejects_required_complete_group_overflow() -> None:
+    required_group = [
+        _msg(
+            "assistant",
+            content="required call",
+            tool_calls=[{"id": "call-required", "name": "tool", "arguments": {}}],
+        ),
+        _msg("tool", content="required result", tool_call_id="call-required"),
+    ]
+    required_size = conversation_serialized_size_bytes(required_group)
+
+    with pytest.raises(ValueError, match="exceeds the serialized byte limit"):
+        compact_ai_builder_conversation(
+            required_group,
+            max_conversation_bytes=required_size - 1,
+        )
 
 
 def test_compaction_enforces_utf8_bytes_instead_of_character_count() -> None:
