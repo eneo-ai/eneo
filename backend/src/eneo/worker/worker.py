@@ -407,7 +407,6 @@ class Worker:
                                     selectinload(Users.tenant).selectinload(
                                         Tenants.modules
                                     ),
-                                    selectinload(Users.api_key),
                                     selectinload(Users.user_groups),
                                 )
                             )

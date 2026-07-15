@@ -161,45 +161,25 @@ async def test_api_key_crud_flow(client, default_user_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_legacy_user_api_key_endpoints_still_work(client, default_user_token):
+async def test_legacy_api_key_endpoints_removed(client, default_user_token):
+    """The v1 key endpoints are retired; only /api/v1/api-keys mints keys."""
     post_response = await client.post(
         "/api/v1/users/api-keys/",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert post_response.status_code == 200, post_response.text
-    post_payload = post_response.json()
-    assert post_payload["key"].startswith("inp_")
+    assert post_response.status_code == 404, post_response.text
 
-    post_auth = await client.get(
-        "/api/v1/assistants/",
-        headers={"X-API-Key": post_payload["key"]},
-    )
-    assert post_auth.status_code == 200
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_legacy_assistant_api_key_endpoint_still_works(
-    client, default_user_token
-):
-    assistants_response = await client.get(
-        "/api/v1/assistants/",
+    revoke_response = await client.delete(
+        "/api/v1/users/api-keys/legacy",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert assistants_response.status_code == 200, assistants_response.text
-    assistants_payload = assistants_response.json()
-    assistant_items = assistants_payload.get("items", [])
-    if not assistant_items:
-        pytest.skip("No assistants available in integration seed data.")
+    assert revoke_response.status_code == 404, revoke_response.text
 
-    assistant_id = assistant_items[0]["id"]
-    legacy_response = await client.get(
-        f"/api/v1/assistants/{assistant_id}/api-keys/",
+    assistant_key_response = await client.get(
+        f"/api/v1/assistants/{uuid4()}/api-keys/",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
-    assert legacy_response.status_code == 200, legacy_response.text
-    payload = legacy_response.json()
-    assert payload["key"].startswith("ina_")
+    assert assistant_key_response.status_code == 404, assistant_key_response.text
 
 
 @pytest.mark.integration

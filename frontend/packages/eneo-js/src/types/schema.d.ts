@@ -429,47 +429,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/users/api-keys/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Generate legacy user API key
-     * @deprecated
-     * @description Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This endpoint rotates the old legacy key immediately.
-     */
-    post: operations["generate_api_key_api_v1_users_api_keys__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/users/api-keys/legacy": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    /**
-     * Revoke legacy user API key
-     * @description Permanently revokes the caller's legacy (v1) API key.
-     */
-    delete: operations["revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete"];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/users/admin/invite/": {
     parameters: {
       query?: never;
@@ -1161,27 +1120,6 @@ export interface paths {
      * @description Leave feedback on a session.
      */
     post: operations["leave_feedback_api_v1_assistants__id__sessions__session_id__feedback__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/assistants/{id}/api-keys/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Generate legacy assistant API key
-     * @deprecated
-     * @description Legacy assistant API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. This returns a legacy assistant-scoped key.
-     */
-    get: operations["generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -7580,13 +7518,6 @@ export interface components {
      * @enum {string}
      */
     AnalysisProcessingMode: "sync" | "auto";
-    /** ApiKey */
-    ApiKey: {
-      /** Truncated Key */
-      truncated_key: string;
-      /** Key */
-      key: string;
-    };
     /** ApiKeyCreateRequest */
     ApiKeyCreateRequest: {
       /** Name */
@@ -17111,7 +17042,6 @@ export interface components {
        */
       user_groups?: components["schemas"]["UserGroupInDBRead"][];
       tenant: components["schemas"]["TenantInDB"];
-      api_key?: components["schemas"]["ApiKey"] | null;
       active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
@@ -17287,7 +17217,6 @@ export interface components {
        */
       user_groups?: components["schemas"]["UserGroupInDBRead"][];
       tenant: components["schemas"]["TenantInDB"];
-      api_key?: components["schemas"]["ApiKey"] | null;
       active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
       /**
        * Roles
@@ -17386,8 +17315,6 @@ export interface components {
       quota_used?: number;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
-      /** Legacy Api Key Suffix */
-      legacy_api_key_suffix?: string | null;
       /** Quota Limit */
       quota_limit?: number | null;
       /** Roles */
@@ -20346,108 +20273,6 @@ export interface operations {
       };
     };
   };
-  generate_api_key_api_v1_users_api_keys__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Legacy API key created and returned once. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "key": "inp_3f5f2f7f7f...d9a1",
-           *       "truncated_key": "d9a1"
-           *     }
-           */
-          "application/json": components["schemas"]["ApiKey"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
-      410: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "deprecated_endpoint",
-           *       "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys."
-           *     }
-           */
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  revoke_legacy_api_key_api_v1_users_api_keys_legacy_delete: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description No legacy API key found. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   invite_user_api_v1_users_admin_invite__post: {
     parameters: {
       query?: never;
@@ -23075,76 +22900,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  generate_read_only_assistant_key_api_v1_assistants__id__api_keys__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Legacy assistant API key created and returned once. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "key": "ina_6f2c9b3a8f...7b31",
-           *       "truncated_key": "7b31"
-           *     }
-           */
-          "application/json": components["schemas"]["ApiKey"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiKeyErrorResponse"];
-        };
-      };
-      /** @description Legacy endpoint disabled. Migrate to v2 endpoint. */
-      410: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "deprecated_endpoint",
-           *       "message": "Legacy assistant API key endpoint is disabled. Use /api/v1/api-keys."
-           *     }
-           */
-          "application/json": unknown;
         };
       };
       /** @description Validation Error */
