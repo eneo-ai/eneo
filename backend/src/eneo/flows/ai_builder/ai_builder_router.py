@@ -638,53 +638,55 @@ def _ai_builder_json_error_response(
 async def create_session(
     request: Request,
     body: CreateSessionRequest,
-    container: ContainerWithUserDep,
+    container: ContainerWithUserExplicitTransactionDep,
 ):
-    authorization = await _authorize_ai_builder_request(
-        request,
-        container,
-        action=FlowApiAction.BUILDER_SESSION_CREATE,
-        space_id=body.space_id,
-    )
-    space = _authorized_space(authorization)
-    resolve_planner_model(space)
+    database_session = cast(AsyncSession, container.session())
+    async with database_session.begin():
+        authorization = await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_SESSION_CREATE,
+            space_id=body.space_id,
+        )
+        space = _authorized_space(authorization)
+        resolve_planner_model(space)
 
-    service = _get_ai_builder_service(container)
-    session: BuilderSession = await service.create_session(
-        space_id=body.space_id,
-        target_kind=body.target_kind,
-        flow_id=body.flow_id,
-        force_new=body.force_new,
-    )
-    attachment_snapshot = await service.get_session_attachment_snapshot(
-        session_id=session.id
-    )
+        service = _get_ai_builder_service(container)
+        session: BuilderSession = await service.create_session(
+            space_id=body.space_id,
+            target_kind=body.target_kind,
+            flow_id=body.flow_id,
+            force_new=body.force_new,
+        )
+        attachment_snapshot = await service.get_session_attachment_snapshot(
+            session_id=session.id
+        )
 
-    # Audit
-    user = container.user()
-    audit_service = _get_audit_service(container)
-    await audit_service.log(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.AI_BUILDER_SESSION_CREATED,
-        entity_type=EntityType.AI_BUILDER_SESSION,
-        entity_id=session.id,
-        description=f"Started AI builder session ({session.target_kind.value})",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=session,
-            extra={
-                "target_kind": session.target_kind.value,
-                "flow_id": str(session.flow_id) if session.flow_id else None,
-            },
-        ),
-    )
+        user = container.user()
+        audit_service = _get_audit_service(container)
+        await audit_service.log(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.AI_BUILDER_SESSION_CREATED,
+            entity_type=EntityType.AI_BUILDER_SESSION,
+            entity_id=session.id,
+            description=f"Started AI builder session ({session.target_kind.value})",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=session,
+                extra={
+                    "target_kind": session.target_kind.value,
+                    "flow_id": str(session.flow_id) if session.flow_id else None,
+                },
+            ),
+        )
+        response = _to_session_response(
+            session,
+            attachments=[_to_file_public(file) for file in attachment_snapshot.files],
+            attachment_warnings=list(attachment_snapshot.warnings),
+        )
 
-    return _to_session_response(
-        session,
-        attachments=[_to_file_public(file) for file in attachment_snapshot.files],
-        attachment_warnings=list(attachment_snapshot.warnings),
-    )
+    return response
 
 
 @router.get(

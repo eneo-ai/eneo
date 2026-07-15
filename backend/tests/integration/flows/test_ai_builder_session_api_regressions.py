@@ -21,8 +21,10 @@ from litellm.exceptions import (
 from pydantic import ValidationError
 from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette import ServerSentEvent
 from starlette.requests import Request
+from starlette.types import Message, Scope
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
@@ -35,7 +37,11 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
-from eneo.database.database import sessionmanager
+from eneo.database.database import (
+    get_session,
+    get_session_with_transaction,
+    sessionmanager,
+)
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
@@ -642,7 +648,178 @@ async def _create_proposed_ai_builder_plan(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_session_commits_exactly_one_canonical_audit_log(
+async def test_create_session_is_committed_at_final_response_body_boundary(
+    app,
+    client,
+    bearer_token: str,
+    completion_model_factory,
+    db_container,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder response boundary durability",
+    )
+    request_body = json.dumps({"target_kind": "create", "space_id": space_id}).encode()
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/flows/ai-builder/sessions",
+        "raw_path": b"/api/v1/flows/ai-builder/sessions",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"test.local"),
+            (b"content-type", b"application/json"),
+            (b"authorization", f"Bearer {bearer_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test.local", 80),
+    }
+    final_body_received = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    request_received = False
+    response_status: int | None = None
+    response_body = bytearray()
+
+    def is_create_session_request(request: Request) -> bool:
+        return (
+            request.method == "POST"
+            and request.url.path == "/api/v1/flows/ai-builder/sessions"
+        )
+
+    async def gated_transaction_session(
+        request: Request,
+    ) -> AsyncGenerator[AsyncSession, None]:
+        async for session in get_session_with_transaction():
+            try:
+                yield session
+            finally:
+                if is_create_session_request(request):
+                    cleanup_started.set()
+                    await release_cleanup.wait()
+
+    async def gated_session(
+        request: Request,
+    ) -> AsyncGenerator[AsyncSession, None]:
+        async for session in get_session():
+            try:
+                yield session
+            finally:
+                if is_create_session_request(request):
+                    cleanup_started.set()
+                    await release_cleanup.wait()
+
+    previous_transaction_override = app.dependency_overrides.get(
+        get_session_with_transaction
+    )
+    previous_session_override = app.dependency_overrides.get(get_session)
+    app.dependency_overrides[get_session_with_transaction] = gated_transaction_session
+    app.dependency_overrides[get_session] = gated_session
+
+    async def receive() -> Message:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {
+                "type": "http.request",
+                "body": request_body,
+                "more_body": False,
+            }
+        await release_cleanup.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal response_status
+        if message["type"] == "http.response.start":
+            response_status = cast(int, message["status"])
+            return
+        if message["type"] != "http.response.body":
+            return
+        response_body.extend(cast(bytes, message.get("body", b"")))
+        if not message.get("more_body", False):
+            final_body_received.set()
+
+    post_task = asyncio.create_task(app(scope, receive, send))
+
+    async def wait_for_response_boundary() -> None:
+        await final_body_received.wait()
+        await cleanup_started.wait()
+
+    response_boundary_wait = asyncio.create_task(wait_for_response_boundary())
+    try:
+        completed, _ = await asyncio.wait(
+            {post_task, response_boundary_wait},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        assert response_boundary_wait in completed
+        assert not post_task.done()
+        assert response_status == 201
+
+        response_payload = cast(dict[str, object], json.loads(response_body))
+        session_id = UUID(cast(str, response_payload["session_id"]))
+        headers = {"Authorization": f"Bearer {bearer_token}"}
+        session_response, models_response = await asyncio.gather(
+            client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers=headers,
+            ),
+            client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}/models",
+                headers=headers,
+            ),
+        )
+
+        assert (
+            session_response.status_code,
+            models_response.status_code,
+        ) == (200, 200)
+        assert session_response.json()["session_id"] == str(session_id)
+
+        async with db_container() as container:
+            audit_count = await container.session().scalar(
+                select(sa.func.count(AuditLogTable.id)).where(
+                    AuditLogTable.tenant_id == container.user().tenant_id,
+                    AuditLogTable.action == ActionType.AI_BUILDER_SESSION_CREATED.value,
+                    AuditLogTable.entity_type == EntityType.AI_BUILDER_SESSION.value,
+                    AuditLogTable.entity_id == session_id,
+                )
+            )
+
+        assert audit_count == 1
+        assert not post_task.done()
+    finally:
+        release_cleanup.set()
+        try:
+            await post_task
+        finally:
+            if not response_boundary_wait.done():
+                response_boundary_wait.cancel()
+            try:
+                await response_boundary_wait
+            except asyncio.CancelledError:
+                pass
+            if previous_transaction_override is None:
+                app.dependency_overrides.pop(get_session_with_transaction, None)
+            else:
+                app.dependency_overrides[get_session_with_transaction] = (
+                    previous_transaction_override
+                )
+            if previous_session_override is None:
+                app.dependency_overrides.pop(get_session, None)
+            else:
+                app.dependency_overrides[get_session] = previous_session_override
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_create_session_is_immediately_readable_and_commits_one_audit_log(
     client,
     bearer_token: str,
     completion_model_factory,
@@ -663,6 +840,19 @@ async def test_create_session_commits_exactly_one_canonical_audit_log(
             space_id=space_id,
         )
     )
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    session_response = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}",
+        headers=headers,
+    )
+    models_response = await client.get(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}/models",
+        headers=headers,
+    )
+
+    assert session_response.status_code == 200
+    assert session_response.json()["session_id"] == str(session_id)
+    assert models_response.status_code == 200
 
     async with db_container() as container:
         audit_result = await container.session().execute(
