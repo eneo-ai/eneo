@@ -39,6 +39,13 @@ _CONFORMANCE_IMAGE = os.environ.get(
     _SEAWEEDFS_439_IMAGE,
 )
 
+# TemporaryDirectory keeps the source directory owner-only (0700), while Docker
+# bind-mounts each selected file directly into the isolated test container. The
+# upstream image drops from the runner's UID to its non-root service UID before
+# reading these mounts, so the files themselves need a read bit for that UID.
+# Every value is generated test material and every mount remains read-only.
+_CONTAINER_BOUND_TEST_FILE_MODE = 0o444
+
 
 def _write_test_tls_material(directory: Path) -> tuple[Path, Path, Path]:
     now = datetime.now(UTC)
@@ -98,9 +105,9 @@ def _write_test_tls_material(directory: Path) -> tuple[Path, Path, Path]:
             serialization.NoEncryption(),
         )
     )
-    os.chmod(ca_path, 0o600)
-    os.chmod(certificate_path, 0o600)
-    os.chmod(key_path, 0o600)
+    os.chmod(ca_path, _CONTAINER_BOUND_TEST_FILE_MODE)
+    os.chmod(certificate_path, _CONTAINER_BOUND_TEST_FILE_MODE)
+    os.chmod(key_path, _CONTAINER_BOUND_TEST_FILE_MODE)
     return ca_path, certificate_path, key_path
 
 
@@ -219,7 +226,7 @@ async def real_object_store(
         host_port = unused_tcp_port_factory()
         config_path = Path(directory) / "s3.json"
         config_path.write_text(json.dumps(identity), encoding="utf-8")
-        os.chmod(config_path, 0o600)
+        os.chmod(config_path, _CONTAINER_BOUND_TEST_FILE_MODE)
         container = (
             DockerContainer(_CONFORMANCE_IMAGE)
             .with_bind_ports(8333, host_port)
@@ -297,7 +304,7 @@ async def real_tls_object_store(
         host_port = unused_tcp_port_factory()
         config_path = test_directory / "s3.json"
         config_path.write_text(json.dumps(identity), encoding="utf-8")
-        os.chmod(config_path, 0o600)
+        os.chmod(config_path, _CONTAINER_BOUND_TEST_FILE_MODE)
         ca_path, certificate_path, key_path = _write_test_tls_material(test_directory)
         container = (
             DockerContainer(_CONFORMANCE_IMAGE)
