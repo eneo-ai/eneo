@@ -83,6 +83,7 @@ async def list_skills(
     "/{space_id}/skills/",
     response_model=SkillPublic,
     status_code=201,
+    description="Create a Space-owned Skill with its first immutable revision.",
     responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def create_skill(
@@ -141,6 +142,10 @@ async def list_skill_revisions(
     "/{space_id}/skills/{skill_id}/revisions/",
     response_model=SkillRevisionPublic,
     status_code=201,
+    description=(
+        "Create the next immutable Skill revision; identical current content is a "
+        "no-op."
+    ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def create_skill_revision(
@@ -191,6 +196,9 @@ async def create_skill_revision(
 @router.patch(
     "/{space_id}/skills/{skill_id}/active/",
     response_model=SkillPublic,
+    description=(
+        "Activate or deactivate a Skill. Existing exact-revision bindings remain valid."
+    ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def set_skill_active(
@@ -233,6 +241,7 @@ async def set_skill_active(
 @router.delete(
     "/{space_id}/skills/{skill_id}/",
     status_code=204,
+    description="Delete an unbound Skill and all of its revisions.",
     responses=responses.get_responses([403, 404, 409]),
 )
 async def delete_skill(

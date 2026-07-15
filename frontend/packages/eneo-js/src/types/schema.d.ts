@@ -5704,7 +5704,10 @@ export interface paths {
     /** List Skills */
     get: operations["list_skills_api_v1_spaces__space_id__skills__get"];
     put?: never;
-    /** Create Skill */
+    /**
+     * Create Skill
+     * @description Create a Space-owned Skill with its first immutable revision.
+     */
     post: operations["create_skill_api_v1_spaces__space_id__skills__post"];
     delete?: never;
     options?: never;
@@ -5723,7 +5726,10 @@ export interface paths {
     get: operations["get_skill_api_v1_spaces__space_id__skills__skill_id___get"];
     put?: never;
     post?: never;
-    /** Delete Skill */
+    /**
+     * Delete Skill
+     * @description Delete an unbound Skill and all of its revisions.
+     */
     delete: operations["delete_skill_api_v1_spaces__space_id__skills__skill_id___delete"];
     options?: never;
     head?: never;
@@ -5740,7 +5746,10 @@ export interface paths {
     /** List Skill Revisions */
     get: operations["list_skill_revisions_api_v1_spaces__space_id__skills__skill_id__revisions__get"];
     put?: never;
-    /** Create Skill Revision */
+    /**
+     * Create Skill Revision
+     * @description Create the next immutable Skill revision; identical current content is a no-op.
+     */
     post: operations["create_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__post"];
     delete?: never;
     options?: never;
@@ -5761,7 +5770,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Set Skill Active */
+    /**
+     * Set Skill Active
+     * @description Activate or deactivate a Skill. Existing exact-revision bindings remain valid.
+     */
     patch: operations["set_skill_active_api_v1_spaces__space_id__skills__skill_id__active__patch"];
     trace?: never;
   };
