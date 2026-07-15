@@ -33,7 +33,7 @@
   };
 
   const chat = getChatService();
-  const { featureFlags } = getAppContext();
+  const { user } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -490,7 +490,7 @@
         />
       {/if}
 
-      {#if featureFlags.chatDebugPanel && chat.partner.type !== "group-chat"}
+      {#if user.hasPermission("assistant_debug") && chat.partner.type !== "group-chat"}
         <button
           type="button"
           class={buttonVariants({ variant: "ghost", size: "icon" }) + " size-9 rounded-lg"}

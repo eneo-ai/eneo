@@ -3,6 +3,7 @@
 The invariants: ``debug=True`` on an ask forces extended logging (the exact
 provider payload is captured and persisted) regardless of the assistant's
 ``logging_enabled`` setting; ``debug=False`` leaves the setting in charge;
+requesting debug capture requires the ``assistant_debug`` role permission;
 group chats never accept debug capture (they have no logging persistence
 path); the streamed first chunk carries the persisted question id so clients
 can fetch the captured details afterwards.
@@ -17,8 +18,11 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant
 from eneo.conversations.application.conversation_service import ConversationService
-from eneo.main.exceptions import BadRequestException
+from eneo.conversations.conversation_models import ConversationRequest
+from eneo.conversations.conversations_router import chat
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.questions.question import UseTools
+from eneo.roles.permissions import Permission
 from eneo.sessions.session import AskChatResponse, SSEFirstChunk
 
 
@@ -85,6 +89,50 @@ class TestDebugForcesExtendedLogging:
 
             kwargs = completion_service.get_response.await_args.kwargs
             assert kwargs["extended_logging"] is logging_enabled
+
+
+class TestDebugRequiresPermission:
+    """The chat endpoint gates debug capture on the assistant_debug role
+    permission before any session or service work happens."""
+
+    class _PastPermissionCheck(Exception):
+        """Sentinel raised by the first mock touched after the gate."""
+
+    def _container(self, permissions):
+        container = MagicMock()
+        container.user.return_value = SimpleNamespace(permissions=permissions)
+        container.session.side_effect = self._PastPermissionCheck()
+        return container
+
+    def _request(self, **overrides):
+        return ConversationRequest(question="Hello", assistant_id=uuid4(), **overrides)
+
+    @pytest.mark.asyncio
+    async def test_debug_without_permission_is_unauthorized(self):
+        with pytest.raises(UnauthorizedException):
+            await chat(
+                request=self._request(debug=True),
+                http_request=MagicMock(),
+                container=self._container(permissions=[]),
+            )
+
+    @pytest.mark.asyncio
+    async def test_debug_with_permission_passes_the_gate(self):
+        with pytest.raises(self._PastPermissionCheck):
+            await chat(
+                request=self._request(debug=True),
+                http_request=MagicMock(),
+                container=self._container(permissions=[Permission.ASSISTANT_DEBUG]),
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_debug_needs_no_permission(self):
+        with pytest.raises(self._PastPermissionCheck):
+            await chat(
+                request=self._request(),
+                http_request=MagicMock(),
+                container=self._container(permissions=[]),
+            )
 
 
 class TestDebugRejectedForGroupChats:

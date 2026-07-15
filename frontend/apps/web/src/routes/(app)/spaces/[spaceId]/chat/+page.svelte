@@ -24,7 +24,7 @@
   const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
-    featureFlags,
+    user,
     state: { userInfo }
   } = getAppContext();
 
@@ -35,8 +35,8 @@
   const chat = untrack(() => initChatService(data));
 
   // A stale localStorage preference must not keep requesting debug capture
-  // on a deployment where the panel flag is off.
-  if (!featureFlags.chatDebugPanel && chat.debugPanelVisible) {
+  // for a user whose role lacks the permission.
+  if (!user.hasPermission("assistant_debug") && chat.debugPanelVisible) {
     untrack(() => chat.toggleDebugPanel());
   }
 
@@ -162,7 +162,7 @@
                 : undefined}
             ></ConversationView>
           </div>
-          {#if featureFlags.chatDebugPanel && chat.debugPanelVisible && chat.partner.type !== "group-chat"}
+          {#if user.hasPermission("assistant_debug") && chat.debugPanelVisible && chat.partner.type !== "group-chat"}
             <DebugPanel />
           {/if}
         </div>

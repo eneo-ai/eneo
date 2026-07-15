@@ -125,9 +125,6 @@ function isConfigured(value: unknown): boolean {
 
 export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
-  // Deploy-level opt-in for the chat debug panel (exact provider payload,
-  // tool activity, knowledge references). Intended for dev/test instances.
-  const chatDebugPanel = getFlagFromEnv("SHOW_CHAT_DEBUG_PANEL", false);
 
   // Auth
   const zitadelConfigured =
@@ -169,7 +166,6 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
   return Object.freeze({
     newAuth: useNewAuth,
     showHelpCenter,
-    chatDebugPanel,
     federationStatus
   });
 }

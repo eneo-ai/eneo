@@ -203,6 +203,7 @@ class TestPermissionSemantics:
             "integrations",
             "shared_spaces",
             "api_keys",
+            "assistant_debug",
         }
         actual = {p.value for p in Permission}
         assert actual == expected

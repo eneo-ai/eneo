@@ -33,6 +33,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.sessions.session import (
@@ -334,6 +335,11 @@ async def chat(
                 "message": "Debug capture is not supported for group chats.",
             },
         )
+
+    # Debug capture exposes the exact provider payload, so it is role-gated
+    # like other sensitive capabilities.
+    if request.debug:
+        validate_permission(container.user(), Permission.ASSISTANT_DEBUG)
 
     session = cast(AsyncSession, container.session())
     async with session.begin():
