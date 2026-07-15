@@ -162,6 +162,36 @@ def get_references(
     return [blob for blob in blobs if blob is not None]
 
 
+def filter_mcp_tool_references(
+    response_string: str,
+    references: Sequence[McpToolReference],
+    version: int = 1,
+) -> list[McpToolReference]:
+    """Keep only the MCP references the answer cites inline, mirroring the
+    legacy info-blob path.
+
+    Display-only image references never receive a ``source_id`` line (see
+    ``_build_tool_result_with_references``) so they cannot be cited; they are
+    always kept so thumbnail rendering survives filtering.
+    """
+    if version == 1:
+        return list(references)
+
+    display_only = [
+        ref for ref in references if (ref.mime_type or "").startswith("image/")
+    ]
+    citeable = [
+        ref for ref in references if not (ref.mime_type or "").startswith("image/")
+    ]
+    cited = get_references(
+        response_string=response_string,
+        info_blobs=citeable,
+        version=version,
+        get_id_func=lambda ref: ref.id,
+    )
+    return cited + display_only
+
+
 class AssistantService:
     def __init__(
         self,
@@ -1428,7 +1458,12 @@ class AssistantService:
                         logging_details=response.extended_logging
                         or LoggingDetails(model_kwargs={}),
                         tool_calls=tool_calls if tool_calls else None,
-                        mcp_tool_references=mcp_tool_references or None,
+                        mcp_tool_references=filter_mcp_tool_references(
+                            response_string=response_string,
+                            references=mcp_tool_references,
+                            version=version,
+                        )
+                        or None,
                         reasoning=reasoning_string or None,
                     )
                     completed = True
@@ -1502,6 +1537,12 @@ class AssistantService:
                         getattr(answer, "mcp_tool_references", None) or []
                     )
                     final_reasoning = getattr(answer, "reasoning_content", None)
+
+            non_streaming_mcp_refs = filter_mcp_tool_references(
+                response_string=final_answer,
+                references=non_streaming_mcp_refs,
+                version=version,
+            )
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -2003,7 +2044,11 @@ class AssistantService:
             assert isinstance(answer, str)
             info_blob_references = datastore_result.info_blobs
             if isinstance(response.completion, Completion):
-                mcp_tool_references = response.completion.mcp_tool_references or []
+                mcp_tool_references = filter_mcp_tool_references(
+                    response_string=answer,
+                    references=response.completion.mcp_tool_references or [],
+                    version=version,
+                )
         else:
             info_blob_references = datastore_result.info_blobs
 

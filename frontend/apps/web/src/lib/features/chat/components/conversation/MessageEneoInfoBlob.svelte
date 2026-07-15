@@ -5,7 +5,7 @@
   import type { EneoInrefCustomComponentProps } from "@eneo/ui/components/markdown";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
-  import { documentNumber, textDocumentReferences } from "../../mcpReferenceDocs";
+  import { citedTextDocumentReferences, documentNumber } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
 
   let { token }: EneoInrefCustomComponentProps = $props();
@@ -17,9 +17,10 @@
     const message = current();
     return [
       message.references,
-      // Same filtered list MessageTools numbers its chips over: image
-      // references render as thumbnails and hold no citation number.
-      textDocumentReferences(message.mcp_tool_references ?? [])
+      // Same filtered list MessageTools numbers its chips over: cited-only,
+      // in citation order; image references render as thumbnails and hold
+      // no citation number.
+      citedTextDocumentReferences(message.mcp_tool_references ?? [], message.answer ?? "")
     ];
   });
 

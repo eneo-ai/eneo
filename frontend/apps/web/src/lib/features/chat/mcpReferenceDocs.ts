@@ -33,6 +33,31 @@ export function textDocumentReferences<T extends McpRefLike>(refs: T[]): T[] {
   return refs.filter((ref) => !(ref.mime_type ?? "").startsWith("image/"));
 }
 
+const INREF_PATTERN = /<inref id="([0-9a-f]{8})"\/>/g;
+
+/**
+ * Text references the answer actually cites inline, in first-citation order.
+ *
+ * The backend persists cited-only references, but a live streamed message
+ * accumulates every reference from TOOL_CALL events before the answer text
+ * exists — this narrows the display to the same list a reload would show.
+ * Image references are excluded here like in textDocumentReferences; they
+ * render as thumbnails and are never cited.
+ */
+export function citedTextDocumentReferences<T extends McpRefLike>(refs: T[], answer: string): T[] {
+  const textRefs = textDocumentReferences(refs);
+  const seen = new Set<string>();
+  const cited: T[] = [];
+  for (const match of answer.matchAll(INREF_PATTERN)) {
+    const prefix = match[1];
+    if (seen.has(prefix)) continue;
+    seen.add(prefix);
+    const ref = textRefs.find((candidate) => candidate.id.startsWith(prefix));
+    if (ref) cited.push(ref);
+  }
+  return cited;
+}
+
 export function canonicalDocKey(ref: McpRefLike): string {
   const uri = ref.uri ?? "";
   const hashIndex = uri.indexOf("#");
