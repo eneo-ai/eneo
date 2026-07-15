@@ -20,11 +20,10 @@ from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.completion_models.infrastructure.context_builder import (
-    count_attachment_tokens,
     count_tokens,
 )
 from eneo.completion_models.infrastructure.web_search import WebSearch
-from eneo.files.attachment_budget import attachment_token_ceiling
+from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
 from eneo.files.file_models import File, FileType
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
@@ -62,6 +61,7 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.skills.domain.skill import SkillComposition, compose_skill_instructions
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
@@ -102,6 +102,7 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
+    from eneo.skills.application.skill_service import SkillService
     from eneo.spaces.api.space_models import TemplateCreate
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
@@ -177,6 +178,7 @@ class AssistantService:
         icon_repo: IconRepository,
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
+        skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
@@ -202,6 +204,7 @@ class AssistantService:
         self.help_assistant_assignment_history_repo = (
             help_assistant_assignment_history_repo
         )
+        self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
@@ -248,6 +251,45 @@ class AssistantService:
             return None
         return await self.effective_config_service.resolve_for(
             assistant, space_is_personal=space.is_personal()
+        )
+
+    async def _compose_assistant_prompt(
+        self,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+    ) -> SkillComposition:
+        base_instructions = assistant.get_prompt_text()
+        governance_bindings = ()
+        if effective_config is not None:
+            if (
+                effective_config.prompt_enforced
+                and effective_config.enforced_prompt_text
+            ):
+                base_instructions = effective_config.enforced_prompt_text
+            governance_bindings = effective_config.governance_skill_bindings
+
+        assistant_id = cast(UUID | None, assistant.id)
+        if assistant_id is None:
+            direct_composition = compose_skill_instructions(
+                base_instructions=base_instructions, bindings=[]
+            )
+        else:
+            direct_composition = await self.skill_service.compose_for_assistant(
+                assistant_id=assistant_id,
+                base_instructions=base_instructions,
+            )
+
+        if not (space.is_personal() and assistant.is_default):
+            return direct_composition
+        if direct_composition.provenance:
+            raise BadRequestException(
+                "Personal default Assistant has invalid direct Skill bindings"
+            )
+        return compose_skill_instructions(
+            base_instructions=base_instructions,
+            bindings=list(governance_bindings),
         )
 
     async def _ensure_governance_policy_allows_update(
@@ -463,7 +505,6 @@ class AssistantService:
         overflows is rejected even with no attachments. Skipped only when no
         model is resolved."""
         model = assistant.completion_model
-        enforced_prompt: str | None = None
 
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
@@ -477,55 +518,24 @@ class AssistantService:
                 )
                 if resolved_model is not None:
                     model = resolved_model  # type: ignore[assignment]
-            if (
-                effective_config.prompt_enforced
-                and effective_config.enforced_prompt_text
-            ):
-                enforced_prompt = effective_config.enforced_prompt_text
-
+        composition = await self._compose_assistant_prompt(
+            space=space,
+            assistant=assistant,
+            effective_config=effective_config,
+        )
         if model is None:
             return
 
-        prompt_text = (
-            enforced_prompt
-            if enforced_prompt is not None
-            else assistant.get_prompt_text()
-        )
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
-        self._assert_files_fit_context(
-            model=model,
-            prompt_text=prompt_text,
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=model.max_input_tokens,
+            model_name=model.name,
+            prompt_text=composition.prompt,
             files=completion_prompt_files,
         )
-
-    def _assert_files_fit_context(
-        self,
-        *,
-        model: "CompletionModel",
-        prompt_text: str,
-        files: list["File"],
-    ) -> None:
-        """Reject when the system prompt + whole files exceed the model's input
-        window with room left to ask. Files are inlined whole (never truncated),
-        so a set that doesn't fit can't run — a clear rejection beats a
-        provider-side context-length error. Pass files already expanded with any
-        document-derived images, since that is what the request sends. Shared by
-        the save-time persistent check and the per-message ask-time check."""
-        ceiling = attachment_token_ceiling(model.max_input_tokens)
-        used = count_tokens(prompt_text, model.name) + count_attachment_tokens(
-            text_files=[f for f in files if f.file_type == FileType.TEXT],
-            image_files=[f for f in files if f.file_type == FileType.IMAGE],
-            model_name=model.name,
-        )
-        if used > ceiling:
-            raise BadRequestException(
-                f"The prompt and attachments need ~{used} tokens, but only "
-                f"{ceiling} fit this model's context window. Remove content or "
-                f"choose a model with a larger context."
-            )
 
     async def _assert_message_attachments_fit(
         self,
@@ -534,16 +544,19 @@ class AssistantService:
         model: "CompletionModel",
         prompt_text: str,
         files: list["File"],
+        validate_persistent_baseline: bool = False,
     ) -> None:
         """Per-message ask-time guard. Persistent attachments are gated on save,
         but a chat message's own uploads are not — and they are now inlined whole
         on the send and on every later replay. Count the persistent baseline plus
         this message's files (both expanded with derived images, as the request
         sends them) against the same ceiling, so an upload that can't fit is
-        rejected up front instead of failing at the provider. No uploads this
-        turn means nothing new to check: the baseline was validated on save and
-        history is budget-evicted downstream."""
-        if not files:
+        rejected up front instead of failing at the provider. A zero-Skill turn
+        with no uploads keeps the existing fast path because its baseline was
+        validated on save. Skill turns recheck the baseline because bindings can
+        change independently of the Assistant. History is budget-evicted
+        downstream."""
+        if not files and not validate_persistent_baseline:
             return
         persistent_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
@@ -554,8 +567,9 @@ class AssistantService:
             if model.vision
             else files
         )
-        self._assert_files_fit_context(
-            model=model,
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=model.max_input_tokens,
+            model_name=model.name,
             prompt_text=prompt_text,
             files=persistent_files + message_files,
         )
@@ -612,6 +626,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        skill_references: list[tuple[UUID, UUID]] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -664,6 +679,7 @@ class AssistantService:
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
+                skill_references,
             )
         ) or any(
             is_provided(value)
@@ -878,6 +894,13 @@ class AssistantService:
             knowledge_changing=knowledge_changing,
         )
 
+        if skill_references is not None:
+            await self.skill_service.replace_assistant_bindings(
+                space_id=assistant.space_id,
+                assistant_id=assistant_id,
+                references=skill_references,
+            )
+
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
         # no longer fits — after switching to a smaller-context model OR enlarging
@@ -887,6 +910,7 @@ class AssistantService:
             attachments is not None
             or completion_model is not None
             or prompt_obj is not None
+            or skill_references is not None
         ):
             await self._validate_attachments_fit(assistant, space=space)
 
@@ -1003,8 +1027,16 @@ class AssistantService:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
         self._authorize_read_assistant(space=space, assistant=assistant)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        composition = await self._compose_assistant_prompt(
+            space=space,
+            assistant=assistant,
+            effective_config=effective_config,
+        )
 
-        return assistant.get_prompt_text(), assistant.attachments
+        return composition.prompt, assistant.attachments
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
@@ -1745,6 +1777,14 @@ class AssistantService:
             ):
                 prompt_override = effective_config.enforced_prompt_text
 
+        skill_composition = await self._compose_assistant_prompt(
+            space=space,
+            assistant=assistant_to_ask,
+            effective_config=effective_config,
+        )
+        if skill_composition.provenance:
+            prompt_override = skill_composition.prompt
+
         # Per-request MCP opt-out from the composer toolbar: narrow whatever set
         # is effective (policy-granted servers above, or the assistant's own) by
         # the servers the user switched off for this message. Narrowing only — it
@@ -1774,12 +1814,9 @@ class AssistantService:
         await self._assert_message_attachments_fit(
             assistant=assistant_to_ask,
             model=effective_completion_model,
-            prompt_text=(
-                prompt_override
-                if prompt_override is not None
-                else assistant_to_ask.get_prompt_text()
-            ),
+            prompt_text=skill_composition.prompt,
             files=files,
+            validate_persistent_baseline=bool(skill_composition.provenance),
         )
 
         question_id: UUID | None = None
@@ -1812,6 +1849,7 @@ class AssistantService:
                     completion_model=cast(
                         "AICompletionModel", effective_completion_model
                     ),
+                    skill_provenance=skill_composition.provenance or None,
                 )
             else:
                 (
@@ -1826,6 +1864,7 @@ class AssistantService:
                     completion_model=cast(
                         "AICompletionModel", effective_completion_model
                     ),
+                    skill_provenance=skill_composition.provenance or None,
                 )
 
         assert session is not None
@@ -1849,6 +1888,7 @@ class AssistantService:
                 files=files,
                 assistant_id=assistant_to_ask.id,
                 completion_model=cast("AICompletionModel", effective_completion_model),
+                skill_provenance=skill_composition.provenance or None,
             )
         assert question_id is not None
 
@@ -1938,6 +1978,9 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        if publish:
+            await self._validate_attachments_fit(assistant, space=space)
 
         assistant.update(published=publish)
 

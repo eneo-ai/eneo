@@ -26,6 +26,7 @@ class SpaceAction(str, Enum):
 
 class SpaceResourceType(str, Enum):
     ASSISTANT = "assistant"
+    SKILL = "skill"
     GROUP_CHAT = "group_chat"
     APP = "app"
     SERVICE = "service"
@@ -49,6 +50,7 @@ class SpaceRole(str, Enum):
 SHARED_SPACE_PERMISSIONS = {
     SpaceRole.VIEWER: {
         SpaceResourceType.ASSISTANT: {SpaceAction.READ},
+        SpaceResourceType.SKILL: {SpaceAction.READ},
         SpaceResourceType.GROUP_CHAT: {SpaceAction.READ},
         SpaceResourceType.APP: {SpaceAction.READ},
         # Only published resources are readable -- enforced in code
@@ -86,6 +88,12 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.EDIT,
             SpaceAction.DELETE,
             SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.SKILL: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.SERVICE: {
             SpaceAction.READ,
@@ -152,6 +160,12 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.EDIT,
             SpaceAction.DELETE,
             SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.SKILL: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.SERVICE: {
             SpaceAction.READ,
@@ -233,6 +247,12 @@ PERSONAL_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             # Note: No publish
         },
+        SpaceResourceType.SKILL: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+        },
         SpaceResourceType.SERVICE: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -309,6 +329,12 @@ ORG_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             SpaceAction.PUBLISH,
         },
+        SpaceResourceType.SKILL: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+        },
         SpaceResourceType.SERVICE: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -367,6 +393,7 @@ ORG_SPACE_PERMISSIONS = {
 PROPRIETARY_RESOURCES = {}
 PERMISSION_RESOURCES = {
     SpaceResourceType.ASSISTANT,
+    SpaceResourceType.SKILL,
     SpaceResourceType.GROUP_CHAT,
     SpaceResourceType.APP,
     SpaceResourceType.SERVICE,
@@ -406,6 +433,7 @@ class SpaceActor:
     def _to_permisson(self, resource_type: SpaceResourceType):
         permission_map = {
             SpaceResourceType.ASSISTANT: Permission.ASSISTANTS,
+            SpaceResourceType.SKILL: Permission.SKILLS,
             SpaceResourceType.GROUP_CHAT: Permission.GROUP_CHATS,
             SpaceResourceType.APP: Permission.APPS,
             SpaceResourceType.SERVICE: Permission.SERVICES,
@@ -829,6 +857,30 @@ class SpaceActor:
         return self.can_perform_action(
             action=SpaceAction.PUBLISH,
             resource_type=SpaceResourceType.APP,
+        )
+
+    def can_read_skills(self):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.SKILL,
+        )
+
+    def can_create_skills(self):
+        return self.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.SKILL,
+        )
+
+    def can_edit_skills(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.SKILL,
+        )
+
+    def can_delete_skills(self):
+        return self.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.SKILL,
         )
 
     def can_toggle_insight(self):

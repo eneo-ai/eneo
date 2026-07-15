@@ -4,6 +4,7 @@ from uuid import UUID
 
 from eneo.files.file_models import FileInfo
 from eneo.jobs.job_models import JobInDb
+from eneo.skills.domain.skill import SkillExecutionReference
 from eneo.users.user import UserSparse
 
 
@@ -22,6 +23,7 @@ class AppRun:
     user: UserSparse | None
     num_tokens_input: int | None
     num_tokens_output: int | None
+    skill_provenance: tuple[SkillExecutionReference, ...] | None
     job: JobInDb | None
     completion_model_id: UUID
 
@@ -32,6 +34,7 @@ class AppRun:
         output: str | None = None,
         num_tokens_input: int | None = None,
         num_tokens_output: int | None = None,
+        skill_provenance: tuple[SkillExecutionReference, ...] | None = None,
     ):
         if job_id is not None:
             self.job_id = job_id
@@ -44,3 +47,6 @@ class AppRun:
 
         if num_tokens_output is not None:
             self.num_tokens_output = num_tokens_output
+
+        if skill_provenance is not None:
+            self.skill_provenance = skill_provenance

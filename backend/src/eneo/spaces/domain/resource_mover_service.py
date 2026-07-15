@@ -1,12 +1,13 @@
 from typing import TYPE_CHECKING
 
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.actors import ActorManager
     from eneo.groups_legacy.group_service import GroupService
+    from eneo.skills.domain.skill_repo import SkillRepo
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
 
@@ -18,12 +19,14 @@ class ResourceMoverService:
         space_repo: "SpaceRepository",
         actor_manager: "ActorManager",
         group_service: "GroupService",
+        skill_repo: "SkillRepo",
     ):
         super().__init__()
         self.space_service = space_service
         self.space_repo = space_repo
         self.actor_manager = actor_manager
         self.group_service = group_service
+        self.skill_repo = skill_repo
 
     async def link_website_to_space(self, website_id: "UUID", space_id: "UUID"):
         source_space = await self.space_service.get_space_by_website(website_id)
@@ -125,6 +128,11 @@ class ResourceMoverService:
             )
 
         assistant = source_space.get_assistant(assistant_id)
+
+        if await self.skill_repo.has_assistant_bindings(assistant_id=assistant_id):
+            raise BadRequestException(
+                "Remove the Assistant's Skill bindings before moving it to another Space"
+            )
 
         target_space.add_assistant(assistant)
         source_space.remove_assistant(assistant)

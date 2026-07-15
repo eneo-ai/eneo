@@ -92,6 +92,7 @@ from eneo.settings.settings_router import (
 from eneo.settings.settings_router import (
     settings_admin_router,
 )
+from eneo.skills.presentation.skill_router import router as skill_router
 from eneo.spaces.api.space_router import router as space_router
 from eneo.storage.presentation.storage_router import router as storage_router
 from eneo.sysadmin.sysadmin_router import router as sysadmin_router
@@ -502,6 +503,15 @@ router.include_router(
     prefix="/admin/governance-policy",
     tags=["admin", "governance-policy"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    skill_router,
+    dependencies=[
+        Depends(require_resource_permission_for_method("spaces")),
+        Depends(
+            require_api_key_scope_check(resource_type="space", path_param="space_id")
+        ),
+    ],
 )
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]

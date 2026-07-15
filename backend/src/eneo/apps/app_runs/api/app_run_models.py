@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from eneo.files.file_models import FilePublic
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import InDB, ModelId, Status
+from eneo.skills.domain.skill import SkillExecutionReference
 from eneo.users.user import UserSparse
 
 
@@ -24,6 +25,7 @@ class AppRunSparse(InDB):
     status: Status
     finished_at: datetime | None
     user: UserSparse
+    skill_provenance: list[SkillExecutionReference]
 
 
 class AppRunPublic(AppRunSparse):
