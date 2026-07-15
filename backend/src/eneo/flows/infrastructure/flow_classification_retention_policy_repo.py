@@ -20,6 +20,8 @@ def _to_domain(
         tenant_id=record.tenant_id,
         security_classification_id=record.security_classification_id,
         data_retention_days=record.data_retention_days,
+        minimum_retention_days=record.minimum_retention_days,
+        no_purge=record.no_purge,
     )
 
 
@@ -88,11 +90,15 @@ class FlowClassificationRetentionPolicyRepository:
                 tenant_id=policy.tenant_id,
                 security_classification_id=policy.security_classification_id,
                 data_retention_days=policy.data_retention_days,
+                minimum_retention_days=policy.minimum_retention_days,
+                no_purge=policy.no_purge,
             )
             .on_conflict_do_update(
                 index_elements=["tenant_id", "security_classification_id"],
                 set_={
                     "data_retention_days": policy.data_retention_days,
+                    "minimum_retention_days": policy.minimum_retention_days,
+                    "no_purge": policy.no_purge,
                     "updated_at": sa.func.now(),
                 },
             )

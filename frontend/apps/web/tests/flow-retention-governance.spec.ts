@@ -33,11 +33,16 @@ test("tenant admin confirms organization and classification retention through th
   ).toBeVisible();
 
   const runHistory = page.getByRole("spinbutton", { name: "Körningshistorik" });
+  const minimumRetention = page.getByRole("spinbutton", { name: "Minsta kvarhållning" });
+  const noPurge = page.getByRole("checkbox", { name: "Spärra automatisk flödesgallring" });
   const uploads = page.getByRole("spinbutton", { name: "Aldrig anslutna uppladdningar" });
   await expect(runHistory).toHaveAttribute("placeholder", "Automatisk radering är avstängd");
+  await expect(minimumRetention).toHaveAttribute("placeholder", "Ingen minimispärr");
   await expect(uploads).toHaveAttribute("placeholder", "Automatisk radering är avstängd");
 
   await runHistory.fill("30");
+  await minimumRetention.fill("90");
+  await noPurge.check();
   await page.getByRole("button", { name: "Spara" }).click();
 
   const dialog = page.getByRole("dialog");
@@ -52,10 +57,15 @@ test("tenant admin confirms organization and classification retention through th
   await expect(dialog).toContainText("Ej levererad granskning");
   await expect(dialog).toContainText("Olöst webhook");
   await expect(dialog).toContainText("Aktiv omkörning");
+  await expect(dialog).toContainText("Policyhinder");
+  await expect(dialog).toContainText("Minimitid inte uppnådd");
+  await expect(dialog).toContainText("Gallringsspärr");
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(runHistory).toHaveValue("30");
+  await expect(minimumRetention).toHaveValue("90");
+  await expect(noPurge).toBeChecked();
 
   await runHistory.fill("60");
   await page.getByRole("button", { name: "Spara" }).click();
@@ -67,7 +77,15 @@ test("tenant admin confirms organization and classification retention through th
     .getByRole("row")
     .filter({ hasText: classificationName })
     .filter({ has: page.getByRole("spinbutton") });
-  await classificationRow.getByRole("spinbutton").fill("20");
+  await classificationRow
+    .getByRole("spinbutton", { name: `Kvarhållningsdagar för ${classificationName}` })
+    .fill("20");
+  await classificationRow
+    .getByRole("spinbutton", {
+      name: `Minsta kvarhållning i dagar för ${classificationName}`
+    })
+    .fill("120");
+  await classificationRow.getByRole("checkbox", { name: "Spärra automatisk gallring" }).check();
   await classificationRow.getByRole("button", { name: "Spara" }).click();
   await expect(
     dialog.getByRole("heading", { name: "Bekräfta destruktiv gallringsändring" })
@@ -75,7 +93,18 @@ test("tenant admin confirms organization and classification retention through th
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(classificationRow).toContainText("20 dagar");
+  await expect(classificationRow).toContainText("Gallra efter: 20 dagar");
+  await expect(classificationRow).toContainText("Minimum: 120 dagar");
+  await expect(classificationRow).toContainText("Gallringsspärr: på");
+
+  await classificationRow.getByRole("button", { name: "Rensa" }).click();
+  await expect(
+    dialog.getByRole("heading", { name: "Bekräfta destruktiv gallringsändring" })
+  ).toBeVisible();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(classificationRow).toContainText("Ingen klassificeringspolicy");
 
   await page.goto("/account");
   await page.getByRole("combobox", { name: "Språk" }).click();
@@ -84,6 +113,8 @@ test("tenant admin confirms organization and classification retention through th
 
   await page.goto("/en/admin/flow-data-retention");
   await expect(page.getByRole("heading", { name: "Flow data retention" })).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "Minimum retention" })).toHaveValue("90");
+  await expect(page.getByRole("checkbox", { name: "Block automatic Flow purge" })).toBeChecked();
   await expect(page.getByRole("spinbutton", { name: "Never-attached uploads" })).toHaveAttribute(
     "placeholder",
     "Automatic deletion is off"

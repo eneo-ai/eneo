@@ -649,6 +649,19 @@
                                         })
                                 })}
                               </p>
+                              <p class="text-secondary mt-1 text-xs leading-relaxed">
+                                {m.flow_retention_effective_barriers({
+                                  minimum: runHistoryRetention.effective_minimum_days ?? "—",
+                                  noPurge: runHistoryRetention.no_purge
+                                    ? m.flow_retention_no_purge_on()
+                                    : m.flow_retention_no_purge_off()
+                                })}
+                              </p>
+                              {#if runHistoryRetention.policy_conflict}
+                                <p class="text-warning-default mt-1 text-xs font-medium">
+                                  {m.flow_retention_policy_conflict()}
+                                </p>
+                              {/if}
                               <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                                 <div class="flex justify-between gap-2">
                                   <dt class="text-secondary">
@@ -656,6 +669,24 @@
                                   </dt>
                                   <dd class="text-primary tabular-nums">
                                     {runHistoryRetention.contributors.organization_days ?? "—"}
+                                  </dd>
+                                </div>
+                                <div class="flex justify-between gap-2">
+                                  <dt class="text-secondary">
+                                    {m.flow_retention_contributor_organization_minimum()}
+                                  </dt>
+                                  <dd class="text-primary tabular-nums">
+                                    {runHistoryRetention.contributors.organization_minimum_days ??
+                                      "—"}
+                                  </dd>
+                                </div>
+                                <div class="flex justify-between gap-2">
+                                  <dt class="text-secondary">
+                                    {m.flow_retention_contributor_classification_minimum()}
+                                  </dt>
+                                  <dd class="text-primary tabular-nums">
+                                    {runHistoryRetention.contributors.classification_minimum_days ??
+                                      "—"}
                                   </dd>
                                 </div>
                                 <div class="flex justify-between gap-2">

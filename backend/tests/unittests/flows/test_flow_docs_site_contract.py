@@ -3643,7 +3643,7 @@ def test_flow_docs_describe_the_canonical_retention_envelope() -> None:
 
     assert "run_debug_evidence_days" in overview
     assert "layered retention policy" not in overview
-    assert "full run-history purge window" in overview
+    assert "ordinary delete-after controls with non-activating barriers" in overview
     assert "1..2555" in overview
     assert "1..2555" in guide
     assert "/api/v1/settings/flow-classification-retention-policies" in overview
@@ -3656,34 +3656,44 @@ def test_flow_docs_describe_the_canonical_retention_envelope() -> None:
         overview
     )
     assert "flow_run_history_retention_days" in guide
+    assert "flow_run_history_minimum_retention_days" in guide
+    assert "flow_run_history_no_purge" in guide
     assert "flow_runtime_upload_abandonment_days" in guide
     assert "/flow-retention-policy/preview" in guide
     assert "/{security_classification_id}/preview" in guide
     assert "control-plane version" in guide
     assert "preview hash" in guide
     assert "produces `409`" in guide
-    assert "null` means **Off**" in guide
-    assert "Let `A` be the shortest configured organization value" in guide
+    assert "Let `A` be the shortest configured organization" in guide
+    assert "Let `M` be the longest configured organization" in guide
     assert "automatic Flow-run deletion is **Off**" in guide
     assert "cannot activate, loosen, or disable it" in guide
+    assert "Either no-purge value blocks automatic purge" in guide
+    assert "barrier-only classification row is valid" in guide
+    assert "There is no independent `DELETE` endpoint" in guide
     assert "required `run_history_retention` projection" in guide
-    assert "There is no absent third state." in guide
+    assert "There is no absent third state and no per-run `purge_eligible` claim" in (
+        guide
+    )
     assert "canonical run-history purge selector consumes" in guide
     assert "upload sweeping" in guide
-    assert "does not enforce records or legal holds" in guide
+    assert "not a general records-management or legal-hold framework" in guide
     assert "There is no API for raw per-step deletion intervals yet." in guide
 
 
-def test_flow_api_guide_does_not_claim_records_hold_enforcement() -> None:
+def test_flow_api_guide_scopes_no_purge_without_claiming_legal_hold_enforcement() -> (
+    None
+):
     guide = _read(FLOW_API_GUIDE)
 
-    assert "does not enforce records or legal holds" in guide
-    assert "Automatic deletion must not be enabled" in guide
-    assert "separately governed blocker exists" in guide
+    assert "explicit no-purge value is a retention barrier" in guide
+    assert "not a general records-management or legal-hold framework" in guide
+    assert "minimum/no-purge/conflict policy blockers" in guide
     for implemented_blocker in (
         "undelivered audit delivery",
         "unresolved webhook delivery",
         "active rerun work",
     ):
         assert implemented_blocker in guide
+    assert "does not enforce records or legal holds" not in guide
     assert "legal or operational holds" not in guide

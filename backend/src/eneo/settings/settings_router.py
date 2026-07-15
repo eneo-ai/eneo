@@ -1,7 +1,7 @@
 from typing import Annotated, Protocol, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, Depends, Path
 
 from eneo.authentication import auth_dependencies
 from eneo.data_retention.infrastructure.data_retention_service import (
@@ -172,6 +172,8 @@ def _flow_classification_retention_policy_public(
     return FlowClassificationRetentionPolicyPublic(
         security_classification_id=policy.security_classification_id,
         data_retention_days=policy.data_retention_days,
+        minimum_retention_days=policy.minimum_retention_days,
+        no_purge=policy.no_purge,
     )
 
 
@@ -545,7 +547,7 @@ async def list_flow_classification_retention_policies(
 
 @settings_admin_router.put(
     "/flow-classification-retention-policies/{security_classification_id}",
-    response_model=FlowClassificationRetentionPolicyPublic,
+    response_model=FlowClassificationRetentionPolicyPublic | None,
     operation_id="put_flow_classification_retention_policy",
     summary="Set flow classification retention policy",
     description=(
@@ -571,15 +573,21 @@ async def put_flow_classification_retention_policy(
     ],
     payload: FlowClassificationRetentionPolicyUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> FlowClassificationRetentionPolicyPublic:
+) -> FlowClassificationRetentionPolicyPublic | None:
     validate_permission(container.user(), Permission.ADMIN)
     service = container.flow_classification_retention_policy_service()
     policy = await service.set_policy(
         security_classification_id=security_classification_id,
         data_retention_days=payload.data_retention_days,
+        minimum_retention_days=payload.minimum_retention_days,
+        no_purge=payload.no_purge,
         confirmation=_flow_retention_confirmation(payload),
     )
-    return _flow_classification_retention_policy_public(policy)
+    return (
+        _flow_classification_retention_policy_public(policy)
+        if policy is not None
+        else None
+    )
 
 
 @settings_admin_router.post(
@@ -614,44 +622,10 @@ async def preview_flow_classification_retention_policy(
     preview = await service.preview_policy(
         security_classification_id=security_classification_id,
         data_retention_days=payload.data_retention_days,
+        minimum_retention_days=payload.minimum_retention_days,
+        no_purge=payload.no_purge,
     )
     return FlowRetentionImpactPreviewPublic.from_domain(preview)
-
-
-@settings_admin_router.delete(
-    "/flow-classification-retention-policies/{security_classification_id}",
-    response_model=None,
-    status_code=status.HTTP_204_NO_CONTENT,
-    operation_id="delete_flow_classification_retention_policy",
-    summary="Delete flow classification retention policy",
-    description=(
-        "Delete the Flow classification retention policy for one tenant security "
-        "classification. The delete is idempotent when the classification exists "
-        "but has no policy row. If the classification itself is missing or belongs "
-        "to another tenant, the endpoint returns 404. Removing an activation input "
-        "can only disable or lengthen future eligibility, so destructive preview "
-        "confirmation is not required."
-    ),
-    responses={
-        403: _flow_settings_admin_forbidden_response(),
-        404: _flow_settings_not_found_response(
-            "Security classification does not exist for this tenant."
-        ),
-    },
-)
-async def delete_flow_classification_retention_policy(
-    security_classification_id: Annotated[
-        UUID,
-        Path(description="Tenant security classification id whose policy is removed."),
-    ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> Response:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = container.flow_classification_retention_policy_service()
-    await service.delete_policy(
-        security_classification_id=security_classification_id,
-    )
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @settings_admin_router.get(

@@ -45,20 +45,53 @@ describe("canEditFlowRetentionContribution", () => {
       organization_days: 30,
       classification_days: null,
       space_days: null,
-      flow_days: 14
+      flow_days: 14,
+      organization_minimum_days: 30,
+      classification_minimum_days: null,
+      organization_no_purge: false,
+      classification_no_purge: false
     };
 
     expect(
-      canEditFlowRetentionContribution({ state: "days", effective_days: 14, contributors }, false)
+      canEditFlowRetentionContribution(
+        {
+          state: "days",
+          effective_days: 14,
+          effective_minimum_days: 30,
+          no_purge: false,
+          policy_conflict: true,
+          activation_sources: ["organization"],
+          barrier_sources: ["organization_minimum"],
+          contributors
+        },
+        false
+      )
     ).toBe(true);
     expect(
-      canEditFlowRetentionContribution({ state: "days", effective_days: 14, contributors }, true)
+      canEditFlowRetentionContribution(
+        {
+          state: "days",
+          effective_days: 14,
+          effective_minimum_days: 30,
+          no_purge: false,
+          policy_conflict: true,
+          activation_sources: ["organization"],
+          barrier_sources: ["organization_minimum"],
+          contributors
+        },
+        true
+      )
     ).toBe(false);
     expect(
       canEditFlowRetentionContribution(
         {
           state: "off",
           effective_days: null,
+          effective_minimum_days: 30,
+          no_purge: false,
+          policy_conflict: false,
+          activation_sources: [],
+          barrier_sources: ["organization_minimum"],
           contributors: { ...contributors, organization_days: null }
         },
         false

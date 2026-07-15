@@ -27,7 +27,6 @@ from eneo.settings.settings import (
     FlowRuntimePolicyUpdate,
 )
 from eneo.settings.settings_router import (
-    delete_flow_classification_retention_policy,
     get_ai_builder_budget_settings,
     get_flow_document_render_limits,
     get_flow_evidence_policy,
@@ -344,6 +343,8 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
     service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=7,
         flow_run_history_retention_days=None,
+        flow_run_history_minimum_retention_days=None,
+        flow_run_history_no_purge=False,
         flow_runtime_upload_abandonment_days=None,
         effective_state=FlowRetentionEffectiveStatePublic(
             run_history_deletion_active=False,
@@ -369,6 +370,8 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
     service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=14,
         flow_run_history_retention_days=None,
+        flow_run_history_minimum_retention_days=None,
+        flow_run_history_no_purge=False,
         flow_runtime_upload_abandonment_days=None,
         effective_state=FlowRetentionEffectiveStatePublic(
             run_history_deletion_active=False,
@@ -430,7 +433,11 @@ async def test_put_flow_classification_retention_policy_delegates_to_flow_servic
     container.user.return_value = SimpleNamespace(
         id="u", tenant_id="t", permissions=[Permission.ADMIN]
     )
-    payload = FlowClassificationRetentionPolicyUpdate(data_retention_days=14)
+    payload = FlowClassificationRetentionPolicyUpdate(
+        data_retention_days=14,
+        minimum_retention_days=None,
+        no_purge=False,
+    )
 
     response = await put_flow_classification_retention_policy(
         security_classification_id=classification_id,
@@ -438,32 +445,12 @@ async def test_put_flow_classification_retention_policy_delegates_to_flow_servic
         container=container,
     )
 
+    assert response is not None
     assert response.data_retention_days == 14
     service.set_policy.assert_awaited_once_with(
         security_classification_id=classification_id,
         data_retention_days=14,
+        minimum_retention_days=None,
+        no_purge=False,
         confirmation=None,
-    )
-
-
-@pytest.mark.asyncio
-async def test_delete_flow_classification_retention_policy_delegates_to_flow_service() -> (
-    None
-):
-    classification_id = uuid4()
-    container = MagicMock()
-    service = AsyncMock()
-    container.flow_classification_retention_policy_service.return_value = service
-    container.user.return_value = SimpleNamespace(
-        id="u", tenant_id="t", permissions=[Permission.ADMIN]
-    )
-
-    response = await delete_flow_classification_retention_policy(
-        security_classification_id=classification_id,
-        container=container,
-    )
-
-    assert response.status_code == 204
-    service.delete_policy.assert_awaited_once_with(
-        security_classification_id=classification_id
     )

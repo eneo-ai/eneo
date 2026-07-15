@@ -40,6 +40,8 @@ describe("settings flow policy endpoints", () => {
     const settings = initSettings({ fetch });
     const proposal = {
       flow_run_history_retention_days: 30,
+      flow_run_history_minimum_retention_days: null,
+      flow_run_history_no_purge: false,
       flow_runtime_upload_abandonment_days: null
     };
 
@@ -77,7 +79,9 @@ describe("settings flow policy endpoints", () => {
     const settings = initSettings({ fetch });
 
     await settings.putFlowClassificationRetentionPolicy("6f982fa9-8f74-451f-b6fc-773f937af7ef", {
-      data_retention_days: 14
+      data_retention_days: 14,
+      minimum_retention_days: null,
+      no_purge: false
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -93,7 +97,9 @@ describe("settings flow policy endpoints", () => {
       },
       requestBody: {
         "application/json": {
-          data_retention_days: 14
+          data_retention_days: 14,
+          minimum_retention_days: null,
+          no_purge: false
         }
       }
     });
@@ -105,7 +111,9 @@ describe("settings flow policy endpoints", () => {
     const classificationId = "6f982fa9-8f74-451f-b6fc-773f937af7ef";
 
     await settings.previewFlowClassificationRetentionPolicy(classificationId, {
-      data_retention_days: 14
+      data_retention_days: 14,
+      minimum_retention_days: null,
+      no_purge: false
     });
 
     expect(fetch).toHaveBeenCalledWith(
@@ -113,29 +121,15 @@ describe("settings flow policy endpoints", () => {
       {
         method: "post",
         params: { path: { security_classification_id: classificationId } },
-        requestBody: { "application/json": { data_retention_days: 14 } }
-      }
-    );
-  });
-
-  it("deletes flow classification retention policy by classification id", async () => {
-    const fetch = vi.fn(async () => undefined);
-    const settings = initSettings({ fetch });
-
-    await settings.deleteFlowClassificationRetentionPolicy("6f982fa9-8f74-451f-b6fc-773f937af7ef");
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe(
-      "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}"
-    );
-    expect(fetch.mock.calls[0][1]).toMatchObject({
-      method: "delete",
-      params: {
-        path: {
-          security_classification_id: "6f982fa9-8f74-451f-b6fc-773f937af7ef"
+        requestBody: {
+          "application/json": {
+            data_retention_days: 14,
+            minimum_retention_days: null,
+            no_purge: false
+          }
         }
       }
-    });
+    );
   });
 
   it("gets flow evidence policy from canonical settings route", async () => {

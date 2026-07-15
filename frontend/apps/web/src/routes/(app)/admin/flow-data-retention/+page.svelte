@@ -25,6 +25,8 @@
 
   let policy = $derived<FlowRetentionPolicy>(data.flowRetentionPolicy);
   let runHistoryDays = $derived(policy.flow_run_history_retention_days?.toString() ?? "");
+  let minimumDays = $derived(policy.flow_run_history_minimum_retention_days?.toString() ?? "");
+  let noPurge = $derived(policy.flow_run_history_no_purge);
   let uploadDays = $derived(policy.flow_runtime_upload_abandonment_days?.toString() ?? "");
   let saving = $state(false);
   let preview = $state<FlowRetentionImpactPreview | null>(null);
@@ -32,18 +34,23 @@
 
   let parsedRunHistory = $derived(parseFlowRetentionDays(runHistoryDays));
   let parsedUpload = $derived(parseFlowRetentionDays(uploadDays));
-  let valid = $derived(parsedRunHistory.ok && parsedUpload.ok);
+  let parsedMinimum = $derived(parseFlowRetentionDays(minimumDays));
+  let valid = $derived(parsedRunHistory.ok && parsedUpload.ok && parsedMinimum.ok);
   let changed = $derived.by(() => {
-    if (!parsedRunHistory.ok || !parsedUpload.ok) return false;
+    if (!parsedRunHistory.ok || !parsedUpload.ok || !parsedMinimum.ok) return false;
     return (
       parsedRunHistory.days !== policy.flow_run_history_retention_days ||
-      parsedUpload.days !== policy.flow_runtime_upload_abandonment_days
+      parsedUpload.days !== policy.flow_runtime_upload_abandonment_days ||
+      parsedMinimum.days !== policy.flow_run_history_minimum_retention_days ||
+      noPurge !== policy.flow_run_history_no_purge
     );
   });
 
   function applyPolicy(updated: FlowRetentionPolicy) {
     policy = updated;
     runHistoryDays = updated.flow_run_history_retention_days?.toString() ?? "";
+    minimumDays = updated.flow_run_history_minimum_retention_days?.toString() ?? "";
+    noPurge = updated.flow_run_history_no_purge;
     uploadDays = updated.flow_runtime_upload_abandonment_days?.toString() ?? "";
   }
 
@@ -57,10 +64,22 @@
     if (input instanceof HTMLInputElement) uploadDays = input.value;
   }
 
+  function updateMinimumDays(event: Event) {
+    const input = event.currentTarget;
+    if (input instanceof HTMLInputElement) minimumDays = input.value;
+  }
+
+  function updateNoPurge(event: Event) {
+    const input = event.currentTarget;
+    if (input instanceof HTMLInputElement) noPurge = input.checked;
+  }
+
   function proposal(): FlowRetentionPolicyUpdate | null {
-    if (!parsedRunHistory.ok || !parsedUpload.ok) return null;
+    if (!parsedRunHistory.ok || !parsedUpload.ok || !parsedMinimum.ok) return null;
     return {
       flow_run_history_retention_days: parsedRunHistory.days,
+      flow_run_history_minimum_retention_days: parsedMinimum.days,
+      flow_run_history_no_purge: noPurge,
       flow_runtime_upload_abandonment_days: parsedUpload.days
     };
   }
@@ -74,11 +93,16 @@
         organizationRetentionChangeIsDestructive(
           policy,
           next.flow_run_history_retention_days ?? null,
-          next.flow_runtime_upload_abandonment_days ?? null
+          next.flow_runtime_upload_abandonment_days ?? null,
+          next.flow_run_history_minimum_retention_days ?? null,
+          next.flow_run_history_no_purge ?? false
         )
       ) {
         preview = await eneo.settings.previewFlowRetentionPolicy({
           flow_run_history_retention_days: next.flow_run_history_retention_days ?? null,
+          flow_run_history_minimum_retention_days:
+            next.flow_run_history_minimum_retention_days ?? null,
+          flow_run_history_no_purge: next.flow_run_history_no_purge ?? false,
           flow_runtime_upload_abandonment_days: next.flow_runtime_upload_abandonment_days ?? null
         });
         previewOpen = true;
@@ -159,6 +183,42 @@
               <p class="text-negative-default text-xs">{validationMessage(parsedRunHistory)}</p>
             {/if}
           </div>
+        </Settings.Row>
+
+        <Settings.Row
+          title={m.flow_retention_minimum_title()}
+          description={m.flow_retention_minimum_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min={FLOW_RETENTION_MIN_DAYS}
+              max={FLOW_RETENTION_MAX_DAYS}
+              step="1"
+              placeholder={m.flow_retention_no_minimum()}
+              aria-label={m.flow_retention_minimum_title()}
+              value={minimumDays}
+              oninput={updateMinimumDays}
+              aria-invalid={validationMessage(parsedMinimum) ? "true" : undefined}
+            />
+            <p class="text-secondary text-xs">
+              {minimumDays.trim() ? m.flow_retention_days_suffix() : m.flow_retention_no_minimum()}
+            </p>
+            {#if validationMessage(parsedMinimum)}
+              <p class="text-negative-default text-xs">{validationMessage(parsedMinimum)}</p>
+            {/if}
+          </div>
+        </Settings.Row>
+
+        <Settings.Row
+          title={m.flow_retention_no_purge_title()}
+          description={m.flow_retention_no_purge_description()}
+        >
+          <label class="text-primary flex w-full max-w-sm items-center gap-3 text-sm">
+            <input class="size-4" type="checkbox" checked={noPurge} onchange={updateNoPurge} />
+            <span>{m.flow_retention_no_purge_checkbox()}</span>
+          </label>
         </Settings.Row>
 
         <Settings.Row

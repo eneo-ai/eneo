@@ -4,6 +4,7 @@ import {
   buildFlowClassificationRetentionRows,
   clearFlowClassificationRetentionPolicyDraft,
   createFlowClassificationRetentionDrafts,
+  flowClassificationRetentionChangeRequiresConfirmation,
   flowClassificationRetentionChangeIsDestructive,
   parseFlowClassificationRetentionDays,
   setFlowClassificationRetentionPolicyDraft,
@@ -26,11 +27,15 @@ function classification(
 
 function policy(
   securityClassificationId: string,
-  dataRetentionDays: number
+  dataRetentionDays: number | null,
+  minimumRetentionDays: number | null = null,
+  noPurge = false
 ): FlowClassificationRetentionPolicy {
   return {
     security_classification_id: securityClassificationId,
-    data_retention_days: dataRetentionDays
+    data_retention_days: dataRetentionDays,
+    minimum_retention_days: minimumRetentionDays,
+    no_purge: noPurge
   };
 }
 
@@ -56,7 +61,11 @@ describe("flowClassificationRetentionPolicy", () => {
         securityLevel: 2,
         hasPolicy: false,
         configuredDays: null,
+        configuredMinimumDays: null,
+        configuredNoPurge: false,
         draftDays: "",
+        draftMinimumDays: "",
+        draftNoPurge: false,
         hasChanges: false
       }
     ]);
@@ -83,7 +92,11 @@ describe("flowClassificationRetentionPolicy", () => {
         securityLevel: 3,
         hasPolicy: true,
         configuredDays: 7,
+        configuredMinimumDays: null,
+        configuredNoPurge: false,
         draftDays: "7",
+        draftMinimumDays: "",
+        draftNoPurge: false,
         hasChanges: false
       }
     ]);
@@ -135,8 +148,8 @@ describe("flowClassificationRetentionPolicy", () => {
     });
   });
 
-  it("rejects empty, non-integer, and out-of-range day values", () => {
-    expect(parseFlowClassificationRetentionDays("")).toEqual({ ok: false, reason: "empty" });
+  it("accepts Off and rejects non-integer and out-of-range day values", () => {
+    expect(parseFlowClassificationRetentionDays("")).toEqual({ ok: true, days: null });
     expect(parseFlowClassificationRetentionDays("7.5")).toEqual({
       ok: false,
       reason: "integer"
@@ -156,5 +169,19 @@ describe("flowClassificationRetentionPolicy", () => {
     expect(flowClassificationRetentionChangeIsDestructive(30, 14)).toBe(true);
     expect(flowClassificationRetentionChangeIsDestructive(30, 60)).toBe(false);
     expect(flowClassificationRetentionChangeIsDestructive(30, 30)).toBe(false);
+    expect(
+      flowClassificationRetentionChangeRequiresConfirmation(policy("class-1", null), {
+        data_retention_days: null,
+        minimum_retention_days: 90,
+        no_purge: false
+      })
+    ).toBe(true);
+    expect(
+      flowClassificationRetentionChangeRequiresConfirmation(policy("class-1", 30, 90), {
+        data_retention_days: null,
+        minimum_retention_days: null,
+        no_purge: false
+      })
+    ).toBe(true);
   });
 });

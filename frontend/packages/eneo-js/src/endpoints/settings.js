@@ -247,11 +247,11 @@ export function initSettings(client) {
     },
 
     /**
-     * Create or replace a full run-history retention policy for one security classification.
+     * Replace the desired retention policy for one security classification.
      * @param {string} securityClassificationId
      * @param {import('../types/resources').FlowClassificationRetentionPolicyUpdate} payload
      * @throws {EneoError}
-     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicy>}
+     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicy | null>}
      */
     putFlowClassificationRetentionPolicy: async (securityClassificationId, payload) => {
       const res = await client.fetch(
@@ -267,26 +267,6 @@ export function initSettings(client) {
         }
       );
       return res;
-    },
-
-    /**
-     * Delete a full run-history retention policy for one security classification.
-     * @param {string} securityClassificationId
-     * @throws {EneoError}
-     * @returns {Promise<void>}
-     */
-    deleteFlowClassificationRetentionPolicy: async (securityClassificationId) => {
-      await client.fetch(
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        {
-          method: "delete",
-          params: {
-            path: {
-              security_classification_id: securityClassificationId
-            }
-          }
-        }
-      );
     },
 
     /**

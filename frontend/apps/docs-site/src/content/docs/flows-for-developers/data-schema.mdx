@@ -662,7 +662,9 @@ erDiagram
   flow_classification_retention_policies {
     uuid tenant_id PK "required"
     uuid security_classification_id PK "required"
-    integer data_retention_days "required"
+    integer data_retention_days "nullable"
+    integer minimum_retention_days "nullable"
+    boolean no_purge "required"
     timestamp created_at "required"
     timestamp updated_at "required"
   }

@@ -45,7 +45,7 @@ def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate()
     compiled = _compile(service._build_due_flow_run_history_purge_query(now=now))
 
     assert (
-        compiled.count("coalesce(flow_runs.finished_at, flow_runs.created_at) <=") == 2
+        compiled.count("coalesce(flow_runs.finished_at, flow_runs.created_at) <=") == 3
     )
     assert "flow_runs.status IN ('completed', 'failed', 'cancelled')" in compiled
     assert compiled.count("make_interval") >= 2
@@ -69,6 +69,10 @@ def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate()
     )
     assert f"{activation_sql} IS NOT NULL" in compiled
     assert f"make_interval(0, 0, 0, {effective_retention_sql})" in compiled
+    assert "greatest(tenants.flow_run_history_minimum_retention_days" in compiled
+    assert "flow_classification_retention_policies.minimum_retention_days" in compiled
+    assert "tenants.flow_run_history_no_purge" in compiled
+    assert "flow_classification_retention_policies.no_purge" in compiled
     assert "coalesce(flows.data_retention_days, spaces.data_retention_days)" not in (
         compiled
     )

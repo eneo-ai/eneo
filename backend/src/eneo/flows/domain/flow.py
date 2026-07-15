@@ -140,6 +140,19 @@ class FlowRunRetentionContributors(BaseModel):
     classification_days: int | None
     space_days: int | None
     flow_days: int | None
+    organization_minimum_days: int | None
+    classification_minimum_days: int | None
+    organization_no_purge: bool
+    classification_no_purge: bool
+
+
+FlowRunRetentionActivationSource: TypeAlias = Literal["organization", "classification"]
+FlowRunRetentionBarrierSource: TypeAlias = Literal[
+    "organization_minimum",
+    "classification_minimum",
+    "organization_no_purge",
+    "classification_no_purge",
+]
 
 
 class FlowRunRetentionOff(BaseModel):
@@ -147,6 +160,11 @@ class FlowRunRetentionOff(BaseModel):
 
     state: Literal["off"]
     effective_days: None
+    effective_minimum_days: int | None
+    no_purge: bool
+    policy_conflict: bool
+    activation_sources: tuple[FlowRunRetentionActivationSource, ...]
+    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...]
     contributors: FlowRunRetentionContributors
 
 
@@ -155,6 +173,11 @@ class FlowRunRetentionDays(BaseModel):
 
     state: Literal["days"]
     effective_days: int
+    effective_minimum_days: int | None
+    no_purge: bool
+    policy_conflict: bool
+    activation_sources: tuple[FlowRunRetentionActivationSource, ...]
+    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...]
     contributors: FlowRunRetentionContributors
 
 

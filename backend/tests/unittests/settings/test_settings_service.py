@@ -129,11 +129,15 @@ class MockDataRetentionService:
         tenant_id,
         run_history_patch,
         upload_abandonment_patch,
+        minimum_retention_patch,
+        no_purge_patch,
         confirmation,
     ):
         old_policy = FlowRetentionOrganizationProposal(
             flow_run_history_retention_days=None,
             flow_runtime_upload_abandonment_days=None,
+            flow_run_history_minimum_retention_days=None,
+            flow_run_history_no_purge=False,
         )
         new_policy = FlowRetentionOrganizationProposal(
             flow_run_history_retention_days=(
@@ -143,6 +147,14 @@ class MockDataRetentionService:
                 upload_abandonment_patch.value
                 if upload_abandonment_patch.is_set
                 else None
+            ),
+            flow_run_history_minimum_retention_days=(
+                minimum_retention_patch.value
+                if minimum_retention_patch.is_set
+                else None
+            ),
+            flow_run_history_no_purge=(
+                no_purge_patch.value if no_purge_patch.is_set else False
             ),
         )
         return FlowRetentionOrganizationChangeDecision(
@@ -168,7 +180,14 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
         (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
-        (FlowClassificationRetentionPolicyUpdate, {"data_retention_days": 7}),
+        (
+            FlowClassificationRetentionPolicyUpdate,
+            {
+                "data_retention_days": 7,
+                "minimum_retention_days": None,
+                "no_purge": False,
+            },
+        ),
         (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
     )
 

@@ -29,6 +29,8 @@ describe("Flow retention policy control-plane helpers", () => {
         {
           run_debug_evidence_days: 7,
           flow_run_history_retention_days: 30,
+          flow_run_history_minimum_retention_days: null,
+          flow_run_history_no_purge: false,
           flow_runtime_upload_abandonment_days: null,
           effective_state: {
             run_history_deletion_active: true,
@@ -37,7 +39,29 @@ describe("Flow retention policy control-plane helpers", () => {
           }
         },
         60,
-        14
+        14,
+        null,
+        false
+      )
+    ).toBe(true);
+    expect(
+      organizationRetentionChangeIsDestructive(
+        {
+          run_debug_evidence_days: 7,
+          flow_run_history_retention_days: null,
+          flow_run_history_minimum_retention_days: null,
+          flow_run_history_no_purge: false,
+          flow_runtime_upload_abandonment_days: null,
+          effective_state: {
+            run_history_deletion_active: false,
+            runtime_upload_abandonment_active: false,
+            classification_policy_count: 0
+          }
+        },
+        null,
+        null,
+        90,
+        false
       )
     ).toBe(true);
   });
@@ -51,7 +75,11 @@ describe("Flow retention policy control-plane helpers", () => {
       proposed_eligible_bytes: 0,
       newly_eligible_bytes: 0,
       earliest_proposed_anchor: null,
-      latest_proposed_anchor: null
+      latest_proposed_anchor: null,
+      earliest_proposed_delete_after_at: null,
+      latest_proposed_delete_after_at: null,
+      earliest_proposed_minimum_not_before_at: null,
+      latest_proposed_minimum_not_before_at: null
     };
     const preview: FlowRetentionImpactPreview = {
       destructive_change: true,
@@ -66,6 +94,14 @@ describe("Flow retention policy control-plane helpers", () => {
         undelivered_audit_count: 0,
         unresolved_webhook_count: 0,
         active_rerun_count: 0
+      },
+      policy_blockers: {
+        run_history_minimum_not_satisfied_count: 0,
+        run_history_no_purge_count: 0,
+        run_history_policy_conflict_count: 0,
+        runtime_upload_minimum_not_satisfied_count: 0,
+        runtime_upload_no_purge_count: 0,
+        runtime_upload_policy_conflict_count: 0
       },
       latent_space_retention_days: [],
       latent_flow_retention_days: []

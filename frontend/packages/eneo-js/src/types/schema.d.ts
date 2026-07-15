@@ -1065,11 +1065,7 @@ export interface paths {
      */
     put: operations["put_flow_classification_retention_policy"];
     post?: never;
-    /**
-     * Delete flow classification retention policy
-     * @description Delete the Flow classification retention policy for one tenant security classification. The delete is idempotent when the classification exists but has no policy row. If the classification itself is missing or belongs to another tenant, the endpoint returns 404. Removing an activation input can only disable or lengthen future eligibility, so destructive preview confirmation is not required.
-     */
-    delete: operations["delete_flow_classification_retention_policy"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -13916,6 +13912,8 @@ export interface components {
      *       "policies": [
      *         {
      *           "data_retention_days": 7,
+     *           "minimum_retention_days": 30,
+     *           "no_purge": false,
      *           "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef"
      *         }
      *       ]
@@ -13928,7 +13926,9 @@ export interface components {
     /**
      * FlowClassificationRetentionPolicyPreviewRequest
      * @example {
-     *       "data_retention_days": 14
+     *       "data_retention_days": 14,
+     *       "minimum_retention_days": 30,
+     *       "no_purge": false
      *     }
      */
     FlowClassificationRetentionPolicyPreviewRequest: {
@@ -13936,12 +13936,24 @@ export interface components {
        * Data Retention Days
        * @description Proposed matching-classification Flow run-history activation window.
        */
-      data_retention_days: number;
+      data_retention_days: number | null;
+      /**
+       * Minimum Retention Days
+       * @description Proposed matching-classification minimum retention barrier.
+       */
+      minimum_retention_days: number | null;
+      /**
+       * No Purge
+       * @description Proposed matching-classification no-purge barrier; it does not activate automatic deletion.
+       */
+      no_purge: boolean;
     };
     /**
      * FlowClassificationRetentionPolicyPublic
      * @example {
      *       "data_retention_days": 7,
+     *       "minimum_retention_days": 30,
+     *       "no_purge": false,
      *       "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef"
      *     }
      */
@@ -13955,12 +13967,24 @@ export interface components {
        * Data Retention Days
        * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
        */
-      data_retention_days: number;
+      data_retention_days: number | null;
+      /**
+       * Minimum Retention Days
+       * @description Matching-classification minimum retention barrier in days.
+       */
+      minimum_retention_days: number | null;
+      /**
+       * No Purge
+       * @description Matching-classification no-purge barrier; it never activates deletion.
+       */
+      no_purge: boolean;
     };
     /**
      * FlowClassificationRetentionPolicyUpdate
      * @example {
-     *       "data_retention_days": 14
+     *       "data_retention_days": 14,
+     *       "minimum_retention_days": 30,
+     *       "no_purge": false
      *     }
      */
     FlowClassificationRetentionPolicyUpdate: {
@@ -13968,7 +13992,17 @@ export interface components {
        * Data Retention Days
        * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
        */
-      data_retention_days: number;
+      data_retention_days: number | null;
+      /**
+       * Minimum Retention Days
+       * @description Matching-classification minimum retention barrier in days.
+       */
+      minimum_retention_days: number | null;
+      /**
+       * No Purge
+       * @description Matching-classification no-purge barrier; it never activates deletion.
+       */
+      no_purge: boolean;
       confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
     };
     /**
@@ -14889,13 +14923,28 @@ export interface components {
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
+     *         "activation_sources": [
+     *           "organization",
+     *           "classification"
+     *         ],
+     *         "barrier_sources": [
+     *           "organization_minimum",
+     *           "classification_minimum"
+     *         ],
      *         "contributors": {
      *           "classification_days": 30,
+     *           "classification_minimum_days": 60,
+     *           "classification_no_purge": false,
      *           "flow_days": 30,
      *           "organization_days": 90,
+     *           "organization_minimum_days": 90,
+     *           "organization_no_purge": false,
      *           "space_days": 14
      *         },
      *         "effective_days": 14,
+     *         "effective_minimum_days": 90,
+     *         "no_purge": false,
+     *         "policy_conflict": true,
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -14966,7 +15015,7 @@ export interface components {
       data_retention_days?: number | null;
       /**
        * Run History Retention
-       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window.
+       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window. Organization and matching-classification minimum/no-purge barriers never activate deletion and cannot be weakened here.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -15023,6 +15072,14 @@ export interface components {
       earliest_proposed_anchor: string | null;
       /** Latest Proposed Anchor */
       latest_proposed_anchor: string | null;
+      /** Earliest Proposed Delete After At */
+      earliest_proposed_delete_after_at: string | null;
+      /** Latest Proposed Delete After At */
+      latest_proposed_delete_after_at: string | null;
+      /** Earliest Proposed Minimum Not Before At */
+      earliest_proposed_minimum_not_before_at: string | null;
+      /** Latest Proposed Minimum Not Before At */
+      latest_proposed_minimum_not_before_at: string | null;
     };
     /** FlowRetentionEffectiveStatePublic */
     FlowRetentionEffectiveStatePublic: {
@@ -15060,12 +15117,24 @@ export interface components {
      *         "undelivered_audit_count": 1,
      *         "unresolved_webhook_count": 0
      *       },
+     *       "policy_blockers": {
+     *         "run_history_minimum_not_satisfied_count": 4,
+     *         "run_history_no_purge_count": 0,
+     *         "run_history_policy_conflict_count": 12,
+     *         "runtime_upload_minimum_not_satisfied_count": 1,
+     *         "runtime_upload_no_purge_count": 0,
+     *         "runtime_upload_policy_conflict_count": 3
+     *       },
      *       "preview_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
      *       "previewed_at": "2026-07-13T12:00:00Z",
      *       "run_history": {
      *         "current_eligible_count": 0,
      *         "earliest_proposed_anchor": "2025-01-01T12:00:00Z",
+     *         "earliest_proposed_delete_after_at": "2025-01-31T12:00:00Z",
+     *         "earliest_proposed_minimum_not_before_at": "2025-04-01T12:00:00Z",
      *         "latest_proposed_anchor": "2026-01-01T12:00:00Z",
+     *         "latest_proposed_delete_after_at": "2026-01-31T12:00:00Z",
+     *         "latest_proposed_minimum_not_before_at": "2026-04-01T12:00:00Z",
      *         "newly_eligible_bytes": 4096,
      *         "newly_eligible_count": 12,
      *         "no_longer_eligible_count": 0,
@@ -15077,7 +15146,11 @@ export interface components {
      *       "runtime_uploads": {
      *         "current_eligible_count": 0,
      *         "earliest_proposed_anchor": "2025-06-01T12:00:00Z",
+     *         "earliest_proposed_delete_after_at": "2025-06-15T12:00:00Z",
+     *         "earliest_proposed_minimum_not_before_at": "2025-08-30T12:00:00Z",
      *         "latest_proposed_anchor": "2025-12-01T12:00:00Z",
+     *         "latest_proposed_delete_after_at": "2025-12-15T12:00:00Z",
+     *         "latest_proposed_minimum_not_before_at": "2026-03-01T12:00:00Z",
      *         "newly_eligible_bytes": 1024,
      *         "newly_eligible_count": 3,
      *         "no_longer_eligible_count": 0,
@@ -15111,6 +15184,7 @@ export interface components {
       run_history: components["schemas"]["FlowRetentionDataImpactPublic"];
       runtime_uploads: components["schemas"]["FlowRetentionDataImpactPublic"];
       lifecycle_blockers: components["schemas"]["FlowRetentionLifecycleBlockersPublic"];
+      policy_blockers: components["schemas"]["FlowRetentionPolicyBlockersPublic"];
       /** Latent Space Retention Days */
       latent_space_retention_days: number[];
       /** Latent Flow Retention Days */
@@ -15128,6 +15202,8 @@ export interface components {
     /**
      * FlowRetentionOrganizationPreviewRequest
      * @example {
+     *       "flow_run_history_minimum_retention_days": 90,
+     *       "flow_run_history_no_purge": false,
      *       "flow_run_history_retention_days": 30,
      *       "flow_runtime_upload_abandonment_days": 14
      *     }
@@ -15140,6 +15216,31 @@ export interface components {
       flow_run_history_retention_days: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days: number | null;
+      /**
+       * Flow Run History Minimum Retention Days
+       * @description Organization minimum retention barrier for Flow run history and never-attached runtime uploads. Null removes this barrier.
+       */
+      flow_run_history_minimum_retention_days: number | null;
+      /**
+       * Flow Run History No Purge
+       * @description Organization barrier that blocks automatic Flow run-history and never-attached runtime-upload purge without activating deletion.
+       */
+      flow_run_history_no_purge: boolean;
+    };
+    /** FlowRetentionPolicyBlockersPublic */
+    FlowRetentionPolicyBlockersPublic: {
+      /** Run History Minimum Not Satisfied Count */
+      run_history_minimum_not_satisfied_count: number;
+      /** Run History No Purge Count */
+      run_history_no_purge_count: number;
+      /** Run History Policy Conflict Count */
+      run_history_policy_conflict_count: number;
+      /** Runtime Upload Minimum Not Satisfied Count */
+      runtime_upload_minimum_not_satisfied_count: number;
+      /** Runtime Upload No Purge Count */
+      runtime_upload_no_purge_count: number;
+      /** Runtime Upload Policy Conflict Count */
+      runtime_upload_policy_conflict_count: number;
     };
     /**
      * FlowRetentionPolicyPublic
@@ -15149,6 +15250,8 @@ export interface components {
      *         "run_history_deletion_active": true,
      *         "runtime_upload_abandonment_active": true
      *       },
+     *       "flow_run_history_minimum_retention_days": 90,
+     *       "flow_run_history_no_purge": false,
      *       "flow_run_history_retention_days": 30,
      *       "flow_runtime_upload_abandonment_days": 14,
      *       "run_debug_evidence_days": 7
@@ -15164,11 +15267,17 @@ export interface components {
       flow_run_history_retention_days: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days: number | null;
+      /** Flow Run History Minimum Retention Days */
+      flow_run_history_minimum_retention_days: number | null;
+      /** Flow Run History No Purge */
+      flow_run_history_no_purge: boolean;
       effective_state: components["schemas"]["FlowRetentionEffectiveStatePublic"];
     };
     /**
      * FlowRetentionPolicyUpdate
      * @example {
+     *       "flow_run_history_minimum_retention_days": 90,
+     *       "flow_run_history_no_purge": false,
      *       "flow_run_history_retention_days": 30
      *     }
      */
@@ -15182,6 +15291,10 @@ export interface components {
       flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
+      /** Flow Run History Minimum Retention Days */
+      flow_run_history_minimum_retention_days?: number | null;
+      /** Flow Run History No Purge */
+      flow_run_history_no_purge?: boolean;
       confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
     };
     /** FlowReviewCheckpointRuntimePathsPublic */
@@ -17354,6 +17467,14 @@ export interface components {
       space_days: number | null;
       /** Flow Days */
       flow_days: number | null;
+      /** Organization Minimum Days */
+      organization_minimum_days: number | null;
+      /** Classification Minimum Days */
+      classification_minimum_days: number | null;
+      /** Organization No Purge */
+      organization_no_purge: boolean;
+      /** Classification No Purge */
+      classification_no_purge: boolean;
     };
     /** FlowRunRetentionDays */
     FlowRunRetentionDays: {
@@ -17364,6 +17485,21 @@ export interface components {
       state: "days";
       /** Effective Days */
       effective_days: number;
+      /** Effective Minimum Days */
+      effective_minimum_days: number | null;
+      /** No Purge */
+      no_purge: boolean;
+      /** Policy Conflict */
+      policy_conflict: boolean;
+      /** Activation Sources */
+      activation_sources: ("organization" | "classification")[];
+      /** Barrier Sources */
+      barrier_sources: (
+        | "organization_minimum"
+        | "classification_minimum"
+        | "organization_no_purge"
+        | "classification_no_purge"
+      )[];
       contributors: components["schemas"]["FlowRunRetentionContributors"];
     };
     /** FlowRunRetentionOff */
@@ -17375,6 +17511,21 @@ export interface components {
       state: "off";
       /** Effective Days */
       effective_days: null;
+      /** Effective Minimum Days */
+      effective_minimum_days: number | null;
+      /** No Purge */
+      no_purge: boolean;
+      /** Policy Conflict */
+      policy_conflict: boolean;
+      /** Activation Sources */
+      activation_sources: ("organization" | "classification")[];
+      /** Barrier Sources */
+      barrier_sources: (
+        | "organization_minimum"
+        | "classification_minimum"
+        | "organization_no_purge"
+        | "classification_no_purge"
+      )[];
       contributors: components["schemas"]["FlowRunRetentionContributors"];
     };
     /**
@@ -18765,13 +18916,28 @@ export interface components {
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
+     *         "activation_sources": [
+     *           "organization",
+     *           "classification"
+     *         ],
+     *         "barrier_sources": [
+     *           "organization_minimum",
+     *           "classification_minimum"
+     *         ],
      *         "contributors": {
      *           "classification_days": 30,
+     *           "classification_minimum_days": 60,
+     *           "classification_no_purge": false,
      *           "flow_days": 30,
      *           "organization_days": 90,
+     *           "organization_minimum_days": 90,
+     *           "organization_no_purge": false,
      *           "space_days": 14
      *         },
      *         "effective_days": 14,
+     *         "effective_minimum_days": 90,
+     *         "no_purge": false,
+     *         "policy_conflict": true,
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -18816,7 +18982,7 @@ export interface components {
       data_retention_days?: number | null;
       /**
        * Run History Retention
-       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window.
+       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window. Organization and matching-classification minimum/no-purge barriers never activate deletion and cannot be weakened here.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -25467,6 +25633,13 @@ export interface components {
       };
       /** Flow Run History Retention Days */
       flow_run_history_retention_days?: number | null;
+      /** Flow Run History Minimum Retention Days */
+      flow_run_history_minimum_retention_days?: number | null;
+      /**
+       * Flow Run History No Purge
+       * @default false
+       */
+      flow_run_history_no_purge?: boolean;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
       /** Favorite Providers */
@@ -25864,6 +26037,13 @@ export interface components {
       };
       /** Flow Run History Retention Days */
       flow_run_history_retention_days?: number | null;
+      /** Flow Run History Minimum Retention Days */
+      flow_run_history_minimum_retention_days?: number | null;
+      /**
+       * Flow Run History No Purge
+       * @default false
+       */
+      flow_run_history_no_purge?: boolean;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
       /** Favorite Providers */
@@ -31814,7 +31994,8 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["FlowClassificationRetentionPolicyPublic"];
+          "application/json":
+            components["schemas"]["FlowClassificationRetentionPolicyPublic"] | null;
         };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
@@ -31860,68 +32041,6 @@ export interface operations {
            *       "message": "Request a new Flow retention preview and confirm it.",
            *       "eneo_error_code": 9041,
            *       "code": "flow_retention_preview_stale"
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  delete_flow_classification_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Tenant security classification id whose policy is removed. */
-        security_classification_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "Insufficient permissions.",
-           *       "eneo_error_code": 9001,
-           *       "code": "insufficient_tenant_permission"
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Security classification does not exist for this tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "Not found.",
-           *       "eneo_error_code": 9000,
-           *       "code": "not_found"
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -42488,11 +42607,26 @@ export interface operations {
            *           "run_history_retention": {
            *             "state": "days",
            *             "effective_days": 14,
+           *             "effective_minimum_days": 90,
+           *             "no_purge": false,
+           *             "policy_conflict": true,
+           *             "activation_sources": [
+           *               "organization",
+           *               "classification"
+           *             ],
+           *             "barrier_sources": [
+           *               "organization_minimum",
+           *               "classification_minimum"
+           *             ],
            *             "contributors": {
            *               "organization_days": 90,
            *               "classification_days": 30,
            *               "space_days": 14,
-           *               "flow_days": 30
+           *               "flow_days": 30,
+           *               "organization_minimum_days": 90,
+           *               "classification_minimum_days": 60,
+           *               "organization_no_purge": false,
+           *               "classification_no_purge": false
            *             }
            *           },
            *           "created_at": "2026-03-17T09:30:00Z",

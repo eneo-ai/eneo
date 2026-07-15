@@ -50,6 +50,8 @@ async def test_set_policy_requires_tenant_security_classification() -> None:
         await service.set_policy(
             security_classification_id=uuid4(),
             data_retention_days=7,
+            minimum_retention_days=None,
+            no_purge=False,
             confirmation=None,
         )
 
@@ -93,6 +95,8 @@ async def test_set_policy_upserts_and_audits_change() -> None:
     updated = await service.set_policy(
         security_classification_id=classification_id,
         data_retention_days=7,
+        minimum_retention_days=None,
+        no_purge=False,
         confirmation=None,
     )
 
@@ -107,18 +111,39 @@ async def test_set_policy_upserts_and_audits_change() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_policy_is_idempotent_for_existing_classification() -> None:
+async def test_all_off_desired_state_deletes_through_confirmed_put() -> None:
     classification_id = uuid4()
     repo = AsyncMock()
     repo.security_classification_exists.return_value = True
-    repo.get.return_value = None
-    repo.delete.return_value = False
     audit_service = AsyncMock()
-    service = _service(repo, audit_service)
+    data_retention_service = AsyncMock()
+    data_retention_service.prepare_flow_retention_classification_change.return_value = (
+        FlowRetentionClassificationChangeDecision(
+            old_policy=FlowRetentionClassificationProposal(
+                security_classification_id=classification_id,
+                data_retention_days=30,
+            ),
+            new_policy=FlowRetentionClassificationProposal(
+                security_classification_id=classification_id,
+                data_retention_days=None,
+            ),
+            destructive_change=True,
+            preview=None,
+        )
+    )
+    service = _service(repo, audit_service, data_retention_service)
 
-    await service.delete_policy(security_classification_id=classification_id)
+    updated = await service.set_policy(
+        security_classification_id=classification_id,
+        data_retention_days=None,
+        minimum_retention_days=None,
+        no_purge=False,
+        confirmation=None,
+    )
 
+    assert updated is None
     repo.delete.assert_awaited_once()
+    repo.upsert.assert_not_awaited()
     audit_service.log.assert_awaited_once()
     metadata = audit_service.log.await_args.kwargs["metadata"]
     assert set(metadata) == {"old_policy", "new_policy", "preview", "activation"}
@@ -126,4 +151,4 @@ async def test_delete_policy_is_idempotent_for_existing_classification() -> None
         classification_id
     )
     assert metadata["new_policy"] is None
-    assert metadata["activation"]["deleted"] is False
+    assert metadata["activation"]["destructive_change"] is True

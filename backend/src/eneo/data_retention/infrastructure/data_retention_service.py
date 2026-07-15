@@ -176,7 +176,9 @@ FLOW_RETENTION_PREVIEW_STALE_CODE = "flow_retention_preview_stale"
 @dataclass(frozen=True, slots=True)
 class FlowRetentionClassificationPolicyState:
     security_classification_id: UUID
-    data_retention_days: int
+    data_retention_days: int | None
+    minimum_retention_days: int | None = None
+    no_purge: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,14 +188,25 @@ class FlowRetentionControlPlaneState:
     classification_policies: tuple[FlowRetentionClassificationPolicyState, ...]
     latent_space_retention_days: tuple[int, ...]
     latent_flow_retention_days: tuple[int, ...]
+    organization_minimum_retention_days: int | None = None
+    organization_no_purge: bool = False
 
     @property
     def version(self) -> str:
         payload = {
             "organization_run_history_days": self.organization_run_history_days,
+            "organization_minimum_retention_days": (
+                self.organization_minimum_retention_days
+            ),
+            "organization_no_purge": self.organization_no_purge,
             "runtime_upload_abandonment_days": (self.runtime_upload_abandonment_days),
             "classification_policies": [
-                [str(policy.security_classification_id), policy.data_retention_days]
+                [
+                    str(policy.security_classification_id),
+                    policy.data_retention_days,
+                    policy.minimum_retention_days,
+                    policy.no_purge,
+                ]
                 for policy in self.classification_policies
             ],
         }
@@ -206,18 +219,28 @@ class FlowRetentionControlPlaneState:
 class FlowRetentionOrganizationProposal:
     flow_run_history_retention_days: int | None
     flow_runtime_upload_abandonment_days: int | None
+    flow_run_history_minimum_retention_days: int | None = None
+    flow_run_history_no_purge: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRetentionClassificationProposal:
     security_classification_id: UUID
-    data_retention_days: int
+    data_retention_days: int | None
+    minimum_retention_days: int | None = None
+    no_purge: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRetentionValuePatch:
     is_set: bool
     value: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRetentionBoolPatch:
+    is_set: bool
+    value: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +260,10 @@ class FlowRetentionDataImpact:
     newly_eligible_bytes: int
     earliest_proposed_anchor: datetime | None
     latest_proposed_anchor: datetime | None
+    earliest_proposed_delete_after_at: datetime | None
+    latest_proposed_delete_after_at: datetime | None
+    earliest_proposed_minimum_not_before_at: datetime | None
+    latest_proposed_minimum_not_before_at: datetime | None
 
     def hash_payload(self) -> dict[str, object]:
         return {
@@ -250,6 +277,18 @@ class FlowRetentionDataImpact:
                 self.earliest_proposed_anchor
             ),
             "latest_proposed_anchor": _datetime_hash_value(self.latest_proposed_anchor),
+            "earliest_proposed_delete_after_at": _datetime_hash_value(
+                self.earliest_proposed_delete_after_at
+            ),
+            "latest_proposed_delete_after_at": _datetime_hash_value(
+                self.latest_proposed_delete_after_at
+            ),
+            "earliest_proposed_minimum_not_before_at": _datetime_hash_value(
+                self.earliest_proposed_minimum_not_before_at
+            ),
+            "latest_proposed_minimum_not_before_at": _datetime_hash_value(
+                self.latest_proposed_minimum_not_before_at
+            ),
         }
 
 
@@ -268,6 +307,34 @@ class FlowRetentionLifecycleBlockers:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowRetentionPolicyBlockers:
+    run_history_minimum_not_satisfied_count: int
+    run_history_no_purge_count: int
+    run_history_policy_conflict_count: int
+    runtime_upload_minimum_not_satisfied_count: int
+    runtime_upload_no_purge_count: int
+    runtime_upload_policy_conflict_count: int
+
+    def hash_payload(self) -> dict[str, int]:
+        return {
+            "run_history_minimum_not_satisfied_count": (
+                self.run_history_minimum_not_satisfied_count
+            ),
+            "run_history_no_purge_count": self.run_history_no_purge_count,
+            "run_history_policy_conflict_count": (
+                self.run_history_policy_conflict_count
+            ),
+            "runtime_upload_minimum_not_satisfied_count": (
+                self.runtime_upload_minimum_not_satisfied_count
+            ),
+            "runtime_upload_no_purge_count": self.runtime_upload_no_purge_count,
+            "runtime_upload_policy_conflict_count": (
+                self.runtime_upload_policy_conflict_count
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class FlowRetentionImpactPreview:
     destructive_change: bool
     control_plane_version: str
@@ -276,6 +343,7 @@ class FlowRetentionImpactPreview:
     run_history: FlowRetentionDataImpact
     runtime_uploads: FlowRetentionDataImpact
     lifecycle_blockers: FlowRetentionLifecycleBlockers
+    policy_blockers: FlowRetentionPolicyBlockers
     latent_space_retention_days: tuple[int, ...]
     latent_flow_retention_days: tuple[int, ...]
 
@@ -284,6 +352,7 @@ class FlowRetentionImpactPreview:
             "run_history": self.run_history.hash_payload(),
             "runtime_uploads": self.runtime_uploads.hash_payload(),
             "lifecycle_blockers": self.lifecycle_blockers.hash_payload(),
+            "policy_blockers": self.policy_blockers.hash_payload(),
         }
 
 
@@ -307,11 +376,25 @@ class FlowRetentionClassificationChangeDecision:
 class _FlowRetentionSqlProposal:
     organization_run_history_days: int | None
     runtime_upload_abandonment_days: int | None
+    organization_minimum_retention_days: int | None = None
+    organization_no_purge: bool = False
     classification_id: UUID | None = None
     classification_days: int | None = None
+    classification_minimum_retention_days: int | None = None
+    classification_no_purge: bool = False
 
 
 FlowRetentionSqlDays: TypeAlias = sa.ColumnElement[int] | sa.ColumnElement[int | None]
+FlowRetentionSqlBool: TypeAlias = sa.ColumnElement[bool] | sa.ColumnElement[bool | None]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunHistoryRetentionEligibilitySql:
+    """Predicates derived from one run-history policy envelope."""
+
+    delete_after_due: sa.ColumnElement[bool]
+    minimum_satisfied: sa.ColumnElement[bool]
+    eligible: sa.ColumnElement[bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,8 +405,43 @@ class FlowRunHistoryRetentionSqlEnvelope:
     classification_days: FlowRetentionSqlDays
     space_days: FlowRetentionSqlDays
     flow_days: FlowRetentionSqlDays
+    organization_minimum_days: FlowRetentionSqlDays
+    classification_minimum_days: FlowRetentionSqlDays
+    organization_no_purge: FlowRetentionSqlBool
+    classification_no_purge: FlowRetentionSqlBool
     activation_days: sa.ColumnElement[int | None]
     effective_days: sa.ColumnElement[int | None]
+    effective_minimum_days: sa.ColumnElement[int | None]
+    no_purge: sa.ColumnElement[bool]
+    policy_conflict: sa.ColumnElement[bool]
+
+    def eligibility(
+        self,
+        *,
+        anchor: sa.ColumnElement[datetime],
+        at: datetime,
+    ) -> FlowRunHistoryRetentionEligibilitySql:
+        """Apply activation, delete-after, and barrier predicates together."""
+        delete_after_due = sa.and_(
+            self.activation_days.is_not(None),
+            anchor
+            <= sa.literal(at) - sa.func.make_interval(0, 0, 0, self.effective_days),
+        )
+        minimum_satisfied = sa.or_(
+            self.effective_minimum_days.is_(None),
+            anchor
+            <= sa.literal(at)
+            - sa.func.make_interval(0, 0, 0, self.effective_minimum_days),
+        )
+        return FlowRunHistoryRetentionEligibilitySql(
+            delete_after_due=delete_after_due,
+            minimum_satisfied=minimum_satisfied,
+            eligible=sa.and_(
+                delete_after_due,
+                minimum_satisfied,
+                sa.not_(self.no_purge),
+            ),
+        )
 
 
 def _datetime_hash_value(value: datetime | None) -> str | None:
@@ -336,6 +454,22 @@ def _retention_change_is_destructive(
     *, old_days: int | None, new_days: int | None
 ) -> bool:
     return new_days is not None and (old_days is None or new_days < old_days)
+
+
+def _retention_barrier_changed(
+    *,
+    old_minimum_days: int | None,
+    new_minimum_days: int | None,
+    old_no_purge: bool,
+    new_no_purge: bool,
+) -> bool:
+    return old_minimum_days != new_minimum_days or old_no_purge is not new_no_purge
+
+
+def _retention_days_literal(value: int | None) -> FlowRetentionSqlDays:
+    if value is None:
+        return cast(sa.ColumnElement[int | None], sa.null())
+    return sa.literal(value, type_=sa.Integer())
 
 
 class DataRetentionService:
@@ -352,6 +486,10 @@ class DataRetentionService:
         classification_days: FlowRetentionSqlDays,
         space_days: FlowRetentionSqlDays,
         flow_days: FlowRetentionSqlDays,
+        organization_minimum_days: FlowRetentionSqlDays,
+        classification_minimum_days: FlowRetentionSqlDays,
+        organization_no_purge: FlowRetentionSqlBool,
+        classification_no_purge: FlowRetentionSqlBool,
     ) -> FlowRunHistoryRetentionSqlEnvelope:
         """Build the sole SQL policy envelope used by reads and deletion paths."""
         activation_days = cast(
@@ -368,13 +506,36 @@ class DataRetentionService:
                 else_=sa.null(),
             ),
         )
+        effective_minimum_days = cast(
+            sa.ColumnElement[int | None],
+            sa.func.greatest(
+                organization_minimum_days,
+                classification_minimum_days,
+            ),
+        )
+        no_purge = sa.or_(
+            sa.func.coalesce(organization_no_purge, sa.false()),
+            sa.func.coalesce(classification_no_purge, sa.false()),
+        )
+        policy_conflict = sa.and_(
+            effective_days.is_not(None),
+            effective_minimum_days.is_not(None),
+            effective_days < effective_minimum_days,
+        )
         return FlowRunHistoryRetentionSqlEnvelope(
             organization_days=organization_days,
             classification_days=classification_days,
             space_days=space_days,
             flow_days=flow_days,
+            organization_minimum_days=organization_minimum_days,
+            classification_minimum_days=classification_minimum_days,
+            organization_no_purge=organization_no_purge,
+            classification_no_purge=classification_no_purge,
             activation_days=activation_days,
             effective_days=effective_days,
+            effective_minimum_days=effective_minimum_days,
+            no_purge=no_purge,
+            policy_conflict=policy_conflict,
         )
 
     async def get_flow_retention_control_plane_state(
@@ -386,6 +547,8 @@ class DataRetentionService:
         tenant_stmt = sa.select(
             Tenants.flow_run_history_retention_days,
             Tenants.flow_runtime_upload_abandonment_days,
+            Tenants.flow_run_history_minimum_retention_days,
+            Tenants.flow_run_history_no_purge,
         ).where(Tenants.id == tenant_id)
         if lock:
             tenant_stmt = tenant_stmt.with_for_update(of=Tenants)
@@ -398,6 +561,8 @@ class DataRetentionService:
                 sa.select(
                     FlowClassificationRetentionPolicies.security_classification_id,
                     FlowClassificationRetentionPolicies.data_retention_days,
+                    FlowClassificationRetentionPolicies.minimum_retention_days,
+                    FlowClassificationRetentionPolicies.no_purge,
                 )
                 .where(FlowClassificationRetentionPolicies.tenant_id == tenant_id)
                 .order_by(
@@ -435,7 +600,7 @@ class DataRetentionService:
             ).all()
             if day is not None
         )
-        organization_days, upload_days = tenant_row
+        organization_days, upload_days, organization_minimum_days, no_purge = tenant_row
         return FlowRetentionControlPlaneState(
             organization_run_history_days=organization_days,
             runtime_upload_abandonment_days=upload_days,
@@ -443,11 +608,20 @@ class DataRetentionService:
                 FlowRetentionClassificationPolicyState(
                     security_classification_id=classification_id,
                     data_retention_days=retention_days,
+                    minimum_retention_days=minimum_retention_days,
+                    no_purge=classification_no_purge,
                 )
-                for classification_id, retention_days in policy_rows
+                for (
+                    classification_id,
+                    retention_days,
+                    minimum_retention_days,
+                    classification_no_purge,
+                ) in policy_rows
             ),
             latent_space_retention_days=space_days,
             latent_flow_retention_days=flow_days,
+            organization_minimum_retention_days=organization_minimum_days,
+            organization_no_purge=no_purge,
         )
 
     async def preview_flow_retention_organization_change(
@@ -463,13 +637,26 @@ class DataRetentionService:
             runtime_upload_abandonment_days=(
                 proposal.flow_runtime_upload_abandonment_days
             ),
+            organization_minimum_retention_days=(
+                proposal.flow_run_history_minimum_retention_days
+            ),
+            organization_no_purge=proposal.flow_run_history_no_purge,
         )
-        destructive_change = _retention_change_is_destructive(
-            old_days=state.organization_run_history_days,
-            new_days=proposal.flow_run_history_retention_days,
-        ) or _retention_change_is_destructive(
-            old_days=state.runtime_upload_abandonment_days,
-            new_days=proposal.flow_runtime_upload_abandonment_days,
+        destructive_change = (
+            _retention_change_is_destructive(
+                old_days=state.organization_run_history_days,
+                new_days=proposal.flow_run_history_retention_days,
+            )
+            or _retention_change_is_destructive(
+                old_days=state.runtime_upload_abandonment_days,
+                new_days=proposal.flow_runtime_upload_abandonment_days,
+            )
+            or _retention_barrier_changed(
+                old_minimum_days=state.organization_minimum_retention_days,
+                new_minimum_days=proposal.flow_run_history_minimum_retention_days,
+                old_no_purge=state.organization_no_purge,
+                new_no_purge=proposal.flow_run_history_no_purge,
+            )
         )
         return await self._preview_flow_retention_change(
             tenant_id=tenant_id,
@@ -487,9 +674,9 @@ class DataRetentionService:
         previewed_at: datetime | None = None,
     ) -> FlowRetentionImpactPreview:
         state = await self.get_flow_retention_control_plane_state(tenant_id=tenant_id)
-        old_days = next(
+        old_policy = next(
             (
-                policy.data_retention_days
+                policy
                 for policy in state.classification_policies
                 if policy.security_classification_id
                 == proposal.security_classification_id
@@ -502,12 +689,32 @@ class DataRetentionService:
             proposal=_FlowRetentionSqlProposal(
                 organization_run_history_days=(state.organization_run_history_days),
                 runtime_upload_abandonment_days=(state.runtime_upload_abandonment_days),
+                organization_minimum_retention_days=(
+                    state.organization_minimum_retention_days
+                ),
+                organization_no_purge=state.organization_no_purge,
                 classification_id=proposal.security_classification_id,
                 classification_days=proposal.data_retention_days,
+                classification_minimum_retention_days=(proposal.minimum_retention_days),
+                classification_no_purge=proposal.no_purge,
             ),
             destructive_change=_retention_change_is_destructive(
-                old_days=old_days,
+                old_days=(old_policy.data_retention_days if old_policy else None),
                 new_days=proposal.data_retention_days,
+            )
+            or _retention_barrier_changed(
+                old_minimum_days=(
+                    old_policy.minimum_retention_days if old_policy else None
+                ),
+                new_minimum_days=proposal.minimum_retention_days,
+                old_no_purge=old_policy.no_purge if old_policy else False,
+                new_no_purge=proposal.no_purge,
+            )
+            or (
+                old_policy is not None
+                and proposal.data_retention_days is None
+                and proposal.minimum_retention_days is None
+                and not proposal.no_purge
             ),
             previewed_at=previewed_at or datetime.now(timezone.utc),
         )
@@ -518,6 +725,8 @@ class DataRetentionService:
         tenant_id: UUID,
         run_history_patch: FlowRetentionValuePatch,
         upload_abandonment_patch: FlowRetentionValuePatch,
+        minimum_retention_patch: FlowRetentionValuePatch,
+        no_purge_patch: FlowRetentionBoolPatch,
         confirmation: FlowRetentionChangeConfirmation | None,
     ) -> FlowRetentionOrganizationChangeDecision:
         state = await self.get_flow_retention_control_plane_state(
@@ -529,6 +738,10 @@ class DataRetentionService:
             flow_runtime_upload_abandonment_days=(
                 state.runtime_upload_abandonment_days
             ),
+            flow_run_history_minimum_retention_days=(
+                state.organization_minimum_retention_days
+            ),
+            flow_run_history_no_purge=state.organization_no_purge,
         )
         new_policy = FlowRetentionOrganizationProposal(
             flow_run_history_retention_days=(
@@ -541,13 +754,32 @@ class DataRetentionService:
                 if upload_abandonment_patch.is_set
                 else state.runtime_upload_abandonment_days
             ),
+            flow_run_history_minimum_retention_days=(
+                minimum_retention_patch.value
+                if minimum_retention_patch.is_set
+                else state.organization_minimum_retention_days
+            ),
+            flow_run_history_no_purge=(
+                no_purge_patch.value
+                if no_purge_patch.is_set
+                else state.organization_no_purge
+            ),
         )
-        destructive_change = _retention_change_is_destructive(
-            old_days=old_policy.flow_run_history_retention_days,
-            new_days=new_policy.flow_run_history_retention_days,
-        ) or _retention_change_is_destructive(
-            old_days=old_policy.flow_runtime_upload_abandonment_days,
-            new_days=new_policy.flow_runtime_upload_abandonment_days,
+        destructive_change = (
+            _retention_change_is_destructive(
+                old_days=old_policy.flow_run_history_retention_days,
+                new_days=new_policy.flow_run_history_retention_days,
+            )
+            or _retention_change_is_destructive(
+                old_days=old_policy.flow_runtime_upload_abandonment_days,
+                new_days=new_policy.flow_runtime_upload_abandonment_days,
+            )
+            or _retention_barrier_changed(
+                old_minimum_days=(old_policy.flow_run_history_minimum_retention_days),
+                new_minimum_days=(new_policy.flow_run_history_minimum_retention_days),
+                old_no_purge=old_policy.flow_run_history_no_purge,
+                new_no_purge=new_policy.flow_run_history_no_purge,
+            )
         )
         preview = None
         if destructive_change or confirmation is not None:
@@ -561,6 +793,10 @@ class DataRetentionService:
                     runtime_upload_abandonment_days=(
                         new_policy.flow_runtime_upload_abandonment_days
                     ),
+                    organization_minimum_retention_days=(
+                        new_policy.flow_run_history_minimum_retention_days
+                    ),
+                    organization_no_purge=(new_policy.flow_run_history_no_purge),
                 ),
                 confirmation=confirmation,
             )
@@ -582,9 +818,9 @@ class DataRetentionService:
             tenant_id=tenant_id,
             lock=True,
         )
-        old_days = next(
+        old_state = next(
             (
-                policy.data_retention_days
+                policy
                 for policy in state.classification_policies
                 if policy.security_classification_id
                 == proposal.security_classification_id
@@ -594,15 +830,29 @@ class DataRetentionService:
         old_policy = (
             FlowRetentionClassificationProposal(
                 security_classification_id=proposal.security_classification_id,
-                data_retention_days=old_days,
+                data_retention_days=old_state.data_retention_days,
+                minimum_retention_days=old_state.minimum_retention_days,
+                no_purge=old_state.no_purge,
             )
-            if old_days is not None
+            if old_state is not None
             else None
         )
         destructive_change = _retention_change_is_destructive(
-            old_days=old_days,
+            old_days=(old_state.data_retention_days if old_state else None),
             new_days=proposal.data_retention_days,
+        ) or _retention_barrier_changed(
+            old_minimum_days=(old_state.minimum_retention_days if old_state else None),
+            new_minimum_days=proposal.minimum_retention_days,
+            old_no_purge=old_state.no_purge if old_state else False,
+            new_no_purge=proposal.no_purge,
         )
+        all_off_removes_policy = (
+            old_state is not None
+            and proposal.data_retention_days is None
+            and proposal.minimum_retention_days is None
+            and not proposal.no_purge
+        )
+        destructive_change = destructive_change or all_off_removes_policy
         preview = None
         if destructive_change or confirmation is not None:
             preview = await self._confirm_flow_retention_change(
@@ -613,8 +863,16 @@ class DataRetentionService:
                     runtime_upload_abandonment_days=(
                         state.runtime_upload_abandonment_days
                     ),
+                    organization_minimum_retention_days=(
+                        state.organization_minimum_retention_days
+                    ),
+                    organization_no_purge=state.organization_no_purge,
                     classification_id=proposal.security_classification_id,
                     classification_days=proposal.data_retention_days,
+                    classification_minimum_retention_days=(
+                        proposal.minimum_retention_days
+                    ),
+                    classification_no_purge=proposal.no_purge,
                 ),
                 confirmation=confirmation,
             )
@@ -722,6 +980,24 @@ class DataRetentionService:
             ),
             active_rerun_count=_retention_row_int(run_row, "active_rerun_count"),
         )
+        policy_blockers = FlowRetentionPolicyBlockers(
+            run_history_minimum_not_satisfied_count=_retention_row_int(
+                run_row, "minimum_not_satisfied_count"
+            ),
+            run_history_no_purge_count=_retention_row_int(run_row, "no_purge_count"),
+            run_history_policy_conflict_count=_retention_row_int(
+                run_row, "policy_conflict_count"
+            ),
+            runtime_upload_minimum_not_satisfied_count=_retention_row_int(
+                upload_row, "minimum_not_satisfied_count"
+            ),
+            runtime_upload_no_purge_count=_retention_row_int(
+                upload_row, "no_purge_count"
+            ),
+            runtime_upload_policy_conflict_count=_retention_row_int(
+                upload_row, "policy_conflict_count"
+            ),
+        )
         hash_payload = {
             "control_plane_version": state.version,
             "previewed_at": normalized_previewed_at.isoformat(),
@@ -729,6 +1005,10 @@ class DataRetentionService:
                 "organization_run_history_days": (
                     proposal.organization_run_history_days
                 ),
+                "organization_minimum_retention_days": (
+                    proposal.organization_minimum_retention_days
+                ),
+                "organization_no_purge": proposal.organization_no_purge,
                 "runtime_upload_abandonment_days": (
                     proposal.runtime_upload_abandonment_days
                 ),
@@ -738,10 +1018,15 @@ class DataRetentionService:
                     else None
                 ),
                 "classification_days": proposal.classification_days,
+                "classification_minimum_retention_days": (
+                    proposal.classification_minimum_retention_days
+                ),
+                "classification_no_purge": proposal.classification_no_purge,
             },
             "run_history": run_history.hash_payload(),
             "runtime_uploads": runtime_uploads.hash_payload(),
             "lifecycle_blockers": blockers.hash_payload(),
+            "policy_blockers": policy_blockers.hash_payload(),
             "latent_space_retention_days": state.latent_space_retention_days,
             "latent_flow_retention_days": state.latent_flow_retention_days,
         }
@@ -760,6 +1045,7 @@ class DataRetentionService:
             run_history=run_history,
             runtime_uploads=runtime_uploads,
             lifecycle_blockers=blockers,
+            policy_blockers=policy_blockers,
             latent_space_retention_days=state.latent_space_retention_days,
             latent_flow_retention_days=state.latent_flow_retention_days,
         )
@@ -778,45 +1064,107 @@ class DataRetentionService:
         current_classification_days = (
             FlowClassificationRetentionPolicies.data_retention_days.__clause_element__()
         )
+        current_classification_minimum_days = FlowClassificationRetentionPolicies.minimum_retention_days.__clause_element__()
+        current_classification_no_purge = (
+            FlowClassificationRetentionPolicies.no_purge.__clause_element__()
+        )
         proposed_classification_days = current_classification_days
+        proposed_classification_minimum_days = current_classification_minimum_days
+        proposed_classification_no_purge = current_classification_no_purge
         if proposal.classification_id is not None:
             proposed_classification_days = sa.case(
                 (
                     Spaces.security_classification_id == proposal.classification_id,
-                    sa.literal(proposal.classification_days, type_=sa.Integer()),
+                    _retention_days_literal(proposal.classification_days),
                 ),
                 else_=current_classification_days,
             )
+            proposed_classification_minimum_days = sa.case(
+                (
+                    Spaces.security_classification_id == proposal.classification_id,
+                    _retention_days_literal(
+                        proposal.classification_minimum_retention_days
+                    ),
+                ),
+                else_=current_classification_minimum_days,
+            )
+            proposed_classification_no_purge = sa.case(
+                (
+                    Spaces.security_classification_id == proposal.classification_id,
+                    sa.literal(proposal.classification_no_purge, type_=sa.Boolean()),
+                ),
+                else_=current_classification_no_purge,
+            )
 
         current_envelope = self.flow_run_history_retention_sql_envelope(
-            organization_days=sa.literal(
-                state.organization_run_history_days,
-                type_=sa.Integer(),
+            organization_days=_retention_days_literal(
+                state.organization_run_history_days
             ),
             classification_days=current_classification_days,
             space_days=Spaces.data_retention_days.__clause_element__(),
             flow_days=Flows.data_retention_days.__clause_element__(),
+            organization_minimum_days=_retention_days_literal(
+                state.organization_minimum_retention_days
+            ),
+            classification_minimum_days=current_classification_minimum_days,
+            organization_no_purge=sa.literal(
+                state.organization_no_purge,
+                type_=sa.Boolean(),
+            ),
+            classification_no_purge=current_classification_no_purge,
         )
         proposed_envelope = self.flow_run_history_retention_sql_envelope(
-            organization_days=sa.literal(
-                proposal.organization_run_history_days,
-                type_=sa.Integer(),
+            organization_days=_retention_days_literal(
+                proposal.organization_run_history_days
             ),
             classification_days=proposed_classification_days,
             space_days=Spaces.data_retention_days.__clause_element__(),
             flow_days=Flows.data_retention_days.__clause_element__(),
+            organization_minimum_days=_retention_days_literal(
+                proposal.organization_minimum_retention_days
+            ),
+            classification_minimum_days=proposed_classification_minimum_days,
+            organization_no_purge=sa.literal(
+                proposal.organization_no_purge,
+                type_=sa.Boolean(),
+            ),
+            classification_no_purge=proposed_classification_no_purge,
         )
-        current_due = sa.and_(
-            current_envelope.activation_days.is_not(None),
-            anchor
-            <= sa.literal(previewed_at)
-            - sa.func.make_interval(0, 0, 0, current_envelope.effective_days),
+        current_eligibility = current_envelope.eligibility(
+            anchor=anchor,
+            at=previewed_at,
         )
-        proposed_due = sa.and_(
-            proposed_envelope.activation_days.is_not(None),
-            anchor
-            <= sa.literal(previewed_at)
-            - sa.func.make_interval(0, 0, 0, proposed_envelope.effective_days),
+        proposed_eligibility = proposed_envelope.eligibility(
+            anchor=anchor,
+            at=previewed_at,
+        )
+        current_due = current_eligibility.eligible
+        proposed_due = proposed_eligibility.eligible
+        proposed_delete_after_at = sa.case(
+            (
+                proposed_envelope.activation_days.is_not(None),
+                anchor
+                + sa.func.make_interval(
+                    0,
+                    0,
+                    0,
+                    proposed_envelope.effective_days,
+                ),
+            ),
+            else_=sa.null(),
+        )
+        proposed_minimum_not_before_at = sa.case(
+            (
+                proposed_envelope.effective_minimum_days.is_not(None),
+                anchor
+                + sa.func.make_interval(
+                    0,
+                    0,
+                    0,
+                    proposed_envelope.effective_minimum_days,
+                ),
+            ),
+            else_=sa.null(),
         )
         candidates = (
             sa.select(
@@ -825,6 +1173,16 @@ class DataRetentionService:
                 anchor.label("retention_anchor"),
                 current_due.label("current_due"),
                 proposed_due.label("proposed_due"),
+                proposed_eligibility.delete_after_due.label(
+                    "proposed_delete_after_due"
+                ),
+                proposed_eligibility.minimum_satisfied.label(
+                    "proposed_minimum_satisfied"
+                ),
+                proposed_envelope.no_purge.label("proposed_no_purge"),
+                proposed_envelope.policy_conflict.label("proposed_policy_conflict"),
+                proposed_delete_after_at.label("proposed_delete_after_at"),
+                proposed_minimum_not_before_at.label("proposed_minimum_not_before_at"),
             )
             .join(Flows, FlowRuns.flow_id == Flows.id)
             .join(Spaces, Flows.space_id == Spaces.id)
@@ -916,6 +1274,34 @@ class DataRetentionService:
                 sa.func.max(candidates.c.retention_anchor)
                 .filter(candidates.c.proposed_due)
                 .label("latest_proposed_anchor"),
+                sa.func.min(candidates.c.proposed_delete_after_at).label(
+                    "earliest_proposed_delete_after_at"
+                ),
+                sa.func.max(candidates.c.proposed_delete_after_at).label(
+                    "latest_proposed_delete_after_at"
+                ),
+                sa.func.min(candidates.c.proposed_minimum_not_before_at).label(
+                    "earliest_proposed_minimum_not_before_at"
+                ),
+                sa.func.max(candidates.c.proposed_minimum_not_before_at).label(
+                    "latest_proposed_minimum_not_before_at"
+                ),
+                sa.func.count()
+                .filter(
+                    candidates.c.proposed_delete_after_due,
+                    sa.not_(candidates.c.proposed_minimum_satisfied),
+                )
+                .label("minimum_not_satisfied_count"),
+                sa.func.count()
+                .filter(
+                    candidates.c.proposed_delete_after_due,
+                    candidates.c.proposed_minimum_satisfied,
+                    candidates.c.proposed_no_purge,
+                )
+                .label("no_purge_count"),
+                sa.func.count()
+                .filter(candidates.c.proposed_policy_conflict)
+                .label("policy_conflict_count"),
                 sa.func.count()
                 .filter(candidates.c.proposed_due, undelivered_audit)
                 .label("undelivered_audit_count"),
@@ -947,15 +1333,49 @@ class DataRetentionService:
         proposal: _FlowRetentionSqlProposal,
         previewed_at: datetime,
     ) -> sa.Select[tuple[int, int, int, int, int, int, datetime, datetime]]:
-        current_due = _retention_anchor_due(
+        current_delete_after_due = _retention_anchor_due(
             anchor=FlowRuntimeUploadedFiles.created_at,
             retention_days=state.runtime_upload_abandonment_days,
             previewed_at=previewed_at,
         )
-        proposed_due = _retention_anchor_due(
+        proposed_delete_after_due = _retention_anchor_due(
             anchor=FlowRuntimeUploadedFiles.created_at,
             retention_days=proposal.runtime_upload_abandonment_days,
             previewed_at=previewed_at,
+        )
+        current_minimum_satisfied = (
+            sa.true()
+            if state.organization_minimum_retention_days is None
+            else _retention_anchor_due(
+                anchor=FlowRuntimeUploadedFiles.created_at,
+                retention_days=state.organization_minimum_retention_days,
+                previewed_at=previewed_at,
+            )
+        )
+        proposed_minimum_satisfied = (
+            sa.true()
+            if proposal.organization_minimum_retention_days is None
+            else _retention_anchor_due(
+                anchor=FlowRuntimeUploadedFiles.created_at,
+                retention_days=proposal.organization_minimum_retention_days,
+                previewed_at=previewed_at,
+            )
+        )
+        current_due = sa.and_(
+            current_delete_after_due,
+            current_minimum_satisfied,
+            sa.literal(not state.organization_no_purge, type_=sa.Boolean()),
+        )
+        proposed_due = sa.and_(
+            proposed_delete_after_due,
+            proposed_minimum_satisfied,
+            sa.literal(not proposal.organization_no_purge, type_=sa.Boolean()),
+        )
+        proposed_policy_conflict = (
+            proposal.runtime_upload_abandonment_days is not None
+            and proposal.organization_minimum_retention_days is not None
+            and proposal.runtime_upload_abandonment_days
+            < proposal.organization_minimum_retention_days
         )
         newly_due = sa.and_(proposed_due, sa.not_(current_due))
         no_longer_due = sa.and_(current_due, sa.not_(proposed_due))
@@ -983,6 +1403,49 @@ class DataRetentionService:
                 sa.func.max(FlowRuntimeUploadedFiles.created_at)
                 .filter(proposed_due)
                 .label("latest_proposed_anchor"),
+                sa.func.min(
+                    _retention_deadline(
+                        anchor=FlowRuntimeUploadedFiles.created_at,
+                        retention_days=proposal.runtime_upload_abandonment_days,
+                    )
+                ).label("earliest_proposed_delete_after_at"),
+                sa.func.max(
+                    _retention_deadline(
+                        anchor=FlowRuntimeUploadedFiles.created_at,
+                        retention_days=proposal.runtime_upload_abandonment_days,
+                    )
+                ).label("latest_proposed_delete_after_at"),
+                sa.func.min(
+                    _retention_deadline(
+                        anchor=FlowRuntimeUploadedFiles.created_at,
+                        retention_days=proposal.organization_minimum_retention_days,
+                    )
+                ).label("earliest_proposed_minimum_not_before_at"),
+                sa.func.max(
+                    _retention_deadline(
+                        anchor=FlowRuntimeUploadedFiles.created_at,
+                        retention_days=proposal.organization_minimum_retention_days,
+                    )
+                ).label("latest_proposed_minimum_not_before_at"),
+                sa.func.count()
+                .filter(
+                    proposed_delete_after_due,
+                    sa.not_(proposed_minimum_satisfied),
+                )
+                .label("minimum_not_satisfied_count"),
+                sa.func.count()
+                .filter(
+                    proposed_delete_after_due,
+                    proposed_minimum_satisfied,
+                    sa.literal(
+                        proposal.organization_no_purge,
+                        type_=sa.Boolean(),
+                    ),
+                )
+                .label("no_purge_count"),
+                sa.func.count()
+                .filter(sa.literal(proposed_policy_conflict, type_=sa.Boolean()))
+                .label("policy_conflict_count"),
             )
             .select_from(FlowRuntimeUploadedFiles)
             .join(
@@ -1562,7 +2025,20 @@ class DataRetentionService:
             ),
             space_days=Spaces.data_retention_days.__clause_element__(),
             flow_days=Flows.data_retention_days.__clause_element__(),
+            organization_minimum_days=(
+                Tenants.flow_run_history_minimum_retention_days.__clause_element__()
+            ),
+            classification_minimum_days=(
+                FlowClassificationRetentionPolicies.minimum_retention_days.__clause_element__()
+            ),
+            organization_no_purge=(
+                Tenants.flow_run_history_no_purge.__clause_element__()
+            ),
+            classification_no_purge=(
+                FlowClassificationRetentionPolicies.no_purge.__clause_element__()
+            ),
         )
+        eligibility = envelope.eligibility(anchor=anchor, at=now)
         return (
             sa.select(FlowRuns.id.label("run_id"))
             .join(Flows, FlowRuns.flow_id == Flows.id)
@@ -1579,15 +2055,12 @@ class DataRetentionService:
             .where(
                 sa.and_(
                     FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
-                    envelope.activation_days.is_not(None),
                     # Constant lower bound for ix_flow_runs_terminal_retention_anchor;
                     # safe because every retention source is >= MIN_RETENTION_DAYS.
                     anchor
                     <= sa.literal(now)
                     - sa.func.make_interval(0, 0, 0, MIN_RETENTION_DAYS),
-                    anchor
-                    <= sa.literal(now)
-                    - sa.func.make_interval(0, 0, 0, envelope.effective_days),
+                    eligibility.eligible,
                 )
             )
         )
@@ -1918,11 +2391,26 @@ def _retention_anchor_due(
     )
 
 
+def _retention_deadline(
+    *,
+    anchor: sa.ColumnExpressionArgument[datetime],
+    retention_days: int | None,
+) -> sa.ColumnElement[datetime | None]:
+    if retention_days is None:
+        return cast(sa.ColumnElement[datetime | None], sa.null())
+    return cast(
+        sa.ColumnElement[datetime | None],
+        anchor + sa.func.make_interval(0, 0, 0, retention_days),
+    )
+
+
 def _flow_retention_data_impact_from_row(
     row: RowMapping,
 ) -> FlowRetentionDataImpact:
-    earliest_anchor = row["earliest_proposed_anchor"]
-    latest_anchor = row["latest_proposed_anchor"]
+    def optional_datetime(key: str) -> datetime | None:
+        value = row[key]
+        return value if isinstance(value, datetime) else None
+
     return FlowRetentionDataImpact(
         current_eligible_count=_retention_row_int(row, "current_eligible_count"),
         proposed_eligible_count=_retention_row_int(row, "proposed_eligible_count"),
@@ -1933,11 +2421,19 @@ def _flow_retention_data_impact_from_row(
         ),
         proposed_eligible_bytes=_retention_row_int(row, "proposed_eligible_bytes"),
         newly_eligible_bytes=_retention_row_int(row, "newly_eligible_bytes"),
-        earliest_proposed_anchor=(
-            earliest_anchor if isinstance(earliest_anchor, datetime) else None
+        earliest_proposed_anchor=optional_datetime("earliest_proposed_anchor"),
+        latest_proposed_anchor=optional_datetime("latest_proposed_anchor"),
+        earliest_proposed_delete_after_at=optional_datetime(
+            "earliest_proposed_delete_after_at"
         ),
-        latest_proposed_anchor=(
-            latest_anchor if isinstance(latest_anchor, datetime) else None
+        latest_proposed_delete_after_at=optional_datetime(
+            "latest_proposed_delete_after_at"
+        ),
+        earliest_proposed_minimum_not_before_at=optional_datetime(
+            "earliest_proposed_minimum_not_before_at"
+        ),
+        latest_proposed_minimum_not_before_at=optional_datetime(
+            "latest_proposed_minimum_not_before_at"
         ),
     )
 

@@ -32,7 +32,9 @@ export function retentionDaysChangeIsDestructive(
 export function organizationRetentionChangeIsDestructive(
   current: FlowRetentionPolicy,
   proposedRunHistoryDays: number | null,
-  proposedUploadDays: number | null
+  proposedUploadDays: number | null,
+  proposedMinimumDays: number | null,
+  proposedNoPurge: boolean
 ): boolean {
   return (
     retentionDaysChangeIsDestructive(
@@ -42,7 +44,9 @@ export function organizationRetentionChangeIsDestructive(
     retentionDaysChangeIsDestructive(
       current.flow_runtime_upload_abandonment_days,
       proposedUploadDays
-    )
+    ) ||
+    current.flow_run_history_minimum_retention_days !== proposedMinimumDays ||
+    current.flow_run_history_no_purge !== proposedNoPurge
   );
 }
 

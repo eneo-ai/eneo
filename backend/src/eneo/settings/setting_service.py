@@ -10,6 +10,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
+    FlowRetentionBoolPatch,
     FlowRetentionChangeConfirmation,
     FlowRetentionOrganizationProposal,
     FlowRetentionValuePatch,
@@ -488,6 +489,10 @@ class SettingService:
             flow_runtime_upload_abandonment_days=(
                 state.runtime_upload_abandonment_days
             ),
+            flow_run_history_minimum_retention_days=(
+                state.organization_minimum_retention_days
+            ),
+            flow_run_history_no_purge=state.organization_no_purge,
             effective_state=FlowRetentionEffectiveStatePublic.from_domain(state),
         )
 
@@ -505,6 +510,10 @@ class SettingService:
                 flow_runtime_upload_abandonment_days=(
                     payload.flow_runtime_upload_abandonment_days
                 ),
+                flow_run_history_minimum_retention_days=(
+                    payload.flow_run_history_minimum_retention_days
+                ),
+                flow_run_history_no_purge=payload.flow_run_history_no_purge,
             ),
         )
         return FlowRetentionImpactPreviewPublic.from_domain(preview)
@@ -543,6 +552,15 @@ class SettingService:
                 in payload.model_fields_set,
                 value=payload.flow_runtime_upload_abandonment_days,
             ),
+            minimum_retention_patch=FlowRetentionValuePatch(
+                is_set="flow_run_history_minimum_retention_days"
+                in payload.model_fields_set,
+                value=payload.flow_run_history_minimum_retention_days,
+            ),
+            no_purge_patch=FlowRetentionBoolPatch(
+                is_set="flow_run_history_no_purge" in payload.model_fields_set,
+                value=payload.flow_run_history_no_purge,
+            ),
             confirmation=confirmation,
         )
         tenant = await self._get_tenant_for_flow_settings()
@@ -578,6 +596,12 @@ class SettingService:
                 flow_runtime_upload_abandonment_days=(
                     decision.new_policy.flow_runtime_upload_abandonment_days
                 ),
+                flow_run_history_minimum_retention_days=(
+                    decision.new_policy.flow_run_history_minimum_retention_days
+                ),
+                flow_run_history_no_purge=(
+                    decision.new_policy.flow_run_history_no_purge
+                ),
             )
         )
         activation_time = datetime.now(timezone.utc)
@@ -599,6 +623,12 @@ class SettingService:
                     "flow_runtime_upload_abandonment_days": (
                         decision.old_policy.flow_runtime_upload_abandonment_days
                     ),
+                    "flow_run_history_minimum_retention_days": (
+                        decision.old_policy.flow_run_history_minimum_retention_days
+                    ),
+                    "flow_run_history_no_purge": (
+                        decision.old_policy.flow_run_history_no_purge
+                    ),
                 },
                 "new_policy": {
                     "run_debug_evidence_days": payload.run_debug_evidence_days
@@ -609,6 +639,12 @@ class SettingService:
                     ),
                     "flow_runtime_upload_abandonment_days": (
                         decision.new_policy.flow_runtime_upload_abandonment_days
+                    ),
+                    "flow_run_history_minimum_retention_days": (
+                        decision.new_policy.flow_run_history_minimum_retention_days
+                    ),
+                    "flow_run_history_no_purge": (
+                        decision.new_policy.flow_run_history_no_purge
                     ),
                 },
                 "preview": (

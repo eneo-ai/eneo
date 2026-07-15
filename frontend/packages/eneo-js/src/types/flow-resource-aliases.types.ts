@@ -252,11 +252,20 @@ const validFlow: Flow = {
   run_history_retention: {
     state: "days",
     effective_days: 14,
+    effective_minimum_days: null,
+    no_purge: false,
+    policy_conflict: false,
+    activation_sources: ["organization", "classification"],
+    barrier_sources: [],
     contributors: {
       organization_days: 90,
       classification_days: 30,
       space_days: 14,
-      flow_days: null
+      flow_days: null,
+      organization_minimum_days: null,
+      classification_minimum_days: null,
+      organization_no_purge: false,
+      classification_no_purge: false
     }
   },
   steps: [validFlowStep],

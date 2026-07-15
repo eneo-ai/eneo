@@ -38,6 +38,8 @@ from eneo.flows.assistant_authoring_snapshot import (
 )
 from eneo.flows.domain.flow import (
     Flow,
+    FlowRunRetentionActivationSource,
+    FlowRunRetentionBarrierSource,
     FlowRunRetentionContributors,
     FlowRunRetentionDays,
     FlowRunRetentionOff,
@@ -90,24 +92,61 @@ def _attach_run_history_retention(
     classification_days: int | None,
     space_days: int | None,
     flow_days: int | None,
+    organization_minimum_days: int | None,
+    classification_minimum_days: int | None,
+    organization_no_purge: bool,
+    classification_no_purge: bool,
     effective_days: int | None,
+    effective_minimum_days: int | None,
+    no_purge: bool,
+    policy_conflict: bool,
 ) -> _FlowReadModel:
     contributors = FlowRunRetentionContributors(
         organization_days=organization_days,
         classification_days=classification_days,
         space_days=space_days,
         flow_days=flow_days,
+        organization_minimum_days=organization_minimum_days,
+        classification_minimum_days=classification_minimum_days,
+        organization_no_purge=organization_no_purge,
+        classification_no_purge=classification_no_purge,
+    )
+    activation_candidates: tuple[tuple[FlowRunRetentionActivationSource, bool], ...] = (
+        ("organization", organization_days is not None),
+        ("classification", classification_days is not None),
+    )
+    activation_sources: tuple[FlowRunRetentionActivationSource, ...] = tuple(
+        source for source, configured in activation_candidates if configured
+    )
+    barrier_candidates: tuple[tuple[FlowRunRetentionBarrierSource, bool], ...] = (
+        ("organization_minimum", organization_minimum_days is not None),
+        ("classification_minimum", classification_minimum_days is not None),
+        ("organization_no_purge", organization_no_purge),
+        ("classification_no_purge", classification_no_purge),
+    )
+    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...] = tuple(
+        source for source, configured in barrier_candidates if configured
     )
     retention = (
         FlowRunRetentionOff(
             state="off",
             effective_days=None,
+            effective_minimum_days=effective_minimum_days,
+            no_purge=no_purge,
+            policy_conflict=policy_conflict,
+            activation_sources=activation_sources,
+            barrier_sources=barrier_sources,
             contributors=contributors,
         )
         if effective_days is None
         else FlowRunRetentionDays(
             state="days",
             effective_days=effective_days,
+            effective_minimum_days=effective_minimum_days,
+            no_purge=no_purge,
+            policy_conflict=policy_conflict,
+            activation_sources=activation_sources,
+            barrier_sources=barrier_sources,
             contributors=contributors,
         )
     )
@@ -135,7 +174,21 @@ class FlowRepository:
 
     @staticmethod
     def _select_flows_with_run_history_retention() -> sa.Select[
-        tuple[Flows, int | None, int | None, int | None, int | None, int | None]
+        tuple[
+            Flows,
+            int | None,
+            int | None,
+            int | None,
+            int | None,
+            int | None,
+            int | None,
+            bool,
+            bool | None,
+            int | None,
+            int | None,
+            bool,
+            bool,
+        ]
     ]:
         # Local import avoids the infrastructure package's eager exports forming a
         # module cycle while keeping the SQL policy owned by DataRetentionService.
@@ -152,6 +205,18 @@ class FlowRepository:
             ),
             space_days=Spaces.data_retention_days.__clause_element__(),
             flow_days=Flows.data_retention_days.__clause_element__(),
+            organization_minimum_days=(
+                Tenants.flow_run_history_minimum_retention_days.__clause_element__()
+            ),
+            classification_minimum_days=(
+                FlowClassificationRetentionPolicies.minimum_retention_days.__clause_element__()
+            ),
+            organization_no_purge=(
+                Tenants.flow_run_history_no_purge.__clause_element__()
+            ),
+            classification_no_purge=(
+                FlowClassificationRetentionPolicies.no_purge.__clause_element__()
+            ),
         )
         return (
             sa.select(
@@ -160,7 +225,22 @@ class FlowRepository:
                 envelope.classification_days.label("retention_classification_days"),
                 envelope.space_days.label("retention_space_days"),
                 envelope.flow_days.label("retention_flow_days"),
+                envelope.organization_minimum_days.label(
+                    "retention_organization_minimum_days"
+                ),
+                envelope.classification_minimum_days.label(
+                    "retention_classification_minimum_days"
+                ),
+                envelope.organization_no_purge.label("retention_organization_no_purge"),
+                envelope.classification_no_purge.label(
+                    "retention_classification_no_purge"
+                ),
                 envelope.effective_days.label("retention_effective_days"),
+                envelope.effective_minimum_days.label(
+                    "retention_effective_minimum_days"
+                ),
+                envelope.no_purge.label("retention_no_purge"),
+                envelope.policy_conflict.label("retention_policy_conflict"),
             )
             .join(Spaces, Flows.space_id == Spaces.id)
             .join(Tenants, Flows.tenant_id == Tenants.id)
@@ -261,7 +341,14 @@ class FlowRepository:
             classification_days,
             space_days,
             flow_days,
+            organization_minimum_days,
+            classification_minimum_days,
+            organization_no_purge,
+            classification_no_purge,
             effective_days,
+            effective_minimum_days,
+            no_purge,
+            policy_conflict,
         ) = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
         return _attach_run_history_retention(
@@ -270,7 +357,14 @@ class FlowRepository:
             classification_days=classification_days,
             space_days=space_days,
             flow_days=flow_days,
+            organization_minimum_days=organization_minimum_days,
+            classification_minimum_days=classification_minimum_days,
+            organization_no_purge=organization_no_purge,
+            classification_no_purge=classification_no_purge or False,
             effective_days=effective_days,
+            effective_minimum_days=effective_minimum_days,
+            no_purge=no_purge,
+            policy_conflict=policy_conflict,
         )
 
     async def get_by_space(
@@ -326,7 +420,14 @@ class FlowRepository:
                 classification_days=row[2],
                 space_days=row[3],
                 flow_days=row[4],
-                effective_days=row[5],
+                organization_minimum_days=row[5],
+                classification_minimum_days=row[6],
+                organization_no_purge=row[7],
+                classification_no_purge=row[8] or False,
+                effective_days=row[9],
+                effective_minimum_days=row[10],
+                no_purge=row[11],
+                policy_conflict=row[12],
             )
             for row in flow_rows
         ]
@@ -361,7 +462,14 @@ class FlowRepository:
                 classification_days=row[2],
                 space_days=row[3],
                 flow_days=row[4],
-                effective_days=row[5],
+                organization_minimum_days=row[5],
+                classification_minimum_days=row[6],
+                organization_no_purge=row[7],
+                classification_no_purge=row[8] or False,
+                effective_days=row[9],
+                effective_minimum_days=row[10],
+                no_purge=row[11],
+                policy_conflict=row[12],
             )
             for row in flow_rows
         ]

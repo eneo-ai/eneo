@@ -414,6 +414,8 @@ async def test_concurrent_same_organization_preview_allows_one_mutation_and_audi
     headers = {"Authorization": f"Bearer {admin_token}"}
     proposal = {
         "flow_run_history_retention_days": 30,
+        "flow_run_history_minimum_retention_days": None,
+        "flow_run_history_no_purge": False,
         "flow_runtime_upload_abandonment_days": 30,
     }
     preview_response = await client.post(
@@ -479,11 +481,17 @@ async def test_concurrent_same_classification_preview_allows_one_mutation_and_au
     preview_response = await client.post(
         f"{path}/preview",
         headers=headers,
-        json={"data_retention_days": 10},
+        json={
+            "data_retention_days": 10,
+            "minimum_retention_days": None,
+            "no_purge": False,
+        },
     )
     assert preview_response.status_code == 200, preview_response.text
     confirmed_proposal = {
         "data_retention_days": 10,
+        "minimum_retention_days": None,
+        "no_purge": False,
         "confirmation": _confirmation(preview_response.json()),
     }
 
@@ -542,6 +550,8 @@ async def test_admin_organization_and_classification_policy_journeys_use_exact_p
 
     proposal = {
         "flow_run_history_retention_days": 30,
+        "flow_run_history_minimum_retention_days": None,
+        "flow_run_history_no_purge": False,
         "flow_runtime_upload_abandonment_days": 30,
     }
     preview_response = await client.post(
@@ -635,7 +645,11 @@ async def test_admin_organization_and_classification_policy_journeys_use_exact_p
     classification_preview = await client.post(
         f"/api/v1/settings/flow-classification-retention-policies/{classification_id}/preview",
         headers=headers,
-        json={"data_retention_days": 10},
+        json={
+            "data_retention_days": 10,
+            "minimum_retention_days": None,
+            "no_purge": False,
+        },
     )
     assert classification_preview.status_code == 200, classification_preview.text
     classification_impact = classification_preview.json()
@@ -644,7 +658,11 @@ async def test_admin_organization_and_classification_policy_journeys_use_exact_p
     classification_without_confirmation = await client.put(
         f"/api/v1/settings/flow-classification-retention-policies/{classification_id}",
         headers=headers,
-        json={"data_retention_days": 10},
+        json={
+            "data_retention_days": 10,
+            "minimum_retention_days": None,
+            "no_purge": False,
+        },
     )
     assert classification_without_confirmation.status_code == 409
 
@@ -653,10 +671,45 @@ async def test_admin_organization_and_classification_policy_journeys_use_exact_p
         headers=headers,
         json={
             "data_retention_days": 10,
+            "minimum_retention_days": None,
+            "no_purge": False,
             "confirmation": _confirmation(classification_impact),
         },
     )
     assert classification_enabled.status_code == 200, classification_enabled.text
+
+    all_off = {
+        "data_retention_days": None,
+        "minimum_retention_days": None,
+        "no_purge": False,
+    }
+    clear_preview_response = await client.post(
+        f"/api/v1/settings/flow-classification-retention-policies/{classification_id}/preview",
+        headers=headers,
+        json=all_off,
+    )
+    assert clear_preview_response.status_code == 200, clear_preview_response.text
+    unpreviewed_clear = await client.put(
+        f"/api/v1/settings/flow-classification-retention-policies/{classification_id}",
+        headers=headers,
+        json=all_off,
+    )
+    assert unpreviewed_clear.status_code == 409
+    cleared = await client.put(
+        f"/api/v1/settings/flow-classification-retention-policies/{classification_id}",
+        headers=headers,
+        json={
+            **all_off,
+            "confirmation": _confirmation(clear_preview_response.json()),
+        },
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json() is None
+    independent_delete = await client.delete(
+        f"/api/v1/settings/flow-classification-retention-policies/{classification_id}",
+        headers=headers,
+    )
+    assert independent_delete.status_code == 405
 
     async with db_container() as container:
         audit_metadata_rows = (
@@ -693,6 +746,8 @@ async def test_admin_organization_and_classification_policy_journeys_use_exact_p
             "/api/v1/settings/flow-retention-policy/preview",
             {
                 "flow_run_history_retention_days": 30,
+                "flow_run_history_minimum_retention_days": None,
+                "flow_run_history_no_purge": False,
                 "flow_runtime_upload_abandonment_days": None,
             },
         ),

@@ -44,7 +44,9 @@ class FlowClassificationRetentionPolicyService:
         self,
         *,
         security_classification_id: UUID,
-        data_retention_days: int,
+        data_retention_days: int | None,
+        minimum_retention_days: int | None,
+        no_purge: bool,
     ) -> FlowRetentionImpactPreview:
         await self._ensure_security_classification_exists(security_classification_id)
         return await self.data_retention_service.preview_flow_retention_classification_change(
@@ -52,6 +54,8 @@ class FlowClassificationRetentionPolicyService:
             proposal=FlowRetentionClassificationProposal(
                 security_classification_id=security_classification_id,
                 data_retention_days=data_retention_days,
+                minimum_retention_days=minimum_retention_days,
+                no_purge=no_purge,
             ),
         )
 
@@ -60,15 +64,19 @@ class FlowClassificationRetentionPolicyService:
         self,
         *,
         security_classification_id: UUID,
-        data_retention_days: int,
+        data_retention_days: int | None,
+        minimum_retention_days: int | None,
+        no_purge: bool,
         confirmation: FlowRetentionChangeConfirmation | None,
-    ) -> FlowClassificationRetentionPolicy:
+    ) -> FlowClassificationRetentionPolicy | None:
         await self._ensure_security_classification_exists(security_classification_id)
         decision = await self.data_retention_service.prepare_flow_retention_classification_change(
             tenant_id=self.user.tenant_id,
             proposal=FlowRetentionClassificationProposal(
                 security_classification_id=security_classification_id,
                 data_retention_days=data_retention_days,
+                minimum_retention_days=minimum_retention_days,
+                no_purge=no_purge,
             ),
             confirmation=confirmation,
         )
@@ -76,13 +84,27 @@ class FlowClassificationRetentionPolicyService:
             security_classification_id,
             lock=True,
         )
-        updated = await self.repo.upsert(
-            FlowClassificationRetentionPolicy(
+        all_off = (
+            data_retention_days is None
+            and minimum_retention_days is None
+            and not no_purge
+        )
+        updated = None
+        if all_off:
+            await self.repo.delete(
                 tenant_id=self.user.tenant_id,
                 security_classification_id=security_classification_id,
-                data_retention_days=data_retention_days,
             )
-        )
+        else:
+            updated = await self.repo.upsert(
+                FlowClassificationRetentionPolicy(
+                    tenant_id=self.user.tenant_id,
+                    security_classification_id=security_classification_id,
+                    data_retention_days=data_retention_days,
+                    minimum_retention_days=minimum_retention_days,
+                    no_purge=no_purge,
+                )
+            )
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -98,11 +120,27 @@ class FlowClassificationRetentionPolicyService:
                         if decision.old_policy is not None
                         else None
                     ),
+                    "minimum_retention_days": (
+                        decision.old_policy.minimum_retention_days
+                        if decision.old_policy is not None
+                        else None
+                    ),
+                    "no_purge": (
+                        decision.old_policy.no_purge
+                        if decision.old_policy is not None
+                        else False
+                    ),
                 },
-                "new_policy": {
-                    "security_classification_id": str(security_classification_id),
-                    "data_retention_days": updated.data_retention_days,
-                },
+                "new_policy": (
+                    {
+                        "security_classification_id": str(security_classification_id),
+                        "data_retention_days": updated.data_retention_days,
+                        "minimum_retention_days": updated.minimum_retention_days,
+                        "no_purge": updated.no_purge,
+                    }
+                    if updated is not None
+                    else None
+                ),
                 "preview": (
                     decision.preview.audit_summary()
                     if decision.preview is not None
@@ -115,49 +153,6 @@ class FlowClassificationRetentionPolicyService:
             },
         )
         return updated
-
-    @validate_permissions(Permission.ADMIN)
-    async def delete_policy(self, *, security_classification_id: UUID) -> None:
-        await self._ensure_security_classification_exists(security_classification_id)
-        await self.data_retention_service.get_flow_retention_control_plane_state(
-            tenant_id=self.user.tenant_id,
-            lock=True,
-        )
-        await self._ensure_security_classification_exists(
-            security_classification_id,
-            lock=True,
-        )
-        previous = await self.repo.get(
-            tenant_id=self.user.tenant_id,
-            security_classification_id=security_classification_id,
-        )
-        deleted = await self.repo.delete(
-            tenant_id=self.user.tenant_id,
-            security_classification_id=security_classification_id,
-        )
-        await self.audit_service.log(
-            tenant_id=self.user.tenant_id,
-            user=self.user,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description="Deleted Flow classification retention policy",
-            metadata={
-                "old_policy": {
-                    "security_classification_id": str(security_classification_id),
-                    "data_retention_days": (
-                        previous.data_retention_days if previous is not None else None
-                    ),
-                },
-                "new_policy": None,
-                "preview": None,
-                "activation": {
-                    "destructive_change": False,
-                    "activated_at": datetime.now(timezone.utc).isoformat(),
-                    "deleted": deleted,
-                },
-            },
-        )
 
     async def _ensure_security_classification_exists(
         self,

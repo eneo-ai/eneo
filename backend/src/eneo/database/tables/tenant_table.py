@@ -47,6 +47,14 @@ class Tenants(BasePublic):
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
+    flow_run_history_minimum_retention_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
+    flow_run_history_no_purge: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
     flow_runtime_upload_abandonment_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
@@ -83,6 +91,14 @@ class Tenants(BasePublic):
             f"(flow_runtime_upload_abandonment_days >= {MIN_RETENTION_DAYS} AND "
             f"flow_runtime_upload_abandonment_days <= {MAX_RETENTION_DAYS})",
             name="ck_tenants_flow_runtime_upload_abandonment_days_range",
+        ),
+        CheckConstraint(
+            "flow_run_history_minimum_retention_days IS NULL OR "
+            "(flow_run_history_minimum_retention_days >= "
+            f"{MIN_RETENTION_DAYS} AND "
+            "flow_run_history_minimum_retention_days <= "
+            f"{MAX_RETENTION_DAYS})",
+            name="ck_tenants_flow_run_history_minimum_retention_days_range",
         ),
     )
 

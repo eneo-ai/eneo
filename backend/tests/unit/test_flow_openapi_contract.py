@@ -335,7 +335,6 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/settings/flow-classification-retention-policies": {"get"},
     "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}": {
         "put",
-        "delete",
     },
     "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview": {
         "post",
@@ -467,10 +466,6 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "put",
     ): "put_flow_classification_retention_policy",
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "delete",
-    ): "delete_flow_classification_retention_policy",
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
         "post",
@@ -630,10 +625,6 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "put",
     ): {"403", "404", "409", "422"},
     (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "delete",
-    ): {"403", "404", "422"},
-    (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
         "post",
     ): {"403", "404", "422"},
@@ -764,10 +755,6 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
         "put",
     ): {"403", "404", "409"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "delete",
-    ): {"403", "404"},
     (
         "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
         "post",
@@ -1017,12 +1004,16 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     assert set(public_properties) == {
         "run_debug_evidence_days",
         "flow_run_history_retention_days",
+        "flow_run_history_minimum_retention_days",
+        "flow_run_history_no_purge",
         "flow_runtime_upload_abandonment_days",
         "effective_state",
     }
     assert set(update_properties) == {
         "run_debug_evidence_days",
         "flow_run_history_retention_days",
+        "flow_run_history_minimum_retention_days",
+        "flow_run_history_no_purge",
         "flow_runtime_upload_abandonment_days",
         "confirmation",
     }
@@ -1032,6 +1023,7 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
 
     for field_name in (
         "flow_run_history_retention_days",
+        "flow_run_history_minimum_retention_days",
         "flow_runtime_upload_abandonment_days",
     ):
         for properties in (public_properties, update_properties):
@@ -1057,6 +1049,8 @@ def test_openapi_flow_retention_preview_and_confirmation_are_exact_contracts(
 
     assert set(preview_request["required"]) == {
         "flow_run_history_retention_days",
+        "flow_run_history_minimum_retention_days",
+        "flow_run_history_no_purge",
         "flow_runtime_upload_abandonment_days",
     }
     assert preview_request.get("additionalProperties") is False
@@ -1107,10 +1101,15 @@ def test_openapi_flow_classification_retention_policy_contract(
     assert set(row_properties) == {
         "security_classification_id",
         "data_retention_days",
+        "minimum_retention_days",
+        "no_purge",
     }
     assert row_properties["security_classification_id"]["format"] == "uuid"
-    assert row_properties["data_retention_days"]["minimum"] == 1
-    assert row_properties["data_retention_days"]["maximum"] == 2555
+    for field_name in ("data_retention_days", "minimum_retention_days"):
+        integer_schema = _integer_schema_option(row_properties[field_name])
+        assert integer_schema["minimum"] == 1
+        assert integer_schema["maximum"] == 2555
+        assert _schema_allows_null(row_properties[field_name])
 
     list_schema = schemas.get("FlowClassificationRetentionPoliciesPublic", {})
     assert set(list_schema.get("properties", {})) == {"policies"}
@@ -1118,11 +1117,22 @@ def test_openapi_flow_classification_retention_policy_contract(
     update_schema = schemas.get("FlowClassificationRetentionPolicyUpdate", {})
     assert set(update_schema.get("properties", {})) == {
         "data_retention_days",
+        "minimum_retention_days",
+        "no_purge",
         "confirmation",
     }
     assert update_schema.get("additionalProperties") is False
-    assert update_schema["properties"]["data_retention_days"]["minimum"] == 1
-    assert update_schema["properties"]["data_retention_days"]["maximum"] == 2555
+    assert set(update_schema["required"]) == {
+        "data_retention_days",
+        "minimum_retention_days",
+        "no_purge",
+    }
+    for field_name in ("data_retention_days", "minimum_retention_days"):
+        property_schema = update_schema["properties"][field_name]
+        integer_schema = _integer_schema_option(property_schema)
+        assert integer_schema["minimum"] == 1
+        assert integer_schema["maximum"] == 2555
+        assert _schema_allows_null(property_schema)
 
 
 def test_openapi_all_flow_success_responses_have_examples(
@@ -2469,8 +2479,18 @@ def test_openapi_flow_read_models_expose_discriminated_retention_projection(
     off = schemas["FlowRunRetentionOff"]
     days = schemas["FlowRunRetentionDays"]
     contributors = schemas["FlowRunRetentionContributors"]
-    assert set(off["required"]) == {"state", "effective_days", "contributors"}
-    assert set(days["required"]) == {"state", "effective_days", "contributors"}
+    shared_required = {
+        "state",
+        "effective_days",
+        "effective_minimum_days",
+        "no_purge",
+        "policy_conflict",
+        "activation_sources",
+        "barrier_sources",
+        "contributors",
+    }
+    assert set(off["required"]) == shared_required
+    assert set(days["required"]) == shared_required
     assert off["properties"]["state"]["const"] == "off"
     assert off["properties"]["effective_days"]["type"] == "null"
     assert days["properties"]["state"]["const"] == "days"
@@ -2480,6 +2500,20 @@ def test_openapi_flow_read_models_expose_discriminated_retention_projection(
         "classification_days",
         "space_days",
         "flow_days",
+        "organization_minimum_days",
+        "classification_minimum_days",
+        "organization_no_purge",
+        "classification_no_purge",
+    }
+    assert set(days["properties"]["activation_sources"]["items"]["enum"]) == {
+        "organization",
+        "classification",
+    }
+    assert set(days["properties"]["barrier_sources"]["items"]["enum"]) == {
+        "organization_minimum",
+        "classification_minimum",
+        "organization_no_purge",
+        "classification_no_purge",
     }
 
 

@@ -197,49 +197,55 @@ Eneo also exposes **tenant-level Flow runtime settings** for operators and platf
 
 These are admin surfaces, not end-user runtime endpoints:
 
-| Setting area                | Endpoint                                                                                  | Purpose                                                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                            | Control maximum file/audio sizes and file-count limits                                                                   |
-| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                                  | Control generated PDF/DOCX rendering limits                                                                              |
-| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                                          | Control runtime step execution timeouts                                                                                  |
-| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                                         | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
-| Flow retention policy       | `GET/PATCH/POST .../preview /api/v1/settings/flow-retention-policy`                       | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
-| Classification retention    | `GET/PUT/DELETE/POST .../preview /api/v1/settings/flow-classification-retention-policies` | Inspect and change classification-scoped run-history windows through the same exact-preview gate                         |
+| Setting area                | Endpoint                                                                           | Purpose                                                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                     | Control maximum file/audio sizes and file-count limits                                                                   |
+| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                           | Control generated PDF/DOCX rendering limits                                                                              |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                                   | Control runtime step execution timeouts                                                                                  |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                                  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
+| Flow retention policy       | `GET/PATCH/POST .../preview /api/v1/settings/flow-retention-policy`                | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
+| Classification retention    | `GET/PUT/POST .../preview /api/v1/settings/flow-classification-retention-policies` | Inspect and replace classification-scoped delete-after and barrier state through the same exact-preview gate             |
 
 AI Builder budget settings live at `GET/PATCH /api/v1/settings/ai-builder-budget`.
 They are authoring/admin settings for AI Builder sessions, not Flow runtime controls.
 
 ### Flow retention policy shape
 
-`GET /api/v1/settings/flow-retention-policy` exposes three independent inputs:
+`GET /api/v1/settings/flow-retention-policy` exposes five inputs:
 
 - `run_debug_evidence_days`
 - `flow_run_history_retention_days`
+- `flow_run_history_minimum_retention_days`
+- `flow_run_history_no_purge`
 - `flow_runtime_upload_abandonment_days`
 
-The two organization inputs are nullable integers in the range `1..2555`. `null` means **Off**; there is no default or backfill. The first is the organization activation envelope for completed run and step history. The second covers runtime uploads that were never attached to a run input. Debug-evidence redaction remains a separate cleanup policy.
+The three day inputs are nullable integers in the range `1..2555`; there is no default or backfill. `flow_run_history_retention_days` activates the organization delete-after envelope for completed run and step history. `flow_runtime_upload_abandonment_days` is the separate delete-after input for runtime uploads that were never attached to a run input. The minimum and no-purge inputs are barriers for both preview projections: they never activate deletion. Debug-evidence redaction remains a separate cleanup policy.
 
-Enabling either organization input, or shortening an enabled value, is a destructive policy change. First send the exact proposed pair to `POST /api/v1/settings/flow-retention-policy/preview`. The bounded, read-only response includes the control-plane version, preview hash, preview timestamp, newly eligible counts and distinct file bytes, time anchors, latent Space/Flow values, and lifecycle blockers. Send those three evidence fields back as `confirmation` with the same PATCH. The server locks and transactionally recomputes the exact preview; stale policy or data produces `409`. Disabling or lengthening does not need confirmation.
+Enabling either delete-after input, shortening an enabled value, or changing either barrier requires confirmation. First send the exact proposed values to `POST /api/v1/settings/flow-retention-policy/preview`. The bounded, read-only response includes the control-plane version, preview hash, preview timestamp, newly eligible counts and distinct file bytes, delete-after and minimum-not-before ranges, latent Space/Flow values, lifecycle blockers, and policy blockers. Send those three evidence fields back as `confirmation` with the same PATCH. The server locks and transactionally recomputes the exact preview; stale policy or data produces `409`. An ordinary disable or lengthening with unchanged barriers does not need confirmation.
 
 `/api/v1/settings/flow-classification-retention-policies` configures classification-aware full history purge:
 
 - `GET /api/v1/settings/flow-classification-retention-policies` lists policy rows.
-- `POST /api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview` previews an exact enable or shorten operation.
-- `PUT /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` creates or replaces a policy and accepts the same confirmation shape.
-- `DELETE /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` removes a policy. Delete is idempotent when the classification exists but has no policy row.
+- `POST /api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview` previews the exact desired state.
+- `PUT /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` creates or replaces that exact state and accepts the same confirmation shape.
+- Sending `data_retention_days: null`, `minimum_retention_days: null`, and `no_purge: false` through preview and confirmed `PUT` removes the row. There is no independent `DELETE` endpoint.
 
 Each policy stores:
 
 - `security_classification_id`
 - `data_retention_days`
+- `minimum_retention_days`
+- `no_purge`
 
-`DataRetentionService` owns the policy calculation used by preview, deletion, and Flow reads. Let `A` be the shortest configured organization value and matching classification value. If neither value is configured, `A` is absent and automatic Flow-run deletion is **Off**, even when the Space or Flow contains a retention value. If `A` is present, the effective window is the shortest of `A`, the Space value, and the Flow value. Space and Flow values can only tighten an active envelope; they cannot activate, loosen, or disable it. Admin preview always returns the latent Space and Flow values so an activation decision shows its full impact.
+`DataRetentionService` owns the policy calculation used by preview, deletion, and Flow reads. Let `A` be the shortest configured organization and exact matching-classification delete-after value. If neither value is configured, `A` is absent and automatic Flow-run deletion is **Off**, even when the Space or Flow contains a retention value. If `A` is present, the effective window is the shortest of `A`, the Space value, and the Flow value. Space and Flow values can only tighten an active envelope; they cannot activate, loosen, or disable it. Class 3 follows this same ordinary exact-match rule.
 
-Every Flow response includes the required `run_history_retention` projection. Its `state` is either `off`, with `effective_days: null`, or `days`, with the positive effective window. `contributors` exposes the configured organization, matching-classification, Space, and Flow values that produced that state. There is no absent third state.
+Let `M` be the longest configured organization and exact matching-classification minimum. A run is not eligible until both its effective delete-after time and `M` have elapsed. Either no-purge value blocks automatic purge. These barriers never activate deletion, so a barrier-only classification row is valid and an ordinary Space/Flow value remains latent while `A` is absent. Admin preview returns the latent values and policy blockers so a decision shows the full impact.
+
+Every Flow response includes the required `run_history_retention` projection. Its `state` is either `off`, with `effective_days: null`, or `days`, with the positive effective window. The projection also reports `effective_minimum_days`, `no_purge`, `policy_conflict`, activation and barrier sources, and every organization, exact matching-classification, Space, and Flow contributor. There is no absent third state and no per-run `purge_eligible` claim.
 
 Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference. The organization value then remains the only possible activation source; if it is also Off, child Space and Flow values become latent and automatic Flow-run deletion turns Off.
 
-This release does not enforce records or legal holds. Automatic deletion must not be enabled for material under an active hold or preservation obligation until a separately governed blocker exists. The preview reports only three implemented lifecycle blockers: undelivered audit delivery, unresolved webhook delivery, and active rerun work.
+The explicit no-purge value is a retention barrier, not a general records-management or legal-hold framework. The preview separately reports three lifecycle blockers—undelivered audit delivery, unresolved webhook delivery, and active rerun work—and the minimum/no-purge/conflict policy blockers.
 
 Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. When the organization or matching-classification envelope is active, a stricter Flow/Space `data_retention_days` value can shorten the full run-history window. A Flow/Space value cannot activate deletion by itself. Use tenant evidence policy for export controls.
 

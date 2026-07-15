@@ -63,6 +63,20 @@
               {formatAnchor(preview.run_history.latest_proposed_anchor)}
             </dd>
           </div>
+          <div class="col-span-2">
+            <dt class="text-secondary">{m.flow_retention_preview_delete_after_range()}</dt>
+            <dd class="text-primary mt-1">
+              {formatAnchor(preview.run_history.earliest_proposed_delete_after_at)} –
+              {formatAnchor(preview.run_history.latest_proposed_delete_after_at)}
+            </dd>
+          </div>
+          <div class="col-span-2">
+            <dt class="text-secondary">{m.flow_retention_preview_minimum_range()}</dt>
+            <dd class="text-primary mt-1">
+              {formatAnchor(preview.run_history.earliest_proposed_minimum_not_before_at)} –
+              {formatAnchor(preview.run_history.latest_proposed_minimum_not_before_at)}
+            </dd>
+          </div>
         </dl>
       </section>
 
@@ -91,6 +105,20 @@
               {formatAnchor(preview.runtime_uploads.latest_proposed_anchor)}
             </dd>
           </div>
+          <div class="col-span-2">
+            <dt class="text-secondary">{m.flow_retention_preview_delete_after_range()}</dt>
+            <dd class="text-primary mt-1">
+              {formatAnchor(preview.runtime_uploads.earliest_proposed_delete_after_at)} –
+              {formatAnchor(preview.runtime_uploads.latest_proposed_delete_after_at)}
+            </dd>
+          </div>
+          <div class="col-span-2">
+            <dt class="text-secondary">{m.flow_retention_preview_minimum_range()}</dt>
+            <dd class="text-primary mt-1">
+              {formatAnchor(preview.runtime_uploads.earliest_proposed_minimum_not_before_at)} –
+              {formatAnchor(preview.runtime_uploads.latest_proposed_minimum_not_before_at)}
+            </dd>
+          </div>
         </dl>
       </section>
     </div>
@@ -109,6 +137,21 @@
         <li>
           {m.flow_retention_preview_active_rerun()}:
           {preview.lifecycle_blockers.active_rerun_count}
+        </li>
+      </ul>
+      <h4 class="text-primary mt-3 font-medium">{m.flow_retention_preview_policy_blockers()}</h4>
+      <ul class="text-secondary mt-2 grid gap-1 sm:grid-cols-3">
+        <li>
+          {m.flow_retention_preview_minimum_blocked()}:
+          {preview.policy_blockers.run_history_minimum_not_satisfied_count}
+        </li>
+        <li>
+          {m.flow_retention_preview_no_purge_blocked()}:
+          {preview.policy_blockers.run_history_no_purge_count}
+        </li>
+        <li>
+          {m.flow_retention_preview_conflicts()}:
+          {preview.policy_blockers.run_history_policy_conflict_count}
         </li>
       </ul>
       <p class="text-secondary mt-3">

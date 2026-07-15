@@ -123,6 +123,8 @@ FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
 FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
     "run_debug_evidence_days": 7,
     "flow_run_history_retention_days": 30,
+    "flow_run_history_minimum_retention_days": 90,
+    "flow_run_history_no_purge": False,
     "flow_runtime_upload_abandonment_days": 14,
     "effective_state": {
         "run_history_deletion_active": True,
@@ -133,6 +135,8 @@ FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
 
 FLOW_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "flow_run_history_retention_days": 30,
+    "flow_run_history_minimum_retention_days": 90,
+    "flow_run_history_no_purge": False,
 }
 
 FLOW_RETENTION_PREVIEW_EXAMPLE: JsonDict = {
@@ -151,6 +155,10 @@ FLOW_RETENTION_PREVIEW_EXAMPLE: JsonDict = {
         "newly_eligible_bytes": 4096,
         "earliest_proposed_anchor": "2025-01-01T12:00:00Z",
         "latest_proposed_anchor": "2026-01-01T12:00:00Z",
+        "earliest_proposed_delete_after_at": "2025-01-31T12:00:00Z",
+        "latest_proposed_delete_after_at": "2026-01-31T12:00:00Z",
+        "earliest_proposed_minimum_not_before_at": "2025-04-01T12:00:00Z",
+        "latest_proposed_minimum_not_before_at": "2026-04-01T12:00:00Z",
     },
     "runtime_uploads": {
         "current_eligible_count": 0,
@@ -161,11 +169,23 @@ FLOW_RETENTION_PREVIEW_EXAMPLE: JsonDict = {
         "newly_eligible_bytes": 1024,
         "earliest_proposed_anchor": "2025-06-01T12:00:00Z",
         "latest_proposed_anchor": "2025-12-01T12:00:00Z",
+        "earliest_proposed_delete_after_at": "2025-06-15T12:00:00Z",
+        "latest_proposed_delete_after_at": "2025-12-15T12:00:00Z",
+        "earliest_proposed_minimum_not_before_at": "2025-08-30T12:00:00Z",
+        "latest_proposed_minimum_not_before_at": "2026-03-01T12:00:00Z",
     },
     "lifecycle_blockers": {
         "undelivered_audit_count": 1,
         "unresolved_webhook_count": 0,
         "active_rerun_count": 0,
+    },
+    "policy_blockers": {
+        "run_history_minimum_not_satisfied_count": 4,
+        "run_history_no_purge_count": 0,
+        "run_history_policy_conflict_count": 12,
+        "runtime_upload_minimum_not_satisfied_count": 1,
+        "runtime_upload_no_purge_count": 0,
+        "runtime_upload_policy_conflict_count": 3,
     },
     "latent_space_retention_days": [7, 30],
     "latent_flow_retention_days": [1, 14],
@@ -174,6 +194,8 @@ FLOW_RETENTION_PREVIEW_EXAMPLE: JsonDict = {
 FLOW_CLASSIFICATION_RETENTION_POLICY_EXAMPLE: JsonDict = {
     "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef",
     "data_retention_days": 7,
+    "minimum_retention_days": 30,
+    "no_purge": False,
 }
 
 FLOW_CLASSIFICATION_RETENTION_POLICIES_EXAMPLE: JsonDict = {
@@ -182,6 +204,8 @@ FLOW_CLASSIFICATION_RETENTION_POLICIES_EXAMPLE: JsonDict = {
 
 FLOW_CLASSIFICATION_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "data_retention_days": 14,
+    "minimum_retention_days": 30,
+    "no_purge": False,
 }
 
 FlowEvidencePolicyUpdateFlag = bool | SkipJsonSchema[None]
@@ -481,7 +505,10 @@ class FlowRetentionEffectiveStatePublic(BaseModel):
         return cls(
             run_history_deletion_active=(
                 state.organization_run_history_days is not None
-                or bool(state.classification_policies)
+                or any(
+                    policy.data_retention_days is not None
+                    for policy in state.classification_policies
+                )
             ),
             runtime_upload_abandonment_active=(
                 state.runtime_upload_abandonment_days is not None
@@ -515,6 +542,10 @@ class FlowRetentionDataImpactPublic(BaseModel):
     newly_eligible_bytes: int = Field(ge=0)
     earliest_proposed_anchor: datetime | None
     latest_proposed_anchor: datetime | None
+    earliest_proposed_delete_after_at: datetime | None
+    latest_proposed_delete_after_at: datetime | None
+    earliest_proposed_minimum_not_before_at: datetime | None
+    latest_proposed_minimum_not_before_at: datetime | None
 
     @classmethod
     def from_domain(
@@ -530,6 +561,16 @@ class FlowRetentionDataImpactPublic(BaseModel):
             newly_eligible_bytes=impact.newly_eligible_bytes,
             earliest_proposed_anchor=impact.earliest_proposed_anchor,
             latest_proposed_anchor=impact.latest_proposed_anchor,
+            earliest_proposed_delete_after_at=(
+                impact.earliest_proposed_delete_after_at
+            ),
+            latest_proposed_delete_after_at=impact.latest_proposed_delete_after_at,
+            earliest_proposed_minimum_not_before_at=(
+                impact.earliest_proposed_minimum_not_before_at
+            ),
+            latest_proposed_minimum_not_before_at=(
+                impact.latest_proposed_minimum_not_before_at
+            ),
         )
 
 
@@ -537,6 +578,15 @@ class FlowRetentionLifecycleBlockersPublic(BaseModel):
     undelivered_audit_count: int = Field(ge=0)
     unresolved_webhook_count: int = Field(ge=0)
     active_rerun_count: int = Field(ge=0)
+
+
+class FlowRetentionPolicyBlockersPublic(BaseModel):
+    run_history_minimum_not_satisfied_count: int = Field(ge=0)
+    run_history_no_purge_count: int = Field(ge=0)
+    run_history_policy_conflict_count: int = Field(ge=0)
+    runtime_upload_minimum_not_satisfied_count: int = Field(ge=0)
+    runtime_upload_no_purge_count: int = Field(ge=0)
+    runtime_upload_policy_conflict_count: int = Field(ge=0)
 
 
 class FlowRetentionImpactPreviewPublic(BaseModel):
@@ -561,6 +611,7 @@ class FlowRetentionImpactPreviewPublic(BaseModel):
     run_history: FlowRetentionDataImpactPublic
     runtime_uploads: FlowRetentionDataImpactPublic
     lifecycle_blockers: FlowRetentionLifecycleBlockersPublic
+    policy_blockers: FlowRetentionPolicyBlockersPublic
     latent_space_retention_days: list[int]
     latent_flow_retention_days: list[int]
 
@@ -589,6 +640,9 @@ class FlowRetentionImpactPreviewPublic(BaseModel):
                 ),
                 active_rerun_count=preview.lifecycle_blockers.active_rerun_count,
             ),
+            policy_blockers=FlowRetentionPolicyBlockersPublic(
+                **preview.policy_blockers.hash_payload()
+            ),
             latent_space_retention_days=list(preview.latent_space_retention_days),
             latent_flow_retention_days=list(preview.latent_flow_retention_days),
         )
@@ -600,6 +654,8 @@ class FlowRetentionOrganizationPreviewRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "flow_run_history_retention_days": 30,
+                "flow_run_history_minimum_retention_days": 90,
+                "flow_run_history_no_purge": False,
                 "flow_runtime_upload_abandonment_days": 14,
             }
         },
@@ -621,20 +677,56 @@ class FlowRetentionOrganizationPreviewRequest(BaseModel):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
     )
+    flow_run_history_minimum_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=(
+            "Organization minimum retention barrier for Flow run history and "
+            "never-attached runtime uploads. Null removes this barrier."
+        ),
+    )
+    flow_run_history_no_purge: bool = Field(
+        ...,
+        strict=True,
+        description=(
+            "Organization barrier that blocks automatic Flow run-history and "
+            "never-attached runtime-upload purge without activating deletion."
+        ),
+    )
 
 
 class FlowClassificationRetentionPolicyPreviewRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"example": {"data_retention_days": 14}},
+        json_schema_extra={
+            "example": FLOW_CLASSIFICATION_RETENTION_POLICY_UPDATE_EXAMPLE
+        },
     )
 
-    data_retention_days: int = Field(
+    data_retention_days: int | None = Field(
+        ...,
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
         description=(
             "Proposed matching-classification Flow run-history activation window."
+        ),
+    )
+    minimum_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description="Proposed matching-classification minimum retention barrier.",
+    )
+    no_purge: bool = Field(
+        ...,
+        strict=True,
+        description=(
+            "Proposed matching-classification no-purge barrier; it does not "
+            "activate automatic deletion."
         ),
     )
 
@@ -661,6 +753,13 @@ class FlowRetentionPolicyPublic(BaseModel):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
     )
+    flow_run_history_minimum_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+    flow_run_history_no_purge: bool = Field(..., strict=True)
     effective_state: FlowRetentionEffectiveStatePublic
 
 
@@ -692,6 +791,18 @@ class FlowRetentionPolicyUpdate(BaseModel):
         le=MAX_RETENTION_DAYS,
         json_schema_extra=_strip_json_schema_default,
     )
+    flow_run_history_minimum_retention_days: int | None = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    flow_run_history_no_purge: bool = Field(
+        default=False,
+        strict=True,
+        json_schema_extra=_strip_json_schema_default,
+    )
     confirmation: FlowRetentionChangeConfirmationPublic | None = Field(
         default=None,
         json_schema_extra=_strip_json_schema_default,
@@ -704,7 +815,8 @@ class FlowClassificationRetentionPolicyPublic(BaseModel):
     )
 
     security_classification_id: UUID
-    data_retention_days: int = Field(
+    data_retention_days: int | None = Field(
+        ...,
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
@@ -712,6 +824,20 @@ class FlowClassificationRetentionPolicyPublic(BaseModel):
             "Matching-classification Flow run-history activation window in days. "
             "The effective window is the minimum of this value, the organization "
             "value, and configured Space or Flow tightening values."
+        ),
+    )
+    minimum_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description="Matching-classification minimum retention barrier in days.",
+    )
+    no_purge: bool = Field(
+        ...,
+        strict=True,
+        description=(
+            "Matching-classification no-purge barrier; it never activates deletion."
         ),
     )
 
@@ -732,7 +858,8 @@ class FlowClassificationRetentionPolicyUpdate(BaseModel):
         },
     )
 
-    data_retention_days: int = Field(
+    data_retention_days: int | None = Field(
+        ...,
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
@@ -740,6 +867,20 @@ class FlowClassificationRetentionPolicyUpdate(BaseModel):
             "Matching-classification Flow run-history activation window in days. "
             "The effective window is the minimum of this value, the organization "
             "value, and configured Space or Flow tightening values."
+        ),
+    )
+    minimum_retention_days: int | None = Field(
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description="Matching-classification minimum retention barrier in days.",
+    )
+    no_purge: bool = Field(
+        ...,
+        strict=True,
+        description=(
+            "Matching-classification no-purge barrier; it never activates deletion."
         ),
     )
     confirmation: FlowRetentionChangeConfirmationPublic | None = Field(

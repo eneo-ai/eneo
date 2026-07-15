@@ -26,12 +26,21 @@ SPACE_RETENTION_CONSTRAINT_NAME = "ck_spaces_data_retention_days_range"
 CLASSIFICATION_RETENTION_CONSTRAINT_NAME = (
     "ck_flow_classification_retention_policy_days_range"
 )
+CLASSIFICATION_MINIMUM_RETENTION_CONSTRAINT_NAME = (
+    "ck_flow_classification_retention_policy_minimum_days_range"
+)
+CLASSIFICATION_ACTIVE_POLICY_CONSTRAINT_NAME = (
+    "ck_flow_classification_retention_policy_has_value"
+)
 CLASSIFICATION_RETENTION_POLICY_TABLE_NAME = "flow_classification_retention_policies"
 FLOW_RUN_RETENTION_ANCHOR_INDEX_NAME = "ix_flow_runs_terminal_retention_anchor"
 TENANT_FLOW_RETENTION_CONSTRAINT_NAMES = {
     "ck_tenants_flow_run_history_retention_days_range",
     "ck_tenants_flow_runtime_upload_abandonment_days_range",
 }
+TENANT_FLOW_RETENTION_BARRIER_CONSTRAINT_NAME = (
+    "ck_tenants_flow_run_history_minimum_retention_days_range"
+)
 
 
 def _check_constraint_sql(table: object, constraint_name: str) -> str:
@@ -116,6 +125,26 @@ def test_tenant_flow_retention_inputs_have_separate_named_range_checks() -> None
         assert "<= 2555" in sqltext
 
 
+def test_tenant_flow_retention_barriers_default_to_preserving_current_behavior() -> (
+    None
+):
+    minimum_column = Tenants.__table__.c["flow_run_history_minimum_retention_days"]
+    no_purge_column = Tenants.__table__.c["flow_run_history_no_purge"]
+
+    assert minimum_column.nullable is True
+    assert minimum_column.server_default is None
+    assert no_purge_column.nullable is False
+    assert str(no_purge_column.server_default.arg) == "false"
+
+    constraint_sql = _check_constraint_sql(
+        Tenants,
+        TENANT_FLOW_RETENTION_BARRIER_CONSTRAINT_NAME,
+    )
+    assert "flow_run_history_minimum_retention_days IS NULL" in constraint_sql
+    assert "flow_run_history_minimum_retention_days >= 1" in constraint_sql
+    assert "flow_run_history_minimum_retention_days <= 2555" in constraint_sql
+
+
 @pytest.mark.parametrize(
     "field_name",
     (
@@ -131,27 +160,61 @@ def test_tenant_flow_retention_model_is_strict_and_bounded(field_name: str) -> N
             TenantUpdate(id=uuid4(), **{field_name: rejected})
 
 
+def test_tenant_flow_retention_barrier_model_is_strict_and_bounded() -> None:
+    for accepted in (None, 1, 2555):
+        assert TenantUpdate(
+            id=uuid4(),
+            flow_run_history_minimum_retention_days=accepted,
+        )
+    for rejected in (0, 2556, "30"):
+        with pytest.raises(ValidationError):
+            TenantUpdate(
+                id=uuid4(),
+                flow_run_history_minimum_retention_days=rejected,
+            )
+
+    assert TenantUpdate(id=uuid4(), flow_run_history_no_purge=False)
+    assert TenantUpdate(id=uuid4(), flow_run_history_no_purge=True)
+    with pytest.raises(ValidationError):
+        TenantUpdate(id=uuid4(), flow_run_history_no_purge=1)
+
+
 def test_flow_run_retention_projection_is_a_strict_state_union() -> None:
     adapter = TypeAdapter(FlowRunRetentionProjection)
-    contributors = {
+    off_contributors = {
         "organization_days": None,
         "classification_days": None,
         "space_days": 7,
         "flow_days": 3,
+        "organization_minimum_days": 30,
+        "classification_minimum_days": None,
+        "organization_no_purge": False,
+        "classification_no_purge": False,
     }
+    days_contributors = {**off_contributors, "organization_days": 7}
 
     off = adapter.validate_python(
         {
             "state": "off",
             "effective_days": None,
-            "contributors": contributors,
+            "effective_minimum_days": 30,
+            "no_purge": False,
+            "policy_conflict": False,
+            "activation_sources": [],
+            "barrier_sources": ["organization_minimum"],
+            "contributors": off_contributors,
         }
     )
     days = adapter.validate_python(
         {
             "state": "days",
             "effective_days": 3,
-            "contributors": contributors,
+            "effective_minimum_days": 30,
+            "no_purge": False,
+            "policy_conflict": True,
+            "activation_sources": ["organization"],
+            "barrier_sources": ["organization_minimum"],
+            "contributors": days_contributors,
         }
     )
 
@@ -164,7 +227,12 @@ def test_flow_run_retention_projection_is_a_strict_state_union() -> None:
             {
                 "state": "off",
                 "effective_days": 3,
-                "contributors": contributors,
+                "effective_minimum_days": 30,
+                "no_purge": False,
+                "policy_conflict": False,
+                "activation_sources": [],
+                "barrier_sources": ["organization_minimum"],
+                "contributors": off_contributors,
             }
         )
 
@@ -198,6 +266,35 @@ def test_classification_retention_policy_table_has_tenant_paired_contract() -> N
         "security_classifications.tenant_id",
     ]
     assert composite_fk.ondelete == "CASCADE"
+
+
+def test_classification_retention_policy_supports_barrier_only_rows() -> None:
+    table = FlowClassificationRetentionPolicies.__table__
+
+    assert table.c.data_retention_days.nullable is True
+    assert table.c.minimum_retention_days.nullable is True
+    assert table.c.no_purge.nullable is False
+    assert str(table.c.no_purge.server_default.arg) == "false"
+
+    days_sql = _check_constraint_sql(
+        FlowClassificationRetentionPolicies,
+        CLASSIFICATION_RETENTION_CONSTRAINT_NAME,
+    )
+    minimum_sql = _check_constraint_sql(
+        FlowClassificationRetentionPolicies,
+        CLASSIFICATION_MINIMUM_RETENTION_CONSTRAINT_NAME,
+    )
+    active_policy_sql = _check_constraint_sql(
+        FlowClassificationRetentionPolicies,
+        CLASSIFICATION_ACTIVE_POLICY_CONSTRAINT_NAME,
+    )
+    assert "data_retention_days IS NULL" in days_sql
+    assert "minimum_retention_days IS NULL" in minimum_sql
+    assert "minimum_retention_days >= 1" in minimum_sql
+    assert "minimum_retention_days <= 2555" in minimum_sql
+    assert "data_retention_days IS NOT NULL" in active_policy_sql
+    assert "minimum_retention_days IS NOT NULL" in active_policy_sql
+    assert "no_purge" in active_policy_sql
 
 
 def test_security_classifications_has_tenant_pair_unique_constraint() -> None:

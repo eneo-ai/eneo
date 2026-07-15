@@ -23,11 +23,20 @@ function makeFlow(fields: FlowFormField[]): Flow {
     run_history_retention: {
       state: "off",
       effective_days: null,
+      effective_minimum_days: null,
+      no_purge: false,
+      policy_conflict: false,
+      activation_sources: [],
+      barrier_sources: [],
       contributors: {
         organization_days: null,
         classification_days: null,
         space_days: null,
-        flow_days: null
+        flow_days: null,
+        organization_minimum_days: null,
+        classification_minimum_days: null,
+        organization_no_purge: false,
+        classification_no_purge: false
       }
     },
     created_at: null,

@@ -215,6 +215,10 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
         "classification_days": case.classification_days,
         "space_days": case.space_days,
         "flow_days": case.flow_days,
+        "organization_minimum_days": None,
+        "classification_minimum_days": None,
+        "organization_no_purge": False,
+        "classification_no_purge": False,
     }
     if blocked_by_audit:
         preview = await retention_service.preview_flow_retention_organization_change(

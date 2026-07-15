@@ -107,7 +107,8 @@ FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
 FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
     "Effective automatic Flow run-history deletion state. The organization or "
     "matching classification value activates deletion; space and Flow values "
-    "can only tighten the active window."
+    "can only tighten the active window. Organization and matching-classification "
+    "minimum/no-purge barriers never activate deletion and cannot be weakened here."
 )
 FlowDataRetentionDays: TypeAlias = Annotated[
     int,
@@ -193,11 +194,23 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "run_history_retention": {
         "state": "days",
         "effective_days": 14,
+        "effective_minimum_days": 90,
+        "no_purge": False,
+        "policy_conflict": True,
+        "activation_sources": ["organization", "classification"],
+        "barrier_sources": [
+            "organization_minimum",
+            "classification_minimum",
+        ],
         "contributors": {
             "organization_days": 90,
             "classification_days": 30,
             "space_days": 14,
             "flow_days": 30,
+            "organization_minimum_days": 90,
+            "classification_minimum_days": 60,
+            "organization_no_purge": False,
+            "classification_no_purge": False,
         },
     },
     "created_at": "2026-03-17T09:30:00Z",
