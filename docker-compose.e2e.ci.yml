@@ -94,6 +94,16 @@ services:
       UPLOAD_MAX_FILE_SIZE: "10485760"
       TRANSCRIPTION_MAX_FILE_SIZE: "10485760"
       MAX_IN_QUESTION: "1"
+      # Browser E2E proves API liveness while the byte plane is unavailable.
+      # Real SeaweedFS persistence/integrity/recovery is covered by the backend
+      # object_content integration suite in this same CI workflow.
+      OBJECT_CONTENT_ENDPOINT_URL: http://127.0.0.1:1
+      OBJECT_CONTENT_REGION: local
+      OBJECT_CONTENT_BUCKET: eneo-e2e-test
+      OBJECT_CONTENT_ACCESS_KEY_ID: e2e-test-key
+      OBJECT_CONTENT_SECRET_ACCESS_KEY: e2e-test-secret
+      OBJECT_CONTENT_DEPLOYMENT_ID: 2ab0d434-4883-4aee-96d0-cf46b5f87f89
+      OBJECT_CONTENT_ALLOW_INSECURE_HTTP: "true"
       # Seeded login identity. init_db only seeds when ALL five are set.
       DEFAULT_TENANT_NAME: E2ETenant
       DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"

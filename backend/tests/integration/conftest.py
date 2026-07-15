@@ -109,6 +109,23 @@ if not os.getenv("URL_SIGNING_KEY"):
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
 
+# Generic API integration tests exercise process startup and liveness, not the
+# byte plane. Give that process an explicit, intentionally unavailable endpoint
+# so mandatory production configuration stays fail-closed without starting a
+# second object store for every worker. The dedicated object_content suite owns
+# real SeaweedFS persistence, integrity, range, multipart, and recovery proof.
+_OBJECT_CONTENT_TEST_ENV = {
+    "OBJECT_CONTENT_ENDPOINT_URL": "http://127.0.0.1:1",
+    "OBJECT_CONTENT_REGION": "local",
+    "OBJECT_CONTENT_BUCKET": "eneo-integration-test",
+    "OBJECT_CONTENT_ACCESS_KEY_ID": "integration-test-key",
+    "OBJECT_CONTENT_SECRET_ACCESS_KEY": "integration-test-secret",
+    "OBJECT_CONTENT_DEPLOYMENT_ID": "1ca60836-7e7c-49c8-b2e1-1fb70dc15cf0",
+    "OBJECT_CONTENT_ALLOW_INSECURE_HTTP": "true",
+}
+for _name, _value in _OBJECT_CONTENT_TEST_ENV.items():
+    os.environ.setdefault(_name, _value)
+
 # Crawler settings - ensure TTL > max_length to pass validation
 # These must be set BEFORE importing any module that calls get_settings()
 if not os.getenv("CRAWL_MAX_LENGTH"):
@@ -573,21 +590,26 @@ async def app(setup_database):
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
+    from eneo.object_content.runtime import object_content_runtime
     from eneo.server.dependencies.lifespan import startup
 
-    await startup()
+    try:
+        await startup()
 
-    # Verify app initialization
-    print("\n=== Application Verification ===")
-    print("✓ FastAPI app initialized")
-    # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
-    # Endpoint-level route contracts are covered by the route contract tests.
-    print(f"✓ Routes registered: {len(application.routes)} route entries")
-    print("✓ Ready for testing\n")
+        # Verify app initialization
+        print("\n=== Application Verification ===")
+        print("✓ FastAPI app initialized")
+        # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
+        # Endpoint-level route contracts are covered by the route contract tests.
+        print(f"✓ Routes registered: {len(application.routes)} route entries")
+        print("✓ Ready for testing\n")
 
-    yield application
-
-    # Note: We skip shutdown() to keep sessionmanager open for cleanup
+        yield application
+    finally:
+        # Full shutdown closes the session manager needed by cleanup_database.
+        # Release the new process-owned byte-plane clients independently so
+        # every function-scoped application gets a fresh runtime without leaks.
+        await object_content_runtime.stop()
 
 
 @pytest.fixture
