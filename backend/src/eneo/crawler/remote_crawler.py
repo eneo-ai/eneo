@@ -29,6 +29,7 @@ from typing import Any, Callable, Coroutine, Iterable, Optional, cast
 from urllib.parse import unquote, urlparse
 
 import aiohttp
+import yarl
 from typing_extensions import TypedDict
 
 from eneo.crawler.models import Crawl, CrawledPage
@@ -64,6 +65,11 @@ _CONNECT_TIMEOUT_SECONDS = 30
 # Total timeout for the /v1/preview dry-run used to validate sitemap configs;
 # it runs inline in API requests, so it must stay bounded.
 _PREVIEW_TIMEOUT_SECONDS = 30
+
+# Linked-file downloads follow redirects manually so every hop can be checked
+# against the crawl host; an off-host hop is a boundary violation, not a fetch.
+_FILE_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_MAX_FILE_REDIRECTS = 5
 
 
 @dataclass(frozen=True)
@@ -269,8 +275,11 @@ class RemoteCrawler:
         request_body: dict[str, Any] = {
             "url": url,
             "crawl_type": crawl_type.value,
-            # Whole-site parity with Eneo's crawl semantics: the service
-            # defaults to depth 1; 10 is its maximum
+            # Whole-site parity with Eneo's crawl semantics: path_prefix scope
+            # crawls without a depth limit (like the previous in-process
+            # crawler), bounded by max_pages/max_seconds instead. depth is the
+            # service maximum and only applies if scope were ever absent.
+            "scope": "path_prefix",
             "depth": 10,
             "http_auth": (
                 {"user": http_user, "password": http_pass}
@@ -456,36 +465,71 @@ class RemoteCrawler:
             # to the worker — never a truncated blob.
             part = target.parent / (target.name + ".part")
             try:
-                async with session.get(
-                    link_url,
-                    headers=(
-                        {"Authorization": auth_header}
-                        if auth_header is not None
-                        else None
-                    ),
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-                ) as response:
-                    if response.status != 200:
-                        logger.warning(
-                            "Skipping linked file (non-200)",
-                            extra={"file_url": link_url, "status": response.status},
-                        )
-                        continue
-                    declared = response.content_length
-                    if declared is not None and declared > max_size:
-                        logger.warning(
-                            "Skipping linked file (exceeds download_max_size)",
-                            extra={"file_url": link_url, "size": declared},
-                        )
-                        continue
-                    written = 0
-                    with open(part, "wb") as out:
-                        async for chunk in response.content.iter_chunked(64 * 1024):
-                            written += len(chunk)
-                            if written > max_size:
-                                raise CrawlerException("download_max_size exceeded")
-                            out.write(chunk)
-                part.replace(target)
+                # Redirects are followed manually: each hop must stay on the
+                # crawl host, or a crawled page could bounce the worker to an
+                # internal or off-scope address and ingest its response.
+                fetch_url = link_url
+                for _ in range(_MAX_FILE_REDIRECTS + 1):
+                    async with session.get(
+                        fetch_url,
+                        headers=(
+                            {"Authorization": auth_header}
+                            if auth_header is not None
+                            else None
+                        ),
+                        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                        allow_redirects=False,
+                    ) as response:
+                        if response.status in _FILE_REDIRECT_STATUSES:
+                            location = response.headers.get("Location")
+                            next_url = (
+                                str(response.url.join(yarl.URL(location)))
+                                if location
+                                else None
+                            )
+                            if next_url is None or not same_host(next_url, crawl_host):
+                                logger.warning(
+                                    "Skipping linked file redirected outside "
+                                    "crawl host",
+                                    extra={
+                                        "file_url": link_url,
+                                        "redirect_target": next_url,
+                                        "crawl_host": crawl_host,
+                                    },
+                                )
+                                break
+                            fetch_url = next_url
+                            continue
+                        if response.status != 200:
+                            logger.warning(
+                                "Skipping linked file (non-200)",
+                                extra={
+                                    "file_url": link_url,
+                                    "status": response.status,
+                                },
+                            )
+                            break
+                        declared = response.content_length
+                        if declared is not None and declared > max_size:
+                            logger.warning(
+                                "Skipping linked file (exceeds download_max_size)",
+                                extra={"file_url": link_url, "size": declared},
+                            )
+                            break
+                        written = 0
+                        with open(part, "wb") as out:
+                            async for chunk in response.content.iter_chunked(64 * 1024):
+                                written += len(chunk)
+                                if written > max_size:
+                                    raise CrawlerException("download_max_size exceeded")
+                                out.write(chunk)
+                        part.replace(target)
+                        break
+                else:
+                    logger.warning(
+                        "Skipping linked file (too many redirects)",
+                        extra={"file_url": link_url},
+                    )
             except (aiohttp.ClientError, asyncio.TimeoutError, CrawlerException) as exc:
                 logger.warning(
                     "Failed to download linked file, skipping",
@@ -607,6 +651,13 @@ class RemoteCrawler:
                         elif done_status == "failed":
                             is_partial = True
                             termination_reason = "error"
+                        elif done_status is None:
+                            # The stream ended without a terminal done event
+                            # (service died between events, or a middlebox
+                            # terminated the framing cleanly). The pages
+                            # received are a prefix, not the full crawl.
+                            is_partial = True
+                            termination_reason = "stream_interrupted"
                         logger.info(
                             "Remote crawl stream finished",
                             extra={

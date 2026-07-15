@@ -733,6 +733,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_titles: list[str] = []
             existing_file_hashes: dict[str, bytes] = {}
             existing_page_hashes: dict[str, bytes] = {}
+            existing_validators: dict[str, tuple[str | None, str | None]] = {}
             conditional_gets: list[ConditionalGetHint] = []
             stored_sitemap_state: dict[str, Any] | None = None
             website_url: str = ""  # For logging after session closes
@@ -959,6 +960,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             continue
                         if hash_bytes is not None:
                             existing_page_hashes[title] = hash_bytes
+                        existing_validators[title] = (blob_etag, blob_last_modified)
                         if blob_etag or blob_last_modified:
                             conditional_gets.append(
                                 {
@@ -1133,6 +1135,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Use set for O(1) membership tests
             crawled_titles: set[str] = set()
             failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
+            # Hash-skipped pages whose ETag/Last-Modified changed; flushed as
+            # one batch update in the cleanup phase
+            validator_refreshes: list[dict[str, str | None]] = []
 
             # Get per-tenant settings for heartbeat BEFORE starting crawl
             # This ensures heartbeat runs during the entire crawl phase
@@ -1246,6 +1251,23 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     if existing_page_hashes.get(page.url) == page_hash:
                         num_skipped_pages += 1
                         crawled_titles.add(page.url)
+                        # An origin can rotate ETag/Last-Modified while the
+                        # extracted text stays identical; keep the stored
+                        # validators current or every later crawl re-sends the
+                        # old ones and never reaches the 304 path again.
+                        if (
+                            page.etag or page.last_modified
+                        ) and existing_validators.get(page.url) != (
+                            page.etag,
+                            page.last_modified,
+                        ):
+                            validator_refreshes.append(
+                                {
+                                    "b_title": page.url,
+                                    "b_etag": page.etag,
+                                    "b_last_modified": page.last_modified,
+                                }
+                            )
                         continue
 
                     # Buffer page as dict (primitives only!)
@@ -1434,6 +1456,37 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
             else:
                 num_deleted_blobs = 0
+
+            if validator_refreshes:
+
+                async def _do_validator_refresh(sess: AsyncSession) -> None:
+                    await sess.execute(
+                        sa.update(InfoBlobs)
+                        .where(
+                            InfoBlobs.website_id == params.website_id,
+                            InfoBlobs.title == sa.bindparam("b_title"),
+                        )
+                        .values(
+                            http_etag=sa.bindparam("b_etag"),
+                            http_last_modified=sa.bindparam("b_last_modified"),
+                        ),
+                        validator_refreshes,
+                    )
+
+                await execute_with_recovery(
+                    container=container,
+                    session_holder=session_holder,
+                    created_sessions=created_sessions,
+                    operation_name="validator_refresh",
+                    operation=_do_validator_refresh,
+                )
+                logger.info(
+                    "Refreshed HTTP validators on hash-skipped pages",
+                    extra={
+                        "website_id": str(params.website_id),
+                        "num_refreshed": len(validator_refreshes),
+                    },
+                )
             timings["cleanup_deleted"] = time.time() - cleanup_start
 
             # Measure website size update with recovery wrapper

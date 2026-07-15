@@ -160,6 +160,45 @@ class TestProbeSitemap:
         assert probe.supports_skip is False
 
     @pytest.mark.asyncio
+    async def test_entry_cap_crossed_by_sub_sitemaps_fails_probe(
+        self, stub, monkeypatch
+    ):
+        # The probe retains every (loc, lastmod) entry before fingerprinting;
+        # the probe-wide cap bounds that memory. Crossing it mid-index gives
+        # up (full crawl) instead of aggregating further.
+        import eneo.crawler.sitemap_check as sitemap_check
+
+        monkeypatch.setattr(sitemap_check, "_MAX_TOTAL_ENTRIES", 3)
+        index = f"""<?xml version="1.0"?>
+        <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <sitemap><loc>{stub.base_url}/sub1.xml</loc></sitemap>
+          <sitemap><loc>{stub.base_url}/sub2.xml</loc></sitemap>
+        </sitemapindex>
+        """
+        stub.docs["/index.xml"] = index.encode()
+        stub.docs["/sub1.xml"] = URLSET.encode()
+        stub.docs["/sub2.xml"] = URLSET.encode()
+
+        assert await probe_sitemap([f"{stub.base_url}/index.xml"]) is None
+
+    @pytest.mark.asyncio
+    async def test_entry_cap_crossed_across_locations_fails_probe(
+        self, stub, monkeypatch
+    ):
+        # The cap is probe-wide: entries already collected from earlier
+        # top-level locations shrink the budget for later ones.
+        import eneo.crawler.sitemap_check as sitemap_check
+
+        monkeypatch.setattr(sitemap_check, "_MAX_TOTAL_ENTRIES", 3)
+        stub.docs["/a.xml"] = URLSET.encode()
+        stub.docs["/b.xml"] = URLSET.encode()
+
+        assert (
+            await probe_sitemap([f"{stub.base_url}/a.xml", f"{stub.base_url}/b.xml"])
+            is None
+        )
+
+    @pytest.mark.asyncio
     async def test_mixed_lastmod_never_skips(self, stub):
         # A urlset where one of two entries lacks lastmod: the fingerprint is
         # blind to changes on the lastmod-less page, so skipping is unsound.

@@ -34,6 +34,10 @@ _MAX_FETCH_BYTES = 16 * 1024 * 1024
 # Indexes larger than this are cheaper to crawl with conditional GETs than
 # to fingerprint on every schedule tick
 _MAX_SUB_SITEMAPS = 50
+# Probe-wide ceiling on retained (loc, lastmod) entries across all documents.
+# Far above any crawlable site (max_pages caps the crawl anyway); bounds the
+# memory and the synchronous sort a hostile or gigantic sitemap can force.
+_MAX_TOTAL_ENTRIES = 200_000
 
 _IS_INDEX = re.compile(r"<sitemapindex\b", re.IGNORECASE)
 _SITEMAP_BLOCK = re.compile(r"<sitemap\b[\s\S]*?</sitemap>", re.IGNORECASE)
@@ -152,6 +156,7 @@ async def _collect_entries(
     *,
     auth_host: Optional[str],
     auth_header: Optional[str],
+    max_entries: int,
 ) -> Optional[list[tuple[str, Optional[str]]]]:
     """The (loc, lastmod) entries of one sitemap document (a urlset, or a
     sitemapindex expanded one level). None means the probe cannot be trusted
@@ -193,8 +198,21 @@ async def _collect_entries(
             if sub_xml is None or _IS_INDEX.search(sub_xml):
                 return None
             entries.extend(_parse_blocks(sub_xml, _URL_BLOCK))
+            if len(entries) > max_entries:
+                logger.warning(
+                    "Sitemap index exceeds probe entry cap; failing probe",
+                    extra={"sitemap_url": url, "cap": max_entries},
+                )
+                return None
         return entries
-    return _parse_blocks(xml, _URL_BLOCK)
+    entries = _parse_blocks(xml, _URL_BLOCK)
+    if len(entries) > max_entries:
+        logger.warning(
+            "Sitemap exceeds probe entry cap; failing probe",
+            extra={"sitemap_url": url, "cap": max_entries},
+        )
+        return None
+    return entries
 
 
 async def probe_sitemap(
@@ -231,7 +249,11 @@ async def probe_sitemap(
             async with aiohttp.ClientSession() as session:
                 for location in sitemap_urls:
                     entries = await _collect_entries(
-                        session, location, auth_host=auth_host, auth_header=auth_header
+                        session,
+                        location,
+                        auth_host=auth_host,
+                        auth_header=auth_header,
+                        max_entries=_MAX_TOTAL_ENTRIES - len(all_entries),
                     )
                     if entries is None:
                         return None

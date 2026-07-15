@@ -102,6 +102,12 @@ async def service():
 
     app.router.add_get("/stall/{name}", serve_stream_stall)
 
+    async def serve_redirect(request: web.Request) -> web.Response:
+        stub.file_requests.append((request.path, request.headers.get("Authorization")))
+        raise web.HTTPFound(location=request.query["to"])
+
+    app.router.add_get("/redirect/{name}", serve_redirect)
+
     server = TestServer(app)
     await server.start_server()
     stub.base_url = str(server.make_url("")).rstrip("/")
@@ -163,6 +169,9 @@ class TestStreamHappyPath:
 
         body = service.received_json
         assert body["crawl_type"] == "sitemap"
+        # path_prefix scope crawls depth-unbounded within the seed's path,
+        # matching the previous in-process crawler's traversal contract
+        assert body["scope"] == "path_prefix"
         assert body["depth"] == 10
         assert body["http_auth"] == {"user": "intern", "password": "hemligt"}
         assert body["limits"]["max_pages"] == 500
@@ -251,6 +260,21 @@ class TestFailureSemantics:
         with pytest.raises(CrawlerException, match="returned no pages"):
             async with crawler.crawl(url="https://k.se"):
                 pass
+
+    @pytest.mark.asyncio
+    async def test_clean_eof_without_done_event_is_partial(self, service):
+        # A 200 stream that ends cleanly without a terminal done event is a
+        # prefix, not a completed crawl: treating it as complete would let
+        # stale cleanup delete every page missing from the truncated stream.
+        service.body = ndjson(page("https://k.se/a"))
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            pages = list(crawl.pages)
+
+        assert len(pages) == 1
+        assert crawl.is_partial is True
+        assert crawl.termination_reason == "stream_interrupted"
 
     @pytest.mark.asyncio
     async def test_mid_stream_disconnect_salvages_pages(self, service):
@@ -481,6 +505,50 @@ class TestFileDownloads:
         # The off-host host was never contacted (it is unresolvable on purpose);
         # only the single on-host request was served
         assert [req[0] for req in service.file_requests] == ["/files/64/local.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_same_host_redirect_is_followed(self, service):
+        # A same-host redirect (trailing slash, moved document) keeps the
+        # download working; every hop stays inside the crawl-host boundary.
+        file_url = f"{service.base_url}/redirect/rapport.pdf?to=/files/64/rapport.pdf"
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[file_url]), DONE
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url=service.base_url, download_files=True) as crawl:
+            list(crawl.pages)
+            files = list(crawl.files)
+            assert [f.name for f in files] == ["rapport.pdf"]
+            assert files[0].read_bytes() == b"x" * 64
+
+        assert [req[0] for req in service.file_requests] == [
+            "/redirect/rapport.pdf",
+            "/files/64/rapport.pdf",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_off_host_redirect_is_not_followed(self, service):
+        # An on-host file link that answers with a redirect off the crawl host
+        # must not be followed: the worker would otherwise fetch arbitrary
+        # internal or off-scope addresses and ingest the response.
+        file_url = (
+            f"{service.base_url}/redirect/evil.pdf"
+            "?to=http://other.host.invalid/leak.pdf"
+        )
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[file_url]), DONE
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url=service.base_url, download_files=True) as crawl:
+            list(crawl.pages)
+            files = list(crawl.files)
+
+        assert files == []
+        # Only the on-host redirect response was served; the off-host target
+        # was never requested (it is unresolvable on purpose)
+        assert [req[0] for req in service.file_requests] == ["/redirect/evil.pdf"]
 
     @pytest.mark.asyncio
     async def test_heartbeat_stays_live_during_file_downloads(self, service):
