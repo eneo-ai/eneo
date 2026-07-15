@@ -57,6 +57,7 @@ def _service(file_service=None):
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=AsyncMock(),
         help_assistant_assignment_history_repo=AsyncMock(),
+        skill_service=AsyncMock(),
     )
     return service
 
@@ -84,6 +85,8 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
     )
     prompt = SimpleNamespace(text=prompt_text) if prompt_text is not None else None
     return SimpleNamespace(
+        id=None,
+        is_default=False,
         completion_model=model,
         attachments=[_text_attachment() for _ in range(n_attachments)],
         prompt=prompt,
@@ -170,11 +173,9 @@ def test_update_enforces_count_cap_through_setter(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_rejects_when_over_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 5)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 5
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda **k: 90,
     )
     # ceiling = 100 - 10 = 90; used = prompt 5 + attachments 90 = 95 > 90 -> reject
@@ -187,11 +188,9 @@ async def test_fit_rejects_when_over_ceiling(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_passes_when_within(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 5)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 5
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda **k: 80,
     )
     # used = 85 <= ceiling 90 -> ok
@@ -203,11 +202,9 @@ async def test_fit_passes_when_within(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_passes_at_exact_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda **k: 90,
     )
     # used == ceiling is allowed (block only when strictly over)
@@ -218,11 +215,16 @@ async def test_fit_passes_at_exact_ceiling(monkeypatch):
 async def test_fit_skipped_when_no_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda **k: 10**9,
     )
     assistant = SimpleNamespace(
-        completion_model=None, attachments=[_text_attachment()], prompt=None
+        id=None,
+        is_default=False,
+        completion_model=None,
+        attachments=[_text_attachment()],
+        prompt=None,
+        get_prompt_text=lambda: "",
     )
     await _service()._validate_attachments_fit(assistant, space=MagicMock())  # no raise
 
@@ -230,15 +232,13 @@ async def test_fit_skipped_when_no_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
 
     def fake_count_attachment_tokens(*, text_files, image_files, model_name):
         return len(text_files) * 10 + len(image_files) * 90
 
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         fake_count_attachment_tokens,
     )
     text_attachment = _text_attachment()
@@ -260,15 +260,13 @@ async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_does_not_count_derived_images_without_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
 
     def fake_count_attachment_tokens(*, text_files, image_files, model_name):
         return len(text_files) * 10 + len(image_files) * 90
 
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         fake_count_attachment_tokens,
     )
     file_service = AsyncMock()
@@ -292,11 +290,9 @@ async def test_fit_rejects_prompt_only_over_ceiling(monkeypatch):
     # attachments — the ceiling covers prompt + attachments, not attachments
     # alone (regression guard: the early-return on empty attachments hid this).
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 95)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 95
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+        "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 0
     )
     assistant = _assistant_with(100, n_attachments=0, prompt_text="huge prompt")
     # ceiling = 90; prompt 95 > 90 -> reject
@@ -307,11 +303,9 @@ async def test_fit_rejects_prompt_only_over_ceiling(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_passes_prompt_only_within_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 50)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 50
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+        "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 0
     )
     assistant = _assistant_with(100, n_attachments=0, prompt_text="ok prompt")
     # ceiling = 90; prompt 50 <= 90 -> ok
@@ -326,11 +320,9 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
     # Own model fits (100-token window), but governance steers to a 20-token
     # model: the save must be rejected against the model ask() will actually use.
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens", lambda **k: 15
+        "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 15
     )
     small_model = SimpleNamespace(max_input_tokens=20, name="small", vision=False)
     monkeypatch.setattr(
@@ -340,7 +332,10 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
     service = _service()
     service._resolve_effective_config = AsyncMock(
         return_value=SimpleNamespace(
-            models_enforced=True, prompt_enforced=False, enforced_prompt_text=None
+            models_enforced=True,
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_bindings=(),
         )
     )
     # own ceiling 90 -> 15 fits; effective ceiling 10 -> 15 over -> reject
@@ -356,11 +351,11 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
     # that ask() will send: the save must be rejected against that prompt.
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens",
+        "eneo.files.attachment_budget.count_tokens",
         lambda text, *a, **k: len(text),
     )
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+        "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 0
     )
     service = _service()
     service._resolve_effective_config = AsyncMock(
@@ -368,6 +363,7 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
             models_enforced=False,
             prompt_enforced=True,
             enforced_prompt_text="x" * 95,
+            governance_skill_bindings=(),
         )
     )
     # ceiling 90; enforced prompt is 95 chars -> 95 > 90 -> reject
@@ -385,11 +381,9 @@ async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
     # A chat upload big enough to overflow on its own is rejected up front
     # instead of being inlined whole and failing at the provider.
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: len(text_files) * 100,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
@@ -404,11 +398,9 @@ async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
 @pytest.mark.asyncio
 async def test_message_fit_passes_when_within_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: len(text_files) * 40,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
@@ -424,11 +416,9 @@ async def test_message_fit_includes_persistent_baseline(monkeypatch):
     # An upload that fits alone is still rejected when the assistant's persistent
     # attachments leave no room — the request sends both on the same turn.
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: len(text_files) * 50,
     )
     model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
@@ -446,10 +436,10 @@ async def test_message_fit_skips_when_no_uploads(monkeypatch):
     # baseline was gated on save, and history is budget-evicted downstream.
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 10**9
+        "eneo.files.attachment_budget.count_tokens", lambda *a, **k: 10**9
     )
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda **k: 10**9,
     )
     file_service = AsyncMock()
@@ -463,13 +453,31 @@ async def test_message_fit_skips_when_no_uploads(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_message_fit_rechecks_skill_baseline_without_uploads(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 95)
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 0
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
+    assistant = SimpleNamespace(attachments=[])
+
+    with pytest.raises(BadRequestException):
+        await _service()._assert_message_attachments_fit(
+            assistant=assistant,
+            model=model,
+            prompt_text="Skill prompt",
+            files=[],
+            validate_persistent_baseline=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: len(text_files) * 10
         + len(image_files) * 90,
     )
@@ -493,11 +501,9 @@ async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
 @pytest.mark.asyncio
 async def test_message_fit_no_derived_images_without_vision(monkeypatch):
     _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr("eneo.files.attachment_budget.count_tokens", lambda *a, **k: 0)
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_tokens", lambda *a, **k: 0
-    )
-    monkeypatch.setattr(
-        "eneo.assistants.assistant_service.count_attachment_tokens",
+        "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: len(text_files) * 10
         + len(image_files) * 90,
     )

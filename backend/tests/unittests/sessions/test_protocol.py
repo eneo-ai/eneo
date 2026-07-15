@@ -8,6 +8,7 @@ from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_sessions_paginated_response,
 )
+from eneo.skills.domain.skill import SkillExecutionReference
 
 
 def test_no_limit():
@@ -120,6 +121,13 @@ def test_metadata_pagination_forward_limit():
 
 def test_question_public_omits_persisted_tool_result():
     now = datetime.now(timezone.utc)
+    skill_reference = SkillExecutionReference(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        revision_number=2,
+        content_digest="a" * 64,
+        position=0,
+    )
     question = Question(
         id=uuid4(),
         created_at=now,
@@ -139,6 +147,7 @@ def test_question_public_omits_persisted_tool_result():
                 mcp_tool_name="server__tool",
             )
         ],
+        skill_provenance=[skill_reference],
     )
 
     public = to_question_public(question)
@@ -147,3 +156,4 @@ def test_question_public_omits_persisted_tool_result():
     assert public.tool_calls[0].result is None
     assert question.tool_calls is not None
     assert question.tool_calls[0].result == "large upstream payload"
+    assert public.skill_provenance == [skill_reference]

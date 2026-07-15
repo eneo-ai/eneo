@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -7,6 +7,7 @@ from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
+from eneo.skills.domain.skill import SkillExecutionReference
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_ASSISTANT = AssistantSparse(
@@ -139,3 +140,33 @@ async def test_delete_terminates_remote_mcp_sessions_before_local_delete():
     assert deleted == session
     lifecycle_service.terminate_for_chat_session.assert_awaited_once_with(TEST_UUID)
     session_repo.delete.assert_awaited_once_with(TEST_UUID)
+
+
+async def test_question_placeholder_persists_selected_skill_revision(
+    service: SessionService,
+):
+    reference = SkillExecutionReference(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        revision_number=2,
+        content_digest="a" * 64,
+        position=0,
+    )
+    question_id = uuid4()
+    service.session_repo.session.in_transaction = MagicMock(return_value=True)
+    service.question_repo.add.return_value = MagicMock(id=question_id)
+    session = SessionInDB(
+        user_id=TEST_USER.id,
+        name="test_session",
+        id=TEST_UUID,
+    )
+
+    result = await service.create_question_placeholder(
+        question="Question",
+        session=session,
+        skill_provenance=(reference,),
+    )
+
+    question_add = service.question_repo.add.await_args.args[0]
+    assert question_add.skill_provenance == [reference]
+    assert result == question_id

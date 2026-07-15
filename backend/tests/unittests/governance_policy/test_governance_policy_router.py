@@ -1,0 +1,61 @@
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from fastapi import HTTPException, Request
+
+from eneo.governance_policy.presentation.governance_policy_models import (
+    GovernancePolicyUpdate,
+    ModelsRestrictionInput,
+    SkillsPolicyInput,
+)
+from eneo.governance_policy.presentation.governance_policy_router import (
+    update_governance_policy,
+)
+
+
+def _api_key_request() -> Request:
+    request = Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "path": "/admin/governance-policy/",
+            "headers": [],
+        }
+    )
+    request.state.api_key = MagicMock()
+    return request
+
+
+async def test_governance_router_rejects_api_key_skill_facet_before_service_call():
+    container = MagicMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_governance_policy(
+            payload=GovernancePolicyUpdate(skills=SkillsPolicyInput(bindings=[])),
+            request=_api_key_request(),
+            container=container,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "session token" in str(exc_info.value.detail)
+    container.governance_policy_service.assert_not_called()
+
+
+async def test_governance_router_keeps_api_key_access_to_non_skill_facets():
+    service = MagicMock()
+    service.get_policy_for_update = AsyncMock(
+        side_effect=RuntimeError("non-Skill update reached the existing service")
+    )
+    container = MagicMock()
+    container.governance_policy_service.return_value = service
+
+    with pytest.raises(RuntimeError, match="non-Skill update reached"):
+        await update_governance_policy(
+            payload=GovernancePolicyUpdate(
+                models_restriction=ModelsRestrictionInput(enabled=False)
+            ),
+            request=_api_key_request(),
+            container=container,
+        )
+
+    service.get_policy_for_update.assert_awaited_once()

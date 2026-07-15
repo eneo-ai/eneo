@@ -6,6 +6,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantType, DefaultAssistant
 from eneo.files.file_models import FileRestrictions, Limit
+from eneo.main.models import ResourcePermission
 from eneo.questions.question import UseTools
 from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
@@ -49,12 +50,46 @@ def space_assembler():
     assistant_assembler.from_assistant_to_default_assistant_model.return_value = (
         TEST_DEFAULT_ASSISTANT
     )
+    user = MagicMock(active_api_key=None)
     return SpaceAssembler(
-        MagicMock(),
+        user,
         assistant_assembler=assistant_assembler,
         completion_model_assembler=MagicMock(),
         actor_manager=MagicMock(),
     )
+
+
+def test_space_exposes_skill_permissions_for_session_user(
+    space: Space, space_assembler: SpaceAssembler
+):
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.can_read_skills.return_value = True
+    actor.can_create_skills.return_value = True
+    actor.can_edit_skills.return_value = True
+    actor.can_delete_skills.return_value = False
+
+    space_public = space_assembler.from_space_to_model(space)
+
+    assert space_public.skill_permissions == [
+        ResourcePermission.READ,
+        ResourcePermission.CREATE,
+        ResourcePermission.EDIT,
+    ]
+
+
+def test_space_hides_skill_permissions_from_api_keys(
+    space: Space, space_assembler: SpaceAssembler
+):
+    space_assembler.user.active_api_key = MagicMock()
+    actor = space_assembler.actor_manager.get_space_actor_from_space.return_value
+    actor.can_read_skills.return_value = True
+    actor.can_create_skills.return_value = True
+    actor.can_edit_skills.return_value = True
+    actor.can_delete_skills.return_value = True
+
+    space_public = space_assembler.from_space_to_model(space)
+
+    assert space_public.skill_permissions == []
 
 
 @pytest.fixture

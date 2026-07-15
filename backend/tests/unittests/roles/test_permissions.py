@@ -190,6 +190,7 @@ class TestPermissionSemantics:
         """Ensure all expected permissions are defined in the enum."""
         expected = {
             "assistants",
+            "skills",
             "personal_chat",
             "group_chats",
             "apps",

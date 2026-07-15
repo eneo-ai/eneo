@@ -12,6 +12,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     select_effective_completion_model,
 )
+from eneo.skills.domain.skill import ResolvedSkillBinding
 
 
 def _mk_assistant(is_default: bool = True):
@@ -81,6 +82,37 @@ def test_no_policy_returns_all_disabled():
     assert cfg.models_enforced is False
     assert cfg.mcp_enforced is False
     assert cfg.prompt_enforced is False
+
+
+def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt():
+    policy = _empty_policy()
+    policy.prompt_enforcement_enabled = True
+    policy.default_prompt_library_id = uuid4()
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        slug="payroll",
+        revision_number=2,
+        display_name="Payroll",
+        description="Answers payroll questions",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+    )
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text="Enforced tenant prompt",
+        governance_skill_bindings=(binding,),
+    )
+
+    assert cfg.prompt_enforced is True
+    assert cfg.enforced_prompt_text == "Enforced tenant prompt"
+    assert cfg.governance_skill_bindings == (binding,)
 
 
 def test_models_disabled_means_no_filtering_even_with_m2m_rows():

@@ -1,0 +1,495 @@
+import asyncio
+from dataclasses import dataclass
+from uuid import UUID
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
+)
+from eneo.roles.permissions import Permission
+
+
+@dataclass(frozen=True)
+class SkillConcurrencyResources:
+    space_id: UUID
+    assistant_id: UUID
+    app_id: UUID
+    first_skill_id: UUID
+    first_revision_id: UUID
+    second_skill_id: UUID
+    second_revision_id: UUID
+
+    @property
+    def first_reference(self) -> tuple[UUID, UUID]:
+        return self.first_skill_id, self.first_revision_id
+
+    @property
+    def second_reference(self) -> tuple[UUID, UUID]:
+        return self.second_skill_id, self.second_revision_id
+
+
+@pytest.fixture
+async def skill_concurrency_resources(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    app_factory,
+    admin_user,
+) -> SkillConcurrencyResources:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "skills-concurrency-model")
+        space = await space_factory(
+            session,
+            "Skills concurrency space",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Skills concurrency assistant",
+            model.id,
+            space_id=space.id,
+        )
+        app = await app_factory(
+            session,
+            "Skills concurrency app",
+            model.id,
+            space_id=space.id,
+        )
+        first = await container.skill_repo().create(
+            space_id=space.id,
+            slug="first-skill",
+            display_name="First Skill",
+            description="First concurrency Skill",
+            instructions="First instructions",
+            content_digest="1" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        second = await container.skill_repo().create(
+            space_id=space.id,
+            slug="second-skill",
+            display_name="Second Skill",
+            description="Second concurrency Skill",
+            instructions="Second instructions",
+            content_digest="2" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        space_id = space.id
+        assistant_id = assistant.id
+        app_id = app.id
+
+    return SkillConcurrencyResources(
+        space_id=space_id,
+        assistant_id=assistant_id,
+        app_id=app_id,
+        first_skill_id=first.id,
+        first_revision_id=first.current_revision.id,
+        second_skill_id=second.id,
+        second_revision_id=second.current_revision.id,
+    )
+
+
+async def _wait_until_database_lock(db_session, *, pid: int) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with db_session() as session:
+            wait_event_type = await session.scalar(
+                sa.text(
+                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"
+                ).bindparams(pid=pid)
+            )
+        if wait_event_type == "Lock":
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Database session {pid} did not wait for the expected lock")
+
+
+async def _backend_pid(container) -> int:
+    pid = await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+    assert isinstance(pid, int)
+    return pid
+
+
+async def _wait_for_held_write(
+    event: asyncio.Event, writer: asyncio.Task[object]
+) -> None:
+    event_waiter = asyncio.create_task(event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {event_waiter, writer},
+            timeout=5,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if writer in done:
+            await writer
+            raise AssertionError("Writer completed without holding its transaction")
+        if event_waiter not in done:
+            writer.cancel()
+            await asyncio.gather(writer, return_exceptions=True)
+            raise AssertionError("Writer did not reach the held transaction state")
+        await event_waiter
+    finally:
+        if not event_waiter.done():
+            event_waiter.cancel()
+            await asyncio.gather(event_waiter, return_exceptions=True)
+
+
+async def test_fresh_install_owner_has_every_tenant_permission(admin_user):
+    assert admin_user.permissions == set(Permission) - {Permission.EDITOR}
+
+
+@pytest.mark.parametrize("parent_kind", ["assistant", "app"])
+@pytest.mark.parametrize("second_clears", [False, True])
+async def test_parent_binding_replacements_are_serialized(
+    parent_kind: str,
+    second_clears: bool,
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    first_finished = asyncio.Event()
+    release_first = asyncio.Event()
+    second_pid = asyncio.get_running_loop().create_future()
+
+    async def replace(container, references: list[tuple[UUID, UUID]]):
+        service = container.skill_service()
+        if parent_kind == "assistant":
+            return await service.replace_assistant_bindings(
+                space_id=resources.space_id,
+                assistant_id=resources.assistant_id,
+                references=references,
+            )
+        return await service.replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=references,
+        )
+
+    async def first_writer():
+        async with db_container() as container:
+            result = await replace(container, [resources.first_reference])
+            first_finished.set()
+            await release_first.wait()
+            return result
+
+    async def second_writer():
+        async with db_container() as container:
+            second_pid.set_result(await _backend_pid(container))
+            references = [] if second_clears else [resources.second_reference]
+            return await replace(container, references)
+
+    first_task = asyncio.create_task(first_writer())
+    await _wait_for_held_write(first_finished, first_task)
+    second_task = asyncio.create_task(second_writer())
+    pid = await asyncio.wait_for(second_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_first.set()
+    await asyncio.gather(first_task, second_task)
+
+    async with db_container() as container:
+        repo = container.skill_repo()
+        if parent_kind == "assistant":
+            bindings = await repo.list_assistant_bindings(
+                assistant_id=resources.assistant_id
+            )
+        else:
+            bindings = await repo.list_app_bindings(app_id=resources.app_id)
+
+    expected_ids = [] if second_clears else [resources.second_skill_id]
+    assert [binding.skill_id for binding in bindings] == expected_ids
+    assert [binding.position for binding in bindings] == list(range(len(expected_ids)))
+
+
+async def test_deactivation_serializes_with_new_binding_validation(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    deactivation_finished = asyncio.Event()
+    release_deactivation = asyncio.Event()
+    binding_pid = asyncio.get_running_loop().create_future()
+
+    async def deactivate():
+        async with db_container() as container:
+            change = await container.skill_service().set_active(
+                skill_id=resources.first_skill_id,
+                is_active=False,
+            )
+            deactivation_finished.set()
+            await release_deactivation.wait()
+            return change
+
+    async def attach():
+        async with db_container() as container:
+            binding_pid.set_result(await _backend_pid(container))
+            with pytest.raises(BadRequestException, match="Inactive Skills"):
+                await container.skill_service().replace_app_bindings(
+                    space_id=resources.space_id,
+                    app_id=resources.app_id,
+                    references=[resources.first_reference],
+                )
+
+    deactivation_task = asyncio.create_task(deactivate())
+    await _wait_for_held_write(deactivation_finished, deactivation_task)
+    binding_task = asyncio.create_task(attach())
+    pid = await asyncio.wait_for(binding_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_deactivation.set()
+    change, _ = await asyncio.gather(deactivation_task, binding_task)
+
+    assert change.changed is True
+    assert change.previous_is_active is True
+    async with db_container() as container:
+        skill = await container.skill_repo().get(skill_id=resources.first_skill_id)
+        bindings = await container.skill_repo().list_app_bindings(
+            app_id=resources.app_id
+        )
+    assert skill is not None and skill.is_active is False
+    assert bindings == []
+
+
+async def test_delete_serializes_before_new_binding_validation(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    delete_finished = asyncio.Event()
+    release_delete = asyncio.Event()
+    binding_pid = asyncio.get_running_loop().create_future()
+
+    async def delete():
+        async with db_container() as container:
+            deleted = await container.skill_service().delete_skill(
+                skill_id=resources.first_skill_id
+            )
+            delete_finished.set()
+            await release_delete.wait()
+            return deleted
+
+    async def attach():
+        async with db_container() as container:
+            binding_pid.set_result(await _backend_pid(container))
+            with pytest.raises(NotFoundException, match="Skill revisions"):
+                await container.skill_service().replace_app_bindings(
+                    space_id=resources.space_id,
+                    app_id=resources.app_id,
+                    references=[resources.first_reference],
+                )
+
+    delete_task = asyncio.create_task(delete())
+    await _wait_for_held_write(delete_finished, delete_task)
+    binding_task = asyncio.create_task(attach())
+    pid = await asyncio.wait_for(binding_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_delete.set()
+    deleted, _ = await asyncio.gather(delete_task, binding_task)
+
+    assert deleted.id == resources.first_skill_id
+    async with db_container() as container:
+        skill = await container.skill_repo().get(skill_id=resources.first_skill_id)
+        bindings = await container.skill_repo().list_app_bindings(
+            app_id=resources.app_id
+        )
+    assert skill is None
+    assert bindings == []
+
+
+async def test_new_binding_serializes_before_delete_validation(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    binding_finished = asyncio.Event()
+    release_binding = asyncio.Event()
+    delete_pid = asyncio.get_running_loop().create_future()
+
+    async def attach():
+        async with db_container() as container:
+            bindings = await container.skill_service().replace_app_bindings(
+                space_id=resources.space_id,
+                app_id=resources.app_id,
+                references=[resources.first_reference],
+            )
+            binding_finished.set()
+            await release_binding.wait()
+            return bindings
+
+    async def delete():
+        async with db_container() as container:
+            delete_pid.set_result(await _backend_pid(container))
+            with pytest.raises(NameCollisionException, match="still attached"):
+                await container.skill_service().delete_skill(
+                    skill_id=resources.first_skill_id
+                )
+
+    binding_task = asyncio.create_task(attach())
+    await _wait_for_held_write(binding_finished, binding_task)
+    delete_task = asyncio.create_task(delete())
+    pid = await asyncio.wait_for(delete_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_binding.set()
+    bindings, _ = await asyncio.gather(binding_task, delete_task)
+
+    assert [binding.skill_id for binding in bindings] == [resources.first_skill_id]
+    async with db_container() as container:
+        skill = await container.skill_repo().get(skill_id=resources.first_skill_id)
+        persisted = await container.skill_repo().list_app_bindings(
+            app_id=resources.app_id
+        )
+    assert skill is not None
+    assert [binding.skill_id for binding in persisted] == [resources.first_skill_id]
+
+
+async def test_concurrent_same_content_revision_has_one_created_outcome(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    first_finished = asyncio.Event()
+    release_first = asyncio.Event()
+    second_pid = asyncio.get_running_loop().create_future()
+
+    async def revise(*, hold: bool):
+        async with db_container() as container:
+            if not hold:
+                second_pid.set_result(await _backend_pid(container))
+            change = await container.skill_service().create_revision(
+                skill_id=resources.first_skill_id,
+                display_name="Revised Skill",
+                description="Concurrent revision",
+                instructions="The same submitted instructions",
+            )
+            if hold:
+                first_finished.set()
+                await release_first.wait()
+            return change
+
+    first_task = asyncio.create_task(revise(hold=True))
+    await _wait_for_held_write(first_finished, first_task)
+    second_task = asyncio.create_task(revise(hold=False))
+    pid = await asyncio.wait_for(second_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_first.set()
+    first_change, second_change = await asyncio.gather(first_task, second_task)
+
+    assert first_change.created is True
+    assert second_change.created is False
+    assert first_change.revision.id == second_change.revision.id
+    assert first_change.previous_revision_number == 1
+    assert second_change.previous_revision_number == 2
+    async with db_container() as container:
+        revisions = await container.skill_repo().list_revisions(
+            skill_id=resources.first_skill_id
+        )
+    assert [revision.revision_number for revision in revisions] == [2, 1]
+
+
+async def test_concurrent_identical_status_change_has_one_changed_outcome(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    first_finished = asyncio.Event()
+    release_first = asyncio.Event()
+    second_pid = asyncio.get_running_loop().create_future()
+
+    async def deactivate(*, hold: bool):
+        async with db_container() as container:
+            if not hold:
+                second_pid.set_result(await _backend_pid(container))
+            change = await container.skill_service().set_active(
+                skill_id=resources.first_skill_id,
+                is_active=False,
+            )
+            if hold:
+                first_finished.set()
+                await release_first.wait()
+            return change
+
+    first_task = asyncio.create_task(deactivate(hold=True))
+    await _wait_for_held_write(first_finished, first_task)
+    second_task = asyncio.create_task(deactivate(hold=False))
+    pid = await asyncio.wait_for(second_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_first.set()
+    first_change, second_change = await asyncio.gather(first_task, second_task)
+
+    assert first_change.changed is True
+    assert first_change.previous_is_active is True
+    assert second_change.changed is False
+    assert second_change.previous_is_active is False
+
+
+async def test_concurrent_delete_has_one_deleted_outcome(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    first_finished = asyncio.Event()
+    release_first = asyncio.Event()
+    second_pid = asyncio.get_running_loop().create_future()
+
+    async def first_delete():
+        async with db_container() as container:
+            deleted = await container.skill_service().delete_skill(
+                skill_id=resources.first_skill_id
+            )
+            first_finished.set()
+            await release_first.wait()
+            return deleted
+
+    async def second_delete():
+        async with db_container() as container:
+            second_pid.set_result(await _backend_pid(container))
+            with pytest.raises(NotFoundException):
+                await container.skill_service().delete_skill(
+                    skill_id=resources.first_skill_id
+                )
+
+    first_task = asyncio.create_task(first_delete())
+    await _wait_for_held_write(first_finished, first_task)
+    second_task = asyncio.create_task(second_delete())
+    pid = await asyncio.wait_for(second_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_first.set()
+    deleted, _ = await asyncio.gather(first_task, second_task)
+
+    assert deleted.id == resources.first_skill_id
+    async with db_container() as container:
+        assert (
+            await container.skill_repo().get(skill_id=resources.first_skill_id) is None
+        )
