@@ -4,6 +4,11 @@ export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
 
 export type AssistantSparse = Omit<components["schemas"]["AssistantSparse"], "user_id">;
+export type SkillSparse = components["schemas"]["SkillSparse"];
+export type SkillPublic = components["schemas"]["SkillPublic"];
+export type SkillRevisionPublic = components["schemas"]["SkillRevisionPublic"];
+export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
+export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
 export type AssistantResponse = Omit<
   components["schemas"]["AskResponse"],
   "session_id" | "references" | "tools"

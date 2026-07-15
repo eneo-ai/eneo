@@ -237,6 +237,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_app_run_deleted,
     description: m.audit_action_app_run_deleted_description
   },
+  skill_created: {
+    name: m.audit_action_skill_created,
+    description: m.audit_action_skill_created_description
+  },
+  skill_revision_created: {
+    name: m.audit_action_skill_revision_created,
+    description: m.audit_action_skill_revision_created_description
+  },
+  skill_status_changed: {
+    name: m.audit_action_skill_status_changed,
+    description: m.audit_action_skill_status_changed_description
+  },
+  skill_deleted: {
+    name: m.audit_action_skill_deleted,
+    description: m.audit_action_skill_deleted_description
+  },
   session_started: {
     name: m.audit_action_session_started,
     description: m.audit_action_session_started_description

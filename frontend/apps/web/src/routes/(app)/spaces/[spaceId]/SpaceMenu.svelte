@@ -17,6 +17,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { BookOpenCheck } from "lucide-svelte";
   // TODO
   const {
     state: { currentSpace }
@@ -73,6 +74,14 @@
       isActive={section === "knowledge"}
       icon={IconKnowledge}
       label={m.knowledge()}
+    />
+  {/if}
+  {#if $currentSpace.hasPermission("read", "skill")}
+    <Navigation.Link
+      href={localizeHref(`/spaces/${$currentSpace.routeId}/skills`)}
+      isActive={section === "skills"}
+      icon={BookOpenCheck}
+      label={m.skills()}
     />
   {/if}
   {#if $currentSpace.hasPermission("read", "service")}<div
