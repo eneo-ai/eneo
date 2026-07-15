@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -18,8 +19,16 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     extract_freeform_user_messages,
 )
 
+# Versioned persistence limits for the BuilderSessions JSON aggregate. These are
+# deliberately independent of model context windows: provider request assembly
+# derives its token budget from the selected model in
+# ai_builder_planner_request_preparation. Changing these limits requires the same
+# review and PostgreSQL measurement as changing the aggregate itself; they are not
+# tenant/admin settings.
 MAX_SESSION_MESSAGES = 60
 TAIL_SESSION_MESSAGES = 40
+MAX_SESSION_MESSAGE_BYTES = 256 * 1024
+MAX_SESSION_CONVERSATION_BYTES = 1024 * 1024
 
 
 def compact_ai_builder_conversation(
@@ -27,6 +36,79 @@ def compact_ai_builder_conversation(
     *,
     max_messages: int = MAX_SESSION_MESSAGES,
     tail_messages: int = TAIL_SESSION_MESSAGES,
+    max_message_bytes: int = MAX_SESSION_MESSAGE_BYTES,
+    max_conversation_bytes: int = MAX_SESSION_CONVERSATION_BYTES,
+) -> list[ConversationMessage]:
+    message_sizes = [
+        _message_serialized_size_bytes(message) for message in conversation
+    ]
+    for message_size in message_sizes:
+        if message_size > max_message_bytes:
+            raise ValueError(
+                "AI Builder conversation message exceeds the serialized byte limit."
+            )
+
+    compacted = _compact_by_message_count(
+        conversation,
+        max_messages=max_messages,
+        tail_messages=tail_messages,
+    )
+    compacted_sizes = [_message_serialized_size_bytes(message) for message in compacted]
+    serialized_size = _conversation_size_from_message_sizes(compacted_sizes)
+    if serialized_size <= max_conversation_bytes:
+        return compacted
+
+    protected_indices = _required_message_indices(compacted)
+    if compacted:
+        protected_indices.add(len(compacted) - 1)
+    selected_indices = list(range(len(compacted)))
+    selected_count = len(selected_indices)
+    for index in selected_indices.copy():
+        if index in protected_indices:
+            continue
+        selected_indices.remove(index)
+        serialized_size -= compacted_sizes[index]
+        if selected_count > 1:
+            serialized_size -= 1
+        selected_count -= 1
+        if serialized_size <= max_conversation_bytes:
+            return [compacted[selected_index] for selected_index in selected_indices]
+
+    raise ValueError(
+        "Required AI Builder conversation context exceeds the serialized byte limit."
+    )
+
+
+def conversation_serialized_size_bytes(
+    conversation: list[ConversationMessage],
+) -> int:
+    return _conversation_size_from_message_sizes(
+        [_message_serialized_size_bytes(message) for message in conversation]
+    )
+
+
+def _message_serialized_size_bytes(message: ConversationMessage) -> int:
+    return len(_compact_json_bytes(message.model_dump(mode="json")))
+
+
+def _conversation_size_from_message_sizes(message_sizes: list[int]) -> int:
+    comma_bytes = max(0, len(message_sizes) - 1)
+    return 2 + sum(message_sizes) + comma_bytes
+
+
+def _compact_json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _compact_by_message_count(
+    conversation: list[ConversationMessage],
+    *,
+    max_messages: int,
+    tail_messages: int,
 ) -> list[ConversationMessage]:
     if len(conversation) <= max_messages:
         return list(conversation)
@@ -74,6 +156,30 @@ def compact_ai_builder_conversation(
         max_messages=max_messages,
     )
     return [conversation[index] for index in selected_indices]
+
+
+def _required_message_indices(
+    conversation: list[ConversationMessage],
+) -> set[int]:
+    required_indices: set[int] = set()
+    requirements_index = _latest_requirements_summary_index(conversation)
+    if requirements_index is not None:
+        required_indices.add(requirements_index)
+        previous_request_index = _latest_user_request_before_index(
+            conversation,
+            requirements_index,
+        )
+        if previous_request_index is not None:
+            required_indices.add(previous_request_index)
+        confirmation_index = _matching_requirements_confirmation_index(
+            conversation,
+            requirements_index,
+        )
+        if confirmation_index is not None:
+            required_indices.add(confirmation_index)
+    required_indices.update(_latest_structured_answer_indices(conversation))
+    required_indices.update(_latest_tool_trace_indices(conversation))
+    return required_indices
 
 
 def _latest_requirements_summary_index(

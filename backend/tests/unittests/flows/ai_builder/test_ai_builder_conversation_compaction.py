@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    MAX_SESSION_CONVERSATION_BYTES,
+    MAX_SESSION_MESSAGE_BYTES,
     compact_ai_builder_conversation,
+    conversation_serialized_size_bytes,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
@@ -404,3 +409,66 @@ def test_compaction_deduplicates_structured_answers_by_canonical_question_id() -
     ]
     assert len(preserved_answers) == 1
     assert preserved_answers[0].content == "new answer"
+
+
+def test_compaction_accepts_exact_per_message_serialized_byte_cap() -> None:
+    message = _msg("user")
+    fixed_bytes = conversation_serialized_size_bytes([message]) - 2
+    message = message.model_copy(
+        update={"content": "x" * (MAX_SESSION_MESSAGE_BYTES - fixed_bytes)}
+    )
+
+    compacted = compact_ai_builder_conversation([message])
+
+    assert conversation_serialized_size_bytes(compacted) == (
+        MAX_SESSION_MESSAGE_BYTES + 2
+    )
+
+
+def test_compaction_rejects_per_message_serialized_byte_cap_plus_one() -> None:
+    message = _msg("user")
+    fixed_bytes = conversation_serialized_size_bytes([message]) - 2
+    oversized = message.model_copy(
+        update={"content": "x" * (MAX_SESSION_MESSAGE_BYTES - fixed_bytes + 1)}
+    )
+
+    with pytest.raises(ValueError, match="serialized byte limit"):
+        compact_ai_builder_conversation([oversized])
+
+
+def test_compaction_accepts_exact_total_and_compacts_maximum_plus_one() -> None:
+    messages = [_msg("user") for _index in range(5)]
+    fixed_bytes = conversation_serialized_size_bytes(messages)
+    content_budget = MAX_SESSION_CONVERSATION_BYTES - fixed_bytes
+    content_sizes = [content_budget // len(messages)] * len(messages)
+    content_sizes[-1] += content_budget - sum(content_sizes)
+    at_limit = [
+        message.model_copy(update={"content": "x" * content_size})
+        for message, content_size in zip(messages, content_sizes, strict=True)
+    ]
+
+    assert conversation_serialized_size_bytes(at_limit) == (
+        MAX_SESSION_CONVERSATION_BYTES
+    )
+    assert compact_ai_builder_conversation(at_limit) == at_limit
+
+    over_limit = [
+        at_limit[0].model_copy(update={"content": f"{at_limit[0].content}x"}),
+        *at_limit[1:],
+    ]
+    compacted = compact_ai_builder_conversation(over_limit)
+
+    assert compacted == at_limit[1:]
+    assert (
+        conversation_serialized_size_bytes(compacted) <= MAX_SESSION_CONVERSATION_BYTES
+    )
+
+
+def test_compaction_enforces_utf8_bytes_instead_of_character_count() -> None:
+    message = _msg("user")
+    fixed_bytes = conversation_serialized_size_bytes([message]) - 2
+    unicode_characters = (MAX_SESSION_MESSAGE_BYTES - fixed_bytes) // 2 + 1
+    oversized = message.model_copy(update={"content": "å" * unicode_characters})
+
+    with pytest.raises(ValueError, match="serialized byte limit"):
+        compact_ai_builder_conversation([oversized])

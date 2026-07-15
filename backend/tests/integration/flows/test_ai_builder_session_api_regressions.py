@@ -20,7 +20,7 @@ from litellm.exceptions import (
 )
 from pydantic import ValidationError
 from sqlalchemy import insert, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette import ServerSentEvent
 from starlette.requests import Request
@@ -60,6 +60,10 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder import ai_builder_error_contract as error_contract_module
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    MAX_SESSION_CONVERSATION_BYTES,
+    conversation_serialized_size_bytes,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
     ConversationMessage,
@@ -77,6 +81,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderPublicError,
     build_ai_builder_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
@@ -2523,6 +2528,90 @@ async def test_ai_builder_session_reload_projects_expired_turn_recovery_state(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_state", "effective_state"),
+    [
+        (BuilderTurnState.OPEN, BuilderTurnState.FAILED_BEFORE_PROVIDER),
+        (
+            BuilderTurnState.PROCESSING,
+            BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN,
+        ),
+        (BuilderTurnState.COMMITTED, BuilderTurnState.COMMITTED),
+        (
+            BuilderTurnState.FAILED_BEFORE_PROVIDER,
+            BuilderTurnState.FAILED_BEFORE_PROVIDER,
+        ),
+        (
+            BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN,
+            BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN,
+        ),
+    ],
+)
+async def test_ai_builder_repo_sql_and_python_turn_projection_are_exhaustive(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    stored_state: BuilderTurnState,
+    effective_state: BuilderTurnState,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name=f"AI Builder Turn Projection {stored_state.value}",
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        await repo.session.execute(
+            update(BuilderSessions)
+            .where(
+                BuilderSessions.id == session.id,
+                BuilderSessions.tenant_id == user.tenant_id,
+            )
+            .values(latest_turn_state=stored_state.value)
+        )
+
+        projected = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        released_state = await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=turn.lease,
+        )
+        persisted_state = await repo.session.scalar(
+            select(BuilderSessions.latest_turn_state).where(
+                BuilderSessions.id == session.id,
+                BuilderSessions.tenant_id == user.tenant_id,
+            )
+        )
+
+    assert projected.latest_turn is not None
+    assert projected.latest_turn.state is effective_state
+    assert released_state is effective_state
+    assert persisted_state == effective_state.value
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_session_reload_uses_database_clock_for_turn_state(
     client,
     bearer_token,
@@ -2924,6 +3013,517 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert released.lease == released_lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_terminal_compare_and_set_preserves_first_result(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Terminal Compare And Set",
+    )
+    first_error = build_ai_builder_error(
+        message="First terminal result.",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="first-terminal-result",
+    )
+    stale_error = build_ai_builder_error(
+        message="Stale competing result.",
+        code=AIBuilderErrorCode.PLANNER_REJECTED,
+        request_id="stale-terminal-result",
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        await repo.mark_session_turn_processing(turn=turn)
+        await repo.complete_session_turn(turn=turn, error=first_error)
+        await repo.complete_session_turn(turn=turn, error=first_error)
+
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            await repo.complete_session_turn(turn=turn, error=stale_error)
+
+        reloaded = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST
+    assert reloaded.latest_turn is not None
+    assert reloaded.latest_turn.state is BuilderTurnState.COMMITTED
+    assert reloaded.latest_turn.error == first_error
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_concurrent_terminal_writers_have_one_winner(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Concurrent Terminal Writers",
+    )
+    errors = (
+        build_ai_builder_error(
+            message="Terminal writer A.",
+            code=AIBuilderErrorCode.PLANNER_REJECTED,
+            request_id="terminal-writer-a",
+        ),
+        build_ai_builder_error(
+            message="Terminal writer B.",
+            code=AIBuilderErrorCode.PLANNER_REJECTED,
+            request_id="terminal-writer-b",
+        ),
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        await repo.mark_session_turn_processing(turn=turn)
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    start = asyncio.Event()
+
+    async def terminalize(
+        error: AIBuilderPublicError,
+    ) -> tuple[AIBuilderErrorCode | None, AIBuilderPublicError]:
+        async with db_container() as container:
+            await start.wait()
+            try:
+                await AIBuilderRepository(container.session()).complete_session_turn(
+                    turn=turn,
+                    error=error,
+                )
+            except AIBuilderBadRequestException as exception:
+                return exception.code, error
+            return None, error
+
+    writers = [asyncio.create_task(terminalize(error)) for error in errors]
+    start.set()
+    results = await asyncio.gather(*writers)
+
+    successful_errors = [error for code, error in results if code is None]
+    rejected_codes = [code for code, _error in results if code is not None]
+    assert len(successful_errors) == 1
+    assert rejected_codes == [AIBuilderErrorCode.SESSION_SEND_LEASE_LOST]
+
+    async with db_container() as container:
+        reloaded = await AIBuilderRepository(container.session()).get_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    assert reloaded.latest_turn is not None
+    assert reloaded.latest_turn.state is BuilderTurnState.COMMITTED
+    assert reloaded.latest_turn.error == successful_errors[0]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_terminal_rollback_reload_and_acknowledged_replay(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Terminal Rollback Replay",
+    )
+    client_turn_id = uuid4()
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        original_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=client_turn_id,
+        )
+        await repo.mark_session_turn_processing(turn=original_turn)
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    with pytest.raises(RuntimeError, match="simulated process rollback"):
+        async with db_container() as container:
+            await AIBuilderRepository(container.session()).complete_session_turn(
+                turn=original_turn,
+            )
+            raise RuntimeError("simulated process rollback")
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        await repo.session.execute(
+            update(BuilderSessions)
+            .where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            .values(
+                lock_expires_at=sa.func.clock_timestamp()
+                - sa.text("interval '1 second'")
+            )
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        expired = await repo.get_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        assert expired.latest_turn is not None
+        assert expired.latest_turn.state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+
+        preflight = await repo.preflight_session_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=True,
+        )
+        replay_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+        claim = await repo.accept_session_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=replay_lease,
+            lock_lease_seconds=30,
+            acceptance=SessionTurnAcceptance(
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Accepted turn",
+                },
+                user_message=ConversationMessage(
+                    role="user",
+                    content="Accepted turn",
+                ),
+                file_ids=(),
+                acknowledge_duplicate_provider_spend=True,
+            ),
+            preparation_baseline=preflight.baseline,
+        )
+        replay_turn = SessionSendTurn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=replay_lease,
+            base_planning_state_version=claim.base_planning_state_version,
+        )
+        await repo.mark_session_turn_processing(turn=replay_turn)
+        await repo.complete_session_turn(turn=replay_turn)
+        await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=replay_lease,
+        )
+
+    async with db_container() as container:
+        reloaded = await AIBuilderRepository(container.session()).get_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    assert reloaded.latest_turn is not None
+    assert reloaded.latest_turn.client_turn_id == client_turn_id
+    assert reloaded.latest_turn.state is BuilderTurnState.COMMITTED
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_idempotency_horizon_is_latest_turn_only(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Latest Turn Idempotency Horizon",
+    )
+    first_turn_id = uuid4()
+    second_turn_id = uuid4()
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        first_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=first_turn_id,
+        )
+        await repo.complete_session_turn(turn=first_turn)
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=first_turn.lease,
+        )
+
+        current_replay = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=first_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+        assert current_replay.replayed is True
+
+        second_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=second_turn_id,
+        )
+        await repo.complete_session_turn(turn=second_turn)
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=second_turn.lease,
+        )
+
+        historical_key = await repo.preflight_session_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            client_turn_id=first_turn_id,
+            request_fingerprint="a" * 64,
+            acknowledge_duplicate_provider_spend=False,
+        )
+
+    assert historical_key.replayed is False
+    assert historical_key.baseline.latest_turn_id == second_turn_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_conversation_json_aggregate_has_bounded_rewrite_and_lock(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Conversation Aggregate Measurement",
+    )
+    representative_messages = [
+        ConversationMessage(
+            role="assistant",
+            content="".join(str(uuid4()) for _index in range(5_000)),
+        )
+        for _message_index in range(5)
+    ]
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+        relation_before, toast_before = (
+            await repo.session.execute(
+                sa.text(
+                    """
+                    SELECT
+                        pg_total_relation_size('builder_sessions'::regclass),
+                        pg_total_relation_size(reltoastrelid)
+                    FROM pg_class
+                    WHERE oid = 'builder_sessions'::regclass
+                    """
+                )
+            )
+        ).one()
+        first_lsn = await repo.session.scalar(
+            sa.text("SELECT pg_current_wal_insert_lsn()")
+        )
+        stored = await repo.append_session_messages(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            conversation=representative_messages,
+            lease=turn.lease,
+        )
+        first_wal_bytes = await repo.session.scalar(
+            sa.text(
+                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(), "
+                "CAST(:start_lsn AS pg_lsn))"
+            ),
+            {"start_lsn": first_lsn},
+        )
+        second_lsn = await repo.session.scalar(
+            sa.text("SELECT pg_current_wal_insert_lsn()")
+        )
+        stored = await repo.append_session_messages(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            conversation=[ConversationMessage(role="assistant", content="rewrite")],
+            lease=turn.lease,
+        )
+        second_wal_bytes = await repo.session.scalar(
+            sa.text(
+                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(), "
+                "CAST(:start_lsn AS pg_lsn))"
+            ),
+            {"start_lsn": second_lsn},
+        )
+        jsonb_column_bytes, jsonb_text_bytes = (
+            await repo.session.execute(
+                select(
+                    sa.func.pg_column_size(BuilderSessions.conversation),
+                    sa.func.octet_length(
+                        sa.cast(BuilderSessions.conversation, sa.Text)
+                    ),
+                ).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+            )
+        ).one()
+        relation_after, toast_after = (
+            await repo.session.execute(
+                sa.text(
+                    """
+                    SELECT
+                        pg_total_relation_size('builder_sessions'::regclass),
+                        pg_total_relation_size(reltoastrelid)
+                    FROM pg_class
+                    WHERE oid = 'builder_sessions'::regclass
+                    """
+                )
+            )
+        ).one()
+
+    serialized_bytes = conversation_serialized_size_bytes(stored)
+    assert 700_000 < serialized_bytes <= MAX_SESSION_CONVERSATION_BYTES
+    assert int(first_wal_bytes) > 0
+    assert 0 < int(second_wal_bytes) <= 8 * MAX_SESSION_CONVERSATION_BYTES
+    assert int(jsonb_column_bytes) > 0
+    assert int(jsonb_text_bytes) >= serialized_bytes
+    assert int(relation_after) >= int(relation_before)
+    assert int(toast_after) > int(toast_before)
+
+    async with (
+        sessionmanager.session() as holder_session,
+        sessionmanager.session() as contender_session,
+    ):
+        await holder_session.begin()
+        await contender_session.begin()
+        await holder_session.execute(
+            select(BuilderSessions)
+            .where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+        await contender_session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
+        with pytest.raises(DBAPIError):
+            await AIBuilderRepository(contender_session).append_session_messages(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                conversation=[
+                    ConversationMessage(role="assistant", content="contended")
+                ],
+                lease=turn.lease,
+            )
+        await contender_session.rollback()
+        await holder_session.commit()
+
+        await contender_session.begin()
+        retried = await AIBuilderRepository(contender_session).append_session_messages(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            conversation=[ConversationMessage(role="assistant", content="retry")],
+            lease=turn.lease,
+        )
+        await contender_session.commit()
+
+    assert retried[-1].content == "retry"
+    print(
+        "conversation_aggregate_measurement "
+        f"serialized_bytes={serialized_bytes} "
+        f"jsonb_column_bytes={int(jsonb_column_bytes)} "
+        f"jsonb_text_bytes={int(jsonb_text_bytes)} "
+        f"first_wal_bytes={int(first_wal_bytes)} "
+        f"rewrite_wal_bytes={int(second_wal_bytes)} "
+        f"relation_growth_bytes={int(relation_after) - int(relation_before)} "
+        f"toast_growth_bytes={int(toast_after) - int(toast_before)} "
+        "lock_timeout_ms=100 retry=passed"
+    )
 
 
 @pytest.mark.integration
@@ -3495,7 +4095,7 @@ def _planning_state_fixture() -> PlanningState:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ai_builder_repo_save_planning_state_bumps_version(
+async def test_ai_builder_repo_save_planning_state_explicit_administrative_replace(
     client,
     bearer_token,
     completion_model_factory,
@@ -3524,11 +4124,13 @@ async def test_ai_builder_repo_save_planning_state_bumps_version(
             session_id=session.id,
             tenant_id=user.tenant_id,
             state=state,
+            base_version=None,
         )
         second = await repo.save_planning_state(
             session_id=session.id,
             tenant_id=user.tenant_id,
             state=state,
+            base_version=None,
         )
 
     assert first == 1
@@ -3665,6 +4267,7 @@ async def test_ai_builder_repo_load_planning_state_round_trips_saved_state(
             session_id=session.id,
             tenant_id=user.tenant_id,
             state=state,
+            base_version=None,
         )
 
         loaded = await repo.load_planning_state(
@@ -3710,6 +4313,7 @@ async def test_ai_builder_repo_planning_state_round_trip_byte_identical(
             session_id=session_id,
             tenant_id=tenant_id,
             state=_planning_state_fixture(),
+            base_version=None,
         )
 
     async with db_container() as container:
@@ -3734,6 +4338,7 @@ async def test_ai_builder_repo_planning_state_round_trip_byte_identical(
             session_id=session_id,
             tenant_id=tenant_id,
             state=first_loaded,
+            base_version=None,
         )
 
     async with db_container() as container:
@@ -3805,6 +4410,7 @@ async def test_ai_builder_repo_save_planning_state_raises_for_wrong_tenant(
                 session_id=session.id,
                 tenant_id=other_tenant_id,
                 state=state,
+                base_version=None,
             )
 
 

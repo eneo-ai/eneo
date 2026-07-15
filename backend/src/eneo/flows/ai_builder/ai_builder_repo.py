@@ -41,6 +41,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderPublicError,
 )
 from eneo.flows.ai_builder.ai_builder_session_transitions import (
+    builder_turn_terminal_state_pairs,
+    builder_turn_transition_predecessors,
+    effective_builder_turn_state,
     ensure_valid_session_status_transition,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
@@ -88,17 +91,25 @@ def _session_send_lock_available_clause() -> sa.ColumnElement[bool]:
     )
 
 
-def _terminal_turn_state_after_lock_clear() -> sa.ColumnElement[str]:
-    return sa.case(
-        (
-            BuilderSessions.latest_turn_state == BuilderTurnState.OPEN.value,
-            BuilderTurnState.FAILED_BEFORE_PROVIDER.value,
-        ),
-        (
-            BuilderSessions.latest_turn_state == BuilderTurnState.PROCESSING.value,
-            BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN.value,
-        ),
-        else_=BuilderSessions.latest_turn_state,
+def _terminal_turn_state_after_lock_clear() -> sa.ColumnElement[str | None]:
+    state_mapping = (
+        sa.values(
+            sa.column("stored_state", sa.String),
+            sa.column("terminal_state", sa.String),
+            name="builder_turn_terminal_states",
+        )
+        .data(
+            [
+                (stored_state.value, terminal_state.value)
+                for stored_state, terminal_state in builder_turn_terminal_state_pairs()
+            ]
+        )
+        .alias()
+    )
+    return (
+        select(state_mapping.c.terminal_state)
+        .where(state_mapping.c.stored_state == BuilderSessions.latest_turn_state)
+        .scalar_subquery()
     )
 
 
@@ -860,12 +871,11 @@ class AIBuilderRepository:
                 if row.latest_turn_state is not None
                 else None
             )
-            effective_state = stored_state
-            if row.active_request_id is not None and not lock_is_active:
-                if stored_state is BuilderTurnState.OPEN:
-                    effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
-                elif stored_state is BuilderTurnState.PROCESSING:
-                    effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+            effective_state = effective_builder_turn_state(
+                stored_state,
+                has_active_request=row.active_request_id is not None,
+                lock_is_active=lock_is_active,
+            )
 
             same_turn = row.latest_turn_id == client_turn_id
             if same_turn:
@@ -965,12 +975,11 @@ class AIBuilderRepository:
                 if row.latest_turn_state is not None
                 else None
             )
-            effective_state = stored_state
-            if row.active_request_id is not None and not lock_is_active:
-                if stored_state is BuilderTurnState.OPEN:
-                    effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
-                elif stored_state is BuilderTurnState.PROCESSING:
-                    effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+            effective_state = effective_builder_turn_state(
+                stored_state,
+                has_active_request=row.active_request_id is not None,
+                lock_is_active=lock_is_active,
+            )
             same_turn = row.latest_turn_id == acceptance.client_turn_id
             stored_message = acceptance.user_message
             if same_turn:
@@ -1107,10 +1116,10 @@ class AIBuilderRepository:
                     BuilderSessions.tenant_id == turn.tenant_id,
                     *_lease_filters(turn.lease),
                     BuilderSessions.latest_turn_state.in_(
-                        [
-                            BuilderTurnState.OPEN.value,
-                            BuilderTurnState.PROCESSING.value,
-                        ]
+                        state.value
+                        for state in builder_turn_transition_predecessors(
+                            BuilderTurnState.PROCESSING
+                        )
                     ),
                 )
                 .values(
@@ -1134,18 +1143,34 @@ class AIBuilderRepository:
         error: AIBuilderPublicError | None = None,
     ) -> None:
         async with self._transaction():
+            terminal_error = (
+                error.model_dump(mode="json") if error is not None else None
+            )
             stmt = (
                 update(BuilderSessions)
                 .where(
                     BuilderSessions.id == turn.session_id,
                     BuilderSessions.tenant_id == turn.tenant_id,
                     *_lease_filters(turn.lease),
+                    sa.or_(
+                        BuilderSessions.latest_turn_state.in_(
+                            state.value
+                            for state in builder_turn_transition_predecessors(
+                                BuilderTurnState.COMMITTED
+                            )
+                        ),
+                        sa.and_(
+                            BuilderSessions.latest_turn_state
+                            == BuilderTurnState.COMMITTED.value,
+                            BuilderSessions.latest_turn_error_jsonb.is_not_distinct_from(
+                                terminal_error
+                            ),
+                        ),
+                    ),
                 )
                 .values(
                     latest_turn_state=BuilderTurnState.COMMITTED.value,
-                    latest_turn_error_jsonb=(
-                        error.model_dump(mode="json") if error is not None else None
-                    ),
+                    latest_turn_error_jsonb=terminal_error,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
@@ -1428,7 +1453,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         state: PlanningState,
-        base_version: int | None = None,
+        base_version: int | None,
     ) -> int:
         """Persist the full `PlanningState` snapshot and return the new version.
 
@@ -1445,8 +1470,9 @@ class AIBuilderRepository:
         between), the UPDATE matches zero rows and this raises
         `AIBuilderBadRequestException(code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH)`.
         Callers should reload the state and retry with the fresh
-        version. When `base_version` is `None` the save is
-        unconditional (last-writer-wins).
+        version. An explicit `base_version=None` is reserved for
+        single-owner initialization or administrative replacement;
+        interactive turn writers pass their accepted CAS version.
 
         Raises `NotFoundException` when `(session_id, tenant_id)` does
         not match a builder session — the caller misrouted the write.
@@ -1832,18 +1858,20 @@ def _session_from_row(
             or message_id is None
         ):
             raise ValueError("Persisted Builder latest-turn fields are incomplete.")
-        effective_state = BuilderTurnState(state)
+        stored_state = BuilderTurnState(state)
         lock_expires_at = data["lock_expires_at"]
-        if (
-            database_now is not None
-            and data["active_request_id"] is not None
-            and lock_expires_at is not None
-            and lock_expires_at <= database_now
-        ):
-            if effective_state is BuilderTurnState.OPEN:
-                effective_state = BuilderTurnState.FAILED_BEFORE_PROVIDER
-            elif effective_state is BuilderTurnState.PROCESSING:
-                effective_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+        lock_is_active = (
+            database_now is None
+            or lock_expires_at is None
+            or lock_expires_at > database_now
+        )
+        effective_state = effective_builder_turn_state(
+            stored_state,
+            has_active_request=data["active_request_id"] is not None,
+            lock_is_active=lock_is_active,
+        )
+        if effective_state is None:
+            raise ValueError("Persisted Builder latest turn has no state.")
         latest_turn = BuilderTurnLifecycle(
             client_turn_id=data["latest_turn_id"],
             request_fingerprint=request_fingerprint,
