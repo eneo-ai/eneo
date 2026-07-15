@@ -168,7 +168,7 @@ services:
     # memory budget per crawl, NOT a container limit - if you set a container
     # memory limit, leave headroom for MAX_CONCURRENT_CRAWLS (default 2)
     # concurrent crawls plus the runtime itself.
-    image: ghcr.io/oddly-even/kravla:0.3.0
+    image: ghcr.io/eneo-ai/kravla:0.4.0
     container_name: eneo_kravla
     restart: unless-stopped
     environment:

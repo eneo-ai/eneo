@@ -46,10 +46,7 @@ services:
     # External crawler service; the backend reaches it at http://kravla:8080
     # (set CRAWLER_SERVICE_URL=http://kravla:8080 in backend/.env).
     # Pinned on purpose - bump deliberately after verifying a new release.
-    image: ghcr.io/oddly-even/kravla:0.3.0
-    # The published image is amd64-only; emulate on Apple Silicon until the
-    # release workflow builds multi-arch
-    platform: linux/amd64
+    image: ghcr.io/eneo-ai/kravla:0.4.0
     networks:
       - eneo
     environment:
