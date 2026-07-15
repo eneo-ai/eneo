@@ -6,6 +6,38 @@
 - **Scope:** Central Marketplace Hub, Eneo instance connector, portable package
   releases, source-knowledge assets, and first-class Eneo Skills
 
+## TL;DR
+
+We want municipalities to reuse each other's well-designed Eneo solutions
+instead of repeatedly building the same Assistant, Flow, Skill, or App from
+scratch.
+
+The Marketplace will feel like a shared library inside Eneo. An approved
+publisher creates a clearly described, versioned release. A municipality finds
+it in Eneo, reviews the complete contents and local requirements, and its tenant
+administrator approves an exact installation plan. Eneo then creates a new
+local copy. That copy belongs to the municipality and keeps working without the
+Marketplace.
+
+Skills make this useful before the Marketplace exists. They split one large
+Assistant prompt into named, focused instruction sets—for example separate HR,
+IT-support, management-support, or document-creation capabilities. A Skill can
+be reused where appropriate and revised without silently changing an Assistant
+that is pinned to an older version. When portability is added, an Assistant and
+its exact underlying Skills can travel together as one understandable package.
+
+The architecture has two separate owners: the central Hub manages approved
+contributors and instances, review, versions, audiences, publication, downloads,
+and Hub audit; each Eneo installation owns browsing, preview, local mappings,
+tenant-admin confirmation, installation, permissions, and the installed
+resource. The Hub never administers a municipality's Eneo instance, and Eneo
+never shares its users' human OIDC identities with the Hub.
+
+The result should be less duplicated municipal work, easier sharing of proven
+solutions, clearer Assistants, explicit versioning, and safe local control. We
+deliver it in order: first local Skills, then portable Skill/Assistant packages,
+then the central Marketplace and native Eneo connection.
+
 ## Outcome
 
 Eneo should provide two separately deployed products that share one package
