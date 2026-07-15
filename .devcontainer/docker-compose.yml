@@ -45,8 +45,10 @@ services:
   kravla:
     # External crawler service; the backend reaches it at http://kravla:8080
     # (set CRAWLER_SERVICE_URL=http://kravla:8080 in backend/.env).
-    # Pinned on purpose - bump deliberately after verifying a new release.
-    image: ghcr.io/eneo-ai/kravla:0.4.0
+    # Built from the kravla GitHub repo, pinned to a release tag on purpose -
+    # bump deliberately after verifying a new release.
+    build:
+      context: https://github.com/eneo-ai/kravla.git#v0.4.0
     networks:
       - eneo
     environment:
