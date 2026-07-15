@@ -14,7 +14,7 @@ import { Callout, Steps, Tabs } from 'nextra/components'
 
 ## Architecture Overview
 
-Eneo uses a microservices architecture with six core services.
+Eneo uses a small service stack with a separate durable byte plane.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
@@ -29,6 +29,7 @@ Eneo uses a microservices architecture with six core services.
 | **Worker** | ARQ | - | Background processing, document indexing |
 | **Database** | PostgreSQL 16 + pgvector | 5432 | Data storage, vector search |
 | **Redis** | Redis 7 | 6379 | Cache, task queue |
+| **Object content** | S3-compatible endpoint | 8333 private | Durable original and derived bytes |
 | **db-init** | Python | - | One-time database initialization |
 
 <Callout type="info">
@@ -66,6 +67,7 @@ Before deploying, ensure you have:
   - [ ] Generate and set `JWT_SECRET` (32+ chars)
   - [ ] Set `PUBLIC_ORIGIN` in both backend and frontend env files
   - [ ] Configure at least ONE AI provider key
+  - [ ] Configure `.env`, including a verified object-store image digest, credentials, and stable deployment UUID
   - [ ] Run `docker network create proxy_tier`
   - [ ] **Production:** Pin image versions instead of `latest` (see [Version Pinning](#version-pinning-recommended))
 </Callout>
@@ -84,6 +86,7 @@ curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/dock
 curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_backend.template
 curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_frontend.template
 curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/.env.template
 ```
 
 ### Create environment files
@@ -92,6 +95,8 @@ curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_
 cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
+cp .env.template .env
+chmod 600 .env env_backend.env env_frontend.env env_db.env
 ```
 
 ### Configure required values
@@ -127,6 +132,16 @@ Edit `docker-compose.yml`:
 - Replace `your-domain.com` with your actual domain (4 locations)
 - Replace `your-email@domain.com` with your email for Let's Encrypt
 
+Edit `.env`:
+
+- pin `ENEO_SEAWEEDFS_IMAGE` to the exact attested manifest digest from the
+  release's `IMAGE-DIGESTS.txt`;
+- generate independent high-entropy `OBJECT_CONTENT_ACCESS_KEY_ID` and
+  `OBJECT_CONTENT_SECRET_ACCESS_KEY` values;
+- generate `OBJECT_CONTENT_DEPLOYMENT_ID` once with `uuidgen` and preserve it
+  through upgrades and restores; changing it makes existing object-content rows
+  unavailable and requires a separately verified migration.
+
 ### Create Docker network and deploy
 
 ```bash
@@ -159,13 +174,14 @@ Navigate to `https://your-domain.com`
 
 ## Network Isolation
 
-The Docker Compose stack uses three networks:
+The Docker Compose stack uses four networks:
 
 | Network | Services | Purpose |
 |---------|----------|---------|
 | `proxy_tier` (external) | Traefik, frontend, backend, worker | Ingress and outbound access for APIs, OIDC, and crawls |
 | `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer without internet egress, isolated from Traefik and frontend |
 | `module_net` | Traefik, backend | Reserved for optional module containers |
+| `object_content_net` (`internal: true`) | object-content, backend, worker | Private S3-compatible byte plane; never routed publicly |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
 
@@ -353,6 +369,104 @@ curl -fsS https://your-domain.com/version
 
   </Tabs.Tab>
 </Tabs>
+
+---
+
+## Object Content Storage
+
+PostgreSQL owns content identity, authorization references, canonical SHA-256,
+size/type, lifecycle, holds, retention, audit, and bounded reconciliation facts.
+The private S3-compatible endpoint owns durable byte streams. Endpoint, bucket,
+key, and provider details are never exposed by ordinary APIs.
+
+This configuration is a deployment prerequisite: backend and worker refuse to
+start when the mandatory object-content settings are absent or invalid, even
+before an existing byte producer adopts the foundation.
+
+The reference deployment starts an Eneo-built SeaweedFS 4.39 image. Eneo pins
+and reviews upstream source, builds minimal non-root amd64/arm64 images, blocks
+license and HIGH/CRITICAL vulnerability policy failures, publishes CycloneDX
+1.6/SPDX SBOMs, and signs provenance with GitHub OIDC. This is an Eneo-attested
+build—not supplier-signed upstream provenance.
+
+Self-hosted and European-operated endpoints, including external MinIO, use the
+same application contract; there is no provider-specific code or Amazon service
+dependency. To use one, configure its HTTPS endpoint, SigV4 signing scope,
+bucket, credentials, addressing style, and optional private CA, then run:
+
+```bash
+docker compose up -d --scale object-content=0
+```
+
+Leave `ENEO_SEAWEEDFS_IMAGE` pinned to the verified release digest because
+Compose validates the complete file; scale zero prevents that service from
+starting, and Eneo connects only to the configured external endpoint.
+
+The signing-scope value does not determine where the bundled volume lives. The
+bundled SeaweedFS service uses `local`; an external endpoint must use the value
+required by its operator. Eneo always connects to the explicit endpoint and
+never discovers or falls back to an Amazon service.
+
+### Use an external MinIO deployment
+
+Deploy and license MinIO under its current production guidance; Eneo does not
+ship or administer it. Create one private `eneo-object-content` bucket and one
+non-admin application identity limited to list and multipart-list on that
+bucket, plus get, put, delete, multipart-abort, and multipart-part-list on its
+objects. The part-list permission is exercised by Eneo's endpoint conformance
+suite. MinIO policy files use IAM-compatible `arn:aws:s3` resource strings as
+local syntax; this does not introduce an Amazon service dependency.
+
+Configure the protected deployment `.env` with the MinIO API endpoint and
+application credentials:
+
+```dotenv
+OBJECT_CONTENT_ENDPOINT_URL=https://minio.storage.example.eu:9000
+OBJECT_CONTENT_REGION=<the MinIO operator's signing scope>
+OBJECT_CONTENT_BUCKET=eneo-object-content
+OBJECT_CONTENT_ACCESS_KEY_ID=<application access key>
+OBJECT_CONTENT_SECRET_ACCESS_KEY=<application secret key>
+OBJECT_CONTENT_ALLOW_INSECURE_HTTP=false
+```
+
+Keep path-style addressing unless the MinIO operator provides wildcard DNS and
+TLS for virtual-host buckets. Mount a private CA into both backend and worker
+when required. Start Eneo with `--scale object-content=0`, verify `/api/readyz`,
+then validate single/multipart upload, ordered parts, full/range read, delete,
+and paired restore in staging against the exact MinIO build before production
+use. Eneo's object-content integration suite defines the expected behaviors.
+
+The repository's [object-content operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#external-minio-example)
+contains the exact least-privilege policy and commands. See MinIO's current
+[installation](https://docs.min.io/aistor/installation/),
+[TLS](https://docs.min.io/aistor/installation/linux/network-encryption/enable-tls-encryption/),
+and [S3 compatibility](https://docs.min.io/aistor/developers/s3-api-compatibility/)
+documentation for the storage service itself.
+
+<Callout type="warning">
+  **No database-only backup is complete.** Stop writers and back up PostgreSQL
+  and the object byte plane as one named recovery point. Preserve the stable
+  deployment UUID. Restore both halves while reconciliation is stopped, verify
+  readiness plus full/range reads, and only then reopen traffic.
+</Callout>
+
+The settings in `env_backend.env` control transport timeouts, bounded spool and
+multipart sizes, leases, retries, and reconciliation concurrency. They do not
+define business upload limits; administrators retain ownership of user-facing
+limits. Object keys and storage topology remain tenant-neutral.
+
+Capacity planning must cover PostgreSQL and the byte plane. Monitor bucket
+bytes/object count, durable free space, request latency/errors, pending and
+failed content, delete backlog, reconciliation lag, multipart uploads, and
+orphan-candidate age. Size the backend/worker temporary volume for concurrent
+in-flight spools: memory remains bounded at the configured threshold, while the
+remainder uses temporary disk until upload completes. Organizations needing
+multi-node storage availability should use an externally operated compatible
+endpoint with their standard redundancy and disaster-recovery controls.
+
+See the repository's [durable object-content operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md)
+for the exact S3 subset, TLS/custom-CA setup, attestation verification, paired
+backup/restore, skew recovery, capacity, upgrade, and rollback procedures.
 
 ---
 
@@ -665,7 +779,8 @@ worker:
 ### Backups
 
 <Callout type="warning">
-  **Always back up before updating.** Take database and volume backups before any upgrade to enable rollback if issues occur.
+  **Always take one paired recovery point before updating.** A PostgreSQL dump
+  without the matching object-content snapshot—or the reverse—is incomplete.
 </Callout>
 
 **Database backup with pg_dump (recommended):**
@@ -693,6 +808,11 @@ docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
   tar czf /backup/redis_volume_$(date +%Y%m%d).tar.gz /data
 ```
 
+Also archive `eneo_eneo_object_content_data` while backend, worker, and the
+object-content service are stopped, or take the matching versioned snapshot in
+your external provider. Follow the [paired backup/restore procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#paired-backup-and-restore),
+including checksum and skew-recovery checks.
+
 ### Updating Eneo
 
 <Steps>
@@ -702,6 +822,8 @@ docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
 # Database backup (required)
 docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
 ```
+
+Take the matching object-content snapshot before resuming writes.
 
 ### Update version tags (if pinned)
 
@@ -758,3 +880,4 @@ docker compose up -d --scale backend=3 --scale worker=2
 - [SharePoint Integration](/guides/sharepoint-integration) - Connect SharePoint and OneDrive
 - [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
 - [System Architecture](/docs/architecture) - Complete architecture overview
+- [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance

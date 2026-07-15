@@ -1,0 +1,201 @@
+from dataclasses import replace
+from hashlib import sha256
+from io import BytesIO
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
+
+from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    ObjectContents,
+)
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
+from eneo.object_content.content import (
+    CapturedContent,
+    ContentAccessClass,
+    ContentIntent,
+    ObjectContentIdempotencyConflictError,
+    content_request_fingerprint,
+)
+from eneo.object_content.content_repository import ObjectContentRepository
+
+
+async def _owner_ids(database: DatabaseSessionManager) -> tuple[UUID, UUID]:
+    async with database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+    return tenant_id, user_id
+
+
+def _file(*, tenant_id: UUID, user_id: UUID, name: str) -> Files:
+    return Files(
+        name=name,
+        text=None,
+        blob=None,
+        checksum=sha256(name.encode()).hexdigest(),
+        size=1,
+        mimetype="text/plain",
+        file_type="text",
+        transcription=None,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        parent_file_id=None,
+    )
+
+
+def _pending_content(
+    *, tenant_id: UUID, user_id: UUID, idempotency_key: str
+) -> ObjectContents:
+    digest = sha256(idempotency_key.encode()).digest()
+    return ObjectContents(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        object_key=f"v1/a2d539affef042aaa7f814376947be2c/{idempotency_key}",
+        state="pending",
+        access_class="private_resource",
+        sha256=digest,
+        size_bytes=1,
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+        idempotency_key=idempotency_key,
+        request_fingerprint=digest,
+    )
+
+
+def _captured_content(payload: bytes = b"x") -> CapturedContent:
+    digest = sha256(payload).digest()
+    return CapturedContent(
+        file=BytesIO(payload),
+        sha256=digest,
+        size_bytes=len(payload),
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+        part_sha256=(digest,) if payload else (),
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_content_only_accepts_its_first_reference_in_creation_transaction(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    async with object_content_database.session() as session, session.begin():
+        server_version = (
+            await session.execute(text("SHOW server_version_num"))
+        ).scalar_one()
+    assert int(server_version) // 10_000 == 13
+
+    tenant_id, user_id = await _owner_ids(object_content_database)
+
+    async with object_content_database.session() as session, session.begin():
+        first_file = _file(tenant_id=tenant_id, user_id=user_id, name="first.txt")
+        initial_content = _pending_content(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            idempotency_key="initial-content",
+        )
+        session.add_all([first_file, initial_content])
+        await session.flush()
+        session.add(
+            FileContentReferences(
+                file_id=first_file.id,
+                content_id=initial_content.id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+        await session.flush()
+        await session.refresh(initial_content)
+        assert initial_content.reference_count == 1
+
+        later_file = _file(tenant_id=tenant_id, user_id=user_id, name="later.txt")
+        later_content = _pending_content(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            idempotency_key="later-content",
+        )
+        session.add_all([later_file, later_content])
+        await session.flush()
+        later_file_id = later_file.id
+        later_content_id = later_content.id
+
+    with pytest.raises(DBAPIError, match="pending content may only receive"):
+        async with object_content_database.session() as session, session.begin():
+            session.add(
+                FileContentReferences(
+                    file_id=later_file_id,
+                    content_id=later_content_id,
+                    variant="original",
+                    ordinal=0,
+                )
+            )
+            await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+    content = _captured_content(b"same content")
+    intent = ContentIntent(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        idempotency_key="repository-idempotency",
+        producer_receipt="file:repository-idempotency:original:0",
+    )
+    fingerprint = content_request_fingerprint(intent, content)
+
+    async with object_content_database.session() as session, session.begin():
+        owner = _file(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="repository-idempotency.txt",
+        )
+        session.add(owner)
+        await session.flush()
+        prepared = await ObjectContentRepository(session).prepare(
+            intent=intent,
+            content=content,
+            object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
+            request_fingerprint=fingerprint,
+        )
+        session.add(
+            FileContentReferences(
+                file_id=owner.id,
+                content_id=prepared.id,
+                variant="original",
+                ordinal=0,
+            )
+        )
+        await session.flush()
+        assert prepared.created is True
+
+    async with object_content_database.session() as session, session.begin():
+        replay = await ObjectContentRepository(session).prepare(
+            intent=intent,
+            content=content,
+            object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
+            request_fingerprint=fingerprint,
+        )
+        assert replay.created is False
+        assert replay.id == prepared.id
+        assert replay.object_key == prepared.object_key
+
+    changed_intent = replace(intent, producer_receipt="file:other:original:0")
+    with pytest.raises(ObjectContentIdempotencyConflictError):
+        async with object_content_database.session() as session, session.begin():
+            await ObjectContentRepository(session).prepare(
+                intent=changed_intent,
+                content=content,
+                object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
+                request_fingerprint=content_request_fingerprint(
+                    changed_intent,
+                    content,
+                ),
+            )

@@ -177,7 +177,43 @@ LIMIT 5;
 
 ---
 
-### Worker Service (ARQ)
+### Durable Object Content
+
+Durable file data is split across two canonical owners:
+
+| PostgreSQL control plane | Private S3-compatible byte plane |
+| --- | --- |
+| Content identity and lifecycle state | Original and derived byte streams |
+| Canonical SHA-256, exact size, and media type | Images, audio, previews, pages, and generated artifacts |
+| Concrete authorization references, holds, and retention | Full extracted text or transcription when it is not a bounded searchable fact |
+| Audit and bounded reconciliation/query facts | No authorization, tenant routing, or lifecycle decisions |
+
+PostgreSQL retains bounded text/search facts that must be queried or indexed.
+Large or complete variants live only in object storage. Object keys are opaque
+and deployment-scoped; filenames and tenant identifiers are not encoded into
+them. Ordinary APIs never expose endpoint, bucket, key, or provider details.
+
+The application uses one vendor-neutral S3-compatible contract. The reference
+deployment bundles an Eneo-built and attested SeaweedFS image. Self-hosted or
+European-operated compatible endpoints, including externally operated MinIO,
+use the same configuration and conformance tests—there is no provider plugin,
+product-code branch, or Amazon service dependency.
+
+Uploads, deletes, and reconciliation follow the finite lifecycle `pending` →
+`available`/`failed` → `retained` or `delete_pending` → `tombstoned`. PostgreSQL
+records durable intent before remote work, and a bounded reconciler resolves
+process/network crash interleavings. Canonical full-byte SHA-256 is computed by
+Eneo while streaming; ETag, CRC, and multipart composite checksums are never the
+canonical digest.
+
+The platform foundation does not itself cut existing File, InfoBlob, Icon, or
+Flow producers over to the new owner. Those migrations are separate vertical
+slices so each producer can copy and verify bytes before deleting its previous
+authority.
+
+---
+
+### Worker Service (ARQ today)
 
 **Technology:**
 - **Queue**: Redis-based ARQ (Async Redis Queue)
@@ -189,6 +225,11 @@ LIMIT 5;
 - Web crawling and content extraction
 - Embedding generation
 - Background tasks and scheduled jobs
+
+Object-content reconciliation is implemented as a queue-neutral async task.
+Only the current registration and schedule adapter depends on ARQ. A future
+worker change therefore does not alter the object store, lifecycle, or database
+contract, and Eneo avoids a speculative generic queue framework in the meantime.
 
 **Task Types:**
 

@@ -198,6 +198,46 @@ ENEO_SUPER_API_KEY=
 ENEO_SUPER_DUPER_API_KEY=
 
 # ----------------------------------------------------------------------------
+# Durable Object Content (deployment and protocol tuning)
+# ----------------------------------------------------------------------------
+# Required endpoint, bucket, credentials, and the stable deployment UUID are
+# owned by docs/deployment/.env because Docker Compose must give the same
+# credentials to Eneo and the bundled reference store. Do not duplicate them
+# here. These settings tune transport and reconciliation; they are not business
+# upload limits. User-facing limits remain admin-configurable in Eneo.
+
+# Use virtual only when the external endpoint and DNS/TLS support bucket hosts.
+OBJECT_CONTENT_ADDRESSING_STYLE=path
+
+# External private CA only. Mount the file read-only into backend and worker.
+# OBJECT_CONTENT_CA_BUNDLE=/etc/eneo/object-content/ca.pem
+
+OBJECT_CONTENT_CONNECT_TIMEOUT_SECONDS=5
+OBJECT_CONTENT_READ_TIMEOUT_SECONDS=60
+OBJECT_CONTENT_SDK_MAX_ATTEMPTS=3
+OBJECT_CONTENT_READINESS_TIMEOUT_SECONDS=2
+OBJECT_CONTENT_READINESS_MAX_ATTEMPTS=1
+
+# Bounded streaming/spooling and portable multipart settings.
+OBJECT_CONTENT_IO_CHUNK_BYTES=262144
+OBJECT_CONTENT_SPOOL_MEMORY_BYTES=8388608
+OBJECT_CONTENT_MULTIPART_PART_BYTES=8388608
+OBJECT_CONTENT_MULTIPART_THRESHOLD_BYTES=16777216
+
+# Bounded background reconciliation. Increase only after measuring the object
+# endpoint and PostgreSQL capacity; batch is the portable S3 range 1-1000 and
+# concurrency is validated in the range 1-32.
+OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE=100
+OBJECT_CONTENT_RECONCILIATION_CONCURRENCY=4
+OBJECT_CONTENT_RECONCILIATION_LEASE_SECONDS=300
+OBJECT_CONTENT_RECONCILIATION_RETRY_BASE_SECONDS=30
+OBJECT_CONTENT_RECONCILIATION_RETRY_MAX_SECONDS=3600
+OBJECT_CONTENT_PENDING_STALE_SECONDS=300
+OBJECT_CONTENT_DELETE_VISIBILITY_TIMEOUT_SECONDS=30
+OBJECT_CONTENT_DELETE_POLL_INTERVAL_SECONDS=0.25
+OBJECT_CONTENT_ORPHAN_GRACE_SECONDS=3600
+
+# ----------------------------------------------------------------------------
 # Database Connection Pool Configuration
 # ----------------------------------------------------------------------------
 # Controls PostgreSQL connection pooling. Each container has its own pool.

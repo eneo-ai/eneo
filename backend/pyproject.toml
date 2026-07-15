@@ -59,6 +59,7 @@ dependencies = [
     "opentelemetry-instrumentation-redis>=0.41b0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "opentelemetry-instrumentation-aiohttp-client>=0.41b0",
+    "botocore>=1.43,<2",
 ]
 
 [project.scripts]
@@ -87,6 +88,8 @@ dev = [
     "python-docx>=1.2.0,<2",  # test-only: builds .docx fixtures in test_text_extractor
     "deptry>=0.25.1",
     "vulture>=2.16",
+    "mypy-boto3-s3>=1.43,<2",
+    "botocore-stubs>=1.43,<2",
 ]
 
 [build-system]

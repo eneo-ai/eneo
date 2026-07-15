@@ -20,6 +20,10 @@ from eneo.main.container.container import Container
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.crawl_tasks import crawl_task, queue_website_crawls
+from eneo.worker.object_content_tasks import (
+    ObjectContentReconciliationSummary,
+    reconcile_object_content_task,
+)
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 from eneo.worker.usage_stats_tasks import (
     recalculate_all_tenants_usage_stats,
@@ -29,6 +33,15 @@ from eneo.worker.usage_stats_tasks import (
 from eneo.worker.worker import Worker
 
 worker = Worker()
+
+
+@worker.cron_job(manages_own_session=True, run_at_startup=True)
+async def reconcile_object_content(
+    container: Container,
+) -> ObjectContentReconciliationSummary:
+    """Converge one bounded object-content batch every minute."""
+    del container
+    return await reconcile_object_content_task()
 
 
 class ExportCleanupJobError(TypedDict, total=False):
