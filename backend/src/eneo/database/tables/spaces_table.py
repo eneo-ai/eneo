@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import (
@@ -99,6 +99,15 @@ class Spaces(BasePublic):
         relationship(viewonly=True)
     )
     mcp_servers_mapping: Mapped[list["SpacesMCPServers"]] = relationship(viewonly=True)
+
+    __table_args__ = (
+        Index(
+            "uq_spaces_tenant_id_id",
+            "tenant_id",
+            "id",
+            unique=True,
+        ),
+    )
 
 
 class SpacesEmbeddingModels(BaseCrossReference):

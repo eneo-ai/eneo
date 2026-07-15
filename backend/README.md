@@ -101,6 +101,7 @@ docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
 | UPLOAD_MAX_FILE_SIZE             | x        | Max file size for uploading to a collection              |
 | TRANSCRIPTION_MAX_FILE_SIZE      | x        | Max file size for uploading to a collection              |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
+| SKILL_MAX_BINDINGS               |          | Configurable Skill-reference safety limit per resource or policy (default 100) |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |
 | USING_AZURE_MODELS               | x        | Feature flag if using azure models (example: False)      |
 | API_PREFIX                       | x        | Api prefix - eg `/api/v1/`                               |

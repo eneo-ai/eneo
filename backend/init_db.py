@@ -109,6 +109,7 @@ def add_tenant_user(
                 "admin",
                 "personal_chat",
                 "assistants",
+                "skills",
                 "group_chats",
                 "apps",
                 "services",

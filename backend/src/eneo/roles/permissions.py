@@ -15,6 +15,7 @@ _F = TypeVar("_F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 class Permission(str, Enum):
     ASSISTANTS = "assistants"
+    SKILLS = "skills"
     PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"

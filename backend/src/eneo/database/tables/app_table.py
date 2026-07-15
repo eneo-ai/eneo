@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,12 +52,24 @@ class Apps(BasePublic):
     )
     template: Mapped[Optional[AppTemplates]] = relationship(viewonly=True)
 
+    __table_args__ = (
+        Index(
+            "uq_apps_space_id_id",
+            "space_id",
+            "id",
+            unique=True,
+        ),
+    )
+
 
 class AppRuns(BasePublic):
     input_text: Mapped[Optional[str]] = mapped_column()
     output_text: Mapped[Optional[str]] = mapped_column()
     num_tokens_input: Mapped[Optional[int]] = mapped_column()
     num_tokens_output: Mapped[Optional[int]] = mapped_column()
+    skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

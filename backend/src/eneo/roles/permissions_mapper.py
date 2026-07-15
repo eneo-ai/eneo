@@ -5,6 +5,7 @@ from eneo.roles.permissions import Permission
 
 PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ASSISTANTS: "Management of Assistants. Create, Update, and Delete Assistants.",
+    Permission.SKILLS: "Management of Skills. Create revisions and attach Skills to Assistants and Apps.",
     Permission.PERSONAL_CHAT: "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
     Permission.GROUP_CHATS: "Management of Group Chats. Create, Update, and Delete Assistants.",
     Permission.APPS: "Management of Apps. Create, Update, and Delete Apps",

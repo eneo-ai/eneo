@@ -28,6 +28,9 @@ class Questions(BasePublic):
     num_tokens_answer: Mapped[int] = mapped_column()
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
