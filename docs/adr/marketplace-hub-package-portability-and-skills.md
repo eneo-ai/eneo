@@ -8,35 +8,36 @@
 
 ## TL;DR
 
-We want municipalities to reuse each other's well-designed Eneo solutions
-instead of repeatedly building the same Assistant, Flow, Skill, or App from
-scratch.
+We want municipal staff to open Eneo and find a shared library of solutions that
+other municipalities have chosen to share. If Sundsvall builds a useful HR
+Assistant or permit-handling Flow, another municipality should be able to reuse
+that work without rebuilding it from the beginning.
 
-The Marketplace will feel like a shared library inside Eneo. An approved
-publisher creates a clearly described, versioned release. A municipality finds
-it in Eneo, reviews the complete contents and local requirements, and its tenant
-administrator approves an exact installation plan. Eneo then creates a new
-local copy. That copy belongs to the municipality and keeps working without the
-Marketplace.
+The publisher gives each Flow, Skill, Assistant, or future App a clear
+description, version, and audience. A receiving municipality can inspect the
+complete contents inside Eneo, see which local choices or mappings it must make,
+and install a new local copy after its tenant administrator approves the plan.
+That copy belongs to the receiving municipality and keeps working during a
+Marketplace outage.
 
-Skills make this useful before the Marketplace exists. They split one large
-Assistant prompt into named, focused instruction sets—for example separate HR,
-IT-support, management-support, or document-creation capabilities. A Skill can
-be reused where appropriate and revised without silently changing an Assistant
-that is pinned to an older version. When portability is added, an Assistant and
-its exact underlying Skills can travel together as one understandable package.
+Skills are the first building block. They let authors replace one large prompt
+that mixes HR, IT support, management support, and document creation with named
+instruction sets. Authors can reuse a Skill across suitable Assistants and
+create new revisions without changing parents pinned to older content. An
+Assistant can later travel with its exact Skills as one complete package.
 
-The architecture has two separate owners: the central Hub manages approved
-contributors and instances, review, versions, audiences, publication, downloads,
-and Hub audit; each Eneo installation owns browsing, preview, local mappings,
-tenant-admin confirmation, installation, permissions, and the installed
-resource. The Hub never administers a municipality's Eneo instance, and Eneo
-never shares its users' human OIDC identities with the Hub.
+The central Hub manages approved contributors and instances, review, versions,
+audiences, publication, downloads, and Hub audit. Each Eneo installation owns
+browsing, preview, local mappings, tenant-admin confirmation, installation,
+permissions, and the installed resource. The Hub cannot administer a
+municipality's Eneo instance, and Eneo shares no human OIDC identity with the
+Hub.
 
-The result should be less duplicated municipal work, easier sharing of proven
-solutions, clearer Assistants, explicit versioning, and safe local control. We
-deliver it in order: first local Skills, then portable Skill/Assistant packages,
-then the central Marketplace and native Eneo connection.
+Municipal staff spend less time duplicating work. They can share solutions that
+have worked elsewhere, understand Assistants as smaller named capabilities, and
+choose when to adopt a new version. Delivery follows that value chain: local
+Skills first, portable Skill/Assistant packages second, then the central
+Marketplace and native Eneo connection.
 
 ## Outcome
 
