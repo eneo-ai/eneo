@@ -215,7 +215,6 @@ class AIBuilderProviderFailure:
     status_code: int | None
     status_class: AIBuilderProviderStatusClass | None
     exception_class: AIBuilderProviderExceptionClass
-    code: str | None
     parameter: str | None
     fingerprint: str
 
@@ -250,8 +249,6 @@ class AIBuilderProviderRequestEvidence:
             "status_class": failure.status_class,
             "rejection_class": rejection_class,
         }
-        if failure.code is not None:
-            failure_value["code"] = failure.code
         if parameter is not None:
             failure_value["parameter"] = parameter
         return {
@@ -294,8 +291,7 @@ def classify_ai_builder_provider_failure(
         status_code=status_code,
         status_class=_provider_status_class(status_code),
         exception_class=_provider_exception_class(error),
-        code=_provider_dependency_fact(error, "code"),
-        parameter=_provider_dependency_fact(error, "param"),
+        parameter=_provider_parameter(error),
         fingerprint=make_failure_fingerprint(
             "ai_builder_provider",
             stage,
@@ -378,10 +374,7 @@ def _provider_exception_class(
     return "unknown"
 
 
-def _provider_dependency_fact(
-    error: Exception,
-    field_name: Literal["code", "param"],
-) -> str | None:
+def _provider_parameter(error: Exception) -> str | None:
     if not isinstance(
         error,
         (
@@ -392,7 +385,7 @@ def _provider_dependency_fact(
         ),
     ):
         return None
-    value = getattr(error, field_name, None)
+    value = getattr(error, "param", None)
     if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
         return None
     if not all(character.isalnum() or character in "._:-" for character in value):

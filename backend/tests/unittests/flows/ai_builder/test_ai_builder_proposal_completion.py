@@ -412,7 +412,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
                 model="private-model",
                 llm_provider="private-provider",
                 body={
-                    "code": "invalid_request_error",
+                    "code": "sk_live_CREDENTIAL_LEAK_9F2A",
                     "param": "temperature",
                     "type": "invalid_request_error",
                 },
@@ -497,7 +497,6 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         "exception_class": "bad_request",
         "status_code": 400,
         "status_class": "4xx",
-        "code": "invalid_request_error",
         "parameter": "temperature",
         "rejection_class": "outgoing_parameter",
     }
@@ -510,6 +509,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         "private-provider",
         "private-user-content",
         "private-tool-schema-content",
+        "sk_live_CREDENTIAL_LEAK_9F2A",
         "request_id",
         "session_id",
         "tenant_id",
