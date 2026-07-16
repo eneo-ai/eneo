@@ -4,6 +4,7 @@ from uuid import UUID
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingReference,
     SkillRevision,
     SkillRevisionChange,
     SkillStatusChange,
@@ -50,14 +51,14 @@ class SkillRepo(Protocol):
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]: ...
 
     async def resolve_references_for_binding_update(
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]: ...
 
     async def lock_assistant_for_binding_update(

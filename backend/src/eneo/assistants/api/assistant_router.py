@@ -53,7 +53,10 @@ from eneo.sessions.session_protocol import (
     to_session_public,
     to_sessions_paginated_response,
 )
-from eneo.skills.presentation.skill_assembler import skill_binding_audit_entries
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 from eneo.spaces.api.space_models import TransferApplicationRequest
 
 if TYPE_CHECKING:
@@ -643,10 +646,7 @@ async def update_assistant(
 
     skill_references = None
     if assistant.skill_bindings is not None:
-        skill_references = [
-            (binding.skill_id, binding.skill_revision_id)
-            for binding in assistant.skill_bindings
-        ]
+        skill_references = skill_binding_references_from_input(assistant.skill_bindings)
 
     # get original request dict to check if description was actually provided
     # (@partial_model overrides NOT_PROVIDED with None)

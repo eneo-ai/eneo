@@ -12,6 +12,7 @@ from eneo.main.exceptions import (
     NotFoundException,
 )
 from eneo.roles.permissions import Permission
+from eneo.skills.domain.skill import SkillBindingReference
 
 
 @dataclass(frozen=True)
@@ -25,12 +26,18 @@ class SkillConcurrencyResources:
     second_revision_id: UUID
 
     @property
-    def first_reference(self) -> tuple[UUID, UUID]:
-        return self.first_skill_id, self.first_revision_id
+    def first_reference(self) -> SkillBindingReference:
+        return SkillBindingReference(
+            skill_id=self.first_skill_id,
+            skill_revision_id=self.first_revision_id,
+        )
 
     @property
-    def second_reference(self) -> tuple[UUID, UUID]:
-        return self.second_skill_id, self.second_revision_id
+    def second_reference(self) -> SkillBindingReference:
+        return SkillBindingReference(
+            skill_id=self.second_skill_id,
+            skill_revision_id=self.second_revision_id,
+        )
 
 
 @pytest.fixture
@@ -165,7 +172,7 @@ async def test_parent_binding_replacements_are_serialized(
     release_first = asyncio.Event()
     second_pid = asyncio.get_running_loop().create_future()
 
-    async def replace(container, references: list[tuple[UUID, UUID]]):
+    async def replace(container, references: list[SkillBindingReference]):
         service = container.skill_service()
         if parent_kind == "assistant":
             return await service.replace_assistant_bindings(

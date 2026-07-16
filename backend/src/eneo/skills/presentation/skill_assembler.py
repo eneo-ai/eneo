@@ -1,10 +1,28 @@
-from eneo.skills.domain.skill import ResolvedSkillBinding, Skill, SkillRevision
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    Skill,
+    SkillBindingReference,
+    SkillRevision,
+)
 from eneo.skills.presentation.skill_models import (
+    SkillBindingReferenceInput,
     SkillBindingSummary,
     SkillPublic,
     SkillRevisionPublic,
     SkillSparse,
 )
+
+
+def skill_binding_references_from_input(
+    references: list[SkillBindingReferenceInput],
+) -> list[SkillBindingReference]:
+    return [
+        SkillBindingReference(
+            skill_id=reference.skill_id,
+            skill_revision_id=reference.skill_revision_id,
+        )
+        for reference in references
+    ]
 
 
 def skill_binding_audit_entries(

@@ -11,7 +11,7 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
-from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingReference
 
 
 def _binding(
@@ -32,6 +32,13 @@ def _binding(
         content_digest="a" * 64,
         position=position,
         is_active=active,
+    )
+
+
+def _binding_reference(binding: ResolvedSkillBinding) -> SkillBindingReference:
+    return SkillBindingReference(
+        skill_id=binding.skill_id,
+        skill_revision_id=binding.skill_revision_id,
     )
 
 
@@ -88,12 +95,12 @@ async def test_same_space_skill_can_be_reused_by_multiple_parents():
     first = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=uuid4(),
-        references=[(binding.skill_id, binding.skill_revision_id)],
+        references=[_binding_reference(binding)],
     )
     second = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=uuid4(),
-        references=[(binding.skill_id, binding.skill_revision_id)],
+        references=[_binding_reference(binding)],
     )
 
     assert first == [binding]
@@ -112,7 +119,12 @@ async def test_missing_or_cross_space_revision_fails_before_replacing_bindings()
         await service.replace_app_bindings(
             space_id=space.id,
             app_id=space.app.id,
-            references=[(uuid4(), uuid4())],
+            references=[
+                SkillBindingReference(
+                    skill_id=uuid4(),
+                    skill_revision_id=uuid4(),
+                )
+            ],
         )
 
     repo.replace_app_bindings.assert_not_awaited()
@@ -130,7 +142,7 @@ async def test_inactive_skill_cannot_receive_a_new_binding():
         await service.replace_assistant_bindings(
             space_id=space.id,
             assistant_id=space.assistant.id,
-            references=[(inactive.skill_id, inactive.skill_revision_id)],
+            references=[_binding_reference(inactive)],
         )
 
 
@@ -145,7 +157,7 @@ async def test_existing_inactive_exact_revision_binding_can_be_reordered():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[(inactive.skill_id, inactive.skill_revision_id)],
+        references=[_binding_reference(inactive)],
     )
 
     assert result == [inactive]
@@ -238,7 +250,10 @@ async def test_binding_abuse_guardrail_comes_from_deployment_settings():
     repo = AsyncMock()
     repo.list_app_bindings.return_value = []
     service = _service(space=space, repo=repo)
-    references = [(uuid4(), uuid4()), (uuid4(), uuid4())]
+    references = [
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+    ]
 
     with (
         patch(

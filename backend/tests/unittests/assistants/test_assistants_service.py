@@ -22,6 +22,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.skills.domain.skill import SkillBindingReference
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -282,7 +283,10 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
     assistant.space_id = TEST_UUID
     space = setup.service.space_repo.get_space_by_assistant.return_value
     setup.service.space_repo.update.return_value = space
-    references = [(uuid4(), uuid4()), (uuid4(), uuid4())]
+    references = [
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+    ]
     events: list[str] = []
 
     assistant.update.side_effect = lambda **_: events.append("parent_update")

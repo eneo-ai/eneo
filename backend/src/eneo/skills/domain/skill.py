@@ -124,6 +124,12 @@ class SkillHasBindingsError(Exception):
 
 
 @dataclass(frozen=True)
+class SkillBindingReference:
+    skill_id: UUID
+    skill_revision_id: UUID
+
+
+@dataclass(frozen=True)
 class ResolvedSkillBinding:
     skill_id: UUID
     skill_revision_id: UUID

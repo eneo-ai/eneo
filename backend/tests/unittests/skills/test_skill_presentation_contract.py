@@ -17,7 +17,11 @@ from eneo.skills.domain.skill import (
     SkillStatusChange,
 )
 from eneo.skills.presentation import skill_models, skill_router
-from eneo.skills.presentation.skill_assembler import skill_binding_audit_entries
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
+from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
 from eneo.skills.presentation.skill_router import router
 
 
@@ -91,6 +95,22 @@ def test_skill_binding_audit_entries_preserve_order_without_bodies():
     assert [entry["position"] for entry in entries] == [0, 1]
     assert "instructions" not in str(entries)
     assert "description" not in str(entries)
+
+
+def test_skill_binding_reference_input_maps_to_named_domain_reference():
+    first = SkillBindingReferenceInput(skill_id=uuid4(), skill_revision_id=uuid4())
+    second = SkillBindingReferenceInput(skill_id=uuid4(), skill_revision_id=uuid4())
+
+    references = skill_binding_references_from_input([first, second])
+
+    assert [reference.skill_id for reference in references] == [
+        first.skill_id,
+        second.skill_id,
+    ]
+    assert [reference.skill_revision_id for reference in references] == [
+        first.skill_revision_id,
+        second.skill_revision_id,
+    ]
 
 
 def test_parent_binding_projection_routes_are_get_only():

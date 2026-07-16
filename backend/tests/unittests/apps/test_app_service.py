@@ -6,7 +6,11 @@ import pytest
 
 from eneo.apps.apps.app_service import AppService
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
-from eneo.skills.domain.skill import SkillComposition, SkillExecutionReference
+from eneo.skills.domain.skill import (
+    SkillBindingReference,
+    SkillComposition,
+    SkillExecutionReference,
+)
 
 
 @pytest.fixture
@@ -105,7 +109,10 @@ async def test_update_app_replaces_skills_before_fit_and_parent_persist(
     service: AppService,
 ):
     app = _configure_editable_app(service)
-    references = [(uuid4(), uuid4()), (uuid4(), uuid4())]
+    references = [
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+    ]
     events: list[str] = []
 
     app.update.side_effect = lambda **_: events.append("parent_update")

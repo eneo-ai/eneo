@@ -28,7 +28,10 @@ from eneo.prompts.api.prompt_models import PromptSparse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.skills.presentation.skill_assembler import skill_binding_audit_entries
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -121,10 +124,9 @@ async def update_app(
 
     skill_references = None
     if update_service_req.skill_bindings is not None:
-        skill_references = [
-            (binding.skill_id, binding.skill_revision_id)
-            for binding in update_service_req.skill_bindings
-        ]
+        skill_references = skill_binding_references_from_input(
+            update_service_req.skill_bindings
+        )
 
     app, permissions = await service.update_app(
         app_id=id,

@@ -61,7 +61,11 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
-from eneo.skills.domain.skill import SkillComposition, compose_skill_instructions
+from eneo.skills.domain.skill import (
+    SkillBindingReference,
+    SkillComposition,
+    compose_skill_instructions,
+)
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
@@ -626,7 +630,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-        skill_references: list[tuple[UUID, UUID]] | None = None,
+        skill_references: list[SkillBindingReference] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)

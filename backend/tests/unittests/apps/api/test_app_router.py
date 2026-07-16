@@ -13,7 +13,7 @@ from eneo.apps.apps.api.app_models import (
     InputFieldType,
 )
 from eneo.audit.domain.action_types import ActionType
-from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingReference
 from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
 
 
@@ -205,7 +205,11 @@ async def test_update_app_folds_ordered_body_free_skills_into_single_parent_audi
 
     service.update_app.assert_awaited_once()
     assert service.update_app.await_args.kwargs["skill_references"] == [
-        (reference.skill_id, reference.skill_revision_id) for reference in references
+        SkillBindingReference(
+            skill_id=reference.skill_id,
+            skill_revision_id=reference.skill_revision_id,
+        )
+        for reference in references
     ]
     audit_service.log_async.assert_awaited_once()
     audit_call = audit_service.log_async.await_args.kwargs

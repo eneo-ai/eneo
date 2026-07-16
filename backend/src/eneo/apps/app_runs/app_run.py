@@ -23,6 +23,7 @@ class AppRun:
     user: UserSparse | None
     num_tokens_input: int | None
     num_tokens_output: int | None
+    # Pinned prompt-composition lineage remains truthful if execution fails early.
     skill_provenance: tuple[SkillExecutionReference, ...] | None
     job: JobInDb | None
     completion_model_id: UUID

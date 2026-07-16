@@ -24,7 +24,10 @@ from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.skills.domain.skill import ResolvedSkillBinding
-from eneo.skills.presentation.skill_assembler import skill_binding_audit_entries
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 
 router = APIRouter()
 
@@ -197,10 +200,7 @@ async def update_governance_policy(
 
     skill_references = None
     if payload.skills is not None:
-        skill_references = [
-            (binding.skill_id, binding.skill_revision_id)
-            for binding in payload.skills.bindings
-        ]
+        skill_references = skill_binding_references_from_input(payload.skills.bindings)
 
     policy = await service.update_policy(
         models_restriction=models_restriction,

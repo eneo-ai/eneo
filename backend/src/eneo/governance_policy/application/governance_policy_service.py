@@ -17,6 +17,7 @@ from eneo.governance_policy.domain.governance_policy_repo import (
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.skills.domain.skill import SkillBindingReference
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -102,7 +103,7 @@ class GovernancePolicyService:
         ) = None,
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
-        skill_references: list[tuple[UUID, UUID]] | None = None,
+        skill_references: list[SkillBindingReference] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
 

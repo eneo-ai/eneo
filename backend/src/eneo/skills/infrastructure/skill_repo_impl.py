@@ -16,6 +16,7 @@ from eneo.database.tables.skill_table import (
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingReference,
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
@@ -287,13 +288,13 @@ class SkillRepoImpl:
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
         lock_active_state: bool,
     ) -> list[ResolvedSkillBinding]:
         if not references:
             return []
-        skill_ids = [skill_id for skill_id, _ in references]
-        revision_ids = [revision_id for _, revision_id in references]
+        skill_ids = [reference.skill_id for reference in references]
+        revision_ids = [reference.skill_revision_id for reference in references]
         statement = (
             sa.select(Skills, SkillRevisions)
             .join(SkillRevisions, SkillRevisions.skill_id == Skills.id)
@@ -307,7 +308,11 @@ class SkillRepoImpl:
             statement = statement.with_for_update(read=True, of=Skills)
         rows = await self.session.execute(statement)
         by_reference = {
-            (skill.id, revision.id): (skill, revision) for skill, revision in rows.all()
+            SkillBindingReference(
+                skill_id=skill.id,
+                skill_revision_id=revision.id,
+            ): (skill, revision)
+            for skill, revision in rows.all()
         }
         return [
             self._to_resolved(*by_reference[reference], position)
@@ -319,7 +324,7 @@ class SkillRepoImpl:
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
         return await self._resolve_references(
             space_id=space_id,
@@ -331,7 +336,7 @@ class SkillRepoImpl:
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
         return await self._resolve_references(
             space_id=space_id,

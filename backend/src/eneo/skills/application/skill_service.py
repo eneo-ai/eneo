@@ -15,6 +15,7 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingReference,
     SkillComposition,
     SkillExecutionReference,
     SkillHasBindingsError,
@@ -196,13 +197,13 @@ class SkillService:
         return deleted
 
     @staticmethod
-    def _validate_reference_count(references: list[tuple[UUID, UUID]]) -> None:
+    def _validate_reference_count(references: list[SkillBindingReference]) -> None:
         max_bindings = get_settings().skill_max_bindings
         if len(references) > max_bindings:
             raise BadRequestException(
                 f"A resource cannot use more than {max_bindings} Skills"
             )
-        if len({skill_id for skill_id, _ in references}) != len(references):
+        if len({reference.skill_id for reference in references}) != len(references):
             raise BadRequestException("A Skill can only be attached once")
         if len(set(references)) != len(references):
             raise BadRequestException("Duplicate Skill revision binding")
@@ -211,7 +212,7 @@ class SkillService:
         self,
         *,
         space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
         self._validate_reference_count(references)
@@ -223,13 +224,21 @@ class SkillService:
                 "One or more Skill revisions do not exist in this Space"
             )
         existing_pairs = {
-            (binding.skill_id, binding.skill_revision_id) for binding in existing
+            SkillBindingReference(
+                skill_id=binding.skill_id,
+                skill_revision_id=binding.skill_revision_id,
+            )
+            for binding in existing
         }
         inactive_new = [
             binding
             for binding in resolved
             if not binding.is_active
-            and (binding.skill_id, binding.skill_revision_id) not in existing_pairs
+            and SkillBindingReference(
+                skill_id=binding.skill_id,
+                skill_revision_id=binding.skill_revision_id,
+            )
+            not in existing_pairs
         ]
         if inactive_new:
             raise BadRequestException("Inactive Skills cannot receive new bindings")
@@ -263,7 +272,7 @@ class SkillService:
         *,
         space_id: UUID,
         assistant_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill binding changes require a session token")
@@ -316,7 +325,7 @@ class SkillService:
         *,
         space_id: UUID,
         app_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill binding changes require a session token")
@@ -347,7 +356,7 @@ class SkillService:
         *,
         policy_id: UUID,
         organization_space_id: UUID,
-        references: list[tuple[UUID, UUID]],
+        references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]:
         if self.user.active_api_key is not None:
             raise UnauthorizedException("Skill policy changes require a session token")
@@ -421,7 +430,11 @@ class SkillService:
             raise BadRequestException("A Skill can only be bound once to a resource")
 
         references = [
-            (reference.skill_id, reference.skill_revision_id) for reference in ordered
+            SkillBindingReference(
+                skill_id=reference.skill_id,
+                skill_revision_id=reference.skill_revision_id,
+            )
+            for reference in ordered
         ]
         resolved = await self.repo.resolve_references(
             space_id=space_id,
@@ -433,13 +446,19 @@ class SkillService:
             )
 
         resolved_by_reference = {
-            (binding.skill_id, binding.skill_revision_id): binding
+            SkillBindingReference(
+                skill_id=binding.skill_id,
+                skill_revision_id=binding.skill_revision_id,
+            ): binding
             for binding in resolved
         }
         snapshot_bindings: list[ResolvedSkillBinding] = []
         for reference in ordered:
             binding = resolved_by_reference.get(
-                (reference.skill_id, reference.skill_revision_id)
+                SkillBindingReference(
+                    skill_id=reference.skill_id,
+                    skill_revision_id=reference.skill_revision_id,
+                )
             )
             if binding is None:
                 raise BadRequestException(

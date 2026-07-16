@@ -23,6 +23,7 @@ from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
+    SkillBindingReference,
     SkillComposition,
     SkillExecutionReference,
     compose_skill_instructions,
@@ -312,7 +313,7 @@ class AppService:
         transcription_model_id: UUID | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-        skill_references: list[tuple[UUID, UUID]] | None = None,
+        skill_references: list[SkillBindingReference] | None = None,
     ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)

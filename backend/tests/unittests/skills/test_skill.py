@@ -14,7 +14,7 @@ from eneo.skills import (
     validate_skill_slug,
 )
 from eneo.skills.application.skill_service import SkillService
-from eneo.skills.domain.skill import SkillExecutionReference
+from eneo.skills.domain.skill import SkillBindingReference, SkillExecutionReference
 
 
 def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
@@ -202,8 +202,14 @@ async def test_execution_snapshot_uses_persisted_order_and_allows_inactive_skill
     repo.resolve_references.assert_awaited_once_with(
         space_id=space_id,
         references=[
-            (payroll.skill_id, payroll.skill_revision_id),
-            (absence.skill_id, absence.skill_revision_id),
+            SkillBindingReference(
+                skill_id=payroll.skill_id,
+                skill_revision_id=payroll.skill_revision_id,
+            ),
+            SkillBindingReference(
+                skill_id=absence.skill_id,
+                skill_revision_id=absence.skill_revision_id,
+            ),
         ],
     )
     assert composition.prompt.index("### Skill: Payroll") < composition.prompt.index(
