@@ -450,11 +450,11 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the tenant-admin Flow deletion envelope and the independent "
-        "debug-evidence cleanup value. Null organization run-history and runtime-upload "
-        "values mean Off. Classification policies can also activate the run-history "
-        "envelope. This control plane must not be deployed without the canonical "
-        "WI-19B selector adoption; this endpoint does not itself delete data."
+        "Return the tenant-admin Flow deletion envelope, independent preservation "
+        "barriers, and debug-evidence cleanup value. Null organization and "
+        "classification delete-after values mean automatic run-history deletion is "
+        "Off. Minimum-retention and no-purge values can block deletion without "
+        "activating it. This endpoint does not itself delete data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -473,9 +473,10 @@ async def get_flow_retention_policy(
     summary="Preview a flow retention policy change",
     description=(
         "Read a bounded, set-based impact preview for exact proposed organization "
-        "run-history and never-attached runtime-upload values. The preview includes "
-        "counts, distinct file bytes, fixed clock anchors, latent Flow/Space values, "
-        "and lifecycle blockers. It changes no policy and deletes no data."
+        "delete-after, minimum-retention, no-purge, and never-attached runtime-upload "
+        "values. The preview includes current, proposed, newly eligible, and "
+        "no-longer-eligible counts, distinct file bytes, fixed clock anchors, latent "
+        "Flow/Space values, and blockers. It changes no policy and deletes no data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -495,10 +496,11 @@ async def preview_flow_retention_policy(
     summary="Update flow retention policy",
     description=(
         "Update tenant Flow retention inputs. Omitted fields are unchanged and null "
-        "means Off. Enabling or shortening organization run-history or never-attached "
-        "upload retention requires the exact fresh preview confirmation returned by "
-        "/flow-retention-policy/preview. Disabling or lengthening does not require "
-        "confirmation. run_debug_evidence_days remains independent JSONB cleanup."
+        "means Off. Enabling or shortening a delete-after value, and every change to "
+        "minimum-retention or no-purge, requires the exact preview confirmation "
+        "returned by /flow-retention-policy/preview. Disabling or lengthening only an "
+        "ordinary delete-after value does not require confirmation. "
+        "run_debug_evidence_days remains independent JSONB cleanup."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(
@@ -524,11 +526,11 @@ async def update_flow_retention_policy(
     operation_id="list_flow_classification_retention_policies",
     summary="List flow classification retention policies",
     description=(
-        "List tenant Flow classification retention control-plane inputs. A row can "
-        "activate the full run history and step history envelope for spaces carrying "
-        "its classification id, including while security_enabled is false. "
-        "Debug-evidence cleanup is independent. These inputs must not be deployed "
-        "without WI-19B selector adoption; listing policies does not delete data."
+        "List tenant Flow classification retention inputs. A row's delete-after value "
+        "activates automatic run-history deletion for matching spaces, including while "
+        "security_enabled is false. A barrier-only row with minimum-retention or "
+        "no-purge does not activate deletion. Debug-evidence cleanup is independent, "
+        "and listing policies does not delete data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -551,12 +553,12 @@ async def list_flow_classification_retention_policies(
     operation_id="put_flow_classification_retention_policy",
     summary="Set flow classification retention policy",
     description=(
-        "Create or replace the run-history envelope input for one tenant security "
-        "classification. Enabling or shortening requires the exact fresh evidence "
-        "from the classification preview endpoint; lengthening does not. Once the "
-        "WI-19B selector gate is integrated, the shortest active organization, "
-        "classification, Space, and Flow value wins. This endpoint itself deletes "
-        "no data and does not configure debug-evidence redaction."
+        "Create, replace, or remove the desired retention state for one tenant security "
+        "classification. Enabling or shortening its delete-after value, and every "
+        "minimum-retention or no-purge change, requires the exact preview confirmation. "
+        "A barrier-only state never activates deletion. Setting all three values Off "
+        "removes the row through this same operation. This endpoint itself deletes no "
+        "run data and does not configure debug-evidence redaction."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),
@@ -597,10 +599,11 @@ async def put_flow_classification_retention_policy(
     summary="Preview a flow classification retention policy change",
     description=(
         "Use the same exact-state, set-based Flow retention gate as organization "
-        "policy changes before enabling or shortening a classification policy. "
-        "This bounded read returns the control-plane version, preview hash, fixed "
-        "clock anchor, counts, distinct file bytes, latent Flow/Space values, and "
-        "lifecycle blockers needed to confirm the proposal without deleting data."
+        "policy changes before enabling or shortening classification delete-after, or "
+        "changing minimum-retention or no-purge. This bounded read returns the "
+        "control-plane version, preview hash, fixed clock anchor, current/proposed "
+        "eligibility, distinct file bytes, latent Flow/Space values, and blockers "
+        "needed to confirm the proposal without deleting data."
     ),
     responses={
         403: _flow_settings_admin_forbidden_response(),

@@ -350,6 +350,8 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
             run_history_deletion_active=False,
             runtime_upload_abandonment_active=False,
             classification_policy_count=0,
+            activation_sources=(),
+            barrier_sources=(),
         ),
     )
     container.settings_service.return_value = service
@@ -377,6 +379,8 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
             run_history_deletion_active=False,
             runtime_upload_abandonment_active=False,
             classification_policy_count=0,
+            activation_sources=(),
+            barrier_sources=(),
         ),
     )
     container.settings_service.return_value = service

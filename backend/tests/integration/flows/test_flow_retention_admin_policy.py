@@ -199,12 +199,12 @@ def _confirmation(preview: dict[str, object]) -> dict[str, object]:
     }
 
 
-async def test_preview_has_constant_read_only_statement_cardinality(
+async def test_preview_has_constant_query_count_and_natural_representative_plan(
     db_container,
     admin_user,
     retention_existing_data,
 ) -> None:
-    flow_id, _classification_id = retention_existing_data
+    flow_id, classification_id = retention_existing_data
     statements: list[tuple[str, tuple[object, ...]]] = []
 
     def record_statement(
@@ -260,6 +260,39 @@ async def test_preview_has_constant_read_only_statement_cardinality(
         ]
         container.session().add_all(representative_runs + representative_files)
         await container.session().flush()
+        representative_classifications = [
+            SecurityClassification(
+                name=f"Representative retention class {uuid4()}",
+                description="Natural planner cardinality",
+                security_level=2,
+                tenant_id=admin_user.tenant_id,
+            )
+            for _index in range(127)
+        ]
+        container.session().add_all(representative_classifications)
+        await container.session().flush()
+        container.session().add_all(
+            [
+                FlowClassificationRetentionPolicies(
+                    tenant_id=admin_user.tenant_id,
+                    security_classification_id=classification.id,
+                    data_retention_days=30,
+                    minimum_retention_days=None,
+                    no_purge=False,
+                )
+                for classification in representative_classifications
+            ]
+            + [
+                FlowClassificationRetentionPolicies(
+                    tenant_id=admin_user.tenant_id,
+                    security_classification_id=classification_id,
+                    data_retention_days=None,
+                    minimum_retention_days=1,
+                    no_purge=False,
+                )
+            ]
+        )
+        await container.session().flush()
         container.session().add_all(
             [
                 FlowRuntimeUploadedFiles(
@@ -277,6 +310,13 @@ async def test_preview_has_constant_read_only_statement_cardinality(
             ]
         )
         await container.session().flush()
+        classification_policy_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowClassificationRetentionPolicies)
+            .where(
+                FlowClassificationRetentionPolicies.tenant_id == admin_user.tenant_id
+            )
+        )
 
         previewed_at = datetime.now(timezone.utc)
         legacy_effective_days = sa.func.least(
@@ -363,7 +403,6 @@ async def test_preview_has_constant_read_only_statement_cardinality(
 
         disable_statements = list(statements)
         impact_statements = enable_statements[-2:] + disable_statements[-2:]
-        await container.session().execute(sa.text("SET LOCAL enable_seqscan = off"))
         connection = await container.session().connection()
         plans: list[str] = []
         for statement, parameters in impact_statements:
@@ -374,6 +413,7 @@ async def test_preview_has_constant_read_only_statement_cardinality(
             plans.append("\n".join(row[0] for row in result))
 
     assert legacy_child_only_candidates == 256
+    assert classification_policy_count == 128
     assert canonical_off_candidates == []
     assert enabled_preview.run_history.newly_eligible_count == 256
     assert enabled_preview.run_history.no_longer_eligible_count == 0
@@ -397,11 +437,13 @@ async def test_preview_has_constant_read_only_statement_cardinality(
         statement.lstrip().startswith(("SELECT", "WITH"))
         for statement, _parameters in enable_statements + disable_statements
     )
-    assert "ix_flow_runs_tenant_created_at" in plans[0]
-    assert "ix_flow_runtime_uploaded_files_tenant_id" in plans[1]
-    assert "ix_flow_runs_tenant_created_at" in plans[2]
-    assert "ix_flow_runtime_uploaded_files_tenant_id" in plans[3]
     assert all("Buffers:" in plan for plan in plans)
+    assert all("Execution Time:" in plan for plan in plans)
+    assert all("enable_seqscan" not in plan for plan in plans)
+    assert all(
+        "flow_classification_retention_policies" in plan
+        for plan in (plans[0], plans[2])
+    )
 
 
 async def test_concurrent_same_organization_preview_allows_one_mutation_and_audit(

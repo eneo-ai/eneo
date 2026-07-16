@@ -157,8 +157,9 @@ _AGGREGATE_DESCRIPTIONS = {
         "and invalidation lineage without deleting earlier history."
     ),
     FlowSchemaAggregate.RETENTION: (
-        "Retention policy tables tighten run-history purge windows by tenant "
-        "security classification."
+        "Delete-after values activate automatic run-history deletion. "
+        "Minimum-retention values preserve history and no-purge values block "
+        "deletion without activating it."
     ),
     FlowSchemaAggregate.DEFERRED_ADJACENT: (
         "Adjacent builder and import tables live near Flow persistence "

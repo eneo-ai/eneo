@@ -164,7 +164,7 @@ describe("flowClassificationRetentionPolicy", () => {
     });
   });
 
-  it("requires exact preview confirmation only for enable and shorten", () => {
+  it("requires exact preview confirmation for destructive and barrier changes", () => {
     expect(flowClassificationRetentionChangeIsDestructive(null, 30)).toBe(true);
     expect(flowClassificationRetentionChangeIsDestructive(30, 14)).toBe(true);
     expect(flowClassificationRetentionChangeIsDestructive(30, 60)).toBe(false);
@@ -183,5 +183,12 @@ describe("flowClassificationRetentionPolicy", () => {
         no_purge: false
       })
     ).toBe(true);
+    expect(
+      flowClassificationRetentionChangeRequiresConfirmation(policy("class-1", 20, 120, true), {
+        data_retention_days: null,
+        minimum_retention_days: 120,
+        no_purge: true
+      })
+    ).toBe(false);
   });
 });

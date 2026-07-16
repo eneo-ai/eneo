@@ -45,9 +45,27 @@
         </p>
         <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
           <div>
+            <dt class="text-secondary">{m.flow_retention_preview_current_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.run_history.current_eligible_count}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-secondary">{m.flow_retention_preview_proposed_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.run_history.proposed_eligible_count}
+            </dd>
+          </div>
+          <div>
             <dt class="text-secondary">{m.flow_retention_preview_newly_eligible()}</dt>
             <dd class="text-primary mt-1 font-semibold">
               {preview.run_history.newly_eligible_count}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-secondary">{m.flow_retention_preview_no_longer_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.run_history.no_longer_eligible_count}
             </dd>
           </div>
           <div>
@@ -87,9 +105,27 @@
         </p>
         <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
           <div>
+            <dt class="text-secondary">{m.flow_retention_preview_current_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.runtime_uploads.current_eligible_count}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-secondary">{m.flow_retention_preview_proposed_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.runtime_uploads.proposed_eligible_count}
+            </dd>
+          </div>
+          <div>
             <dt class="text-secondary">{m.flow_retention_preview_newly_eligible()}</dt>
             <dd class="text-primary mt-1 font-semibold">
               {preview.runtime_uploads.newly_eligible_count}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-secondary">{m.flow_retention_preview_no_longer_eligible()}</dt>
+            <dd class="text-primary mt-1 font-semibold">
+              {preview.runtime_uploads.no_longer_eligible_count}
             </dd>
           </div>
           <div>

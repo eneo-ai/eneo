@@ -10,6 +10,10 @@ from pydantic.json_schema import SkipJsonSchema
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.flows.domain.flow import (
+    FlowRunRetentionActivationSource,
+    FlowRunRetentionBarrierSource,
+)
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
@@ -130,6 +134,8 @@ FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
         "run_history_deletion_active": True,
         "runtime_upload_abandonment_active": True,
         "classification_policy_count": 0,
+        "activation_sources": ["organization"],
+        "barrier_sources": ["organization_minimum"],
     },
 }
 
@@ -485,8 +491,8 @@ class FlowEvidencePolicyUpdate(BaseModel):
 class FlowRetentionEffectiveStatePublic(BaseModel):
     run_history_deletion_active: bool = Field(
         description=(
-            "Whether an organization policy or at least one classification policy "
-            "can activate automatic Flow run-history deletion."
+            "Whether an organization or classification delete-after value activates "
+            "automatic Flow run-history deletion."
         )
     )
     runtime_upload_abandonment_active: bool = Field(
@@ -494,7 +500,16 @@ class FlowRetentionEffectiveStatePublic(BaseModel):
     )
     classification_policy_count: int = Field(
         ge=0,
-        description="Number of configured classification activation policies.",
+        description="Number of configured classification delete-after activators.",
+    )
+    activation_sources: tuple[FlowRunRetentionActivationSource, ...] = Field(
+        description="Configured scopes whose delete-after values activate deletion."
+    )
+    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...] = Field(
+        description=(
+            "Configured minimum-retention and no-purge sources that can block deletion "
+            "without activating it."
+        )
     )
 
     @classmethod
@@ -502,18 +517,41 @@ class FlowRetentionEffectiveStatePublic(BaseModel):
         cls,
         state: "FlowRetentionControlPlaneState",
     ) -> "FlowRetentionEffectiveStatePublic":
+        activation_source_items: list[FlowRunRetentionActivationSource] = []
+        if state.organization_run_history_days is not None:
+            activation_source_items.append("organization")
+        if any(
+            policy.data_retention_days is not None
+            for policy in state.classification_policies
+        ):
+            activation_source_items.append("classification")
+
+        barrier_source_items: list[FlowRunRetentionBarrierSource] = []
+        if state.organization_minimum_retention_days is not None:
+            barrier_source_items.append("organization_minimum")
+        if any(
+            policy.minimum_retention_days is not None
+            for policy in state.classification_policies
+        ):
+            barrier_source_items.append("classification_minimum")
+        if state.organization_no_purge:
+            barrier_source_items.append("organization_no_purge")
+        if any(policy.no_purge for policy in state.classification_policies):
+            barrier_source_items.append("classification_no_purge")
+
+        activation_sources = tuple(activation_source_items)
+        barrier_sources = tuple(barrier_source_items)
         return cls(
-            run_history_deletion_active=(
-                state.organization_run_history_days is not None
-                or any(
-                    policy.data_retention_days is not None
-                    for policy in state.classification_policies
-                )
-            ),
+            run_history_deletion_active=bool(activation_sources),
             runtime_upload_abandonment_active=(
                 state.runtime_upload_abandonment_days is not None
             ),
-            classification_policy_count=len(state.classification_policies),
+            classification_policy_count=sum(
+                policy.data_retention_days is not None
+                for policy in state.classification_policies
+            ),
+            activation_sources=activation_sources,
+            barrier_sources=barrier_sources,
         )
 
 

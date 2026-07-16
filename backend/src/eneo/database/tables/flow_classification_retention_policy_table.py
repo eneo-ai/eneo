@@ -23,7 +23,12 @@ FLOW_CLASSIFICATION_RETENTION_POLICY_HAS_VALUE_CHECK = (
 
 
 class FlowClassificationRetentionPolicies(BaseCrossReference):
-    """Stores classification-scoped Flow retention windows. Writer: FlowClassificationRetentionPolicyRepository. Purpose: tighten Flow run-history purge horizons by tenant security classification."""
+    """Stores classification-scoped Flow delete-after and preservation barriers.
+
+    Writer: FlowClassificationRetentionPolicyRepository. Purpose: activate deletion
+    for matching spaces only through delete-after and preserve data through
+    minimum-retention or no-purge.
+    """
 
     tenant_id: Mapped[UUID] = mapped_column(nullable=False)
     security_classification_id: Mapped[UUID] = mapped_column(nullable=False)

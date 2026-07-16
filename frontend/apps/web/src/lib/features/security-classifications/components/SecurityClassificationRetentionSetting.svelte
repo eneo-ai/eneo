@@ -23,6 +23,7 @@
     buildFlowClassificationRetentionRows,
     clearFlowClassificationRetentionPolicyDraft,
     createFlowClassificationRetentionDrafts,
+    flowClassificationRetentionChangeRequiresConfirmation,
     FLOW_CLASSIFICATION_RETENTION_MAX_DAYS,
     FLOW_CLASSIFICATION_RETENTION_MIN_DAYS,
     parseFlowClassificationRetentionDays,
@@ -142,7 +143,24 @@
 
     savingById = setBusy(savingById, row.id, true);
     try {
-      await previewPolicy(row, proposal);
+      const currentPolicy = row.hasPolicy
+        ? {
+            security_classification_id: row.id,
+            data_retention_days: row.configuredDays,
+            minimum_retention_days: row.configuredMinimumDays,
+            no_purge: row.configuredNoPurge
+          }
+        : null;
+      if (flowClassificationRetentionChangeRequiresConfirmation(currentPolicy, proposal)) {
+        await previewPolicy(row, proposal);
+        return;
+      }
+
+      const policy = await eneo.settings.putFlowClassificationRetentionPolicy(row.id, proposal);
+      drafts = policy
+        ? setFlowClassificationRetentionPolicyDraft(drafts, policy)
+        : clearFlowClassificationRetentionPolicyDraft(drafts, row.id);
+      toast.success(m.saved_successfully());
     } catch (error) {
       toastError(error);
     } finally {
@@ -253,11 +271,13 @@
                 <td class="px-4 py-4">
                   {#if row.hasPolicy}
                     <div class="text-primary grid gap-1 text-xs">
-                      <span
-                        >{m.flow_classification_retention_delete_after_value({
-                          value: row.configuredDays ?? "—"
-                        })}</span
-                      >
+                      {#if row.configuredDays !== null}
+                        <span
+                          >{m.flow_classification_retention_delete_after_value({
+                            value: row.configuredDays
+                          })}</span
+                        >
+                      {/if}
                       <span
                         >{m.flow_classification_retention_minimum_value({
                           value: row.configuredMinimumDays ?? "—"

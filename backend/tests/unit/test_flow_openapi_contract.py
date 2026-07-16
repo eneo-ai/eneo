@@ -1021,6 +1021,27 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     assert update_schema.get("additionalProperties") is False
     assert update_schema.get("required", []) == []
 
+    effective_state = schemas["FlowRetentionEffectiveStatePublic"]
+    assert set(effective_state["required"]) == {
+        "run_history_deletion_active",
+        "runtime_upload_abandonment_active",
+        "classification_policy_count",
+        "activation_sources",
+        "barrier_sources",
+    }
+    assert set(
+        effective_state["properties"]["activation_sources"]["items"]["enum"]
+    ) == {
+        "organization",
+        "classification",
+    }
+    assert set(effective_state["properties"]["barrier_sources"]["items"]["enum"]) == {
+        "organization_minimum",
+        "classification_minimum",
+        "organization_no_purge",
+        "classification_no_purge",
+    }
+
     for field_name in (
         "flow_run_history_retention_days",
         "flow_run_history_minimum_retention_days",
@@ -1036,7 +1057,48 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
             assert integer_schema["minimum"] == 1
             assert integer_schema["maximum"] == 2555
             assert _schema_allows_null(property_schema)
-            assert "default" not in property_schema
+        assert "default" not in property_schema
+
+
+def test_openapi_flow_retention_descriptions_are_public_and_match_confirmation_semantics(
+    openapi_spec: dict,
+) -> None:
+    operations = (
+        _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "get"),
+        _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "patch"),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-retention-policy/preview",
+            "post",
+        ),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-classification-retention-policies",
+            "get",
+        ),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
+            "put",
+        ),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
+            "post",
+        ),
+    )
+    descriptions = "\n".join(
+        str(operation.get("description", "")) for operation in operations
+    )
+    normalized = descriptions.lower()
+
+    assert "wi-19" not in normalized
+    assert "disabling or lengthening does not require confirmation" not in normalized
+    assert "every change to minimum-retention or no-purge" in normalized
+    assert "minimum-retention" in normalized
+    assert "no-purge" in normalized
+    assert "barrier-only" in normalized
+    assert "exact preview" in normalized
 
 
 def test_openapi_flow_retention_preview_and_confirmation_are_exact_contracts(
@@ -1084,9 +1146,12 @@ def test_openapi_flow_retention_surfaces_are_disambiguated(
 
     assert "debug-evidence" in organization_description
     assert "deletion envelope" in organization_description
-    assert "wi-19b" in organization_description
-    assert "full run history" in classification_description
-    assert "step history" in classification_description
+    assert "preservation barriers" in organization_description
+    assert "wi-19" not in organization_description
+    assert "delete-after" in classification_description
+    assert "barrier-only" in classification_description
+    assert "minimum-retention" in classification_description
+    assert "no-purge" in classification_description
     assert "debug-evidence" in classification_description
     assert "security_enabled" in classification_description
 

@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from eneo.data_retention.infrastructure.data_retention_service import (
+    FlowRetentionClassificationPolicyState,
     FlowRetentionControlPlaneState,
     FlowRetentionOrganizationChangeDecision,
     FlowRetentionOrganizationProposal,
@@ -24,6 +25,7 @@ from eneo.settings.settings import (
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
+    FlowRetentionEffectiveStatePublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyUpdate,
     SettingsInDB,
@@ -37,6 +39,34 @@ TEST_SETTINGS_EXPECTED = SettingsInDB(
     user_id=TEST_USER.id,
     id=TEST_UUID,
 )
+
+
+def test_barrier_only_classification_is_not_projected_as_deletion_activation() -> None:
+    state = FlowRetentionControlPlaneState(
+        organization_run_history_days=None,
+        runtime_upload_abandonment_days=None,
+        classification_policies=(
+            FlowRetentionClassificationPolicyState(
+                security_classification_id=TEST_UUID,
+                data_retention_days=None,
+                minimum_retention_days=90,
+                no_purge=True,
+            ),
+        ),
+        latent_space_retention_days=(),
+        latent_flow_retention_days=(),
+    )
+
+    assert FlowRetentionEffectiveStatePublic.from_domain(state).model_dump() == {
+        "run_history_deletion_active": False,
+        "runtime_upload_abandonment_active": False,
+        "classification_policy_count": 0,
+        "activation_sources": (),
+        "barrier_sources": (
+            "classification_minimum",
+            "classification_no_purge",
+        ),
+    }
 
 
 class MockRepo:

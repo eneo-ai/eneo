@@ -29,7 +29,7 @@ test("tenant admin confirms organization and classification retention through th
   await expect(page.getByText("Körningshistorik: Automatisk radering är avstängd")).toBeVisible();
   await expect(page.getByText("Aldrig anslutna uppladdningar använder created_at")).toBeVisible();
   await expect(
-    page.getByText("Varje policyaktivering registrerar administratörens identitet")
+    page.getByText("Varje bekräftad policyändring registrerar administratörens identitet")
   ).toBeVisible();
 
   const runHistory = page.getByRole("spinbutton", { name: "Körningshistorik" });
@@ -47,8 +47,12 @@ test("tenant admin confirms organization and classification retention through th
 
   const dialog = page.getByRole("dialog");
   await expect(
-    dialog.getByRole("heading", { name: "Bekräfta destruktiv gallringsändring" })
+    dialog.getByRole("heading", { name: "Bekräfta ändring av gallringspolicy" })
   ).toBeVisible();
+  await expect(dialog).toContainText("Gallringsbara poster nu");
+  await expect(dialog).toContainText("Gallringsbara poster efter ändringen");
+  await expect(dialog).toContainText("Nytillkomna gallringsbara poster");
+  await expect(dialog).toContainText("Poster som inte längre är gallringsbara");
   await expect(dialog).toContainText("Livscykelhinder och vilande värden");
   await expect(dialog).toContainText("Klockfält: finished_at_or_created_at");
   await expect(dialog).toContainText("Klockfält: created_at");
@@ -88,7 +92,7 @@ test("tenant admin confirms organization and classification retention through th
   await classificationRow.getByRole("checkbox", { name: "Spärra automatisk gallring" }).check();
   await classificationRow.getByRole("button", { name: "Spara" }).click();
   await expect(
-    dialog.getByRole("heading", { name: "Bekräfta destruktiv gallringsändring" })
+    dialog.getByRole("heading", { name: "Bekräfta ändring av gallringspolicy" })
   ).toBeVisible();
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
@@ -97,14 +101,40 @@ test("tenant admin confirms organization and classification retention through th
   await expect(classificationRow).toContainText("Minimum: 120 dagar");
   await expect(classificationRow).toContainText("Gallringsspärr: på");
 
-  await classificationRow.getByRole("button", { name: "Rensa" }).click();
+  await classificationRow
+    .getByRole("spinbutton", { name: `Kvarhållningsdagar för ${classificationName}` })
+    .fill("");
+  await classificationRow.getByRole("button", { name: "Spara" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(classificationRow).not.toContainText("Gallra efter:");
+  await expect(classificationRow).toContainText("Minimum: 120 dagar");
+  await expect(classificationRow).toContainText("Gallringsspärr: på");
+
+  await page.goto("/admin/flow-data-retention");
+  const offRunHistory = page.getByRole("spinbutton", { name: "Körningshistorik" });
+  await offRunHistory.fill("");
+  await page.getByRole("button", { name: "Spara" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("Körningshistorik: Automatisk radering är avstängd")).toBeVisible();
+  await expect(page.getByText("Klassificeringar som aktiverar gallring: 0")).toBeVisible();
+  await expect(page.getByText("Källor som aktiverar gallring")).toBeVisible();
+  await expect(page.getByText("Inga angivna")).toBeVisible();
+  await expect(page.getByText("Källor med bevarandespärrar")).toBeVisible();
+  await expect(page.getByText(/Klassificeringens gallringsspärr/)).toBeVisible();
+
+  await page.goto("/admin/security-classifications");
+  const barrierOnlyRow = page
+    .getByRole("row")
+    .filter({ hasText: classificationName })
+    .filter({ has: page.getByRole("spinbutton") });
+  await barrierOnlyRow.getByRole("button", { name: "Rensa" }).click();
   await expect(
-    dialog.getByRole("heading", { name: "Bekräfta destruktiv gallringsändring" })
+    dialog.getByRole("heading", { name: "Bekräfta ändring av gallringspolicy" })
   ).toBeVisible();
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "Bekräfta policyändring" }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(classificationRow).toContainText("Ingen klassificeringspolicy");
+  await expect(barrierOnlyRow).toContainText("Ingen klassificeringspolicy");
 
   await page.goto("/account");
   await page.getByRole("combobox", { name: "Språk" }).click();
@@ -113,6 +143,11 @@ test("tenant admin confirms organization and classification retention through th
 
   await page.goto("/en/admin/flow-data-retention");
   await expect(page.getByRole("heading", { name: "Flow data retention" })).toBeVisible();
+  await expect(page.getByText("Run history: Automatic deletion is off")).toBeVisible();
+  await expect(page.getByText("Classification deletion activators: 0")).toBeVisible();
+  await expect(page.getByText("Deletion activation sources")).toBeVisible();
+  await expect(page.getByText("None configured")).toBeVisible();
+  await expect(page.getByText("Preservation barrier sources")).toBeVisible();
   await expect(page.getByRole("spinbutton", { name: "Minimum retention" })).toHaveValue("90");
   await expect(page.getByRole("checkbox", { name: "Block automatic Flow purge" })).toBeChecked();
   await expect(page.getByRole("spinbutton", { name: "Never-attached uploads" })).toHaveAttribute(

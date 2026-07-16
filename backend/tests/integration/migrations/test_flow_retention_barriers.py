@@ -17,7 +17,7 @@ from tests.integration.migrations.alembic_test_utils import current_revisions
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "202607131200_flow_retention"
-MIGRATION_REVISION = "202607151200_flow_retention_barriers"
+MIGRATION_REVISION = "202607151200_retention_barrier"
 TENANT_CONSTRAINT = "ck_tenants_flow_run_history_minimum_retention_days_range"
 CLASSIFICATION_CONSTRAINTS = (
     "ck_flow_classification_retention_policy_days_range",
@@ -110,6 +110,22 @@ def _constraints(conn, table_name: str, constraint_names: tuple[str, ...]):
         return {name: (validated, definition) for name, validated, definition in cursor}
 
 
+def _alembic_version_width(conn) -> int:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT character_maximum_length
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'alembic_version'
+              AND column_name = 'version_num'
+            """
+        )
+        width = cursor.fetchone()[0]
+    assert isinstance(width, int)
+    return width
+
+
 def test_upgrade_adds_inactive_checked_barriers_on_postgresql_13(migration_db) -> None:
     conn = migration_db["conn"]
     cfg = migration_db["cfg"]
@@ -139,6 +155,7 @@ def test_upgrade_adds_inactive_checked_barriers_on_postgresql_13(migration_db) -
     command.upgrade(cfg, MIGRATION_REVISION)
 
     assert current_revisions(conn) == {MIGRATION_REVISION}
+    assert _alembic_version_width(conn) == 32
     assert _columns(conn, "tenants", tenant_columns) == {
         "flow_run_history_minimum_retention_days": ("YES", None),
         "flow_run_history_no_purge": ("NO", "false"),

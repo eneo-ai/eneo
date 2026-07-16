@@ -146,6 +146,29 @@
       max: FLOW_RETENTION_MAX_DAYS
     });
   }
+
+  function activationSourceLabel(
+    source: FlowRetentionPolicy["effective_state"]["activation_sources"][number]
+  ): string {
+    return source === "organization"
+      ? m.flow_retention_contributor_organization()
+      : m.flow_retention_contributor_classification();
+  }
+
+  function barrierSourceLabel(
+    source: FlowRetentionPolicy["effective_state"]["barrier_sources"][number]
+  ): string {
+    switch (source) {
+      case "organization_minimum":
+        return m.flow_retention_contributor_organization_minimum();
+      case "classification_minimum":
+        return m.flow_retention_contributor_classification_minimum();
+      case "organization_no_purge":
+        return m.flow_retention_source_organization_no_purge();
+      case "classification_no_purge":
+        return m.flow_retention_source_classification_no_purge();
+    }
+  }
 </script>
 
 <svelte:head>
@@ -276,6 +299,20 @@
                 count: policy.effective_state.classification_policy_count
               })}
             </p>
+            <div>
+              <p class="text-primary font-medium">{m.flow_retention_activation_sources()}</p>
+              <p>
+                {policy.effective_state.activation_sources.map(activationSourceLabel).join(", ") ||
+                  m.flow_retention_source_none()}
+              </p>
+            </div>
+            <div>
+              <p class="text-primary font-medium">{m.flow_retention_barrier_sources()}</p>
+              <p>
+                {policy.effective_state.barrier_sources.map(barrierSourceLabel).join(", ") ||
+                  m.flow_retention_source_none()}
+              </p>
+            </div>
           </div>
         </Settings.Row>
 

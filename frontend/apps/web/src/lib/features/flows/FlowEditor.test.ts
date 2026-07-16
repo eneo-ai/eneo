@@ -786,6 +786,23 @@ describe("FlowStepList ownership guard", () => {
   });
 });
 
+describe("Flow retention projection surface", () => {
+  it("renders activation and barrier sources from the generated Flow projection", () => {
+    const source = readFileSync(
+      new URL(
+        "../../../routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+    expect(source).toContain("runHistoryRetention.activation_sources");
+    expect(source).toContain("runHistoryRetention.barrier_sources");
+    expect(source).toContain("m.flow_retention_activation_sources()");
+    expect(source).toContain("m.flow_retention_barrier_sources()");
+  });
+});
+
 describe("FlowEditor active step selection commands", () => {
   it("selects a known step id", () => {
     const editor = createFlowEditor({

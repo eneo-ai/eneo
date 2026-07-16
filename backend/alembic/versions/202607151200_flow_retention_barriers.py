@@ -1,6 +1,6 @@
 """Add organization and classification Flow retention barriers.
 
-Revision ID: 202607151200_flow_retention_barriers
+Revision ID: 202607151200_retention_barrier
 Revises: 202607131200_flow_retention
 Create Date: 2026-07-15 12:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202607151200_flow_retention_barriers"
+revision = "202607151200_retention_barrier"
 down_revision = "202607131200_flow_retention"
 branch_labels = None
 depends_on = None
@@ -65,11 +65,6 @@ def _add_validated_check(
 
 
 def upgrade() -> None:
-    # This required revision id exceeds Alembic's historical VARCHAR(32). Alembic
-    # writes the new id only after upgrade() returns, so the capacity change must
-    # happen inside this revision and remain safe across downgrade.
-    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
-
     op.add_column(
         _TENANTS_TABLE,
         sa.Column(_TENANT_MINIMUM_COLUMN, sa.Integer(), nullable=True),

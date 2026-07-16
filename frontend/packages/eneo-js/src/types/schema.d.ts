@@ -996,7 +996,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant-admin Flow deletion envelope and the independent debug-evidence cleanup value. Null organization run-history and runtime-upload values mean Off. Classification policies can also activate the run-history envelope. This control plane must not be deployed without the canonical WI-19B selector adoption; this endpoint does not itself delete data.
+     * @description Return the tenant-admin Flow deletion envelope, independent preservation barriers, and debug-evidence cleanup value. Null organization and classification delete-after values mean automatic run-history deletion is Off. Minimum-retention and no-purge values can block deletion without activating it. This endpoint does not itself delete data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -1006,7 +1006,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Enabling or shortening organization run-history or never-attached upload retention requires the exact fresh preview confirmation returned by /flow-retention-policy/preview. Disabling or lengthening does not require confirmation. run_debug_evidence_days remains independent JSONB cleanup.
+     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Enabling or shortening a delete-after value, and every change to minimum-retention or no-purge, requires the exact preview confirmation returned by /flow-retention-policy/preview. Disabling or lengthening only an ordinary delete-after value does not require confirmation. run_debug_evidence_days remains independent JSONB cleanup.
      */
     patch: operations["update_flow_retention_policy"];
     trace?: never;
@@ -1022,7 +1022,7 @@ export interface paths {
     put?: never;
     /**
      * Preview a flow retention policy change
-     * @description Read a bounded, set-based impact preview for exact proposed organization run-history and never-attached runtime-upload values. The preview includes counts, distinct file bytes, fixed clock anchors, latent Flow/Space values, and lifecycle blockers. It changes no policy and deletes no data.
+     * @description Read a bounded, set-based impact preview for exact proposed organization delete-after, minimum-retention, no-purge, and never-attached runtime-upload values. The preview includes current, proposed, newly eligible, and no-longer-eligible counts, distinct file bytes, fixed clock anchors, latent Flow/Space values, and blockers. It changes no policy and deletes no data.
      */
     post: operations["preview_flow_retention_policy"];
     delete?: never;
@@ -1040,7 +1040,7 @@ export interface paths {
     };
     /**
      * List flow classification retention policies
-     * @description List tenant Flow classification retention control-plane inputs. A row can activate the full run history and step history envelope for spaces carrying its classification id, including while security_enabled is false. Debug-evidence cleanup is independent. These inputs must not be deployed without WI-19B selector adoption; listing policies does not delete data.
+     * @description List tenant Flow classification retention inputs. A row's delete-after value activates automatic run-history deletion for matching spaces, including while security_enabled is false. A barrier-only row with minimum-retention or no-purge does not activate deletion. Debug-evidence cleanup is independent, and listing policies does not delete data.
      */
     get: operations["list_flow_classification_retention_policies"];
     put?: never;
@@ -1061,7 +1061,7 @@ export interface paths {
     get?: never;
     /**
      * Set flow classification retention policy
-     * @description Create or replace the run-history envelope input for one tenant security classification. Enabling or shortening requires the exact fresh evidence from the classification preview endpoint; lengthening does not. Once the WI-19B selector gate is integrated, the shortest active organization, classification, Space, and Flow value wins. This endpoint itself deletes no data and does not configure debug-evidence redaction.
+     * @description Create, replace, or remove the desired retention state for one tenant security classification. Enabling or shortening its delete-after value, and every minimum-retention or no-purge change, requires the exact preview confirmation. A barrier-only state never activates deletion. Setting all three values Off removes the row through this same operation. This endpoint itself deletes no run data and does not configure debug-evidence redaction.
      */
     put: operations["put_flow_classification_retention_policy"];
     post?: never;
@@ -1082,7 +1082,7 @@ export interface paths {
     put?: never;
     /**
      * Preview a flow classification retention policy change
-     * @description Use the same exact-state, set-based Flow retention gate as organization policy changes before enabling or shortening a classification policy. This bounded read returns the control-plane version, preview hash, fixed clock anchor, counts, distinct file bytes, latent Flow/Space values, and lifecycle blockers needed to confirm the proposal without deleting data.
+     * @description Use the same exact-state, set-based Flow retention gate as organization policy changes before enabling or shortening classification delete-after, or changing minimum-retention or no-purge. This bounded read returns the control-plane version, preview hash, fixed clock anchor, current/proposed eligibility, distinct file bytes, latent Flow/Space values, and blockers needed to confirm the proposal without deleting data.
      */
     post: operations["preview_flow_classification_retention_policy"];
     delete?: never;
@@ -15085,7 +15085,7 @@ export interface components {
     FlowRetentionEffectiveStatePublic: {
       /**
        * Run History Deletion Active
-       * @description Whether an organization policy or at least one classification policy can activate automatic Flow run-history deletion.
+       * @description Whether an organization or classification delete-after value activates automatic Flow run-history deletion.
        */
       run_history_deletion_active: boolean;
       /**
@@ -15095,9 +15095,24 @@ export interface components {
       runtime_upload_abandonment_active: boolean;
       /**
        * Classification Policy Count
-       * @description Number of configured classification activation policies.
+       * @description Number of configured classification delete-after activators.
        */
       classification_policy_count: number;
+      /**
+       * Activation Sources
+       * @description Configured scopes whose delete-after values activate deletion.
+       */
+      activation_sources: ("organization" | "classification")[];
+      /**
+       * Barrier Sources
+       * @description Configured minimum-retention and no-purge sources that can block deletion without activating it.
+       */
+      barrier_sources: (
+        | "organization_minimum"
+        | "classification_minimum"
+        | "organization_no_purge"
+        | "classification_no_purge"
+      )[];
     };
     /**
      * FlowRetentionImpactPreviewPublic
@@ -15246,6 +15261,12 @@ export interface components {
      * FlowRetentionPolicyPublic
      * @example {
      *       "effective_state": {
+     *         "activation_sources": [
+     *           "organization"
+     *         ],
+     *         "barrier_sources": [
+     *           "organization_minimum"
+     *         ],
      *         "classification_policy_count": 0,
      *         "run_history_deletion_active": true,
      *         "runtime_upload_abandonment_active": true
