@@ -1241,7 +1241,7 @@
           "document_writer_count": 1,
           "proposal_call_count": 1,
           "max_repair_attempts": 0,
-          "require_effective_optional_kwargs_fingerprint": true,
+          "require_classifier_request_composite_fingerprint": true,
           "require_progress_fingerprint": true,
           "provider_failure_status": "none"
         }

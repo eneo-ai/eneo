@@ -1468,7 +1468,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
         latest_session=latest_session,
         classifier_diagnostics=_classifier_diagnostics(),
         requested_model_id=None,
-        event_summary={"error_codes": []},
+        event_summary={"event_counts": {}, "error_codes": []},
     )
 
     def checks_for(value: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -1500,7 +1500,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
     baseline = checks_for(provenance)
     first_pass_names = {name for name in baseline if name.startswith("first_pass_")}
     assert first_pass_names == {
-        "first_pass_effective_optional_kwargs_fingerprint",
+        "first_pass_classifier_request_composite_fingerprint",
         "first_pass_progress_fingerprint",
         "first_pass_proposal_call_count",
         "first_pass_zero_repairs",
@@ -1510,13 +1510,52 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
     assert all(baseline[name]["passed"] is True for name in first_pass_names)
 
     missing_capability = json.loads(json.dumps(provenance))
-    missing_capability["capability"]["effective_optional_kwargs_fingerprint"] = None
+    missing_capability["capability"]["classifier_request_composite_fingerprint"] = None
     assert (
         checks_for(missing_capability)[
-            "first_pass_effective_optional_kwargs_fingerprint"
+            "first_pass_classifier_request_composite_fingerprint"
         ]["passed"]
         is False
     )
+
+    changed_diagnostics = _classifier_diagnostics()
+    changed_runs = changed_diagnostics["classifier_runs"]
+    assert isinstance(changed_runs, list)
+    assert isinstance(changed_runs[0], dict)
+    changed_runs[0]["prompt_hash"] = "d" * 64
+    changed_capability = harness._live_execution_provenance(
+        case=case,
+        latest_session=latest_session,
+        classifier_diagnostics=changed_diagnostics,
+        requested_model_id=None,
+        event_summary={"event_counts": {}, "error_codes": []},
+    )
+    assert (
+        provenance["capability"]["classifier_request_composite_fingerprint"]
+        != changed_capability["capability"]["classifier_request_composite_fingerprint"]
+    )
+
+    for invalid_diagnostics in (
+        {"classifier_runs": []},
+        {"classifier_runs": [{"prompt_hash": "not-a-sha256"}]},
+    ):
+        invalid_capability = harness._live_execution_provenance(
+            case=case,
+            latest_session=latest_session,
+            classifier_diagnostics=invalid_diagnostics,
+            requested_model_id=None,
+            event_summary={"event_counts": {}, "error_codes": []},
+        )
+        assert (
+            invalid_capability["capability"]["classifier_request_composite_fingerprint"]
+            is None
+        )
+        assert (
+            checks_for(invalid_capability)[
+                "first_pass_classifier_request_composite_fingerprint"
+            ]["passed"]
+            is False
+        )
 
     missing_progress = json.loads(json.dumps(provenance))
     missing_progress["proposal_progress"]["fingerprint"] = None
@@ -1559,6 +1598,132 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
         ]
         is False
     )
+
+
+def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_facts(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: ""
+        if args == ("status", "--porcelain", "--untracked-files=no")
+        else "23fab2d4a638ef1411a4d5808981aa77cb17f59d",
+    )
+    case = next(
+        case
+        for case in harness._read_cases_file(harness.DEFAULT_CASES_FILE)
+        if case.case_id == "complex_authoring_spec_first_pass"
+    )
+    provenance = harness._live_execution_provenance(
+        case=case,
+        latest_session={
+            "telemetry": {
+                "llm_calls_made_total": 1,
+                "last_token_usage_source": "provider",
+                "last_token_usage_estimated": False,
+                "last_model": "openai/gpt-test",
+            }
+        },
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+        event_summary={"event_counts": {"error": 1}, "error_codes": []},
+    )
+    assert case.expected is not None
+    checks = {
+        check["name"]: check
+        for check in harness._live_provenance_checks(
+            provenance,
+            expected=case.expected,
+        )
+    }
+
+    assert checks["first_pass_zero_repairs"]["passed"] is False
+    assert checks["first_pass_attempt_evidence"]["passed"] is False
+    assert checks["first_pass_provider_failure_provenance"]["passed"] is False
+    assert provenance["proposal_progress"]["provider_failure_status"] == (
+        "unclassified"
+    )
+    assert provenance["proposal_progress"]["attempts"] == []
+
+    complete_telemetry = {
+        "prompt_tokens_total": 101,
+        "completion_tokens_total": 17,
+        "total_tokens_total": 118,
+        "llm_calls_made_total": 1,
+        "repair_attempts_total": 0,
+        "parse_repair_attempts_total": 0,
+        "wall_clock_ms_total": 321,
+        "last_token_usage_source": "provider",
+        "last_token_usage_estimated": False,
+        "last_model": "openai/gpt-test",
+    }
+    missing_event_summary = harness._live_execution_provenance(
+        case=case,
+        latest_session={"telemetry": complete_telemetry},
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+    )
+    missing_event_checks = {
+        check["name"]: check
+        for check in harness._live_provenance_checks(
+            missing_event_summary,
+            expected=case.expected,
+        )
+    }
+    assert (
+        missing_event_checks["first_pass_provider_failure_provenance"]["passed"]
+        is False
+    )
+
+    unknown_outcome = harness._live_execution_provenance(
+        case=case,
+        latest_session={"telemetry": complete_telemetry},
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+        event_summary={
+            "event_counts": {"error": 1},
+            "error_codes": ["session_turn_provider_outcome_unknown"],
+        },
+    )
+    assert unknown_outcome["proposal_progress"]["provider_failure_status"] == (
+        "outcome_unknown"
+    )
+
+    for missing_or_incoherent, failing_checks in (
+        (
+            {"repair_attempts_total": None},
+            ("first_pass_zero_repairs", "first_pass_attempt_evidence"),
+        ),
+        (
+            {"parse_repair_attempts_total": None},
+            ("first_pass_zero_repairs", "first_pass_attempt_evidence"),
+        ),
+        ({"prompt_tokens_total": None}, ("first_pass_attempt_evidence",)),
+        ({"total_tokens_total": 119}, ("first_pass_attempt_evidence",)),
+        ({"wall_clock_ms_total": 0}, ("first_pass_attempt_evidence",)),
+        ({"last_token_usage_source": None}, ("first_pass_attempt_evidence",)),
+        ({"last_token_usage_estimated": None}, ("first_pass_attempt_evidence",)),
+    ):
+        telemetry = {**complete_telemetry, **missing_or_incoherent}
+        incomplete_attempt = harness._live_execution_provenance(
+            case=case,
+            latest_session={"telemetry": telemetry},
+            classifier_diagnostics=_classifier_diagnostics(),
+            requested_model_id=None,
+            event_summary={"event_counts": {}, "error_codes": []},
+        )
+        incomplete_checks = {
+            check["name"]: check
+            for check in harness._live_provenance_checks(
+                incomplete_attempt,
+                expected=case.expected,
+            )
+        }
+        assert all(
+            incomplete_checks[name]["passed"] is False for name in failing_checks
+        )
 
 
 def test_required_case_identity_rejects_each_manifest_drift() -> None:
@@ -2182,6 +2347,44 @@ def test_complex_authoring_case_enforces_first_pass_topology_independently() -> 
     wrong_review_steps[1]["review_policy"] = {"mode": "edit"}
     assert (
         checks_for(wrong_review_target)["first_pass_proposed_review_policy_targets"][
+            "passed"
+        ]
+        is False
+    )
+
+    duplicate_review = _complex_authoring_plan()
+    _review_plan_steps(duplicate_review)[1]["review_policy"] = {"mode": "edit"}
+    duplicate_review_checks = checks_for(duplicate_review)
+    assert (
+        duplicate_review_checks["first_pass_proposed_review_policy_count"]["passed"]
+        is False
+    )
+    assert (
+        duplicate_review_checks["first_pass_applied_review_policy_count"]["passed"]
+        is False
+    )
+
+    renderer_review = _complex_authoring_plan()
+    renderer_review_steps = _review_plan_steps(renderer_review)
+    renderer_review_steps[2]["review_policy"] = None
+    renderer_review_steps[3]["review_policy"] = {"mode": "edit"}
+    renderer_review_checks = checks_for(renderer_review)
+    assert (
+        renderer_review_checks["first_pass_proposed_review_policy_targets"]["passed"]
+        is False
+    )
+    assert (
+        renderer_review_checks["first_pass_proposed_review_policy_producing_steps"][
+            "passed"
+        ]
+        is False
+    )
+    assert (
+        renderer_review_checks["first_pass_applied_review_policy_targets"]["passed"]
+        is False
+    )
+    assert (
+        renderer_review_checks["first_pass_applied_review_policy_producing_steps"][
             "passed"
         ]
         is False

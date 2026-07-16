@@ -457,7 +457,7 @@ _FIRST_PASS_AUTHORING_EXPECTATION_KEYS = frozenset(
         "proposal_call_count",
         "provider_failure_status",
         "report_section_groups",
-        "require_effective_optional_kwargs_fingerprint",
+        "require_classifier_request_composite_fingerprint",
         "require_progress_fingerprint",
         "review_targets",
     }
@@ -795,7 +795,7 @@ def _validate_first_pass_authoring_expectation(
     if any(
         value.get(key) is not True
         for key in (
-            "require_effective_optional_kwargs_fingerprint",
+            "require_classifier_request_composite_fingerprint",
             "require_progress_fingerprint",
         )
     ):
@@ -2146,32 +2146,83 @@ def _live_execution_provenance(
             )
         )
     )
-    capability_fingerprint = (
+    classifier_request_composite_fingerprint = (
         _canonical_sha256({"classifier_prompt_hashes": classifier_prompt_hashes})
         if classifier_prompt_hashes
         and all(_is_sha256(item) for item in classifier_prompt_hashes)
         else None
     )
-    model_calls = _int_value(telemetry.get("llm_calls_made_total")) or 0
-    repair_attempts = _int_value(telemetry.get("repair_attempts_total")) or 0
-    parse_repair_attempts = (
-        _int_value(telemetry.get("parse_repair_attempts_total")) or 0
+
+    def telemetry_metric(key: str) -> int | None:
+        value = telemetry.get(key)
+        return (
+            value
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            else None
+        )
+
+    model_calls = telemetry_metric("llm_calls_made_total")
+    repair_attempts = telemetry_metric("repair_attempts_total")
+    parse_repair_attempts = telemetry_metric("parse_repair_attempts_total")
+    prompt_tokens = telemetry_metric("prompt_tokens_total")
+    completion_tokens = telemetry_metric("completion_tokens_total")
+    total_tokens = telemetry_metric("total_tokens_total")
+    elapsed_ms = telemetry_metric("wall_clock_ms_total")
+    event_counts = (
+        event_summary.get("event_counts")
+        if isinstance(event_summary, Mapping)
+        and isinstance(event_summary.get("event_counts"), Mapping)
+        else None
     )
-    prompt_tokens = _int_value(telemetry.get("prompt_tokens_total")) or 0
-    completion_tokens = _int_value(telemetry.get("completion_tokens_total")) or 0
-    total_tokens = _int_value(telemetry.get("total_tokens_total")) or 0
-    elapsed_ms = _int_value(telemetry.get("wall_clock_ms_total")) or 0
-    error_codes = _string_list(
+    error_count = None
+    if isinstance(event_counts, Mapping):
+        raw_error_count = event_counts.get("error", 0)
+        if (
+            isinstance(raw_error_count, int)
+            and not isinstance(raw_error_count, bool)
+            and raw_error_count >= 0
+        ):
+            error_count = raw_error_count
+    raw_error_codes = (
         event_summary.get("error_codes") if isinstance(event_summary, Mapping) else None
     )
-    if "session_turn_provider_outcome_unknown" in error_codes:
+    error_codes_complete = isinstance(raw_error_codes, list) and all(
+        isinstance(code, str) and bool(code) for code in raw_error_codes
+    )
+    error_codes = _string_list(raw_error_codes) if error_codes_complete else []
+    if (
+        error_count is None
+        or not error_codes_complete
+        or error_count != len(error_codes)
+    ):
+        provider_failure_status = "unclassified"
+    elif "session_turn_provider_outcome_unknown" in error_codes:
         provider_failure_status = "outcome_unknown"
     elif error_codes:
         provider_failure_status = "classified_public_error"
     else:
         provider_failure_status = "none"
+    token_usage_source = telemetry.get("last_token_usage_source")
+    token_usage_estimated = telemetry.get("last_token_usage_estimated")
+    token_counts_complete = (
+        prompt_tokens is not None
+        and completion_tokens is not None
+        and total_tokens is not None
+        and total_tokens > 0
+        and total_tokens == prompt_tokens + completion_tokens
+    )
+    attempt_evidence_complete = (
+        model_calls == 1
+        and repair_attempts is not None
+        and parse_repair_attempts is not None
+        and token_counts_complete
+        and elapsed_ms is not None
+        and elapsed_ms > 0
+        and token_usage_source in {"provider", "litellm_estimate"}
+        and isinstance(token_usage_estimated, bool)
+    )
     attempts: list[JsonObject] = []
-    if model_calls == 1:
+    if attempt_evidence_complete:
         attempts.append(
             {
                 "attempt": 1,
@@ -2186,10 +2237,8 @@ def _live_execution_provenance(
                 "total_tokens": total_tokens,
                 "elapsed_ms": elapsed_ms,
                 "elapsed_scope": "proposal_turn_upper_bound",
-                "token_usage_source": telemetry.get("last_token_usage_source"),
-                "token_usage_estimated": (
-                    telemetry.get("last_token_usage_estimated") is True
-                ),
+                "token_usage_source": token_usage_source,
+                "token_usage_estimated": token_usage_estimated,
             }
         )
     progress_payload: JsonObject = {
@@ -2199,7 +2248,7 @@ def _live_execution_provenance(
         "parse_repair_attempts": parse_repair_attempts,
         "attempts": attempts,
         "provider_failure_status": provider_failure_status,
-        "public_error_code_count": len(error_codes),
+        "public_error_code_count": len(error_codes) if error_codes_complete else None,
     }
     return {
         "mode": "live_execution",
@@ -2224,7 +2273,9 @@ def _live_execution_provenance(
         "capability": {
             "source": "slot_classification_prompt_hash_composite",
             "classifier_prompt_hashes": classifier_prompt_hashes,
-            "effective_optional_kwargs_fingerprint": capability_fingerprint,
+            "classifier_request_composite_fingerprint": (
+                classifier_request_composite_fingerprint
+            ),
         },
         "proposal_progress": {
             **progress_payload,
@@ -2390,14 +2441,16 @@ def _first_pass_provenance_checks(
     capability = provenance.get("capability")
     capability = capability if isinstance(capability, Mapping) else {}
     classifier_hashes = _string_list(capability.get("classifier_prompt_hashes"))
-    capability_fingerprint = capability.get("effective_optional_kwargs_fingerprint")
+    classifier_request_composite_fingerprint = capability.get(
+        "classifier_request_composite_fingerprint"
+    )
     capability_complete = (
-        expected.get("require_effective_optional_kwargs_fingerprint") is True
+        expected.get("require_classifier_request_composite_fingerprint") is True
         and capability.get("source") == "slot_classification_prompt_hash_composite"
         and bool(classifier_hashes)
         and all(_is_sha256(item) for item in classifier_hashes)
-        and _is_sha256(capability_fingerprint)
-        and capability_fingerprint
+        and _is_sha256(classifier_request_composite_fingerprint)
+        and classifier_request_composite_fingerprint
         == _canonical_sha256({"classifier_prompt_hashes": classifier_hashes})
     )
     progress = provenance.get("proposal_progress")
@@ -2441,20 +2494,28 @@ def _first_pass_provenance_checks(
             for key in (
                 "prompt_tokens",
                 "completion_tokens",
-                "total_tokens",
-                "elapsed_ms",
             )
         )
+        and isinstance(attempt.get("total_tokens"), int)
+        and not isinstance(attempt.get("total_tokens"), bool)
+        and attempt.get("total_tokens") > 0
+        and attempt.get("total_tokens")
+        == attempt.get("prompt_tokens") + attempt.get("completion_tokens")
+        and isinstance(attempt.get("elapsed_ms"), int)
+        and not isinstance(attempt.get("elapsed_ms"), bool)
+        and attempt.get("elapsed_ms") > 0
         and attempt.get("token_usage_source") in {"provider", "litellm_estimate"}
         and isinstance(attempt.get("token_usage_estimated"), bool)
     )
     expected_failure_status = expected.get("provider_failure_status")
     return [
         {
-            "name": "first_pass_effective_optional_kwargs_fingerprint",
+            "name": "first_pass_classifier_request_composite_fingerprint",
             "passed": capability_complete,
             "actual": dict(capability),
-            "expected": "capability-sensitive classifier request fingerprint",
+            "expected": (
+                "source-labelled capability-sensitive classifier request composite"
+            ),
         },
         {
             "name": "first_pass_progress_fingerprint",
