@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
 
 import redis.asyncio as aioredis
 
@@ -14,6 +15,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
     SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -51,6 +53,88 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+CompletionEvidenceJsonType: TypeAlias = Literal[
+    "null",
+    "boolean",
+    "integer",
+    "number",
+    "string",
+    "array",
+    "object",
+    "unknown",
+]
+CompletionEvidenceFieldDomain: TypeAlias = Literal[
+    "credential",
+    "endpoint",
+    "provider_configuration",
+    "route",
+    "conversation",
+    "tool_contract",
+    "tool_selection",
+    "transport_control",
+    "output_limit",
+    "model_control",
+]
+CompletionCapabilityConstraint: TypeAlias = Literal["none", "range", "options"]
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionEvidenceField:
+    """Allowlisted request-shape fact that never carries the field value."""
+
+    name: str
+    json_type: CompletionEvidenceJsonType
+    domain: CompletionEvidenceFieldDomain
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "json_type": self.json_type,
+            "domain": self.domain,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionModelKwargCapabilityEvidence:
+    name: str
+    supported: bool
+    json_type: CompletionEvidenceJsonType
+    constraint: CompletionCapabilityConstraint
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "supported": self.supported,
+            "json_type": self.json_type,
+            "constraint": self.constraint,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionRouteEvidence:
+    """Content-free projection of the effective selected completion route."""
+
+    configuration_fields: tuple[CompletionEvidenceField, ...]
+    unclassified_configuration_field_count: int
+    model_kwargs_capabilities: tuple[CompletionModelKwargCapabilityEvidence, ...]
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "source": "resolved_completion_model_route",
+            "capability_posture": "trusted_effective",
+            "configuration_fields": [
+                field.to_log_value() for field in self.configuration_fields
+            ],
+            "unclassified_configuration_field_count": (
+                self.unclassified_configuration_field_count
+            ),
+            "model_kwargs_capabilities": [
+                capability.to_log_value()
+                for capability in self.model_kwargs_capabilities
+            ],
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedCompletionModelRoute:
     litellm_model: str
@@ -72,6 +156,98 @@ class ResolvedCompletionModelRoute:
             )
         )
         return provider_kwargs
+
+    def incident_evidence(self) -> CompletionRouteEvidence:
+        configuration_fields: list[CompletionEvidenceField] = []
+        unclassified_configuration_field_count = 0
+        for name in sorted(self.litellm_kwargs):
+            if name in SupportedModelKwargs.model_fields:
+                continue
+            domain = completion_evidence_field_domain(name)
+            if domain is None:
+                unclassified_configuration_field_count += 1
+                continue
+            configuration_fields.append(
+                CompletionEvidenceField(
+                    name=name,
+                    json_type=completion_evidence_json_type(self.litellm_kwargs[name]),
+                    domain=domain,
+                )
+            )
+
+        capabilities = self.supported_model_kwargs
+        capability_specs: tuple[
+            tuple[
+                str,
+                ModelKwargCapability,
+                CompletionEvidenceJsonType,
+            ],
+            ...,
+        ] = (
+            ("temperature", capabilities.temperature, "number"),
+            ("top_p", capabilities.top_p, "number"),
+            ("reasoning_effort", capabilities.reasoning_effort, "string"),
+            ("verbosity", capabilities.verbosity, "string"),
+            ("presence_penalty", capabilities.presence_penalty, "number"),
+            ("frequency_penalty", capabilities.frequency_penalty, "number"),
+            ("top_k", capabilities.top_k, "integer"),
+        )
+        model_kwargs_capabilities = tuple(
+            CompletionModelKwargCapabilityEvidence(
+                name=name,
+                supported=capability.supported,
+                json_type=json_type,
+                constraint=(
+                    "options"
+                    if capability.options is not None
+                    else "range"
+                    if capability.minimum is not None or capability.maximum is not None
+                    else "none"
+                ),
+            )
+            for name, capability, json_type in capability_specs
+        )
+        return CompletionRouteEvidence(
+            configuration_fields=tuple(configuration_fields),
+            unclassified_configuration_field_count=(
+                unclassified_configuration_field_count
+            ),
+            model_kwargs_capabilities=model_kwargs_capabilities,
+        )
+
+
+def completion_evidence_json_type(value: object) -> CompletionEvidenceJsonType:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, Sequence) and not isinstance(value, bytes):
+        return "array"
+    return "unknown"
+
+
+def completion_evidence_field_domain(
+    name: str,
+) -> CompletionEvidenceFieldDomain | None:
+    if name in SupportedModelKwargs.model_fields:
+        return "model_control"
+    if name == "api_key":
+        return "credential"
+    if name == "api_base":
+        return "endpoint"
+    if name in {"api_version", "api_type", "organization", "response_format"}:
+        return "provider_configuration"
+    if name == "drop_params":
+        return "transport_control"
+    return None
 
 
 async def generate_image(prompt: str):

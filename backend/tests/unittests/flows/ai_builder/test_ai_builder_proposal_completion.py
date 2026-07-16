@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -366,8 +367,17 @@ async def test_proposal_post_start_failure_keeps_unknown_public_contract(
     )
     before_provider_call.assert_awaited_once_with()
     assert litellm_client.acompletion.await_count == 1
-    event_log.assert_called_once()
-    payload = event_log.call_args.kwargs["extra"]
+    failure_calls = [
+        call for call in event_log.call_args_list if call.args == ("failure_event",)
+    ]
+    assert len(failure_calls) == 1
+    evidence_calls = [
+        call
+        for call in event_log.call_args_list
+        if call.args == ("ai_builder_provider_incident_evidence",)
+    ]
+    assert len(evidence_calls) == 1
+    payload = failure_calls[0].kwargs["extra"]
     assert payload["event"] == "ai_builder.provider.failure"
     assert payload["operation"] == "proposal_completion"
     assert payload["failure_kind"] == expected_kind
@@ -380,6 +390,131 @@ async def test_proposal_post_start_failure_keeps_unknown_public_contract(
     attempts = tracker.build_planner_telemetry()["proposal_attempts"]
     assert len(attempts) == 1
     assert attempts[0]["failure_kind"] == "provider_error"
+
+
+@pytest.mark.asyncio
+async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> None:
+    route = await _resolved_route(
+        {
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0,
+                "maximum": 2,
+                "step": 0.01,
+            }
+        }
+    )
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=BadRequestError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+                body={
+                    "code": "invalid_request_error",
+                    "param": "temperature",
+                    "type": "invalid_request_error",
+                },
+            )
+        )
+    )
+
+    with patch.object(error_contract_module.logger, "info") as event_log:
+        with pytest.raises(BadRequestError):
+            await call_proposal_completion(
+                litellm_client=litellm_client,
+                request=ProposalCompletionRequest(
+                    messages=[{"role": "user", "content": "private-user-content"}],
+                    tool_schemas=[
+                        {
+                            "function": {
+                                "name": PROPOSE_FLOW_TOOL_NAME,
+                                "description": "private-tool-schema-content",
+                            }
+                        }
+                    ],
+                    route=route,
+                    max_output_tokens=1024,
+                    temperature=0.27,
+                ),
+            )
+
+    evidence_calls = [
+        call
+        for call in event_log.call_args_list
+        if call.args == ("ai_builder_provider_incident_evidence",)
+    ]
+    assert len(evidence_calls) == 1
+    assert set(evidence_calls[0].kwargs["extra"]) == {
+        "ai_builder_provider_incident_evidence"
+    }
+    evidence = evidence_calls[0].kwargs["extra"][
+        "ai_builder_provider_incident_evidence"
+    ]
+    assert set(evidence) == {
+        "schema_version",
+        "route",
+        "outgoing_fields",
+        "unclassified_outgoing_field_count",
+        "failure",
+        "provider_expectation",
+    }
+    assert evidence["schema_version"] == "ai-builder-provider-incident-evidence.v1"
+    assert evidence["route"]["source"] == "resolved_completion_model_route"
+    assert evidence["route"]["capability_posture"] == "trusted_effective"
+    assert evidence["route"]["unclassified_configuration_field_count"] == 0
+    assert evidence["route"]["configuration_fields"] == [
+        {"name": "api_key", "json_type": "string", "domain": "credential"}
+    ]
+    capability_by_name = {
+        capability["name"]: capability
+        for capability in evidence["route"]["model_kwargs_capabilities"]
+    }
+    assert capability_by_name["temperature"] == {
+        "name": "temperature",
+        "supported": True,
+        "json_type": "number",
+        "constraint": "range",
+    }
+    outgoing_by_name = {field["name"]: field for field in evidence["outgoing_fields"]}
+    assert outgoing_by_name["temperature"] == {
+        "name": "temperature",
+        "json_type": "number",
+        "domain": "model_control",
+    }
+    assert outgoing_by_name["messages"]["json_type"] == "array"
+    assert outgoing_by_name["tools"]["json_type"] == "array"
+    assert outgoing_by_name["api_key"] == {
+        "name": "api_key",
+        "json_type": "string",
+        "domain": "credential",
+    }
+    assert evidence["unclassified_outgoing_field_count"] == 0
+    assert evidence["failure"] == {
+        "kind": "rejected",
+        "stage": "proposal_completion",
+        "exception_class": "bad_request",
+        "status_code": 400,
+        "status_class": "4xx",
+        "code": "invalid_request_error",
+        "parameter": "temperature",
+        "rejection_class": "outgoing_parameter",
+    }
+    assert evidence["provider_expectation"] == {"source": "unavailable"}
+    encoded = json.dumps(evidence)
+    for forbidden in (
+        "test-only",
+        "sensitive-provider-material",
+        "private-model",
+        "private-provider",
+        "private-user-content",
+        "private-tool-schema-content",
+        "request_id",
+        "session_id",
+        "tenant_id",
+    ):
+        assert forbidden not in encoded
 
 
 @pytest.mark.asyncio

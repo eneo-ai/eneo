@@ -37,6 +37,10 @@ from eneo.observability.failure_events import (
 )
 
 if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        CompletionEvidenceField,
+        CompletionRouteEvidence,
+    )
     from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
         ProposalTurnTelemetry,
     )
@@ -55,6 +59,25 @@ AIBuilderProviderFailureStage = Literal[
     "semantic_adjudication",
 ]
 AIBuilderProviderStatusClass = Literal["1xx", "2xx", "3xx", "4xx", "5xx"]
+AIBuilderProviderExceptionClass = Literal[
+    "api_connection",
+    "authentication",
+    "bad_gateway",
+    "bad_request",
+    "internal_server",
+    "not_found",
+    "permission_denied",
+    "rate_limit",
+    "service_unavailable",
+    "timeout",
+    "unprocessable_entity",
+    "unknown",
+]
+AIBuilderProviderRejectionClass = Literal[
+    "outgoing_parameter",
+    "provider_rejection",
+    "not_applicable",
+]
 
 _MAX_DETAILS_KEYS = 10
 _MAX_DETAILS_STRING_LENGTH = 256
@@ -62,6 +85,11 @@ _MAX_DETAILS_JSON_BYTES = 1024
 _MAX_MESSAGE_LENGTH = 4096
 _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
+_MAX_PROVIDER_FACT_LENGTH = 64
+AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY = "ai_builder_provider_incident_evidence"
+AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION = (
+    "ai-builder-provider-incident-evidence.v1"
+)
 _PROVIDER_REJECTION_ERRORS = (
     AuthenticationError,
     BadGatewayError,
@@ -186,7 +214,56 @@ class AIBuilderProviderFailure:
     stage: AIBuilderProviderFailureStage
     status_code: int | None
     status_class: AIBuilderProviderStatusClass | None
+    exception_class: AIBuilderProviderExceptionClass
+    code: str | None
+    parameter: str | None
     fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class AIBuilderProviderRequestEvidence:
+    """Allowlisted request-shape facts captured at the provider boundary."""
+
+    route: CompletionRouteEvidence
+    outgoing_fields: tuple[CompletionEvidenceField, ...]
+    unclassified_outgoing_field_count: int
+
+    def to_log_value(
+        self,
+        failure: AIBuilderProviderFailure,
+    ) -> dict[str, object]:
+        outgoing_names = frozenset(field.name for field in self.outgoing_fields)
+        parameter = failure.parameter if failure.parameter in outgoing_names else None
+        rejection_class: AIBuilderProviderRejectionClass
+        if failure.kind != "rejected":
+            rejection_class = "not_applicable"
+        elif parameter is not None:
+            rejection_class = "outgoing_parameter"
+        else:
+            rejection_class = "provider_rejection"
+
+        failure_value: dict[str, object] = {
+            "kind": failure.kind,
+            "stage": failure.stage,
+            "exception_class": failure.exception_class,
+            "status_code": failure.status_code,
+            "status_class": failure.status_class,
+            "rejection_class": rejection_class,
+        }
+        if failure.code is not None:
+            failure_value["code"] = failure.code
+        if parameter is not None:
+            failure_value["parameter"] = parameter
+        return {
+            "schema_version": (AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION),
+            "route": self.route.to_log_value(),
+            "outgoing_fields": [field.to_log_value() for field in self.outgoing_fields],
+            "unclassified_outgoing_field_count": (
+                self.unclassified_outgoing_field_count
+            ),
+            "failure": failure_value,
+            "provider_expectation": {"source": "unavailable"},
+        }
 
 
 def classify_ai_builder_provider_failure(
@@ -216,6 +293,9 @@ def classify_ai_builder_provider_failure(
         stage=stage,
         status_code=status_code,
         status_class=_provider_status_class(status_code),
+        exception_class=_provider_exception_class(error),
+        code=_provider_dependency_fact(error, "code"),
+        parameter=_provider_dependency_fact(error, "param"),
         fingerprint=make_failure_fingerprint(
             "ai_builder_provider",
             stage,
@@ -232,6 +312,7 @@ def record_ai_builder_provider_failure(
     usage_tracker: ProposalTurnTelemetry | None = None,
     request_id: str | None = None,
     tenant_id: UUID | str | None = None,
+    incident_evidence: AIBuilderProviderRequestEvidence | None = None,
     event_logger: logging.Logger = logger,
 ) -> AIBuilderProviderFailure:
     """Record one safe event while preserving coarse persisted turn telemetry."""
@@ -257,7 +338,66 @@ def record_ai_builder_provider_failure(
         tenant_id=None if tenant_id is None else str(tenant_id),
         safe_detail=safe_detail,
     )
+    if incident_evidence is not None:
+        event_logger.info(
+            "ai_builder_provider_incident_evidence",
+            extra={
+                AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY: (
+                    incident_evidence.to_log_value(failure)
+                )
+            },
+        )
     return failure
+
+
+def _provider_exception_class(
+    error: Exception,
+) -> AIBuilderProviderExceptionClass:
+    if isinstance(error, RateLimitError):
+        return "rate_limit"
+    if isinstance(error, Timeout):
+        return "timeout"
+    if isinstance(error, APIConnectionError):
+        return "api_connection"
+    if isinstance(error, AuthenticationError):
+        return "authentication"
+    if isinstance(error, BadGatewayError):
+        return "bad_gateway"
+    if isinstance(error, BadRequestError):
+        return "bad_request"
+    if isinstance(error, InternalServerError):
+        return "internal_server"
+    if isinstance(error, NotFoundError):
+        return "not_found"
+    if isinstance(error, PermissionDeniedError):
+        return "permission_denied"
+    if isinstance(error, ServiceUnavailableError):
+        return "service_unavailable"
+    if isinstance(error, UnprocessableEntityError):
+        return "unprocessable_entity"
+    return "unknown"
+
+
+def _provider_dependency_fact(
+    error: Exception,
+    field_name: Literal["code", "param"],
+) -> str | None:
+    if not isinstance(
+        error,
+        (
+            RateLimitError,
+            Timeout,
+            APIConnectionError,
+            *_PROVIDER_REJECTION_ERRORS,
+        ),
+    ):
+        return None
+    value = getattr(error, field_name, None)
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
+        return None
+    if not all(character.isalnum() or character in "._:-" for character in value):
+        return None
+    return value
 
 
 def _bounded_provider_status(value: object) -> int | None:

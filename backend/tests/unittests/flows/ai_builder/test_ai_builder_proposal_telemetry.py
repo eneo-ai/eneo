@@ -17,11 +17,17 @@ from litellm.exceptions import (
 )
 from pydantic import ValidationError
 
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionEvidenceField,
+    CompletionRouteEvidence,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY,
     AIBuilderProviderFailureKind,
+    AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
     record_ai_builder_provider_failure,
 )
@@ -178,7 +184,13 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_kind", "expected_status_code", "expected_status_class"),
+    (
+        "error",
+        "expected_kind",
+        "expected_status_code",
+        "expected_status_class",
+        "expected_exception_class",
+    ),
     [
         (
             BadRequestError(
@@ -189,6 +201,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "rejected",
             400,
             "4xx",
+            "bad_request",
         ),
         (
             RateLimitError(
@@ -199,6 +212,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "rate_limited",
             429,
             "4xx",
+            "rate_limit",
         ),
         (
             Timeout(
@@ -209,6 +223,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "timeout",
             408,
             "4xx",
+            "timeout",
         ),
         (
             APIConnectionError(
@@ -219,6 +234,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "transport_ambiguous",
             None,
             None,
+            "api_connection",
         ),
         (
             APIError(
@@ -230,6 +246,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "unknown",
             None,
             None,
+            "unknown",
         ),
     ],
 )
@@ -238,6 +255,7 @@ def test_provider_failure_classification_uses_only_known_adapter_evidence(
     expected_kind: AIBuilderProviderFailureKind,
     expected_status_code: int | None,
     expected_status_class: str | None,
+    expected_exception_class: str,
 ) -> None:
     failure = classify_ai_builder_provider_failure(
         error,
@@ -248,6 +266,7 @@ def test_provider_failure_classification_uses_only_known_adapter_evidence(
     assert failure.stage == "proposal_completion"
     assert failure.status_code == expected_status_code
     assert failure.status_class == expected_status_class
+    assert failure.exception_class == expected_exception_class
     assert failure.fingerprint == make_failure_fingerprint(
         "ai_builder_provider",
         "proposal_completion",
@@ -322,6 +341,73 @@ def test_provider_failure_event_is_one_bounded_content_free_row() -> None:
     assert "sensitive-provider-material" not in encoded
     assert "private-model" not in encoded
     assert "private-provider" not in encoded
+
+
+def test_provider_incident_evidence_drops_untrusted_failure_facts() -> None:
+    event_logger = MagicMock()
+    request_evidence = AIBuilderProviderRequestEvidence(
+        route=CompletionRouteEvidence(
+            configuration_fields=(),
+            unclassified_configuration_field_count=0,
+            model_kwargs_capabilities=(),
+        ),
+        outgoing_fields=(
+            CompletionEvidenceField(
+                name="temperature",
+                json_type="number",
+                domain="model_control",
+            ),
+        ),
+        unclassified_outgoing_field_count=0,
+    )
+
+    record_ai_builder_provider_failure(
+        BadRequestError(
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+            body={
+                "code": "raw provider body must not survive",
+                "param": "unlisted_parameter",
+            },
+        ),
+        stage="proposal_completion",
+        request_id="private-request-id",
+        tenant_id=uuid4(),
+        incident_evidence=request_evidence,
+        event_logger=event_logger,
+    )
+
+    evidence_calls = [
+        call
+        for call in event_logger.info.call_args_list
+        if call.args == ("ai_builder_provider_incident_evidence",)
+    ]
+    assert len(evidence_calls) == 1
+    assert set(evidence_calls[0].kwargs["extra"]) == {
+        AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY
+    }
+    evidence = evidence_calls[0].kwargs["extra"][
+        AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY
+    ]
+    assert evidence["failure"] == {
+        "kind": "rejected",
+        "stage": "proposal_completion",
+        "exception_class": "bad_request",
+        "status_code": 400,
+        "status_class": "4xx",
+        "rejection_class": "provider_rejection",
+    }
+    encoded = json.dumps(evidence)
+    for forbidden in (
+        "raw provider body must not survive",
+        "unlisted_parameter",
+        "sensitive-provider-material",
+        "private-model",
+        "private-provider",
+        "private-request-id",
+    ):
+        assert forbidden not in encoded
 
 
 def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:

@@ -7,8 +7,14 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionEvidenceField,
+    completion_evidence_field_domain,
+    completion_evidence_json_type,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
+    AIBuilderProviderRequestEvidence,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -78,6 +84,10 @@ async def call_proposal_completion(
     dropped_response_format = provider_kwargs.pop("response_format", None)
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
+    incident_evidence = _proposal_request_evidence(
+        request=request,
+        provider_kwargs=provider_kwargs,
+    )
     if before_provider_call is not None:
         await before_provider_call()
     try:
@@ -97,6 +107,7 @@ async def call_proposal_completion(
             stage="proposal_completion",
             usage_tracker=usage_tracker,
             request_id=usage_tracker.request_id if usage_tracker is not None else None,
+            incident_evidence=incident_evidence,
         )
         if before_provider_call is not None:
             raise AIBuilderProviderOutcomeUnknownException() from error
@@ -117,6 +128,68 @@ async def call_proposal_completion(
             counts_as_repair=request.counts_as_repair,
         )
     return response
+
+
+def _proposal_request_evidence(
+    *,
+    request: ProposalCompletionRequest,
+    provider_kwargs: Mapping[str, object],
+) -> AIBuilderProviderRequestEvidence:
+    outgoing_fields = [
+        CompletionEvidenceField(
+            name="model",
+            json_type=completion_evidence_json_type(request.route.litellm_model),
+            domain="route",
+        ),
+        CompletionEvidenceField(
+            name="messages",
+            json_type=completion_evidence_json_type(request.messages),
+            domain="conversation",
+        ),
+        CompletionEvidenceField(
+            name="tools",
+            json_type=completion_evidence_json_type(request.tool_schemas),
+            domain="tool_contract",
+        ),
+        CompletionEvidenceField(
+            name="tool_choice",
+            json_type=completion_evidence_json_type(request.tool_choice),
+            domain="tool_selection",
+        ),
+        CompletionEvidenceField(
+            name="stream",
+            json_type="boolean",
+            domain="transport_control",
+        ),
+        CompletionEvidenceField(
+            name="drop_params",
+            json_type="boolean",
+            domain="transport_control",
+        ),
+        CompletionEvidenceField(
+            name="max_tokens",
+            json_type=completion_evidence_json_type(request.max_output_tokens),
+            domain="output_limit",
+        ),
+    ]
+    unclassified_outgoing_field_count = 0
+    for name, value in provider_kwargs.items():
+        domain = completion_evidence_field_domain(name)
+        if domain is None:
+            unclassified_outgoing_field_count += 1
+            continue
+        outgoing_fields.append(
+            CompletionEvidenceField(
+                name=name,
+                json_type=completion_evidence_json_type(value),
+                domain=domain,
+            )
+        )
+    return AIBuilderProviderRequestEvidence(
+        route=request.route.incident_evidence(),
+        outgoing_fields=tuple(sorted(outgoing_fields, key=lambda field: field.name)),
+        unclassified_outgoing_field_count=unclassified_outgoing_field_count,
+    )
 
 
 def make_usage_tracked_proposal_completion(
