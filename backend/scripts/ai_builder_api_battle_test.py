@@ -2176,7 +2176,7 @@ def _live_execution_provenance(
     )
     error_count = None
     if isinstance(event_counts, Mapping):
-        raw_error_count = event_counts.get("error", 0)
+        raw_error_count = event_counts.get("error")
         if (
             isinstance(raw_error_count, int)
             and not isinstance(raw_error_count, bool)
@@ -2204,6 +2204,9 @@ def _live_execution_provenance(
         provider_failure_status = "none"
     token_usage_source = telemetry.get("last_token_usage_source")
     token_usage_estimated = telemetry.get("last_token_usage_estimated")
+    token_usage_posture_complete = (
+        token_usage_source == "provider" and token_usage_estimated is False
+    ) or (token_usage_source == "litellm_estimate" and token_usage_estimated is True)
     token_counts_complete = (
         prompt_tokens is not None
         and completion_tokens is not None
@@ -2218,8 +2221,7 @@ def _live_execution_provenance(
         and token_counts_complete
         and elapsed_ms is not None
         and elapsed_ms > 0
-        and token_usage_source in {"provider", "litellm_estimate"}
-        and isinstance(token_usage_estimated, bool)
+        and token_usage_posture_complete
     )
     attempts: list[JsonObject] = []
     if attempt_evidence_complete:
@@ -2504,8 +2506,16 @@ def _first_pass_provenance_checks(
         and isinstance(attempt.get("elapsed_ms"), int)
         and not isinstance(attempt.get("elapsed_ms"), bool)
         and attempt.get("elapsed_ms") > 0
-        and attempt.get("token_usage_source") in {"provider", "litellm_estimate"}
-        and isinstance(attempt.get("token_usage_estimated"), bool)
+        and (
+            (
+                attempt.get("token_usage_source") == "provider"
+                and attempt.get("token_usage_estimated") is False
+            )
+            or (
+                attempt.get("token_usage_source") == "litellm_estimate"
+                and attempt.get("token_usage_estimated") is True
+            )
+        )
     )
     expected_failure_status = expected.get("provider_failure_status")
     return [

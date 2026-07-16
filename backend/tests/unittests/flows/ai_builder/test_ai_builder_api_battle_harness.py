@@ -1468,7 +1468,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
         latest_session=latest_session,
         classifier_diagnostics=_classifier_diagnostics(),
         requested_model_id=None,
-        event_summary={"event_counts": {}, "error_codes": []},
+        event_summary={"event_counts": {"error": 0}, "error_codes": []},
     )
 
     def checks_for(value: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -1528,7 +1528,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
         latest_session=latest_session,
         classifier_diagnostics=changed_diagnostics,
         requested_model_id=None,
-        event_summary={"event_counts": {}, "error_codes": []},
+        event_summary={"event_counts": {"error": 0}, "error_codes": []},
     )
     assert (
         provenance["capability"]["classifier_request_composite_fingerprint"]
@@ -1544,7 +1544,7 @@ def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
             latest_session=latest_session,
             classifier_diagnostics=invalid_diagnostics,
             requested_model_id=None,
-            event_summary={"event_counts": {}, "error_codes": []},
+            event_summary={"event_counts": {"error": 0}, "error_codes": []},
         )
         assert (
             invalid_capability["capability"]["classifier_request_composite_fingerprint"]
@@ -1677,6 +1677,37 @@ def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_fac
         is False
     )
 
+    for incomplete_summary in (
+        {"event_counts": {}, "error_codes": []},
+        {"event_counts": {"error": "zero"}, "error_codes": []},
+        {"event_counts": {"error": 0}},
+        {"event_counts": {"error": 0}, "error_codes": "none"},
+    ):
+        incomplete_failure = harness._live_execution_provenance(
+            case=case,
+            latest_session={"telemetry": complete_telemetry},
+            classifier_diagnostics=_classifier_diagnostics(),
+            requested_model_id=None,
+            event_summary=incomplete_summary,
+        )
+        incomplete_failure_checks = {
+            check["name"]: check
+            for check in harness._live_provenance_checks(
+                incomplete_failure,
+                expected=case.expected,
+            )
+        }
+        assert (
+            incomplete_failure["proposal_progress"]["provider_failure_status"]
+            == "unclassified"
+        )
+        assert (
+            incomplete_failure_checks["first_pass_provider_failure_provenance"][
+                "passed"
+            ]
+            is False
+        )
+
     unknown_outcome = harness._live_execution_provenance(
         case=case,
         latest_session={"telemetry": complete_telemetry},
@@ -1691,6 +1722,42 @@ def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_fac
         "outcome_unknown"
     )
 
+    classified_error = harness._live_execution_provenance(
+        case=case,
+        latest_session={"telemetry": complete_telemetry},
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+        event_summary={
+            "event_counts": {"error": 1},
+            "error_codes": ["self_correction_invalid_plan"],
+        },
+    )
+    assert classified_error["proposal_progress"]["provider_failure_status"] == (
+        "classified_public_error"
+    )
+
+    estimated_usage = harness._live_execution_provenance(
+        case=case,
+        latest_session={
+            "telemetry": {
+                **complete_telemetry,
+                "last_token_usage_source": "litellm_estimate",
+                "last_token_usage_estimated": True,
+            }
+        },
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+        event_summary={"event_counts": {"error": 0}, "error_codes": []},
+    )
+    estimated_checks = {
+        check["name"]: check
+        for check in harness._live_provenance_checks(
+            estimated_usage,
+            expected=case.expected,
+        )
+    }
+    assert estimated_checks["first_pass_attempt_evidence"]["passed"] is True
+
     for missing_or_incoherent, failing_checks in (
         (
             {"repair_attempts_total": None},
@@ -1703,7 +1770,31 @@ def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_fac
         ({"prompt_tokens_total": None}, ("first_pass_attempt_evidence",)),
         ({"total_tokens_total": 119}, ("first_pass_attempt_evidence",)),
         ({"wall_clock_ms_total": 0}, ("first_pass_attempt_evidence",)),
+        (
+            {
+                "last_token_usage_source": "provider",
+                "last_token_usage_estimated": True,
+            },
+            ("first_pass_attempt_evidence",),
+        ),
+        (
+            {
+                "last_token_usage_source": "litellm_estimate",
+                "last_token_usage_estimated": False,
+            },
+            ("first_pass_attempt_evidence",),
+        ),
+        (
+            {"last_token_usage_source": "none"},
+            ("first_pass_attempt_evidence",),
+        ),
+        (
+            {"last_token_usage_source": "unknown"},
+            ("first_pass_attempt_evidence",),
+        ),
+        ({"last_token_usage_source": 7}, ("first_pass_attempt_evidence",)),
         ({"last_token_usage_source": None}, ("first_pass_attempt_evidence",)),
+        ({"last_token_usage_estimated": "false"}, ("first_pass_attempt_evidence",)),
         ({"last_token_usage_estimated": None}, ("first_pass_attempt_evidence",)),
     ):
         telemetry = {**complete_telemetry, **missing_or_incoherent}
@@ -1712,7 +1803,7 @@ def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_fac
             latest_session={"telemetry": telemetry},
             classifier_diagnostics=_classifier_diagnostics(),
             requested_model_id=None,
-            event_summary={"event_counts": {}, "error_codes": []},
+            event_summary={"event_counts": {"error": 0}, "error_codes": []},
         )
         incomplete_checks = {
             check["name"]: check
@@ -1721,6 +1812,7 @@ def test_complex_first_pass_provenance_fails_closed_without_attempt_or_error_fac
                 expected=case.expected,
             )
         }
+        assert incomplete_attempt["proposal_progress"]["attempts"] == []
         assert all(
             incomplete_checks[name]["passed"] is False for name in failing_checks
         )
