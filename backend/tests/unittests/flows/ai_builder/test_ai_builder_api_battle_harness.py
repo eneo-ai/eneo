@@ -159,6 +159,69 @@ def _review_policy_plan(*, mode: str = "view") -> dict[str, object]:
     }
 
 
+def _complex_authoring_plan() -> dict[str, object]:
+    return {
+        "proposal": {
+            "spec": {
+                "flow_name": "Meeting report",
+                "steps": [
+                    {
+                        "plan_step_ref": "transcribe_audio",
+                        "name": "Transcribe audio",
+                        "input_source": "flow_input",
+                        "input_type": "audio",
+                        "output_type": "text",
+                        "output_mode": "transcribe_only",
+                        "review_policy": {"mode": "edit"},
+                    },
+                    {
+                        "plan_step_ref": "analyze_transcript",
+                        "name": "Analyze transcript",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                        "output_contract": {
+                            "type": "object",
+                            "properties": {
+                                "summary_facts": {"type": "string"},
+                                "analysis_findings": {"type": "string"},
+                                "recommendations": {"type": "string"},
+                            },
+                        },
+                        "assistant_spec": {
+                            "instructions": "Extract stable typed report facts."
+                        },
+                    },
+                    {
+                        "plan_step_ref": "write_report",
+                        "name": "Write report",
+                        "input_source": "previous_step",
+                        "input_type": "json",
+                        "output_type": "text",
+                        "output_mode": "pass_through",
+                        "review_policy": {"mode": "edit"},
+                        "assistant_spec": {
+                            "instructions": (
+                                "Write one report with the headings Sammanfattning, "
+                                "Analys, and Rekommendationer."
+                            )
+                        },
+                    },
+                    {
+                        "plan_step_ref": "render_docx",
+                        "name": "Render DOCX",
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "output_type": "docx",
+                        "output_mode": "render_verbatim",
+                    },
+                ],
+            }
+        }
+    }
+
+
 def _review_plan_steps(plan: Mapping[str, object]) -> list[dict[str, object]]:
     proposal = plan.get("proposal")
     assert isinstance(proposal, Mapping)
@@ -1364,6 +1427,140 @@ def test_live_provenance_captures_source_build_model_prompt_and_usage(
     )
 
 
+def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: ""
+        if args == ("status", "--porcelain", "--untracked-files=no")
+        else "23fab2d4a638ef1411a4d5808981aa77cb17f59d",
+    )
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    case = next(
+        case
+        for case in harness._read_cases_file(cases_path)
+        if case.case_id == "complex_authoring_spec_first_pass"
+    )
+    latest_session = {
+        "telemetry": {
+            "prompt_tokens_total": 101,
+            "completion_tokens_total": 17,
+            "total_tokens_total": 118,
+            "llm_calls_made_total": 1,
+            "repair_attempts_total": 0,
+            "parse_repair_attempts_total": 0,
+            "wall_clock_ms_total": 321,
+            "token_usage_estimated": False,
+            "last_token_usage_source": "provider",
+            "last_token_usage_estimated": False,
+            "last_model": "openai/gpt-test",
+        }
+    }
+    provenance = harness._live_execution_provenance(
+        case=case,
+        latest_session=latest_session,
+        classifier_diagnostics=_classifier_diagnostics(),
+        requested_model_id=None,
+        event_summary={"error_codes": []},
+    )
+
+    def checks_for(value: dict[str, object]) -> dict[str, dict[str, object]]:
+        assert case.expected is not None
+        return {
+            check["name"]: check
+            for check in harness._live_provenance_checks(
+                value,
+                expected=case.expected,
+            )
+        }
+
+    def refresh_progress_fingerprint(value: dict[str, object]) -> None:
+        progress = value["proposal_progress"]
+        assert isinstance(progress, dict)
+        payload_keys = (
+            "source",
+            "call_count",
+            "repair_attempts",
+            "parse_repair_attempts",
+            "attempts",
+            "provider_failure_status",
+            "public_error_code_count",
+        )
+        progress["fingerprint"] = harness._canonical_sha256(
+            {key: progress.get(key) for key in payload_keys}
+        )
+
+    baseline = checks_for(provenance)
+    first_pass_names = {name for name in baseline if name.startswith("first_pass_")}
+    assert first_pass_names == {
+        "first_pass_effective_optional_kwargs_fingerprint",
+        "first_pass_progress_fingerprint",
+        "first_pass_proposal_call_count",
+        "first_pass_zero_repairs",
+        "first_pass_attempt_evidence",
+        "first_pass_provider_failure_provenance",
+    }
+    assert all(baseline[name]["passed"] is True for name in first_pass_names)
+
+    missing_capability = json.loads(json.dumps(provenance))
+    missing_capability["capability"]["effective_optional_kwargs_fingerprint"] = None
+    assert (
+        checks_for(missing_capability)[
+            "first_pass_effective_optional_kwargs_fingerprint"
+        ]["passed"]
+        is False
+    )
+
+    missing_progress = json.loads(json.dumps(provenance))
+    missing_progress["proposal_progress"]["fingerprint"] = None
+    assert (
+        checks_for(missing_progress)["first_pass_progress_fingerprint"]["passed"]
+        is False
+    )
+
+    extra_call = json.loads(json.dumps(provenance))
+    extra_call["proposal_progress"]["call_count"] = 2
+    refresh_progress_fingerprint(extra_call)
+    assert checks_for(extra_call)["first_pass_proposal_call_count"]["passed"] is False
+
+    repair = json.loads(json.dumps(provenance))
+    repair["proposal_progress"]["repair_attempts"] = 1
+    refresh_progress_fingerprint(repair)
+    assert checks_for(repair)["first_pass_zero_repairs"]["passed"] is False
+
+    missing_attempt = json.loads(json.dumps(provenance))
+    missing_attempt["proposal_progress"]["attempts"] = []
+    refresh_progress_fingerprint(missing_attempt)
+    assert checks_for(missing_attempt)["first_pass_attempt_evidence"]["passed"] is False
+
+    missing_failure = json.loads(json.dumps(provenance))
+    missing_failure["proposal_progress"].pop("provider_failure_status")
+    refresh_progress_fingerprint(missing_failure)
+    assert (
+        checks_for(missing_failure)["first_pass_provider_failure_provenance"]["passed"]
+        is False
+    )
+
+    unclassified_failure = json.loads(json.dumps(provenance))
+    unclassified_failure["proposal_progress"]["provider_failure_status"] = (
+        "unclassified"
+    )
+    refresh_progress_fingerprint(unclassified_failure)
+    assert (
+        checks_for(unclassified_failure)["first_pass_provider_failure_provenance"][
+            "passed"
+        ]
+        is False
+    )
+
+
 def test_required_case_identity_rejects_each_manifest_drift() -> None:
     harness = _battle_harness()
     case = harness.BattleCase(
@@ -1842,8 +2039,10 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
         "topology",
         "review_policy",
         "six_file_document_report",
+        "first_pass_semantic",
     } <= required_dimensions
     assert all(by_id[case_id].required for case_id in release_gate.required_case_ids)
+    assert "complex_authoring_spec_first_pass" in release_gate.required_case_ids
 
     review_case = by_id["ordinary_language_human_review_policy"]
     assert review_case.apply_plan is True
@@ -1877,6 +2076,116 @@ def test_release_inventory_owns_required_dimensions_and_named_cases() -> None:
         "model_call_count": 7,
         "max_total_tokens": 250000,
     }
+
+
+def test_complex_authoring_case_enforces_first_pass_topology_independently() -> None:
+    harness = _battle_harness()
+    cases_path = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ai_builder_api_battle_cases.json"
+    )
+    cases = harness._read_cases_file(cases_path)
+    by_id = {case.case_id: case for case in cases}
+    case = by_id["complex_authoring_spec_first_pass"]
+
+    assert case.required is True
+    assert case.apply_plan is True
+    assert case.execute_flow is False
+    assert case.expected is not None
+    expected = case.expected["expected_first_pass_authoring"]
+
+    def checks_for(plan: dict[str, object]) -> dict[str, dict[str, object]]:
+        report = harness._quality_report(
+            plan=plan,
+            summary=harness._summarize_plan(plan),
+            expected=case.expected,
+            event_summary={},
+            applied_flow=_applied_flow_from_plan(plan),
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    baseline = checks_for(_complex_authoring_plan())
+    first_pass_names = {name for name in baseline if name.startswith("first_pass_")}
+    assert first_pass_names == {
+        "first_pass_document_writer_count",
+        "first_pass_pipeline",
+        "first_pass_report_outline",
+        "first_pass_task_headings_not_promoted",
+        "first_pass_typed_analysis_contract",
+        "first_pass_unique_step_names",
+        "first_pass_proposed_review_policy_count",
+        "first_pass_proposed_review_policy_targets",
+        "first_pass_proposed_review_policy_producing_steps",
+        "first_pass_applied_review_policy_count",
+        "first_pass_applied_review_policy_targets",
+        "first_pass_applied_review_policy_producing_steps",
+    }
+    assert all(baseline[name]["passed"] is True for name in first_pass_names)
+    assert expected["proposal_call_count"] == 1
+    assert expected["max_repair_attempts"] == 0
+
+    wrong_outline = _complex_authoring_plan()
+    _review_plan_steps(wrong_outline)[2]["assistant_spec"] = {
+        "instructions": "Write one concise report."
+    }
+    assert checks_for(wrong_outline)["first_pass_report_outline"]["passed"] is False
+
+    untyped_analysis = _complex_authoring_plan()
+    _review_plan_steps(untyped_analysis)[1]["output_contract"] = None
+    assert (
+        checks_for(untyped_analysis)["first_pass_typed_analysis_contract"]["passed"]
+        is False
+    )
+
+    promoted_task_heading = _complex_authoring_plan()
+    _review_plan_steps(promoted_task_heading)[2]["name"] = "Processing rules"
+    assert (
+        checks_for(promoted_task_heading)["first_pass_task_headings_not_promoted"][
+            "passed"
+        ]
+        is False
+    )
+
+    duplicate_name = _complex_authoring_plan()
+    _review_plan_steps(duplicate_name)[2]["name"] = "Analyze transcript"
+    assert checks_for(duplicate_name)["first_pass_unique_step_names"]["passed"] is False
+
+    extra_writer = _complex_authoring_plan()
+    _insert_review_plan_step(
+        extra_writer,
+        3,
+        {
+            "plan_step_ref": "write_appendix",
+            "name": "Write appendix",
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_type": "text",
+            "output_mode": "pass_through",
+            "assistant_spec": {"instructions": "Write a separate appendix."},
+        },
+    )
+    extra_writer_checks = checks_for(extra_writer)
+    assert extra_writer_checks["first_pass_document_writer_count"]["passed"] is False
+    assert extra_writer_checks["first_pass_pipeline"]["passed"] is False
+
+    missing_review = _complex_authoring_plan()
+    _review_plan_steps(missing_review)[2]["review_policy"] = None
+    assert (
+        checks_for(missing_review)["first_pass_proposed_review_policy_count"]["passed"]
+        is False
+    )
+
+    wrong_review_target = _complex_authoring_plan()
+    wrong_review_steps = _review_plan_steps(wrong_review_target)
+    wrong_review_steps[2]["review_policy"] = None
+    wrong_review_steps[1]["review_policy"] = {"mode": "edit"}
+    assert (
+        checks_for(wrong_review_target)["first_pass_proposed_review_policy_targets"][
+            "passed"
+        ]
+        is False
+    )
 
 
 def test_release_expectation_typos_fail_closed(tmp_path: Path) -> None:

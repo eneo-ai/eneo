@@ -10,7 +10,8 @@
       "attachment_example_report_infers_disposition",
       "hard_many_source_documents_exhaustive_pdf",
       "ordinary_language_human_review_policy",
-      "six_file_document_report_release_gate"
+      "six_file_document_report_release_gate",
+      "complex_authoring_spec_first_pass"
     ],
     "thresholds": {
       "max_case_errors": 0,
@@ -1179,6 +1180,70 @@
           "source_display_count": 6,
           "model_call_count": 7,
           "max_total_tokens": 250000
+        }
+      }
+    },
+    {
+      "id": "complex_authoring_spec_first_pass",
+      "complexity": "hard",
+      "domain": "municipality_meetings",
+      "required": true,
+      "release_dimensions": ["first_pass_semantic"],
+      "apply_plan": true,
+      "prompt": "# Arbetsuppgift\n\n## Indata och förberedelser\nVid körning laddar användaren upp en ljudfil. Transkribera hela ljudet och låt användaren redigera transkriptionen innan analysen.\n\n## Bearbetningsregler\nAnalysera den godkända transkriptionen till stabil typad JSON med sammanfattande fakta, analys och rekommendationer.\n\n# Task specification\n\n## Processing rules\nUse exactly one document-writing model step after the typed analysis. Let the user edit that report text before delivery.\n\n## Delivery checks\nRender the approved text deterministically as a DOCX document.\n\n# Slutrapportens disposition\nDen färdiga rapporten ska ha rubrikerna Sammanfattning, Analys och Rekommendationer.",
+      "expected": {
+        "min_steps": 4,
+        "max_steps": 4,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["summary_facts", "sammanfattande_fakta"],
+          ["analysis_findings", "analys"],
+          ["recommendations", "rekommendationer"]
+        ],
+        "expected_first_pass_authoring": {
+          "expected_step_output_types": ["text", "json", "text", "docx"],
+          "expected_step_output_modes": [
+            "transcribe_only",
+            "pass_through",
+            "pass_through",
+            "render_verbatim"
+          ],
+          "report_section_groups": [
+            ["Sammanfattning", "Summary"],
+            ["Analys", "Analysis"],
+            ["Rekommendationer", "Recommendations"]
+          ],
+          "forbidden_task_heading_groups": [
+            ["Arbetsuppgift"],
+            ["Indata och förberedelser"],
+            ["Bearbetningsregler"],
+            ["Task specification"],
+            ["Processing rules"],
+            ["Delivery checks"]
+          ],
+          "review_targets": [
+            {
+              "mode": "edit",
+              "output_type": "text",
+              "output_mode": "transcribe_only"
+            },
+            {
+              "mode": "edit",
+              "output_type": "text",
+              "output_mode": "pass_through"
+            }
+          ],
+          "document_writer_count": 1,
+          "proposal_call_count": 1,
+          "max_repair_attempts": 0,
+          "require_effective_optional_kwargs_fingerprint": true,
+          "require_progress_fingerprint": true,
+          "provider_failure_status": "none"
         }
       }
     },

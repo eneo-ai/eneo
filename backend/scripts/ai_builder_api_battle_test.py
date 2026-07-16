@@ -416,6 +416,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_output_modes",
         "expected_question_event_count",
         "expected_question_event_ids",
+        "expected_first_pass_authoring",
         "expected_review_policy",
         "expected_runtime_evidence",
         "forbid_classifier_commit_grade_slots",
@@ -446,6 +447,22 @@ _REVIEW_POLICY_EXPECTATION_KEYS = frozenset(
         "target_must_be_non_terminal",
     }
 )
+_FIRST_PASS_AUTHORING_EXPECTATION_KEYS = frozenset(
+    {
+        "document_writer_count",
+        "expected_step_output_modes",
+        "expected_step_output_types",
+        "forbidden_task_heading_groups",
+        "max_repair_attempts",
+        "proposal_call_count",
+        "provider_failure_status",
+        "report_section_groups",
+        "require_effective_optional_kwargs_fingerprint",
+        "require_progress_fingerprint",
+        "review_targets",
+    }
+)
+_FIRST_PASS_REVIEW_TARGET_KEYS = frozenset({"mode", "output_mode", "output_type"})
 _RUNTIME_EVIDENCE_EXPECTATION_KEYS = frozenset(
     {
         "source_file_count",
@@ -652,6 +669,9 @@ def _validate_release_expectations(
             f"{path} case {case_id}.expected has unknown expectation keys: "
             + ", ".join(sorted(str(key) for key in unknown_keys))
         )
+    first_pass = expected.get("expected_first_pass_authoring")
+    if first_pass is not None:
+        _validate_first_pass_authoring_expectation(path, case_id, first_pass)
     review_policy = expected.get("expected_review_policy")
     if review_policy is not None:
         if not isinstance(review_policy, Mapping) or set(review_policy) != (
@@ -706,6 +726,88 @@ def _validate_release_expectations(
                 f"expected_runtime_evidence.{key}",
                 runtime_evidence.get(key),
             )
+
+
+def _validate_first_pass_authoring_expectation(
+    path: Path,
+    case_id: str,
+    value: object,
+) -> None:
+    if not isinstance(value, Mapping) or set(value) != (
+        _FIRST_PASS_AUTHORING_EXPECTATION_KEYS
+    ):
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring has an invalid shape."
+        )
+    output_types = _string_list(value.get("expected_step_output_types"))
+    output_modes = _string_list(value.get("expected_step_output_modes"))
+    if not output_types or len(output_types) != len(output_modes):
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring must declare "
+            "matching non-empty step output types and modes."
+        )
+    for key in ("report_section_groups", "forbidden_task_heading_groups"):
+        _require_non_empty_field_groups(
+            path,
+            case_id,
+            f"expected_first_pass_authoring.{key}",
+            value.get(key),
+        )
+    review_targets = value.get("review_targets")
+    if not isinstance(review_targets, list) or len(review_targets) != 2:
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring.review_targets "
+            "must contain exactly two targets."
+        )
+    for target in review_targets:
+        if not isinstance(target, Mapping) or set(target) != (
+            _FIRST_PASS_REVIEW_TARGET_KEYS
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected_first_pass_authoring.review_targets "
+                "has an invalid target."
+            )
+        if target.get("mode") not in {"view", "edit"} or not all(
+            isinstance(target.get(key), str) and target.get(key)
+            for key in ("output_type", "output_mode")
+        ):
+            raise ValueError(
+                f"{path} case {case_id}.expected_first_pass_authoring.review_targets "
+                "has an invalid mode or output target."
+            )
+    for key in ("document_writer_count", "proposal_call_count"):
+        count = value.get(key)
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            raise ValueError(
+                f"{path} case {case_id}.expected_first_pass_authoring.{key} "
+                "must be a positive integer."
+            )
+    max_repairs = value.get("max_repair_attempts")
+    if (
+        not isinstance(max_repairs, int)
+        or isinstance(max_repairs, bool)
+        or max_repairs < 0
+    ):
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring."
+            "max_repair_attempts must be a non-negative integer."
+        )
+    if any(
+        value.get(key) is not True
+        for key in (
+            "require_effective_optional_kwargs_fingerprint",
+            "require_progress_fingerprint",
+        )
+    ):
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring must require "
+            "capability and progress fingerprints."
+        )
+    if value.get("provider_failure_status") != "none":
+        raise ValueError(
+            f"{path} case {case_id}.expected_first_pass_authoring requires a "
+            "failure-free first proposal."
+        )
 
 
 def _require_non_empty_field_groups(
@@ -1444,11 +1546,17 @@ def _run_case(
         ),
         classifier_diagnostics=classifier_diagnostics,
         requested_model_id=args.model_id,
+        event_summary=event_summary,
     )
     if case.required:
         checks = quality_report.get("checks")
         if isinstance(checks, list):
-            checks.extend(_live_provenance_checks(live_execution_provenance))
+            checks.extend(
+                _live_provenance_checks(
+                    live_execution_provenance,
+                    expected=case.expected or {},
+                )
+            )
 
     return {
         "artifact_mode": "live_execution",
@@ -1991,6 +2099,7 @@ def _live_execution_provenance(
     latest_session: Mapping[str, object] | None,
     classifier_diagnostics: Mapping[str, object] | None,
     requested_model_id: str | None,
+    event_summary: Mapping[str, object] | None = None,
 ) -> JsonObject:
     source_revision = _git_output("rev-parse", "HEAD")
     tracked_status = _git_output("status", "--porcelain", "--untracked-files=no")
@@ -2037,6 +2146,61 @@ def _live_execution_provenance(
             )
         )
     )
+    capability_fingerprint = (
+        _canonical_sha256({"classifier_prompt_hashes": classifier_prompt_hashes})
+        if classifier_prompt_hashes
+        and all(_is_sha256(item) for item in classifier_prompt_hashes)
+        else None
+    )
+    model_calls = _int_value(telemetry.get("llm_calls_made_total")) or 0
+    repair_attempts = _int_value(telemetry.get("repair_attempts_total")) or 0
+    parse_repair_attempts = (
+        _int_value(telemetry.get("parse_repair_attempts_total")) or 0
+    )
+    prompt_tokens = _int_value(telemetry.get("prompt_tokens_total")) or 0
+    completion_tokens = _int_value(telemetry.get("completion_tokens_total")) or 0
+    total_tokens = _int_value(telemetry.get("total_tokens_total")) or 0
+    elapsed_ms = _int_value(telemetry.get("wall_clock_ms_total")) or 0
+    error_codes = _string_list(
+        event_summary.get("error_codes") if isinstance(event_summary, Mapping) else None
+    )
+    if "session_turn_provider_outcome_unknown" in error_codes:
+        provider_failure_status = "outcome_unknown"
+    elif error_codes:
+        provider_failure_status = "classified_public_error"
+    else:
+        provider_failure_status = "none"
+    attempts: list[JsonObject] = []
+    if model_calls == 1:
+        attempts.append(
+            {
+                "attempt": 1,
+                "kind": (
+                    "initial"
+                    if repair_attempts == 0 and parse_repair_attempts == 0
+                    else "unresolved"
+                ),
+                "call_count": 1,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "elapsed_ms": elapsed_ms,
+                "elapsed_scope": "proposal_turn_upper_bound",
+                "token_usage_source": telemetry.get("last_token_usage_source"),
+                "token_usage_estimated": (
+                    telemetry.get("last_token_usage_estimated") is True
+                ),
+            }
+        )
+    progress_payload: JsonObject = {
+        "source": "single_call_committed_session_summary",
+        "call_count": model_calls,
+        "repair_attempts": repair_attempts,
+        "parse_repair_attempts": parse_repair_attempts,
+        "attempts": attempts,
+        "provider_failure_status": provider_failure_status,
+        "public_error_code_count": len(error_codes),
+    }
     return {
         "mode": "live_execution",
         "source": {
@@ -2057,13 +2221,20 @@ def _live_execution_provenance(
             "case_sha256": hashlib.sha256(case.prompt.encode("utf-8")).hexdigest(),
             "classifier_hashes": classifier_prompt_hashes,
         },
+        "capability": {
+            "source": "slot_classification_prompt_hash_composite",
+            "classifier_prompt_hashes": classifier_prompt_hashes,
+            "effective_optional_kwargs_fingerprint": capability_fingerprint,
+        },
+        "proposal_progress": {
+            **progress_payload,
+            "fingerprint": _canonical_sha256(progress_payload),
+        },
         "usage": {
-            "prompt_tokens": _int_value(telemetry.get("prompt_tokens_total")) or 0,
-            "completion_tokens": (
-                _int_value(telemetry.get("completion_tokens_total")) or 0
-            ),
-            "total_tokens": _int_value(telemetry.get("total_tokens_total")) or 0,
-            "model_calls": _int_value(telemetry.get("llm_calls_made_total")) or 0,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "model_calls": model_calls,
             "raw_reads": _classifier_raw_read_metrics(classifier_diagnostics),
         },
     }
@@ -2111,7 +2282,11 @@ def _classifier_raw_read_metrics(
     }
 
 
-def _live_provenance_checks(provenance: Mapping[str, object]) -> list[JsonObject]:
+def _live_provenance_checks(
+    provenance: Mapping[str, object],
+    *,
+    expected: Mapping[str, object] | None = None,
+) -> list[JsonObject]:
     source = provenance.get("source")
     source = source if isinstance(source, Mapping) else {}
     build = provenance.get("build")
@@ -2160,7 +2335,7 @@ def _live_provenance_checks(provenance: Mapping[str, object]) -> list[JsonObject
             "truncated_source_count",
         )
     )
-    return [
+    checks: list[JsonObject] = [
         {
             "name": "live_source_provenance_complete",
             "passed": source_complete,
@@ -2190,6 +2365,136 @@ def _live_provenance_checks(provenance: Mapping[str, object]) -> list[JsonObject
             "passed": usage_complete,
             "actual": dict(usage),
             "expected": "token, model-call, and classifier raw-read metrics",
+        },
+    ]
+    first_pass = (
+        expected.get("expected_first_pass_authoring")
+        if isinstance(expected, Mapping)
+        else None
+    )
+    if isinstance(first_pass, Mapping):
+        checks.extend(
+            _first_pass_provenance_checks(
+                provenance=provenance,
+                expected=first_pass,
+            )
+        )
+    return checks
+
+
+def _first_pass_provenance_checks(
+    *,
+    provenance: Mapping[str, object],
+    expected: Mapping[str, object],
+) -> list[JsonObject]:
+    capability = provenance.get("capability")
+    capability = capability if isinstance(capability, Mapping) else {}
+    classifier_hashes = _string_list(capability.get("classifier_prompt_hashes"))
+    capability_fingerprint = capability.get("effective_optional_kwargs_fingerprint")
+    capability_complete = (
+        expected.get("require_effective_optional_kwargs_fingerprint") is True
+        and capability.get("source") == "slot_classification_prompt_hash_composite"
+        and bool(classifier_hashes)
+        and all(_is_sha256(item) for item in classifier_hashes)
+        and _is_sha256(capability_fingerprint)
+        and capability_fingerprint
+        == _canonical_sha256({"classifier_prompt_hashes": classifier_hashes})
+    )
+    progress = provenance.get("proposal_progress")
+    progress = progress if isinstance(progress, Mapping) else {}
+    progress_payload = {
+        key: progress.get(key)
+        for key in (
+            "source",
+            "call_count",
+            "repair_attempts",
+            "parse_repair_attempts",
+            "attempts",
+            "provider_failure_status",
+            "public_error_code_count",
+        )
+    }
+    progress_fingerprint = progress.get("fingerprint")
+    progress_complete = (
+        expected.get("require_progress_fingerprint") is True
+        and progress.get("source") == "single_call_committed_session_summary"
+        and _is_sha256(progress_fingerprint)
+        and progress_fingerprint == _canonical_sha256(progress_payload)
+    )
+    expected_calls = _int_value(expected.get("proposal_call_count"))
+    expected_max_repairs = _int_value(expected.get("max_repair_attempts"))
+    repair_attempts = _int_value(progress.get("repair_attempts"))
+    parse_repair_attempts = _int_value(progress.get("parse_repair_attempts"))
+    attempts = _mapping_list(progress.get("attempts"))
+    attempt = attempts[0] if len(attempts) == 1 else None
+    attempt_complete = (
+        expected_calls == 1
+        and attempt is not None
+        and attempt.get("attempt") == 1
+        and attempt.get("kind") == "initial"
+        and attempt.get("call_count") == 1
+        and attempt.get("elapsed_scope") == "proposal_turn_upper_bound"
+        and all(
+            isinstance(attempt.get(key), int)
+            and not isinstance(attempt.get(key), bool)
+            and attempt.get(key) >= 0
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "elapsed_ms",
+            )
+        )
+        and attempt.get("token_usage_source") in {"provider", "litellm_estimate"}
+        and isinstance(attempt.get("token_usage_estimated"), bool)
+    )
+    expected_failure_status = expected.get("provider_failure_status")
+    return [
+        {
+            "name": "first_pass_effective_optional_kwargs_fingerprint",
+            "passed": capability_complete,
+            "actual": dict(capability),
+            "expected": "capability-sensitive classifier request fingerprint",
+        },
+        {
+            "name": "first_pass_progress_fingerprint",
+            "passed": progress_complete,
+            "actual": progress_fingerprint,
+            "expected": _canonical_sha256(progress_payload),
+        },
+        {
+            "name": "first_pass_proposal_call_count",
+            "passed": progress.get("call_count") == expected_calls,
+            "actual": progress.get("call_count"),
+            "expected": expected_calls,
+        },
+        {
+            "name": "first_pass_zero_repairs",
+            "passed": (
+                repair_attempts is not None
+                and parse_repair_attempts is not None
+                and expected_max_repairs is not None
+                and repair_attempts <= expected_max_repairs
+                and parse_repair_attempts <= expected_max_repairs
+            ),
+            "actual": {
+                "repair_attempts": repair_attempts,
+                "parse_repair_attempts": parse_repair_attempts,
+            },
+            "expected": {"maximum_each": expected_max_repairs},
+        },
+        {
+            "name": "first_pass_attempt_evidence",
+            "passed": attempt_complete,
+            "actual": [dict(item) for item in attempts],
+            "expected": "one bounded initial call/token/elapsed record",
+        },
+        {
+            "name": "first_pass_provider_failure_provenance",
+            "passed": progress.get("provider_failure_status")
+            == expected_failure_status,
+            "actual": progress.get("provider_failure_status"),
+            "expected": expected_failure_status,
         },
     ]
 
@@ -2656,6 +2961,7 @@ def _summarize_plan(plan: JsonObject | None) -> JsonObject:
                     if isinstance(instructions, str)
                     else False
                 ),
+                "has_assistant_spec": isinstance(assistant_spec, Mapping),
             }
         )
     terminal_step = step_summaries[-1] if step_summaries else {}
@@ -3422,6 +3728,33 @@ def _quality_report(
                 expected=expected_review_policy,
             )
         )
+    expected_first_pass = expected.get("expected_first_pass_authoring")
+    if isinstance(expected_first_pass, Mapping):
+        checks.extend(
+            _first_pass_authoring_plan_checks(
+                summary=summary,
+                expected=expected_first_pass,
+                analysis_field_groups=_field_groups_from_expected_key(
+                    expected,
+                    "expected_leaf_output_field_groups",
+                ),
+            )
+        )
+        review_targets = _mapping_list(expected_first_pass.get("review_targets"))
+        checks.extend(
+            _first_pass_review_policy_checks(
+                scope="proposed",
+                summary=summary,
+                expected_targets=review_targets,
+            )
+        )
+        checks.extend(
+            _first_pass_review_policy_checks(
+                scope="applied",
+                summary=_summarize_applied_flow(applied_flow),
+                expected_targets=review_targets,
+            )
+        )
     expected_runtime_evidence = expected.get("expected_runtime_evidence")
     if isinstance(expected_runtime_evidence, Mapping):
         checks.extend(
@@ -3844,6 +4177,200 @@ def _review_policy_checks(
             "passed": not target_is_terminal_or_delivery,
             "actual": actual_target,
             "expected": "non-terminal non-delivery step",
+        },
+    ]
+
+
+def _first_pass_authoring_plan_checks(
+    *,
+    summary: Mapping[str, object],
+    expected: Mapping[str, object],
+    analysis_field_groups: list[list[str]],
+) -> list[JsonObject]:
+    steps = _step_summaries(summary)
+    expected_types = _string_list(expected.get("expected_step_output_types"))
+    expected_modes = _string_list(expected.get("expected_step_output_modes"))
+    actual_pipeline = [
+        {
+            "output_type": step.get("output_type"),
+            "output_mode": step.get("output_mode"),
+        }
+        for step in steps
+    ]
+    expected_pipeline = [
+        {"output_type": output_type, "output_mode": output_mode}
+        for output_type, output_mode in zip(expected_types, expected_modes, strict=True)
+    ]
+    writer_steps = [
+        step
+        for step in steps
+        if step.get("has_assistant_spec") is True
+        and step.get("output_type") == "text"
+        and step.get("output_mode") == "pass_through"
+    ]
+    expected_writer_count = _int_value(expected.get("document_writer_count"))
+    names = _clean_strings([step.get("name") for step in steps])
+    normalized_names = [_normalized_field_name(name) for name in names]
+    analysis_steps = [step for step in steps if step.get("output_type") == "json"]
+    analysis_fields = _clean_strings(
+        [
+            field
+            for step in analysis_steps
+            for field in _string_list(step.get("output_contract_leaf_properties"))
+        ]
+    )
+    normalized_analysis_fields = {
+        _normalized_field_name(field) for field in analysis_fields
+    }
+    missing_analysis_field_groups = [
+        group
+        for group in analysis_field_groups
+        if not any(
+            _normalized_field_name(label) in normalized_analysis_fields
+            for label in group
+        )
+    ]
+    outline_groups = _field_groups_from_expected_key(
+        expected,
+        "report_section_groups",
+    )
+    writer_text = " ".join(
+        str(step.get(key) or "")
+        for step in writer_steps
+        for key in (
+            "name",
+            "instruction_excerpt",
+            "output_contract_leaf_properties",
+        )
+    )
+    normalized_writer_text = _normalized_field_name(writer_text)
+    missing_outline_groups = [
+        group
+        for group in outline_groups
+        if not any(
+            _normalized_field_name(label) in normalized_writer_text for label in group
+        )
+    ]
+    forbidden_heading_groups = _field_groups_from_expected_key(
+        expected,
+        "forbidden_task_heading_groups",
+    )
+    promoted_heading_groups = [
+        group
+        for group in forbidden_heading_groups
+        if any(
+            _normalized_field_name(label) in normalized_writer_text for label in group
+        )
+    ]
+    return [
+        {
+            "name": "first_pass_pipeline",
+            "passed": actual_pipeline == expected_pipeline,
+            "actual": actual_pipeline,
+            "expected": expected_pipeline,
+        },
+        {
+            "name": "first_pass_typed_analysis_contract",
+            "passed": (
+                len(analysis_steps) == 1 and missing_analysis_field_groups == []
+            ),
+            "actual": {
+                "json_step_count": len(analysis_steps),
+                "fields": analysis_fields,
+                "missing_groups": missing_analysis_field_groups,
+            },
+            "expected": analysis_field_groups,
+        },
+        {
+            "name": "first_pass_document_writer_count",
+            "passed": len(writer_steps) == expected_writer_count,
+            "actual": len(writer_steps),
+            "expected": expected_writer_count,
+        },
+        {
+            "name": "first_pass_unique_step_names",
+            "passed": (
+                len(names) == len(steps)
+                and len(normalized_names) == len(set(normalized_names))
+            ),
+            "actual": names,
+            "expected": "unique non-empty step names",
+        },
+        {
+            "name": "first_pass_report_outline",
+            "passed": missing_outline_groups == [],
+            "actual": {"missing_groups": missing_outline_groups},
+            "expected": outline_groups,
+        },
+        {
+            "name": "first_pass_task_headings_not_promoted",
+            "passed": promoted_heading_groups == [],
+            "actual": promoted_heading_groups,
+            "expected": [],
+        },
+    ]
+
+
+def _first_pass_review_policy_checks(
+    *,
+    scope: str,
+    summary: Mapping[str, object],
+    expected_targets: list[Mapping[str, object]],
+) -> list[JsonObject]:
+    steps = _step_summaries(summary)
+    review_steps = [
+        step for step in steps if isinstance(step.get("review_policy"), Mapping)
+    ]
+    unmatched_steps = list(review_steps)
+    missing_targets: list[JsonObject] = []
+    for target in expected_targets:
+        matching_index = next(
+            (
+                index
+                for index, step in enumerate(unmatched_steps)
+                if step.get("review_mode") == target.get("mode")
+                and step.get("output_type") == target.get("output_type")
+                and step.get("output_mode") == target.get("output_mode")
+            ),
+            None,
+        )
+        if matching_index is None:
+            missing_targets.append(dict(target))
+        else:
+            unmatched_steps.pop(matching_index)
+    actual_targets = [
+        {
+            "order": step.get("order"),
+            "mode": step.get("review_mode"),
+            "output_type": step.get("output_type"),
+            "output_mode": step.get("output_mode"),
+        }
+        for step in review_steps
+    ]
+    producing_steps_only = all(
+        step.get("output_type") not in {"pdf", "docx"}
+        and step.get("output_mode") not in {"render_verbatim", "http_post"}
+        and (_int_value(step.get("order")) or len(steps)) < len(steps)
+        for step in review_steps
+    )
+    return [
+        {
+            "name": f"first_pass_{scope}_review_policy_count",
+            "passed": len(review_steps) == len(expected_targets),
+            "actual": len(review_steps),
+            "expected": len(expected_targets),
+        },
+        {
+            "name": f"first_pass_{scope}_review_policy_targets",
+            "passed": not missing_targets and not unmatched_steps,
+            "actual": actual_targets,
+            "expected": [dict(target) for target in expected_targets],
+        },
+        {
+            "name": f"first_pass_{scope}_review_policy_producing_steps",
+            "passed": producing_steps_only and bool(review_steps),
+            "actual": actual_targets,
+            "expected": "non-terminal producing steps only",
         },
     ]
 
