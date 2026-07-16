@@ -36,8 +36,9 @@ Hub.
 Municipal staff spend less time duplicating work. They can share solutions that
 have worked elsewhere, understand Assistants as smaller named capabilities, and
 choose when to adopt a new version. Delivery follows that value chain: local
-Skills first, portable Skill/Assistant packages second, then the central
-Marketplace and native Eneo connection.
+Skills first, selective loading for Assistants and personal chat after the
+internal MCP foundation, portable Skill/Assistant packages next, and then the
+central Marketplace and native Eneo connection.
 
 ## Outcome
 
@@ -61,9 +62,10 @@ decisions are accepted.
 
 An Eneo Skill is a reusable, versioned set of plain-text instructions. It belongs
 to one Space. Any number of Assistants and Apps in that Space may bind an exact
-Skill revision. Eneo composes every bound revision on every invocation, in the
-binding order. A Skill is not executable code, a tool, an Assistant, or a Group
-Chat.
+Skill revision. The first local release composes every bound revision on every
+invocation, in binding order. A later gated delivery may load selected Assistant
+and personal-chat Skills on demand; Apps remain eager. A Skill is not executable
+code, a tool, an Assistant, or a Group Chat.
 
 The Hub and Eneo keep human identity completely separate. The Hub authenticates
 a registered Eneo installation as a machine. A logged-in local tenant
@@ -76,25 +78,31 @@ the team accepts it and revises the existing launch decision identified below.
 
 ### Independent decision layers
 
-This blueprint has three independently acceptable layers. Acceptance of one does
+This blueprint has four independently acceptable layers. Acceptance of one does
 not authorize implementation of the next:
 
 1. **Local Skills:** immutable Skill revisions, revision-pinned Assistant/App
    bindings, deterministic always-on composition, local permissions, and package-
    ready snapshots. This layer has no Hub dependency.
-2. **Package verticals:** strict Assistant, App, Skill, and later Knowledge Bundle
-   profiles. Each owns its plan, apply, receipt, and failure behavior. App
-   knowledge, Flow Skill snapshots, and any future selective activation have
-   separate gates.
-3. **Marketplace Hub:** one external catalog and distribution service plus the
+2. **Selective activation:** trusted on-demand loading for Assistant and
+   organisation-configured personal-chat bindings after the internal MCP
+   foundation. Apps remain eager.
+3. **Package verticals:** strict Assistant, App, Skill, and later Knowledge Bundle
+   profiles. Each owns its plan, apply, receipt, and failure behavior. The
+   Assistant profile starts only after the selective-activation contract is
+   implemented, so it preserves binding behavior rather than freezing an
+   always-only shape. App knowledge and Flow Skill snapshots retain separate
+   gates.
+4. **Marketplace Hub:** one external catalog and distribution service plus the
    native Eneo connector. A Flow-only pilot proves this trust boundary before the
    Hub enables later package kinds.
 
 The first end-to-end Marketplace slice is Flow-only because the Flow package
 vertical already exists. The first local Skill slice has one deterministic
-binding behavior: every pinned revision is composed in order. Selective or
-automatic activation and source-bearing packages remain separate future
-decisions.
+binding behavior: every pinned revision is composed in order. Selective
+activation is a separate required delivery after the trusted internal MCP
+foundation and before Assistant package portability. Source-bearing packages
+remain a separate future decision.
 
 ## Problem and why it matters
 
@@ -285,8 +293,9 @@ Eneo implements the instruction-only core of the
 maps to required `name`, description maps to required `description`, and the
 Markdown instructions map to the `SKILL.md` body. The display name is an Eneo
 authoring field. In S1, description remains human and portability metadata; it
-should explain what the Skill does and when an author should bind it, but it does
-not trigger request-dependent activation.
+should explain what the Skill does and when an author should bind it. The
+selective-activation delivery reuses that same immutable description in its
+bounded discovery catalog. Description alone never grants activation authority.
 
 Eneo does not claim that its database row or `.eneopkg` snapshot is a complete
 Agent Skills directory. S1 deliberately rejects optional `allowed-tools`,
@@ -395,6 +404,11 @@ ordinary parent field changed. Same-Space violation, missing exact revision,
 inactive new binding, binding-limit violation, context-fit failure, or any
 ordinary parent validation failure rolls back the whole parent update.
 
+The presentation boundary maps each wire reference into the domain-owned
+`SkillBindingReference`. The named Skill and revision fields remain intact
+through parent services, `SkillService`, and `SkillRepo`; positional UUID tuples
+are not an internal binding contract.
+
 Skill creation remains an ordinary visible Space-library action with its own
 successful transaction. Creating a Skill from an editor does not attach it. If
 the author later discards the editor or the parent save fails, the valid unbound
@@ -482,15 +496,42 @@ policy.
 A Skill cannot call another Assistant, become a hidden Group Chat participant, or
 acquire independent tool permissions.
 
-### Deferred selective activation
+### Selective activation delivery gate
 
-Automatic or request-selective activation is not part of S1, the S1 schema,
-or the S2 portable contract. A later ADR may add it only with a product owner,
-typed authoring semantics, multilingual municipal evaluation corpus, model-family
-quality thresholds, latency and token budgets, failure evidence, and a migration
-from the always-composed contract. Until then, APIs reject rather than persist
-activation state. Manual one-turn mentions and conversation-level toggles are
-also separate future features.
+Request-selective activation is not part of S1 or its schema. Until the complete
+runtime lands, APIs do not expose or persist activation state and the UI makes no
+on-demand claim. [Development Task #553](https://github.com/eneo-ai/eneo/issues/553)
+owns the end-to-end delivery after the internal MCP foundation in
+[PR #538](https://github.com/eneo-ai/eneo/pull/538) has merged. It must complete
+before S2 freezes the portable Assistant binding contract.
+
+The delivery adds a closed `always | on_demand` mode to Assistant and Governance
+Policy bindings, defaulting existing rows to `always`. Apps stay eager and gain
+no mode. `SkillRevision.description` remains the single authoring and discovery
+source; no parallel activation-hint field is introduced.
+
+Before a provider call, Eneo resolves one immutable turn plan containing exact
+available revisions, initially active revisions, body-bearing in-memory
+bindings, and a bounded description-only catalog. Available references are
+retained separately from the revisions that actually enter the system prompt.
+Activation always resolves against that turn plan, never current mutable
+bindings.
+
+One parameterized internal Skills tool is registered through the internal MCP
+owner. Its result becomes a narrow trusted prompt-activation effect at the
+completion-loop boundary, not ordinary tool text and not a `SkillService`
+dependency in a model adapter. Activation takes precedence over sibling tool
+calls from the same round, replaces the system prompt with the exact pinned
+revision, recalculates context fit, and is idempotent. Streaming and non-streaming
+paths share those semantics. External MCP servers cannot forge the effect.
+
+Tool-capable models initially receive always-active bodies plus the compact
+catalog. Models without tool calling fall back to eager composition and record
+that effective behavior. Success, abort, and failure paths retain body-free
+available and active evidence. The same delivery adds generated contracts,
+Swedish/English shadcn-svelte controls, capability-aware explanation, and
+behavior tests. Manual one-turn mentions, conversation toggles, Group Chat
+routing, and generic control-effect frameworks remain outside this gate.
 
 ## Deferred Skill knowledge and portable source documents
 
@@ -662,7 +703,8 @@ shape. The logical contract is:
   "skill_bindings": [
     {
       "skill_ref": "salary-questions",
-      "position": 0
+      "position": 0,
+      "activation_mode": "on_demand"
     }
   ]
 }
@@ -675,11 +717,13 @@ invariants are:
   coordinate; no local UUID appears;
 - keys, slugs, references, Skill identities, and positions are unique in their
   respective scopes;
+- Assistant bindings carry the closed `always | on_demand` mode implemented by
+  Task #553. A future App profile remains eager and rejects `on_demand`;
 - a parent profile references every embedded Skill exactly once; a standalone
   Skill profile has no parent-binding list;
 - the strict parser rejects unknown fields, duplicate keys, dangling references,
-  extra bindings, and fields for activation, enabled state, knowledge, tools,
-  scripts, assets, or credentials;
+  extra bindings, unknown activation modes, enabled state, selector
+  configuration, knowledge, tools, scripts, assets, or credentials;
 - slug, display-name, and description limits equal the local fixed constraints;
 - instructions have no character or line cap, while the archive profile retains
   bounded entry/archive bytes and install planning validates model context fit;
@@ -688,7 +732,7 @@ invariants are:
 - the destination's configured `SKILL_MAX_BINDINGS` guardrail is checked during
   planning, not encoded as a universal package limit; and
 - the package content checksum covers exact Skill content, digests, references,
-  binding positions, and the parent payload.
+  binding positions, activation modes, and the parent payload.
 
 A parent release embeds each exact pinned Skill revision it needs. It has no
 runtime or install-time dependency on a mutable standalone Skill listing.
@@ -730,7 +774,7 @@ Skills only after the Flow snapshot/runtime gate above.
 | Kind                        | Portable content                                                                                                                                                                          | Logical/local requirements                                                                                                               | Plan and apply owner                                                                                    | Receipt and external-work boundary                                                                                      |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Flow                        | Existing strict Flow draft, requirements, provenance, and no new v1 entries.                                                                                                              | Models and knowledge map to authorized target-Space resources.                                                                           | Existing `flow_packages` planner and `FlowAuthoringCommandService`.                                     | Existing concrete Flow import record; one local draft transaction.                                                      |
-| Assistant                   | Name, description, base instructions, bounded model parameters, exact nested Skill snapshots/bindings, and later embedded source snapshots.                                               | Logical completion model and authorized local knowledge/capability mappings; no local IDs or MCP credentials/configuration.              | Future `assistant_packages` planner ending in the canonical Assistant authoring/configuration owner.    | Concrete Assistant receipt. Instruction-only apply is transactional; source ingestion uses the durable operation above. |
+| Assistant                   | Name, description, base instructions, bounded model parameters, exact nested Skill snapshots/bindings with activation mode, and later embedded source snapshots.                          | Logical completion model and authorized local knowledge/capability mappings; no local IDs or MCP credentials/configuration.              | Future `assistant_packages` planner ending in the canonical Assistant authoring/configuration owner.    | Concrete Assistant receipt. Instruction-only apply is transactional; source ingestion uses the durable operation above. |
 | App                         | Name, description, instructions, typed input definition, bounded model parameters, transcription requirement, exact nested instruction-only Skills, and safe static assets when profiled. | Local completion/transcription model mapping. Skill knowledge is unsupported until Apps own retrieval.                                   | Future `app_packages` planner ending in the canonical App service.                                      | Concrete App receipt; instruction-only apply is transactional.                                                          |
 | Skill                       | Slug, display name, description, Markdown instructions, digest, and later language/tags only through an accepted contract revision.                                                       | No activation state, tool/model grant, knowledge, scripts, assets, credentials, or local IDs. Standalone import chooses a target Space.  | `skill_packages` planner ending in `eneo.skills`.                                                       | Concrete Skill receipt; creates one inactive, unbound Skill and first revision.                                         |
 | Knowledge Bundle (deferred) | Original allowlisted source files plus exact inventory, digest, provenance, license, classification, and use metadata.                                                                    | Target Collection/embedding choice and destination policy; never extracted text, chunks, embeddings, vectors, credentials, or local IDs. | `knowledge_packages` planner delegating file/Collection creation and ingestion to current local owners. | Concrete knowledge receipt plus durable staged ingestion/cleanup state; no claim of one cross-worker transaction.       |
@@ -1234,7 +1278,7 @@ An unresolved row blocks only the dependent layer named in the last column.
 | Instance authentication                 | OAuth client credentials using `private_key_jwt` or mTLS, short-lived scoped tokens.                           | Mechanism/lifetime/rotation owner open                                   | Connector enrollment          |
 | Release version/update                  | Hub SemVer, immutable/yank/revoke, install-new only; no auto-update or merge.                                  | Recommended for acceptance                                               | Hub release/install           |
 | Signing                                 | Deferred until offline Hub-origin proof, mirrors, federation, third parties, or regulation creates the threat. | Deferred trigger                                                         | No first-release blocker      |
-| Selective Skill activation               | S1 and S2 compose all bindings; a later ADR must own selection semantics and evidence.                       | Deferred; no schema or portable field                                    | No initial-phase blocker      |
+| Selective Skill activation               | S1 stays eager. Task #553 adds the complete trusted runtime after PR #538 and before S2 freezes Assistant bindings. | Planned; no partial schema or UI in S1                                   | PR #538 and Task #553         |
 | Source asset limits/scanning            | Separate Knowledge Bundle Gate 0 selects media types, caps, scanners, quarantine SLA, and cleanup.             | Open                                                                     | Source-bearing packages       |
 | Template catalogs                       | Keep tenant templates as local shortcuts; choose migration/deletion plan for global galleries.                 | Deployed-row preflight and product decision open                         | Cross-instance catalog launch |
 | Telemetry/privacy                       | Instance-level authorized/denied download counts only by default; no Eneo human/content/local IDs.             | Retention/analytics policy open                                          | Publisher analytics           |
@@ -1250,24 +1294,26 @@ The canonical delivery records are
 [Marketplace Epic #546](https://github.com/eneo-ai/eneo/issues/546). This ADR
 defines the contract and gates; the Epics track status and implementation work.
 
-The selected execution order is Skills first. The initial capability has two
-gated review units in `eneo-ai/eneo`. S1 merges into `develop`; S2 starts from the
-resulting `develop` and merges afterward. No Marketplace implementation, native
-connector work, scaffold, or deployment change begins before S2 merges. A
-planning-only Marketplace README is the sole permitted repository change during
-this phase.
+The selected execution order is Skills first. S1 merges into `develop`; the
+internal MCP foundation in PR #538 then enables Task #553 to add selective
+Assistant and personal-chat activation; S2 starts from the resulting `develop`
+and adds portability. No Marketplace implementation, native connector work,
+scaffold, or deployment change begins before S2 merges. A planning-only
+Marketplace README is the sole permitted repository change during this phase.
 
 ### Active Skills phase
 
-The initial capability has two product review units in `eneo-ai/eneo`. S1 is
-the complete local vertical, not separate backend and frontend deliveries. S2
-starts from `develop` after S1 merges and adds package portability. Marketplace
-implementation begins only after both merge.
+The initial capability has three product review units in `eneo-ai/eneo`. S1 is
+the complete eager local vertical, not separate backend and frontend deliveries.
+Task #553 is one end-to-end selective-activation vertical after PR #538. S2 then
+adds package portability from updated `develop`. Marketplace implementation
+begins only after all three merge.
 
 | Review unit | Included outcome | Required proof before merge | Deliberately excluded |
 | --- | --- | --- | --- |
 | **S1 — First-class local Skills** | Instruction-only Space-owned Skills; immutable revisions; reusable exact-revision Assistant/App bindings; governance-owned organizational Skills for personal chat; deterministic runtime composition; provenance; permissions, generated contracts, editors, migration, and audit. | Database/domain invariants, session and permission checks, context-fit rejection, provider-prompt and queue-snapshot behavior, governance precedence, transfer/deletion safety, generated-client checks, Swedish/English UI, accessibility, and unchanged behavior without Skills. | Package changes, Marketplace code, activation modes, selectors, Skill knowledge, scripts/assets, App knowledge, Flow snapshots, and Group Chat changes. |
-| **S2 — Portable Skill and Assistant packages** | Earned package-mechanics extraction; exact instruction-only Skill snapshot; standalone Skill and Assistant-with-nested-Skills export/read/plan/install; concrete receipts; versioned contract bundle, digest, and valid/invalid fixtures. | Existing Flow behavior stays green; closed-kind rejection, exact round trips, clean installs, conflict plans, context-fit and configured-guardrail checks, concrete receipts, generated contracts, and cross-consumer fixture conformance pass. | Hub/connector code, App portability, Flow Skills, source bytes, mutable dependencies, automatic reuse/merge, in-place update, or a generic installer. |
+| **Selective Assistant and personal-chat activation — Task #553** | Closed binding mode, immutable turn plan, trusted internal activation effect, context recheck, capability fallback, truthful available/active evidence, and honest generated UI. Apps remain eager. | Existing rows stay `always`; exact pinned activation works in streaming and non-streaming paths; sibling calls, external forgery, concurrent edits, overflow, abort/error, fallback, governance precedence, and zero-Skill behavior are tested. | Packages, Marketplace code, App activation, Skill knowledge, Group Chat routing, and generic control-effect/plugin frameworks. |
+| **S2 — Portable Skill and Assistant packages** | Earned package-mechanics extraction; exact instruction-only Skill snapshot; standalone Skill and Assistant-with-nested-Skills plus binding modes export/read/plan/install; concrete receipts; versioned contract bundle, digest, and valid/invalid fixtures. | Existing Flow behavior stays green; closed-kind rejection, exact round trips, clean installs, conflict plans, activation-mode preservation, context-fit and configured-guardrail checks, concrete receipts, generated contracts, and cross-consumer fixture conformance pass. | Hub/connector code, App portability, Flow Skills, source bytes, mutable dependencies, automatic reuse/merge, in-place update, or a generic installer. |
 
 These review units may use several focused commits. They remain one reviewable
 change set per unit unless a concrete review or migration risk forces the team
@@ -1295,10 +1341,10 @@ governance.
 
 | Slice and canonical owner | Change | Depends on | Acceptance evidence |
 | --- | --- | --- | --- |
-| **S2.1 — Earned package mechanics**: current Flow package mechanics, then `eneo.packages` | Move only archive, manifest-coordinate, exact-digest, and closed-dispatch code that now has at least two consumers. Keep kind entry sets and validation in their verticals; delete the old generic copies in the same mechanical commit. | S1 merged to `develop`. | Existing Flow package bytes, plans, receipts, round trips, and strict invalid fixtures remain unchanged immediately after the move; dependency tests forbid vertical imports and kind-named validators in `eneo.packages`. |
-| **S2.2 — Canonical Skill snapshot**: `eneo.skills` portable contract | Define the strict fields above, Agent Skills core-field mapping, digest rules, fixed metadata constraints, destination guardrail/context checks, generated schema, and valid/invalid conformance fixtures. | S2.1. | Supported `name`/description/Markdown mapping round-trips; unknown/extra fields, local IDs, activation, knowledge, executable content, bad references, duplicate keys/positions, digest mismatch, unsafe archives, configured-limit failure, and context-fit failure reject before mutation. |
+| **S2.1 — Earned package mechanics**: current Flow package mechanics, then `eneo.packages` | Move only archive, manifest-coordinate, exact-digest, and closed-dispatch code that now has at least two consumers. Keep kind entry sets and validation in their verticals; delete the old generic copies in the same mechanical commit. | S1 and Task #553 merged to `develop`. | Existing Flow package bytes, plans, receipts, round trips, and strict invalid fixtures remain unchanged immediately after the move; dependency tests forbid vertical imports and kind-named validators in `eneo.packages`. |
+| **S2.2 — Canonical Skill snapshot**: `eneo.skills` portable contract | Define the strict fields above, Agent Skills core-field mapping, binding-mode mapping, digest rules, fixed metadata constraints, destination guardrail/context checks, generated schema, and valid/invalid conformance fixtures. | S2.1. | Supported `name`/description/Markdown and closed binding-mode mapping round-trip; unknown/extra fields, invalid modes, local IDs, knowledge, executable content, bad references, duplicate keys/positions, digest mismatch, unsafe archives, configured-limit failure, and context-fit failure reject before mutation. |
 | **S2.3 — Standalone Skill vertical**: `skill_packages` | Export one exact revision; read and plan a target Space/slug; apply through the Skill owner; create one inactive, unbound Skill at local revision 1; write a concrete Skill receipt. | S2.2. | Export-read-plan-install-export preserves semantic content; slug conflict is explicit; retries are idempotent; wrong-kind and unauthorized installs fail before mutation; receipt FK and terminal invariants hold. |
-| **S2.4 — Assistant with nested Skills vertical**: `assistant_packages` and canonical Assistant authoring owner | Export base Assistant content plus exact pinned Skill snapshots and positions; plan model/knowledge mappings and every new identity; install nested Skills and one unpublished Assistant transactionally; write a concrete Assistant receipt. | S2.2 and S2.3 primitives, without calling the standalone installer as a generic wrapper. | Clean-instance round trip preserves instructions, positions, digests, and unpublished state; destination conflicts and unsupported fields are visible; failure creates no partial parent or Skills; installed execution matches the preview. |
+| **S2.4 — Assistant with nested Skills vertical**: `assistant_packages` and canonical Assistant authoring owner | Export base Assistant content plus exact pinned Skill snapshots, positions, and activation modes; plan model/knowledge mappings and every new identity; install nested Skills and one unpublished Assistant transactionally; write a concrete Assistant receipt. | S2.2 and S2.3 primitives, without calling the standalone installer as a generic wrapper. | Clean-instance round trip preserves instructions, positions, modes, digests, and unpublished state; destination conflicts and unsupported fields are visible; failure creates no partial parent or Skills; installed execution matches the preview. |
 | **S2.5 — Contract release gate**: package contract bundle and both product verticals | Publish a release-ready versioned bundle and digest from an exact Eneo commit through the later approved artifact channel; document compatibility and Marketplace dependencies. | S2.1–S2.4. | Eneo passes all canonical valid/invalid fixtures, generated clients/examples agree, and the bundle contains no planner, installer, receipt, ORM, or runtime dependency. No Hub advertises the profile yet. |
 
 S2 deliberately stops at standalone Skill and Assistant portability. App
@@ -1307,9 +1353,10 @@ own product and runtime gates.
 
 ### Later Marketplace phase
 
-The Marketplace Epic remains `Future` and blocked until both Skills review units have
-merged into `develop`. Clearing this execution-order blocker permits Marketplace
-task planning; it does not resolve the Marketplace Gate-0 decisions.
+The Marketplace Epic remains `Future` and blocked until the eager local Skills,
+selective-activation, and package-portability review units have merged into
+`develop`. Clearing this execution-order blocker permits Marketplace task
+planning; it does not resolve the Marketplace Gate-0 decisions.
 
 A planning-only README may record the Hub mission, repository boundary, and this
 blocker in `eneo-ai/eneo-marketplace` before S2. It must not add a service
@@ -1355,12 +1402,13 @@ access, and retention; otherwise Gate 0 selects the smallest mechanism that does
 
 ### Deliberately deferred from the initial Skills phase
 
-Automatic Skill activation, Skill knowledge, source-bearing packages and
-Knowledge Bundles, App package portability, App knowledge retrieval, Flow Skill
-snapshots/runtime, detached signing, federation/mirrors, direct publish from Eneo,
-non-admin local browsing, automatic update/merge, Solution Bundles, generic
-dependency graphs, catalog Collections, and global-template migration retain
-their named gates below. They are not hidden work inside S1 or S2.
+Selective Skill activation remains outside S1 and is owned by Task #553 before
+S2. Skill knowledge, source-bearing packages and Knowledge Bundles, App package
+portability, App knowledge retrieval, Flow Skill snapshots/runtime, detached
+signing, federation/mirrors, direct publish from Eneo, non-admin local browsing,
+automatic update/merge, Solution Bundles, generic dependency graphs, catalog
+Collections, and global-template migration retain their named gates below. They
+are not hidden work inside another delivery.
 
 ## Acceptance criteria
 
@@ -1526,7 +1574,7 @@ mock architecture.
 
 | Risk                                                 | Prevention and recovery                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bound Skills conflict or are irrelevant              | S1 is explicit always-composition. Editors show complete ordered content and exact revisions; the fixed boundary preserves platform and governance precedence. Authors remove/reorder bindings or revise content. Selective activation requires a later ADR.              |
+| Bound Skills conflict or are irrelevant              | S1 is explicit always-composition. Editors show complete ordered content and exact revisions; the fixed boundary preserves platform and governance precedence. Authors remove/reorder bindings or revise content. Task #553 adds selective loading as a separate tested runtime. |
 | Skills bypass governance                             | Governance Policy is the only personal-chat Skill owner; direct bindings are rejected and corrupt state fails closed. Prompt enforcement and policy Skills compose in the documented order. Packages cannot carry tenant policy.                                            |
 | Skill revisions drift across parents                 | Bind exact revisions, show update availability, require a per-parent diff/confirmation, and retain old referenced revisions. No edit silently changes a parent.                                                                                                             |
 | Prompt/context growth causes provider failures       | Validate worst permitted combination with the effective model and shared context accounting. Reject before run; never truncate silently.                                                                                                                                    |
@@ -1562,7 +1610,8 @@ resources.
 - No executable Skill, Python/function package, dynamic plugin, MCP configuration,
   credential, automatic tool grant, or remote code interpretation.
 - No activation mode, enabled binding flag, selector, one-turn toggle, or
-  request-dependent Skill routing in S1 or S2.
+  request-dependent routing in S1. After Task #553, S2 may carry only the closed
+  Assistant binding mode; it does not own activation runtime or inference.
 - No semantic/text/digest-based deduplication, automatic merge, reusable/local
   subtype, or implicit binding upgrade.
 - No cross-Space direct binding, tenant-global Skill catalog, direct personal-
