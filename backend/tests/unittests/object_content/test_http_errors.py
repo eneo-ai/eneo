@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from eneo.object_content.content import (
+    ObjectContentDisabledError,
     ObjectContentIdempotencyConflictError,
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
@@ -33,6 +34,15 @@ def test_store_unavailable_has_stable_typed_503_contract() -> None:
         "eneo_error_code": 9038,
         "code": "object_content_unavailable",
     }
+
+
+def test_disabled_capability_has_a_distinct_typed_503_contract() -> None:
+    response = _client_for(
+        ObjectContentDisabledError("Durable object content is disabled")
+    ).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "object_content_disabled"
 
 
 def test_integrity_failure_has_stable_typed_503_contract() -> None:

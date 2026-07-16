@@ -379,9 +379,18 @@ size/type, lifecycle, holds, retention, audit, and bounded reconciliation facts.
 The private S3-compatible endpoint owns durable byte streams. Endpoint, bucket,
 key, and provider details are never exposed by ordinary APIs.
 
-This configuration is a deployment prerequisite: backend and worker refuse to
-start when the mandatory object-content settings are absent or invalid, even
-before an existing byte producer adopts the foundation.
+The reference deployment enables object content. During a custom rollout,
+backend and worker may omit every `OBJECT_CONTENT_*` setting and start with the
+capability explicitly disabled, but only while PostgreSQL has no active
+object-content records. Blank or partial settings fail startup. Disabled
+readiness is healthy with code `disabled`; the public settings response exposes
+only `object_content_enabled=false`, never endpoint, bucket, or key. If active
+records exist, Eneo fails closed with `configuration_required` until the full
+configuration is restored. This is deployment state, not an administrator or
+tenant toggle. API and worker processes evaluate it independently, so give each
+process the same setting set. Before the first active row, any mismatch appears
+in their capability/readiness projections; after a row exists, a disabled
+process fails the safety guard.
 
 The reference deployment starts an Eneo-built SeaweedFS 4.39 image. Eneo pins
 and reviews upstream source, builds minimal non-root amd64/arm64 images, blocks

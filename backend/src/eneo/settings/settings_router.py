@@ -16,6 +16,7 @@ from eneo.settings import settings_factory
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
     GetModelsResponse,
+    SettingsBase,
     SettingsPublic,
     ToggleSettingUpdate,
 )
@@ -48,7 +49,7 @@ async def get_settings(
     responses=responses.get_responses([403]),
 )
 async def upsert_settings(
-    settings: SettingsPublic,
+    settings: SettingsBase,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""

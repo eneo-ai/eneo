@@ -17,7 +17,7 @@ class ObjectContentReconciliationSummary(TypedDict):
 async def reconcile_object_content_task(
     runtime: ObjectContentRuntime = object_content_runtime,
 ) -> ObjectContentReconciliationSummary:
-    result = await runtime.reconciler.run_once()
+    result = await runtime.reconcile_once()
     return {
         "lifecycle_advanced": result.lifecycle_advanced,
         "content_processed": result.content_processed,

@@ -18,7 +18,10 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.observability import init_observability, instrument_fastapi
 from eneo.main.request_context import get_request_context
-from eneo.object_content.runtime import object_content_runtime
+from eneo.object_content.runtime import (
+    ObjectContentReadinessCode,
+    object_content_runtime,
+)
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
 from eneo.server.dependencies.lifespan import lifespan as app_lifespan
@@ -552,6 +555,13 @@ def get_application():
             overall_status = "UNHEALTHY"
             status_code = 503
 
+        if object_content.code is ObjectContentReadinessCode.DISABLED:
+            object_content_status = "DISABLED"
+        elif object_content.ready:
+            object_content_status = "HEALTHY"
+        else:
+            object_content_status = "UNHEALTHY"
+
         # Assemble health response
         response_data = {
             "detail": {
@@ -568,7 +578,7 @@ def get_application():
                     "details": worker_health.details,
                 },
                 "object_content": {
-                    "status": "HEALTHY" if object_content.ready else "UNHEALTHY",
+                    "status": object_content_status,
                     "code": object_content.code.value,
                 },
             }

@@ -109,21 +109,6 @@ if not os.getenv("URL_SIGNING_KEY"):
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
 
-# Generic API integration tests exercise process startup and liveness, not the
-# byte plane. The application fixture applies these explicit settings only while
-# starting its process-owned runtime, so configuration unit tests still observe
-# a genuinely unset environment. The dedicated object_content suite owns real
-# SeaweedFS persistence, integrity, range, multipart, and recovery proof.
-_OBJECT_CONTENT_TEST_ENV = {
-    "OBJECT_CONTENT_ENDPOINT_URL": "http://127.0.0.1:1",
-    "OBJECT_CONTENT_REGION": "local",
-    "OBJECT_CONTENT_BUCKET": "eneo-integration-test",
-    "OBJECT_CONTENT_ACCESS_KEY_ID": "integration-test-key",
-    "OBJECT_CONTENT_SECRET_ACCESS_KEY": "integration-test-secret",
-    "OBJECT_CONTENT_DEPLOYMENT_ID": "1ca60836-7e7c-49c8-b2e1-1fb70dc15cf0",
-    "OBJECT_CONTENT_ALLOW_INSECURE_HTTP": "true",
-}
-
 # Crawler settings - ensure TTL > max_length to pass validation
 # These must be set BEFORE importing any module that calls get_settings()
 if not os.getenv("CRAWL_MAX_LENGTH"):
@@ -592,14 +577,7 @@ async def app(setup_database):
     from eneo.server.dependencies.lifespan import startup
 
     try:
-        # Keep the test endpoint local to runtime construction. Leaving these
-        # values in os.environ for the whole pytest process would mask the
-        # fail-closed configuration contract when unit and integration tests
-        # are collected together, as they are in CI.
-        with pytest.MonkeyPatch.context() as object_content_environment:
-            for name, value in _OBJECT_CONTENT_TEST_ENV.items():
-                object_content_environment.setenv(name, value)
-            await startup()
+        await startup()
 
         # Verify app initialization
         print("\n=== Application Verification ===")

@@ -1,14 +1,42 @@
+import os
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
-from eneo.object_content.configuration import ObjectContentSettings
+from eneo.object_content.configuration import (
+    ObjectContentSettings,
+    load_object_content_settings,
+)
 
 
-def test_object_content_configuration_is_mandatory_and_fail_closed() -> None:
+def _clear_object_content_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+
+
+def test_explicit_object_content_settings_are_mandatory_and_fail_closed() -> None:
     with pytest.raises(ValidationError):
         ObjectContentSettings(_env_file=None)
+
+
+def test_absent_object_content_environment_disables_the_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+
+    assert load_object_content_settings() is None
+
+
+def test_partial_object_content_environment_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv("OBJECT_CONTENT_ENDPOINT_URL", "https://objects.example.test")
+
+    with pytest.raises(ValidationError):
+        load_object_content_settings()
 
 
 def test_object_content_configuration_accepts_private_reference_endpoint() -> None:

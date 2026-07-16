@@ -65,9 +65,12 @@ docker logs eneo_db_init
 # 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
 ```
 
-Durable file bytes require the bundled private object-content service or an
-external endpoint that passes the same S3-compatible contract. See
-[Durable object content](OBJECT_CONTENT.md) before first deployment or restore.
+The reference stack enables the bundled private object-content service. A
+custom rollout may omit all object-content application settings only while
+PostgreSQL has no active object-content rows; partial settings fail startup.
+Once a feature adopts durable file bytes, use the bundled service or an external
+endpoint that passes the same S3-compatible contract. See
+[Durable object content](OBJECT_CONTENT.md) before first use or restore.
 
 ## Network Isolation
 

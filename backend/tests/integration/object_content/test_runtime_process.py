@@ -1,11 +1,15 @@
 import asyncio
+import os
 from collections.abc import Callable
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from testcontainers.postgres import PostgresContainer
 
 from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.object_content_table import ObjectContents
+from eneo.database.tables.tenant_table import Tenants
+from eneo.object_content.content import ObjectContentUnavailableError
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -15,6 +19,46 @@ from tests.integration.object_content.conftest import (
     POSTGRES_13_IMAGE,
     RealObjectStore,
 )
+
+
+@pytest.mark.asyncio
+async def test_disabled_runtime_rejects_active_postgres_content(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+
+    async with object_content_database.session() as session, session.begin():
+        tenant_id = (await session.execute(select(Tenants.id).limit(1))).scalar_one()
+        session.add(
+            ObjectContents(
+                tenant_id=tenant_id,
+                created_by_user_id=None,
+                object_key="v1/disabled-safety-test",
+                state="pending",
+                access_class="private_resource",
+                sha256=b"\0" * 32,
+                size_bytes=0,
+                declared_media_type="application/octet-stream",
+                verified_media_type="application/octet-stream",
+                idempotency_key="disabled-safety-test",
+                request_fingerprint=b"\0" * 32,
+            )
+        )
+
+    runtime = ObjectContentRuntime(object_content_database)
+    runtime.start()
+    try:
+        with pytest.raises(ObjectContentUnavailableError, match="active records"):
+            await runtime.validate_configuration()
+
+        readiness = await runtime.readiness()
+        assert readiness.ready is False
+        assert readiness.code is ObjectContentReadinessCode.CONFIGURATION_REQUIRED
+    finally:
+        await runtime.stop()
 
 
 @pytest.mark.asyncio

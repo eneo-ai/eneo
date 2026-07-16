@@ -42,6 +42,19 @@ class ReconciliationResult:
     multipart_aborted: int
     orphan_objects_deleted: int
 
+    @classmethod
+    def empty(cls) -> "ReconciliationResult":
+        return cls(
+            lifecycle_advanced=0,
+            content_processed=0,
+            references_audited=0,
+            reference_drifts=0,
+            missing_objects=0,
+            object_cycle_completed=False,
+            multipart_aborted=0,
+            orphan_objects_deleted=0,
+        )
+
 
 class ObjectContentReconciler:
     """Converge one bounded page/batch without holding DB locks during S3 I/O."""

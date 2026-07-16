@@ -8,8 +8,14 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.config import get_settings as get_app_settings
 from eneo.main.logging import get_logger
+from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 from eneo.roles.permissions import Permission, validate_permissions
-from eneo.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
+from eneo.settings.settings import (
+    SettingsBase,
+    SettingsInDB,
+    SettingsPublic,
+    SettingsUpsert,
+)
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.tenants.tenant import TenantUpdate
 from eneo.tenants.tenant_repo import TenantRepository
@@ -31,6 +37,7 @@ class SettingService:
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
         audit_service: AuditService,
+        object_content: ObjectContentRuntime = object_content_runtime,
     ):
         super().__init__()
         self.repo = repo
@@ -39,6 +46,7 @@ class SettingService:
         self.feature_flag_service = feature_flag_service
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service
+        self.object_content = object_content
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
@@ -118,6 +126,7 @@ class SettingService:
         return SettingsPublic(
             chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
             or {},
+            object_content_enabled=self.object_content.enabled,
             using_templates=using_templates,
             audit_logging_enabled=audit_logging_enabled,
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
@@ -129,7 +138,7 @@ class SettingService:
         settings = await self.repo.get(self.user.id)
         return await self._build_settings_public(settings_in_db=settings)
 
-    async def update_settings(self, settings: SettingsPublic) -> SettingsPublic:
+    async def update_settings(self, settings: SettingsBase) -> SettingsPublic:
         settings_upsert = SettingsUpsert(**settings.model_dump(), user_id=self.user.id)
 
         existing_settings = await self.repo.get(self.user.id)

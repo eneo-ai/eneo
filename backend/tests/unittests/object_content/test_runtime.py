@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -16,6 +17,7 @@ from eneo.object_content.content import ObjectContentUnavailableError
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
+    ObjectContentRuntimeState,
 )
 from eneo.object_content.s3_object_store import S3ObjectStore
 
@@ -24,16 +26,24 @@ if TYPE_CHECKING:
 
 
 class _ReadinessDatabase(DatabaseSessionManager):
-    def __init__(self, *, available: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        active_object_content: bool = False,
+    ) -> None:
         super().__init__()
         self.available = available
+        self.active_object_content = active_object_content
 
     @asynccontextmanager
     async def connect(self) -> AsyncGenerator[AsyncConnection]:
         if not self.available:
             raise OSError("test PostgreSQL outage")
         connection = MagicMock(spec=AsyncConnection)
-        connection.execute.return_value = None
+        result = MagicMock()
+        result.scalar_one.return_value = self.active_object_content
+        connection.execute = AsyncMock(return_value=result)
         yield cast(AsyncConnection, connection)
 
 
@@ -55,6 +65,66 @@ def test_runtime_fails_closed_before_start() -> None:
 
     with pytest.raises(ObjectContentUnavailableError, match="not initialized"):
         runtime.service
+
+
+@pytest.mark.asyncio
+async def test_absent_configuration_is_an_explicit_healthy_disabled_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+
+    runtime.start()
+    await runtime.validate_configuration()
+    readiness = await runtime.readiness()
+    reconciliation = await runtime.reconcile_once()
+
+    assert runtime.state is ObjectContentRuntimeState.DISABLED
+    assert runtime.enabled is False
+    assert readiness.ready is True
+    assert readiness.code is ObjectContentReadinessCode.DISABLED
+    assert reconciliation.content_processed == 0
+    assert reconciliation.object_cycle_completed is False
+    with pytest.raises(ObjectContentUnavailableError, match="disabled") as error:
+        runtime.service
+    assert error.value.code == "object_content_disabled"
+
+    await runtime.stop()
+    assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_disabled_runtime_fails_closed_when_active_content_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in tuple(os.environ):
+        if name.upper().startswith("OBJECT_CONTENT_"):
+            monkeypatch.delenv(name, raising=False)
+    runtime = ObjectContentRuntime(
+        database=_ReadinessDatabase(active_object_content=True)
+    )
+    runtime.start()
+
+    with pytest.raises(ObjectContentUnavailableError, match="active records"):
+        await runtime.validate_configuration()
+    readiness = await runtime.readiness()
+
+    assert readiness.ready is False
+    assert readiness.code is ObjectContentReadinessCode.CONFIGURATION_REQUIRED
+    with pytest.raises(ObjectContentUnavailableError, match="active records"):
+        await runtime.reconcile_once()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_before_start_remains_a_loud_initialization_error() -> (
+    None
+):
+    runtime = ObjectContentRuntime(database=_ReadinessDatabase())
+
+    with pytest.raises(ObjectContentUnavailableError, match="not initialized"):
+        await runtime.reconcile_once()
 
 
 @pytest.mark.asyncio

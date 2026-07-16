@@ -211,6 +211,14 @@ Flow producers over to the new owner. Those migrations are separate vertical
 slices so each producer can copy and verify bytes before deleting its previous
 authority.
 
+Until a producer adopts the foundation, a deployment may omit every
+`OBJECT_CONTENT_*` setting and run with an explicit disabled capability. A
+partial configuration fails startup. Disabled is healthy only while PostgreSQL
+contains no non-tombstoned object-content rows; otherwise startup and readiness
+fail closed so reconciliation or deletion cannot be silently suspended. Once a
+record exists, the S3-compatible byte plane remains mandatory. This deployment
+capability is intentionally not a tenant or administrator toggle.
+
 ---
 
 ### Worker Service (ARQ today)

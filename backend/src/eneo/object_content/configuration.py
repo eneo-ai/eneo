@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Self, cast
@@ -153,6 +154,8 @@ class ObjectContentSettings(BaseSettings):
         return f"v1/{self.deployment_id.hex}/"
 
 
-def load_object_content_settings() -> ObjectContentSettings:
+def load_object_content_settings() -> ObjectContentSettings | None:
+    if not any(name.upper().startswith("OBJECT_CONTENT_") for name in os.environ):
+        return None
     settings_factory = cast(Callable[[], ObjectContentSettings], ObjectContentSettings)
     return settings_factory()

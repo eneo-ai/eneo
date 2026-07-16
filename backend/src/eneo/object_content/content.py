@@ -43,6 +43,14 @@ class ObjectContentUnavailableError(ObjectContentError):
     code = "object_content_unavailable"
 
 
+class ObjectContentDisabledError(ObjectContentUnavailableError):
+    code = "object_content_disabled"
+
+
+class ObjectContentConfigurationError(ObjectContentUnavailableError):
+    code = "object_content_configuration_required"
+
+
 class ObjectContentIntegrityError(ObjectContentError):
     code = "object_content_integrity_failure"
 

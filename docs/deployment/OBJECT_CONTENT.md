@@ -13,6 +13,12 @@ object URL, provider registry, or provider-specific product branch. Object keys
 are opaque, deployment-scoped values; they contain neither tenant nor filename.
 The bucket and key are never returned by ordinary APIs.
 
+The foundation can remain disabled during rollout while no durable
+object-content records exist. Disable it only by omitting **every**
+`OBJECT_CONTENT_*` application setting. Setting one or more values activates
+strict validation; a blank, partial, or invalid configuration stops startup.
+This is a deployment capability, not a tenant or administrator feature toggle.
+
 ## Choose the endpoint
 
 The reference Compose deployment starts an Eneo-built SeaweedFS 4.39 service on
@@ -148,11 +154,26 @@ versioning, lifecycle rules, snapshots, and immutable retention with Eneo's
 deletion and legal-retention policy; an object-store rule must not silently keep
 purged content longer than approved.
 
-## Required configuration
+## Configuration states
 
-Copy `.env.template` to `.env`, set mode `0600`, and fill every blank. Pin
+The reference Compose installation enables the bundled service, so copy
+`.env.template`, set mode `0600`, and fill every blank. Pin
 `ENEO_SEAWEEDFS_IMAGE` to the exact manifest digest recorded in the Eneo
 release's `IMAGE-DIGESTS.txt`; there is deliberately no mutable-tag default.
+
+A custom deployment that has not adopted an object-backed feature may omit all
+`OBJECT_CONTENT_*` settings. Backend and worker then start with the capability
+disabled, `/api/readyz` reports `object_content.code=disabled`, reconciliation
+performs no S3 work, and authenticated settings expose
+`object_content_enabled=false`. Eneo verifies PostgreSQL before accepting this
+state. If any non-tombstoned object-content row exists, startup and subsequent
+probes fail closed until the complete configuration is restored. This prevents
+pending uploads, retention work, or deletes from being silently stranded.
+
+Do not model disabled with blank values. Omit the variables entirely. Once a
+producer stores its first durable object-content record, the compatible byte
+plane is required for that deployment and there is no filesystem or PostgreSQL
+byte fallback.
 
 `OBJECT_CONTENT_DEPLOYMENT_ID` is generated once with `uuidgen`. It scopes
 opaque keys and must survive upgrades and paired restores. Changing it does not
@@ -180,14 +201,25 @@ business settings owned by the application/admin configuration.
 
 ## Runtime and health
 
-Object-content configuration is a deployment prerequisite for this release:
-both backend and worker refuse to start when mandatory settings are absent or
-invalid, even before an existing byte producer adopts the foundation. The
-process liveness endpoint does not depend on the object store. Readiness uses a
-separate short-timeout S3 client and becomes unhealthy when PostgreSQL or the
-configured bucket is unavailable. Ordinary callers receive a stable typed 503;
-health output includes only a status and stable code, never endpoint, bucket,
-key, credentials, or provider details.
+Object content has four explicit runtime outcomes:
+
+| Deployment state | Process | Readiness / operations |
+| --- | --- | --- |
+| All application settings absent and no active rows | Starts disabled | Healthy `disabled`; dependent operations return typed `object_content_disabled` 503 |
+| Any blank, partial, or invalid settings | Startup fails | Clear configuration validation error |
+| Complete valid settings; PostgreSQL and bucket available | Starts enabled | Healthy `ready` |
+| Complete valid settings; PostgreSQL or bucket unavailable | Stays alive | Unhealthy readiness and typed 503; no fallback |
+
+Disabled with active PostgreSQL content is an invalid fifth state: startup,
+readiness, and the scheduled safety check fail closed with
+`configuration_required`. Each API and worker process evaluates its deployment
+environment independently, so supply the same settings to all of them. Before
+the first active row, mixed process configuration is visible through the
+capability/readiness projection; after a row exists, the disabled process fails
+the guard. Process liveness itself does not depend on the object store.
+Readiness uses a separate short-timeout S3 client when enabled. Health output
+includes only a status and stable code, never endpoint, bucket, key,
+credentials, or provider details.
 
 Uploads and deletes record durable PostgreSQL intent before remote work.
 Bounded leases, idempotency, retries, multipart abort records, tombstones, and

@@ -11,7 +11,7 @@ from eneo.worker.object_content_tasks import reconcile_object_content_task
 @pytest.mark.asyncio
 async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
     runtime = MagicMock(spec=ObjectContentRuntime)
-    runtime.reconciler.run_once = AsyncMock(
+    runtime.reconcile_once = AsyncMock(
         return_value=ReconciliationResult(
             lifecycle_advanced=1,
             content_processed=2,
@@ -36,3 +36,4 @@ async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
         "multipart_aborted": 6,
         "orphan_objects_deleted": 7,
     }
+    runtime.reconcile_once.assert_awaited_once_with()
