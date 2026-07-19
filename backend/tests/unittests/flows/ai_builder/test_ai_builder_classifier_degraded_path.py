@@ -4,6 +4,12 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder import ai_builder_discovery_runtime
 from eneo.flows.ai_builder.ai_builder_action_policy import build_planner_action_policy
 from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
@@ -181,8 +187,11 @@ async def test_classifier_outage_keeps_deterministic_slot_fallbacks(
     context = await build_runtime_discovery_context(
         conversation,
         litellm_client=object(),
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=ResolvedCompletionModelRoute(
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            supported_model_kwargs=SupportedModelKwargs(),
+        ),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -224,8 +233,11 @@ async def test_classifier_outage_asks_report_disposition_instead_of_keyword_gues
     context = await build_runtime_discovery_context(
         conversation,
         litellm_client=object(),
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=ResolvedCompletionModelRoute(
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            supported_model_kwargs=SupportedModelKwargs(),
+        ),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -285,8 +297,11 @@ async def test_classifier_primary_path_merges_result_into_planning_state(
     context = await build_runtime_discovery_context(
         conversation,
         litellm_client=object(),
-        litellm_model="gpt-test",
-        litellm_kwargs={},
+        completion_model_route=ResolvedCompletionModelRoute(
+            litellm_model="gpt-test",
+            litellm_kwargs={},
+            supported_model_kwargs=SupportedModelKwargs(),
+        ),
         tenant_id=uuid4(),
         ui_language="sv",
     )

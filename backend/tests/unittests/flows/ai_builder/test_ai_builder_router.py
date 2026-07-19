@@ -15,6 +15,12 @@ from fastapi.testclient import TestClient
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
@@ -346,8 +352,11 @@ def _make_container(
             max_output_tokens=2048,
             budget_policy=SimpleNamespace(),
         ),
-        litellm_model="openai/gpt-4",
-        litellm_kwargs={"api_key": "sk-test"},
+        completion_model_route=ResolvedCompletionModelRoute(
+            litellm_model="openai/gpt-4",
+            litellm_kwargs={"api_key": "sk-test"},
+            supported_model_kwargs=SupportedModelKwargs(),
+        ),
         flow=None,
         assistant_snapshots=None,
         attachment_files=[],
@@ -1860,8 +1869,11 @@ class TestSendMessageEndpoint:
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
             ),
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
+            completion_model_route=ResolvedCompletionModelRoute(
+                litellm_model="openai/gpt-4",
+                litellm_kwargs={"api_key": "sk-test"},
+                supported_model_kwargs=SupportedModelKwargs(),
+            ),
             flow=flow,
             assistant_snapshots={},
             attachment_files=[],
@@ -1918,15 +1930,18 @@ class TestSendMessageEndpoint:
                 max_output_tokens=4096,
                 budget_policy=SimpleNamespace(),
             ),
-            litellm_model="azure/gpt-4",
-            litellm_kwargs={
-                "api_key": "sk-test",
-                "api_base": "https://azure.example.com",
-                "api_version": "2024-02-15-preview",
-                "api_type": "azure",
-                "organization": "org-123",
-                "deployment_name": "gpt4-prod",
-            },
+            completion_model_route=ResolvedCompletionModelRoute(
+                litellm_model="azure/gpt-4",
+                litellm_kwargs={
+                    "api_key": "sk-test",
+                    "api_base": "https://azure.example.com",
+                    "api_version": "2024-02-15-preview",
+                    "api_type": "azure",
+                    "organization": "org-123",
+                    "deployment_name": "gpt4-prod",
+                },
+                supported_model_kwargs=SupportedModelKwargs(),
+            ),
             flow=None,
             assistant_snapshots=None,
             attachment_files=[],
@@ -1953,7 +1968,9 @@ class TestSendMessageEndpoint:
         async for _chunk in result.body_iterator:
             pass
 
-        assert captured["litellm_kwargs"] == {
+        route = captured["completion_model_route"]
+        assert isinstance(route, ResolvedCompletionModelRoute)
+        assert route.litellm_kwargs == {
             "api_key": "sk-test",
             "api_base": "https://azure.example.com",
             "api_version": "2024-02-15-preview",

@@ -8,6 +8,12 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
@@ -1828,7 +1834,11 @@ class TestExtendedClarificationHints:
             context = await build_runtime_discovery_context(
                 conversation,
                 litellm_client=object(),
-                litellm_model="test-model",
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="test-model",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 tenant_id=uuid4(),
             )
 
@@ -1880,7 +1890,11 @@ class TestExtendedClarificationHints:
             context = await build_runtime_discovery_context(
                 conversation,
                 litellm_client=object(),
-                litellm_model="test-model",
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="test-model",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 tenant_id=uuid4(),
             )
 
@@ -2169,7 +2183,11 @@ class TestExtendedClarificationHints:
             context = await build_runtime_discovery_context(
                 conversation,
                 litellm_client=object(),
-                litellm_model="test-model",
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="test-model",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 tenant_id=uuid4(),
             )
 
@@ -2216,7 +2234,11 @@ class TestExtendedClarificationHints:
             context = await build_runtime_discovery_context(
                 conversation,
                 litellm_client=object(),
-                litellm_model="test-model",
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="test-model",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 tenant_id=uuid4(),
             )
 
@@ -2281,7 +2303,11 @@ class TestExtendedClarificationHints:
             context = await build_runtime_discovery_context(
                 conversation,
                 litellm_client=object(),
-                litellm_model="test-model",
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="test-model",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 tenant_id=uuid4(),
             )
 
@@ -3204,8 +3230,11 @@ class TestPlannerDiscoveryQuestionDispatch:
                 },
                 message="Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
                 ui_language="sv",
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="openai/gpt-5.4",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 available_models=None,
                 available_kbs=None,
                 max_input_tokens=128000,
@@ -3265,8 +3294,11 @@ class TestPlannerDiscoveryQuestionDispatch:
                     "topic sections, and produces a DOCX meeting report."
                 ),
                 ui_language="en",
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
+                completion_model_route=ResolvedCompletionModelRoute(
+                    litellm_model="openai/gpt-5.4",
+                    litellm_kwargs={},
+                    supported_model_kwargs=SupportedModelKwargs(),
+                ),
                 available_models=None,
                 available_kbs=None,
                 max_input_tokens=128000,
