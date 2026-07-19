@@ -29,5 +29,7 @@ def build_step_item_map_config(
     typed_config = cast(Mapping[str, object], raw_config)
     raw_enabled = typed_config.get("enabled", True)
     if not isinstance(raw_enabled, bool):
-        raise BadRequestException("Step input_config.item_map.enabled must be a boolean.")
+        raise BadRequestException(
+            "Step input_config.item_map.enabled must be a boolean."
+        )
     return FlowStepItemMapConfig(enabled=raw_enabled)

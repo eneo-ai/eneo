@@ -19,9 +19,7 @@ def sum_optional_token_counts(values: Iterable[int | None]) -> int | None:
 def mapped_output_diagnostics(
     outputs: Iterable[StepExecutionOutput],
 ) -> tuple[StepDiagnostic, ...]:
-    return tuple(
-        diagnostic for output in outputs for diagnostic in output.diagnostics
-    )
+    return tuple(diagnostic for output in outputs for diagnostic in output.diagnostics)
 
 
 def mapped_rag_metadata(

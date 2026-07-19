@@ -24,6 +24,7 @@ class RuntimeSourceIdentityDraftField(Protocol):
         deep: bool = False,
     ) -> _DraftFieldT: ...
 
+
 RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
 
 

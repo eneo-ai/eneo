@@ -52,7 +52,9 @@ def compose_text_violation(
     if output_mode != "compose_text":
         return None
     if input_type != "text":
-        return f"Step {step_order}: output_mode 'compose_text' requires input_type 'text'."
+        return (
+            f"Step {step_order}: output_mode 'compose_text' requires input_type 'text'."
+        )
     if output_type != "text":
         return f"Step {step_order}: output_mode 'compose_text' requires output_type 'text'."
     return None

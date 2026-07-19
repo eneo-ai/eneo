@@ -42,7 +42,9 @@ class PassThroughStepHandler:
     ) -> StepExecutionResult:
         if should_execute_per_source_reader(step):
             if self.list_step_input_file_ids is None:
-                raise RuntimeError("Per-source reader execution requires file-id listing.")
+                raise RuntimeError(
+                    "Per-source reader execution requires file-id listing."
+                )
             return await execute_per_source_reader(
                 step=step,
                 run=run,
