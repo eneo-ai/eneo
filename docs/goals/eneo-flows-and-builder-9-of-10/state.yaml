@@ -1,0 +1,856 @@
+# Goal Maker v2 state.yaml
+
+version: 2
+
+goal:
+  title: "Eneo Flows and Flow AI Builder 9/10 implementation program"
+  slug: "eneo-flows-and-builder-9-of-10"
+  kind: program
+  tranche: "Restore or prove M0/BM0, then open the first disjoint Flows batch."
+  status: active
+
+roadmap:
+  sources:
+    - "fablereview/flows-9-of-10-2026-07-16/flows-proper/roadmap.md"
+    - "fablereview/flows-9-of-10-2026-07-16/flow-ai-builder/roadmap.md"
+    - "fablereview/flows-9-of-10-2026-07-16/delivery-coordination.md"
+    - "/Users/cimen/.codex/skills/goal-maker/references/eneo-flows-first.md"
+  fingerprint: "sha256:863579596211606532387b704e38b4abd1b8aecc2691c8fcbff78fd0f82f37b4"
+  last_reconciled_at: "2026-07-19T23:29:13Z"
+  active_slice: "Next high-risk tranche documentation and gate reconciliation"
+  completed_slices:
+    - "M0.1"
+    - "M0.2"
+    - "M0.3"
+    - "M0.4"
+    - "M0.5"
+    - "BM0.1"
+  remaining_slices:
+    - "D1"
+    - "D2"
+    - "D3"
+    - "D4"
+    - "D5"
+    - "M1.1"
+    - "M1.2"
+    - "M1.3"
+    - "M1.4"
+    - "M1.5"
+    - "M2.1"
+    - "M2.2"
+    - "M2.3"
+    - "M2.4"
+    - "M2.5"
+    - "M2.6"
+    - "M2.7"
+    - "M2.8"
+    - "M2.9"
+    - "M3.1"
+    - "M3.2"
+    - "M3.3"
+    - "M3.4"
+    - "M3.5"
+    - "M3.6"
+    - "M3.7"
+    - "M3.8"
+    - "M3.9"
+    - "M4.1"
+    - "M4.2"
+    - "M4.3"
+    - "M4.4"
+    - "M4.5"
+    - "M4.6"
+    - "M4.7"
+    - "M4.8"
+    - "M4.9"
+    - "M4.10"
+    - "M4.11"
+    - "M5.1"
+    - "M5.2"
+    - "M5.3"
+    - "M6.1"
+    - "M6.2"
+    - "M6.3"
+    - "M6.4"
+    - "M6.5"
+    - "M6.6"
+    - "BD2"
+    - "BD3"
+    - "BM0.2"
+    - "BM1.1"
+    - "BM1.2"
+    - "BM1.3"
+    - "BM1.4"
+    - "BM1.5"
+    - "BM1.6"
+    - "BM2.1"
+    - "BM2.2"
+    - "BM2.3"
+    - "BM2.4"
+    - "BM2.5"
+    - "BM2.6"
+    - "BM3.1"
+    - "BM3.2"
+    - "BM3.3"
+    - "BM3.4"
+    - "BM4.1"
+    - "BM4.2"
+    - "BM4.3"
+    - "BM4.4"
+    - "BM4.5"
+    - "BM4.6"
+    - "BM4.7"
+    - "BM4.8"
+    - "BM4.9"
+    - "BM5.1"
+    - "BM5.2"
+    - "BM5.3"
+    - "BM5.4"
+    - "FE.1"
+    - "FE.2"
+    - "FE.3"
+    - "FE.4"
+  deferred_slices:
+    - "D6 (owned by the existing Flow finalization ADR delivery order)"
+    - "BD1 (future HTTP-authoring capability milestone outside this roadmap)"
+    - "BD5 (evidence-gated; no work until comparative evidence exists)"
+    - "BM5.5 (requires explicit live-run authorization, isolation, and provider-spend approval)"
+    - "FLOW-P3 (record-only unless it enables a required slice)"
+    - "BUILDER-P3 (record-only unless it enables a required slice)"
+  excluded_slices:
+    - "BD4 (reference-only alias of Flow D2; no Builder-side work)"
+
+delivery:
+  integration_branch: "refactor/flows-clean"
+  direct_commits: true
+  pull_requests: false
+  worker_branch_policy: detached_worktree
+  worker_push: false
+  integration_owner: PM
+  push_policy: "PM after ordered integration and full verification"
+
+track_policy:
+  mode: ordered
+  active_track: "Flows proper"
+  order:
+    - "Flows proper"
+    - "Flow AI Builder"
+  later_track_write_exceptions:
+    - "BM0 repository-wide proof fence"
+    - "BM1.1 shared analyzer contract required by active Flow M2.2"
+    - "BM1.5, BM2.6, and Flow M4.9 coordinated vocabulary convergence"
+    - "source-proved shared contract required by active Flows work"
+    - "all remaining Flows work externally blocked"
+    - "explicit user authorization"
+  read_only_lookahead: true
+  transition:
+    required_decision: flow_core_transition_ready
+    judge_read_only: true
+    receipt_task_id: null
+    receipt_status: pending
+    criteria:
+      - "All release-critical/P0/P1 Flow work and the Flow baseline, analyzer/publish, public/generated-contract, migration/data-integrity, runtime-reliability, and API-DX/docs checkpoints needed by Builder are green."
+      - "No higher-ROI dependency-ready Flow blocker remains."
+      - "Every remaining Flow item has a stable authorized completed, measurement-gated, low-ROI cleanup, owner/external-blocked, deferred, or excluded disposition."
+      - "The receipt compares the highest-ROI ready Flow and Builder outcomes; PM intuition about diminishing returns is insufficient."
+    after_receipt:
+      active_track: "Flow AI Builder"
+      max_steady_flow_tail_workers: 1
+      builder_uses_remaining_safe_lanes: true
+      all_safe_lanes_to_builder_without_ready_flow_tail: true
+      serialize_shared_owner_collisions: true
+
+task_card_contract:
+  documentation_impact_required_for_newly_activated_slices: true
+  documentation_impact_values:
+    - required
+    - unaffected
+  current_source_evidence_required: true
+  owning_convergence_group_updates_docs: true
+  documentation_only_workers: false
+  reuse_generators_and_catalogs: true
+  exclusive_collision_domain: "public-openapi-generated-client-docs-site-consumer-contract"
+  completion_scope:
+    - "public endpoint/schema/status/error"
+    - "OpenAPI or generated client"
+    - "Flow or Builder consumer workflow"
+    - "runtime lifecycle or failure behavior"
+    - "persisted data shape"
+    - "supported capability"
+  relevant_flow_checks:
+    - "make docs:regen"
+    - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_docs_site_contract.py"
+    - "OpenAPI and generated-client drift checks"
+    - "cd frontend/apps/docs-site && bun run build"
+  builder_docs_owners:
+    - "frontend/apps/docs-site/src/content/docs/ai-builder.mdx"
+    - "frontend/apps/docs-site/src/content/docs/flows.mdx"
+    - "affected consumer and developer pages"
+
+anti_loop:
+  reopen_requires:
+    - "new current-source evidence"
+    - "a failing behavior or contract test"
+    - "production evidence"
+    - "an explicit user decision"
+  measurement_trigger_required_for_m6: true
+  tranche_selection: "Choose the highest-ROI remaining bounded outcome; transition instead of manufacturing speculative polish."
+
+parallelism:
+  enabled: true
+  steady_write_workers: 4
+  max_write_workers: 5
+  fifth_worker_requires_judge_disjointness_proof: true
+  isolation: worktree
+  integration_base_ref: "f847ff45dcaf0d610fd871f7baa6f0bdbc3a3d0c"
+  require_disjoint_allowed_files: true
+  require_disjoint_collision_domains: true
+  predeclare_integration_order: true
+  keep_safe_lanes_busy: true
+  use_read_only_lookahead_when_serialized: true
+  free_slot_does_not_prove_independence: true
+
+peer_review:
+  mode: milestone_only
+  active_session: null
+  last_reviewed_fingerprint: null
+
+quarantine:
+  active: false
+  task_ids: []
+  worktree_paths: []
+  collision_domains: []
+  reason: null
+  recorded_at: null
+
+spend_policy:
+  mode: throughput_with_guardrails
+  steady_fast_workers: 4
+  burst_fast_workers: 5
+  burst_requires_judge: true
+  quota_status: unknown
+  fast_worker_minutes_since_report: 0
+
+supervision:
+  mode: continuous
+  automation_id: "eneo-flows-implementation-watchdog"
+  automation_status: active
+  heartbeat_interval_minutes: 15
+  current_thread_id: "019f7c78-fa66-7461-8b06-13c857569fb5"
+  previous_thread_id: null
+  thread_started_at: "2026-07-19T22:26:34Z"
+  rotation_count: 0
+  completed_tranches_in_thread: 0
+  rotate_after_hours: 6
+  rotate_after_tranches: 2
+  last_handoff_at: null
+  last_archived_thread_id: null
+  transient_failures: 0
+  no_progress_wakeups: 0
+  last_progress_at: "2026-07-19T23:29:13Z"
+
+reporting:
+  interval_minutes: 60
+  last_report_at: null
+  last_report_fingerprint: null
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+active_task: T010
+
+tasks:
+  - id: T001
+    roadmap_slice: proof-fence-preflight
+    type: pm
+    assignee: PM
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T001:836ee6cc-86357959:v1"
+    reasoning_hint: ultra
+    objective: "Reproduce or close the current Flow M0 and Builder BM0 proof fences, then record exact dependency-ready Worker cards."
+    inputs:
+      - "Both authoritative roadmaps and blueprints"
+      - "Delivery coordination and Flows-first overlay"
+      - "Current integration revision 836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      - "Initial dirty-state fingerprint sha256:63dfcfed07deb63d3263985d3e61dcf781cfd77c6c2cfd9d6b35c2c5596ed2c2"
+    constraints:
+      - "Preserve all user-owned dirty and ignored files exactly."
+      - "Run baseline verification before behavior slices."
+      - "Reopen current source before declaring any roadmap finding unresolved."
+      - "Do not dispatch a Worker without exact files, collision domains, validation, stop conditions, and a detached worktree."
+    expected_output:
+      - "Current M0 and BM0 disposition with commands and evidence"
+      - "One validated dependency-ready Worker task or proved-disjoint batch"
+      - "Updated board that passes the Goal Maker checker"
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T001:836ee6cc-86357959:v1"
+      result: done
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      reconciled_at: "2026-07-19T22:48:52Z"
+      baseline:
+        flow_unit_fence: "16 failed, 2403 passed, 10 skipped"
+        builder_unit_fence: "27 failed, 2386 passed"
+        ruff_check: green
+        ruff_format: "red in exactly six Flow source files"
+        pyright: "0 errors, 0 warnings"
+      decision: "Five source-disjoint M0.1/M0.2/M0.3/M0.4/BM0.1 cards require one tokened fifth-Worker Judge decision before activation; M0.5 waits for M0.2."
+      bm0_2: "Read-only live governance inspection only; no external mutation without a separate attended change contract."
+      protected_dirty_state: "Preserved exactly; no candidate lease includes a user-owned dirty path."
+  - id: T002
+    roadmap_slice: proof-fence-batch-judge
+    type: judge
+    assignee: Judge
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T002:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Approve, correct, or block the exact tokenized five-Worker proof-fence batch at the frozen shared base."
+    inputs:
+      - "T001 receipt and current repository evidence"
+      - "Exact queued Worker cards T003 through T007"
+      - "Immutable base 836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      - "Temporary-fifth policy and predeclared integration order"
+    constraints:
+      - "Read-only; do not implement or write the board."
+      - "Return the exact dispatch token from this task."
+      - "Approve only if every allowed-file intersection and collision-domain intersection is empty or explicitly ordered."
+      - "Keep M0.4's full non-error allowlist at exactly six entries: existing flow_evidence plus the five named additions."
+      - "Keep BM0.1 test-only and BM0.2 read-only pending a separate attended mutation contract."
+      - "Do not add Claude review to these routine baseline and fixture repairs."
+    expected_output:
+      - "approved | changes_required | blocked"
+      - "Matching dispatch token and frozen base"
+      - "Fifth-Worker disjointness decision"
+      - "Exact integration order and convergence validation"
+      - "Any corrected task field, or confirmation that T003-T007 may activate unchanged"
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T002:836ee6cc-86357959:v1"
+      result: approved
+      frozen_base: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      frozen_tip: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      decision: "Activate T003-T007 unchanged as one temporary five-Worker batch; T007 is the one-batch fifth lane, with no fifth-slot backfill and never a sixth Worker."
+      disjointness: "All ten allowed files and all declared collision domains are pairwise disjoint; T003 precedes T005 to resolve its read-only shared-fixture dependency."
+      integration_order:
+        - T003
+        - T004
+        - T005
+        - T006
+        - T007
+      verified_worktrees:
+        - "/Users/cimen/eneo/eneo-flows-clean-worktrees/T003-m0-1"
+        - "/Users/cimen/eneo/eneo-flows-clean-worktrees/T004-m0-2"
+        - "/Users/cimen/eneo/eneo-flows-clean-worktrees/T005-m0-3"
+        - "/Users/cimen/eneo/eneo-flows-clean-worktrees/T006-m0-4"
+        - "/Users/cimen/eneo/eneo-flows-clean-worktrees/T007-bm0-1"
+      worktree_proof: "All five paths are detached, clean, and exactly at the frozen base before Worker dispatch."
+      m0_5_expected_residual:
+        - "backend/src/eneo/flows/output_modes.py"
+        - "backend/src/eneo/flows/runtime/step_handlers/mapped_outputs.py"
+        - "backend/src/eneo/flows/runtime/step_handlers/pass_through.py"
+        - "backend/src/eneo/flows/source_identity.py"
+        - "backend/src/eneo/flows/step_item_map.py"
+      bm0_2: "Read-only inspection only; no external mutation is authorized."
+      runtime_profile_proof: "Current request metadata reports thread 019f7c78-fa66-7461-8b06-13c857569fb5, gpt-5.6-sol, ultra, sandbox none; list_threads/read_thread match the active current turn and repository."
+  - id: T003
+    roadmap_slice: M0.1
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T003:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Preserve the required run_history_retention public contract by adding the canonical explicit off-state projection to the shared router-test Flow fixture only."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T003-m0-1"
+    base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+    integration_order: 1
+    collision_domains:
+      - "flow-router-shared-fixture"
+      - "flow-retention-public-projection-contract"
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_router.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_router_crud.py"
+      - "cd backend && uv run pytest -q tests/integration/flows/test_flow_retention_envelope.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/test_flow_router.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_router.py"
+      - "cd backend && uv run pyright"
+      - "git diff --check"
+    stop_if:
+      - "Any production or second test file is needed."
+      - "FlowPublic or FlowSparsePublic must become optional or defaulted."
+      - "A real production public path bypasses repository retention projection."
+      - "The integration retention envelope changes or fails for a non-environment reason."
+      - "The worktree base differs or an allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T003:836ee6cc-86357959:v1"
+      result: complete
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      final_ref: "fe80b7f0390069a5b6cc3a402e452843c978bc43"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T003-m0-1"
+      commit_sha: "fe80b7f0390069a5b6cc3a402e452843c978bc43"
+      worker_commit: "fe80b7f0390069a5b6cc3a402e452843c978bc43"
+      initial_dirty_state: "Clean detached worktree at the exact base; the leased file had no pre-existing change."
+      scope_proof: "Worker parent matched base, final worktree was clean, and the base-to-tip diff contained exactly the one leased file."
+      summary: "Added the explicit canonical retention-off projection to the shared router Flow fixture without production or public-schema changes."
+      commands:
+        - "20 router CRUD tests passed"
+        - "7 retention-envelope integration tests passed"
+        - "Ruff check and format-check passed"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "git diff --check and exact changed-file proof passed"
+      changed_files:
+        - "backend/tests/unittests/flows/test_flow_router.py"
+      lease_compliance: exact
+      worker_verification: "20 router CRUD tests, 7 retention-envelope tests, Ruff check/format, and strict Pyright passed."
+      integration_status: integrated
+      integrated_ref: "4f23fe20e202c73a0f7de9c106e8b30dac177e38"
+      pm_verification:
+        - "20 router CRUD tests passed"
+        - "7 retention-envelope integration tests passed"
+        - "Ruff check and format-check passed"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Worker parent, exact one-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "The shared router fixture now models the required explicit retention-off projection without weakening the public contract."
+  - id: T004
+    roadmap_slice: M0.2
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T004:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Close the two output-axis architecture guards by reusing the canonical output-format registry and documenting one narrow pre-handler compose_text input-resolution exception."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T004-m0-2"
+    base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+    integration_order: 2
+    collision_domains:
+      - "flow-output-mode-policy"
+      - "flow-output-type-policy"
+      - "flow-runtime-step-handler-dispatch"
+      - "flow-ruff-format-per-source-reader"
+    allowed_files:
+      - "backend/src/eneo/flows/runtime/step_handlers/per_item_map.py"
+      - "backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_architecture_guards.py::test_output_mode_literal_branches_only_appear_in_allowlisted_call_sites tests/unittests/flows/test_flow_architecture_guards.py::test_output_type_literal_branches_only_appear_in_allowlisted_call_sites"
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_typed_io_executor.py"
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_runtime_output_formats.py"
+      - "cd backend && uv run ruff check src/eneo/flows/runtime/step_handlers/per_item_map.py src/eneo/flows/runtime/step_handlers/per_source_reader.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "cd backend && uv run ruff format --check src/eneo/flows/runtime/step_handlers/per_item_map.py src/eneo/flows/runtime/step_handlers/per_source_reader.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "cd backend && uv run pyright"
+      - "git diff --check"
+    stop_if:
+      - "executor.py, output_formats, StepHandler, or any fourth file must change."
+      - "An import cycle appears."
+      - "A valid runtime-step dispatch or public error code changes."
+      - "Malformed output-type handling changes beyond the existing canonical resolver behavior."
+      - "The allowlist grows by more than the single compose_text entry or MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE does not become exactly 8."
+      - "The worktree base differs or an allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T004:836ee6cc-86357959:v1"
+      result: done
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      final_ref: "1b61aa8a7678a84c2ea9c18624c5d3a76fea6ea0"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T004-m0-2"
+      commit_sha: "1b61aa8a7678a84c2ea9c18624c5d3a76fea6ea0"
+      initial_dirty_state: clean
+      scope_proof: "Worker parent matched the approved base, final worktree was clean, and the immutable base-to-tip diff contained exactly the three leased files."
+      summary: "Replaced two raw JSON output-type branches with the canonical output-format resolver, documented the single compose_text pre-handler input-grammar exception, and formatted the leased reader file."
+      commands:
+        - "2 output-axis architecture guard tests passed"
+        - "69 typed-I/O executor tests passed"
+        - "22 output-format policy tests passed"
+        - "Ruff check and format-check passed for all three leased files"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "git diff --check and exact changed-file proof passed"
+      changed_files:
+        - "backend/src/eneo/flows/runtime/step_handlers/per_item_map.py"
+        - "backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      lease_compliance: exact
+      worker_verification: "2 architecture guards, 69 typed-I/O executor tests, 22 output-format tests, Ruff check/format, and strict Pyright passed."
+      integration_status: integrated
+      integrated_ref: "18a28b5c805023474c8b434fb0c8546ecb8dd020"
+      pm_verification:
+        - "2 output-axis architecture guard tests passed"
+        - "69 typed-I/O executor tests passed"
+        - "22 output-format policy tests passed"
+        - "Ruff check and format-check passed for all three leased files"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Worker parent, exact three-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "Runtime handlers now derive JSON capability from the canonical output-format policy without changing valid dispatch, public errors, or malformed-value behavior."
+  - id: T005
+    roadmap_slice: M0.3
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T005:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Align stale run-view and capability tests with the existing typed enriched-run contract and intentionally public is_rerun_eligible field."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T005-m0-3"
+    base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+    integration_order: 3
+    collision_domains:
+      - "flow-run-enriched-view-test-fixtures"
+      - "flow-run-status-capability-contract"
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_run_status_capabilities.py"
+      - "backend/tests/unittests/flows/test_flow_scope_errors.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_run_status_capabilities.py tests/unittests/flows/test_flow_scope_errors.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/test_flow_run_status_capabilities.py tests/unittests/flows/test_flow_scope_errors.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_run_status_capabilities.py tests/unittests/flows/test_flow_scope_errors.py"
+      - "cd backend && uv run pyright"
+      - "git diff --check"
+    stop_if:
+      - "Any production file or shared test_flow_router.py must change."
+      - "The public status capability model must weaken."
+      - "A compatibility fallback for missing final_output is proposed."
+      - "The M0.1-integrated shared fixture causes a new failure."
+      - "The worktree base differs or an allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T005:836ee6cc-86357959:v1"
+      result: done
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      final_ref: "e5c29760685b63d4cebd9c008bc2e40c3c59a0c4"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T005-m0-3"
+      commit_sha: "e5c29760685b63d4cebd9c008bc2e40c3c59a0c4"
+      initial_dirty_state: clean
+      scope_proof: "Worker parent matched the approved base, final worktree was clean, and the immutable base-to-tip diff contained exactly the two leased test files."
+      summary: "Updated stale scope and capability fixtures to use the existing typed enriched-run page/item contract, explicit final-output metadata, and the intentionally public rerun-eligibility field."
+      commands:
+        - "54 run-status capability and scope tests passed"
+        - "Ruff check and format-check passed for both leased files"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "git diff --check and exact changed-file proof passed"
+      changed_files:
+        - "backend/tests/unittests/flows/test_flow_run_status_capabilities.py"
+        - "backend/tests/unittests/flows/test_flow_scope_errors.py"
+      lease_compliance: exact
+      worker_verification: "54 focused tests, Ruff check/format, and strict Pyright passed."
+      integration_status: integrated
+      integrated_ref: "04601f9358ef610b292c5d69b37b42005b37ce85"
+      pm_verification:
+        - "54 run-status capability and scope tests passed"
+        - "Ruff check and format-check passed for both leased files"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Worker parent, exact two-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "Contract and scope tests now exercise the shipped typed run projection and public rerun capability without weakening runtime or API models."
+  - id: T006
+    roadmap_slice: M0.4
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T006:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Make the guide guard recognize both canonical Flow error catalogs and extend its existing non-error map by exactly the five newly documented identifiers."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T006-m0-4"
+    base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+    integration_order: 4
+    collision_domains:
+      - "flow-api-guide-backtick-catalog-guard"
+      - "flow-error-vocabulary-test"
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_api_error_codes.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/flows/test_flow_api_error_codes.py"
+      - "cd backend && uv run pytest -q tests/unit/test_flow_package_openapi_contract.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/test_flow_api_error_codes.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_api_error_codes.py"
+      - "git diff --check"
+    stop_if:
+      - "The guide, either production catalog, generated SDK, or localization must change."
+      - "Package codes would be duplicated into FlowApiErrorCode."
+      - "The final non-error map is not exactly six tokens: existing flow_evidence plus the five named additions."
+      - "FlowPackageExportErrorCode or another catalog must be added without a current guide token proving need."
+      - "The worktree base differs or the allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T006:836ee6cc-86357959:v1"
+      result: done
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      final_ref: "7b5d834da85001b81d8281f9427ba99d2861279b"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T006-m0-4"
+      commit_sha: "7b5d834da85001b81d8281f9427ba99d2861279b"
+      initial_dirty_state: clean
+      scope_proof: "Worker parent matched the approved base, final worktree was clean, and the immutable base-to-tip diff contained exactly the one leased test file."
+      summary: "Taught the docs-guide guard to recognize the canonical Flow Package error catalog and classified exactly five new backticked field names as non-error vocabulary."
+      commands:
+        - "14 Flow API error-catalog tests passed"
+        - "16 Flow Package OpenAPI contract tests passed"
+        - "Ruff check and format-check passed for the leased file"
+        - "git diff --check and exact changed-file proof passed"
+      changed_files:
+        - "backend/tests/unittests/flows/test_flow_api_error_codes.py"
+      lease_compliance: exact
+      worker_verification: "14 Flow error-catalog tests, 16 package OpenAPI contract tests, and Ruff check/format passed."
+      integration_status: integrated
+      integrated_ref: "71931374467bbd7e2ea3849a5697e63b227354f9"
+      pm_verification:
+        - "14 Flow API error-catalog tests passed"
+        - "16 Flow Package OpenAPI contract tests passed"
+        - "Ruff check and format-check passed for the leased file"
+        - "Worker parent, exact one-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "The guide guard now accepts both canonical error catalogs while continuing to reject undocumented error-like vocabulary."
+  - id: T007
+    roadmap_slice: BM0.1
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T007:836ee6cc-86357959:v1"
+    reasoning_hint: high
+    objective: "Migrate only the three stale Builder test files from primitive completion-model arguments to the existing ResolvedCompletionModelRoute contract."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T007-bm0-1"
+    base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+    integration_order: 5
+    collision_domains:
+      - "builder-test-contract:completion-model-route"
+    allowed_files:
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_classifier_degraded_path.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/flows/ai_builder/test_ai_builder_classifier_degraded_path.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_classifier_degraded_path.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_classifier_degraded_path.py tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "git diff --check"
+    stop_if:
+      - "Any production source must change."
+      - "A helper, overload, compatibility shim, or primitive fallback is proposed."
+      - "The three-file suite is not exactly green at 187 passed."
+      - "Genuine adapter-property setup is rewritten merely because it contains the old field name."
+      - "The worktree base differs or an allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T007:836ee6cc-86357959:v1"
+      result: done
+      base_ref: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+      final_ref: "75d4e8c6abd6583ee8ca8888a0b6c91e8c97b462"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T007-bm0-1"
+      commit_sha: "75d4e8c6abd6583ee8ca8888a0b6c91e8c97b462"
+      initial_dirty_state: clean
+      scope_proof: "Worker parent matched the approved base, final worktree was clean, and the immutable base-to-tip diff contained exactly the three leased Builder test files."
+      summary: "Migrated stale Builder fixtures from separate primitive model arguments to the existing resolved completion-model route contract, including explicit supported-kwargs capability."
+      commands:
+        - "187 targeted Builder tests passed"
+        - "Ruff check and format-check passed for all three leased files"
+        - "git diff --check and exact changed-file proof passed"
+      changed_files:
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_classifier_degraded_path.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+        - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      lease_compliance: exact
+      worker_verification: "187 targeted Builder tests and Ruff check/format passed."
+      integration_status: integrated
+      integrated_ref: "7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+      pm_verification:
+        - "187 targeted Builder tests passed"
+        - "Ruff check and format-check passed for all three leased files"
+        - "Worker parent, exact three-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "Builder contract tests now exercise the canonical resolved completion-model route without adding a primitive fallback or touching production behavior."
+  - id: T008
+    roadmap_slice: proof-fence-convergence
+    type: pm
+    assignee: PM
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T008:7ae0f350-86357959:v1"
+    reasoning_hint: ultra
+    objective: "Validate the fully integrated five-card proof-fence batch and prove the exact residual M0.5 formatting lease before any new Worker dispatch."
+    inputs:
+      - "Integrated revision 7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+      - "T003 through T007 immutable Worker receipts"
+      - "T002 convergence commands and expected M0.5 residual files"
+    constraints:
+      - "Preserve all user-owned dirty and ignored files exactly."
+      - "Do not dispatch M0.5 unless the Flow and Builder proof fences are green and Ruff format reports exactly the five predeclared residual source files."
+      - "Keep Builder work limited to the already-approved BM0 proof fence."
+      - "Do not run Claude for this routine proof-fence convergence."
+    expected_output:
+      - "Green integrated Flow and Builder proof fences"
+      - "Strict Pyright and scoped Ruff evidence"
+      - "Exact integrated source/test file-set proof"
+      - "An exact M0.5 Worker card or a bounded blocker"
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T008:7ae0f350-86357959:v1"
+      result: done
+      base_ref: "7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+      final_ref: "7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+      summary: "Proved the fully integrated M0.1-M0.4 and BM0.1 batch green, confirmed CI and the lock resolve Ruff 0.12.12, and reduced the M0.5 lease to the exact five remaining formatter deltas."
+      commands:
+        - "2419 Flow unit tests passed and 10 skipped"
+        - "2413 Builder unit tests passed"
+        - "7 retention-envelope integration tests passed"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Ruff check passed for all src/eneo"
+        - "Ruff check and format-check passed for all ten integrated files"
+        - "Ruff 0.12.12 format-check reported exactly five predeclared residual Flow source files"
+        - "uv lock --check passed"
+        - "Integrated diff check, exact ten-file set, five-commit count, and shortstat proof passed"
+      changed_files: []
+      product_impact: "The proof-fence repair batch is green as one integrated unit, and the remaining formatter work is a bounded mechanical five-file change against CI's locked toolchain."
+  - id: T009
+    roadmap_slice: M0.5
+    type: worker
+    assignee: Worker
+    status: done
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T009:7ae0f350-86357959:v1"
+    reasoning_hint: high
+    objective: "Apply only Ruff 0.12.12's mechanical formatting to the exact five residual Flow source files and restore the CI formatter baseline without semantic edits."
+    unattended: true
+    execution_environment: worktree
+    worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T009-m0-5"
+    base_ref: "7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+    integration_order: 1
+    collision_domains:
+      - "flow-pinned-ruff-format-baseline"
+    allowed_files:
+      - "backend/src/eneo/flows/output_modes.py"
+      - "backend/src/eneo/flows/runtime/step_handlers/mapped_outputs.py"
+      - "backend/src/eneo/flows/runtime/step_handlers/pass_through.py"
+      - "backend/src/eneo/flows/source_identity.py"
+      - "backend/src/eneo/flows/step_item_map.py"
+    verify:
+      - "cd backend && uv run ruff --version"
+      - "cd backend && uv lock --check"
+      - "cd backend && uv run ruff format src/eneo/flows/output_modes.py src/eneo/flows/runtime/step_handlers/mapped_outputs.py src/eneo/flows/runtime/step_handlers/pass_through.py src/eneo/flows/source_identity.py src/eneo/flows/step_item_map.py"
+      - "cd backend && uv run ruff format --check src/eneo/flows/output_modes.py src/eneo/flows/runtime/step_handlers/mapped_outputs.py src/eneo/flows/runtime/step_handlers/pass_through.py src/eneo/flows/source_identity.py src/eneo/flows/step_item_map.py"
+      - "cd backend && uv run ruff check src/eneo/flows/output_modes.py src/eneo/flows/runtime/step_handlers/mapped_outputs.py src/eneo/flows/runtime/step_handlers/pass_through.py src/eneo/flows/source_identity.py src/eneo/flows/step_item_map.py"
+      - "cd backend && uv run pytest -q tests/unittests/flows --ignore=tests/unittests/flows/ai_builder"
+      - "cd backend && uv run pyright"
+      - "git diff --check"
+    stop_if:
+      - "The resolved Ruff version is not 0.12.12 or uv lock --check fails."
+      - "Any file outside the exact five-file lease changes."
+      - "A semantic, naming, comment, import, test, configuration, or dependency edit is proposed."
+      - "The Flow unit fence or strict Pyright fails."
+      - "The worktree base differs or an allowed file is dirty before work."
+    receipt:
+      dispatch_token: "eneo-flows-and-builder-9-of-10:T009:7ae0f350-86357959:v1"
+      result: done
+      base_ref: "7ae0f35019aed3b2fb0e40d1cb538fa391e602b2"
+      final_ref: "9dc1a94eb136ca17f5aecd56f7eed345d76fd903"
+      worktree_path: "/Users/cimen/eneo/eneo-flows-clean-worktrees/T009-m0-5"
+      commit_sha: "9dc1a94eb136ca17f5aecd56f7eed345d76fd903"
+      initial_dirty_state: clean
+      scope_proof: "Worker parent matched the approved integrated base, final worktree was clean, and the immutable base-to-tip diff contained exactly the five leased formatter files."
+      summary: "Applied only locked Ruff 0.12.12 line wrapping and blank-line normalization to the five residual Flow source files."
+      commands:
+        - "Ruff version resolved exactly to 0.12.12 and uv lock --check passed"
+        - "2419 Flow unit tests passed and 10 skipped"
+        - "2413 Builder unit tests passed after PM integration"
+        - "7 retention-envelope integration tests passed after PM integration"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Ruff check and format-check passed for all 1191 src/eneo files"
+        - "git diff --check and exact five-file proof passed"
+      changed_files:
+        - "backend/src/eneo/flows/output_modes.py"
+        - "backend/src/eneo/flows/runtime/step_handlers/mapped_outputs.py"
+        - "backend/src/eneo/flows/runtime/step_handlers/pass_through.py"
+        - "backend/src/eneo/flows/source_identity.py"
+        - "backend/src/eneo/flows/step_item_map.py"
+      lease_compliance: exact
+      worker_verification: "Locked Ruff checks, 2419 Flow tests with 10 skipped, strict Pyright, diff check, and exact lease proof passed."
+      integration_status: integrated
+      integrated_ref: "f847ff45dcaf0d610fd871f7baa6f0bdbc3a3d0c"
+      pm_verification:
+        - "Every hunk was independently inspected and contained only formatter output"
+        - "2419 Flow unit tests passed and 10 skipped"
+        - "2413 Builder unit tests passed"
+        - "7 retention-envelope integration tests passed"
+        - "Strict Pyright passed with 0 errors and 0 warnings"
+        - "Ruff check and format-check passed for all 1191 src/eneo files"
+        - "Worker parent, exact five-file lease, clean worktree, and immutable base-to-tip diff were verified"
+      product_impact: "No runtime or user-visible behavior changed; the CI-locked formatter baseline is fully green."
+  - id: T010
+    roadmap_slice: next-tranche-gate-preparation
+    type: pm
+    assignee: PM
+    status: active
+    dispatch_token: "eneo-flows-and-builder-9-of-10:T010:f847ff45-86357959:v1"
+    reasoning_hint: ultra
+    objective: "Reconcile current-source documentation impact and exact collision leases for the next high-risk Flows-first candidate batch, then freeze one content fingerprint for read-only Judge and Opus/Max plan gates."
+    documentation_impact: unaffected
+    documentation_evidence: "This PM control task changes only durable orchestration policy and candidate-card evidence; it does not change a product endpoint, schema, workflow, lifecycle, persisted shape, capability, canonical product documentation, or generated contract."
+    inputs:
+      - "Integrated proof-fence revision f847ff45dcaf0d610fd871f7baa6f0bdbc3a3d0c"
+      - "Current M1.2, M3.7, and M1.4 source and roadmap evidence"
+      - "task_card_contract documentation-impact and collision policy"
+      - "Read-only Scout card packet refreshed at the post-proof-fence source state"
+    constraints:
+      - "Do not implement or dispatch coding Workers."
+      - "Every candidate card must state documentation impact and current-source evidence."
+      - "Absorb required docs and generated-contract work into the owning implementation/convergence card."
+      - "Keep M3.9 and M4.5 out of this convergence group while their collisions with M1.2 remain."
+      - "Preserve the protected dirty state and Flows-first pull priority."
+      - "Do not run Fable or a routine per-card Claude review."
+    expected_output:
+      - "Exact mutually disjoint candidate cards with documentation-impact dispositions"
+      - "A stable consolidated content fingerprint"
+      - "One tokened read-only Judge task followed by one milestone Opus/Max plan gate"
+      - "No Worker dispatch before both gates are reconciled"
+    receipt: null
+  - id: T999
+    roadmap_slice: program-audit
+    type: judge
+    assignee: Judge
+    status: queued
+    dispatch_token: null
+    reasoning_hint: high
+    objective: "Audit the full program and return advance, blocked, or program_complete."
+    inputs:
+      - "All canonical roadmap sources"
+      - "All verified receipts and integrated revisions"
+      - "One current integrated completion fingerprint covering HEAD and remote ref, every roadmap disposition, final validation evidence, generated-contract/migration/runtime/frontend status, unresolved decisions, worktree and quarantine state, and the supervision-automation cleanup plan"
+      - "Documentation-impact dispositions and current source-owned docs/docs-site/OpenAPI/generated-client convergence evidence"
+      - "The flow_core_transition_ready receipt or evidence that the program completed before a track transition was needed"
+    constraints:
+      - "Do not implement."
+      - "Activity and passing tests alone are not completion."
+      - "Require every roadmap item to have a stable authorized disposition."
+      - "Reject completion when any public/consumer/runtime/data capability change lacks documentation-impact evidence or its owning convergence group left canonical docs or generated contracts stale."
+      - "Reject a premature Flow-to-Builder transition that lacks the read-only flow_core_transition_ready receipt and its highest-ROI comparison."
+      - "Do not reopen a completed or measurement-closed slice without an anti_loop.reopen_requires trigger."
+      - "Treat program_complete as a mandatory high-risk milestone under docs/engineering/ai-review-workflow.md and peer_review.mode: milestone_only."
+      - "Before deciding program_complete, require a final Claude Opus/Max skeptical audit of the current completion fingerprint and the PM's local verification of every finding."
+      - "Claude is a peer and never makes the completion decision; only this read-only Judge may return program_complete."
+      - "A PM-verified blocker creates a bounded corrective task and prevents completion."
+      - "After a corrective task changes the fingerprint, require another completion verification; completion is eligible only when the unchanged current fingerprint has no PM-verified blocker."
+    expected_output:
+      - "advance | blocked | program_complete"
+      - "Remaining roadmap work or full reconciliation proof"
+      - "Exact next task when advancing"
+      - "Final Claude session, completion fingerprint, verdict, and PM-verified accepted/rejected finding dispositions when deciding program_complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "sha256:63dfcfed07deb63d3263985d3e61dcf781cfd77c6c2cfd9d6b35c2c5596ed2c2"
+  initial_branch: "refactor/flows-clean"
+  initial_head: "836ee6cc6d76658f78fdceb3338f1474135efdd5"
+  upstream: "origin/refactor/flows-clean"
+  initial_divergence: "0 ahead / 0 behind after fetch"
+  initial_dirty_state:
+    - "M .devcontainer/devcontainer.json"
+    - "M .gitignore"
+    - "?? AGENTS.md.backup-20260629-220449"
+    - "!! .devcontainer/devcontainer-lock.json"
+  last_verified_ref: "f847ff45dcaf0d610fd871f7baa6f0bdbc3a3d0c"
+  last_verification:
+    result: pass
+    task: T009
+    commands:
+      - "cd backend && uv run pytest -q tests/unittests/flows --ignore=tests/unittests/flows/ai_builder"
+      - "cd backend && uv run pytest -q tests/unittests/flows/ai_builder"
+      - "cd backend && uv run pytest -q tests/integration/flows/test_flow_retention_envelope.py"
+      - "cd backend && uv run pyright"
+      - "cd backend && uv run ruff check src/eneo"
+      - "cd backend && uv run ruff format --check src/eneo"
+      - "cd backend && uv lock --check"
+      - "git diff --check 7ae0f35019aed3b2fb0e40d1cb538fa391e602b2..HEAD"
