@@ -159,12 +159,12 @@ def test_flow_run_status_capabilities_public_contract() -> None:
     assert by_status[FlowRunStatus.COMPLETED].is_terminal is True
 
 
-def test_flow_run_status_capability_public_fields_stay_explicit_subset() -> None:
+def test_flow_run_status_capability_public_fields_match_source() -> None:
     source_fields = {field.name for field in fields(FlowRunStatusCapability)}
     public_fields = set(FlowRunStatusCapabilityPublic.model_fields)
 
-    assert public_fields == source_fields - {"is_rerun_eligible"}
-    assert "is_rerun_eligible" not in public_fields
+    assert public_fields == source_fields
+    assert "is_rerun_eligible" in public_fields
 
 
 def test_flow_run_status_capabilities_reject_unknown_response_fields() -> None:

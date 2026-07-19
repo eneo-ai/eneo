@@ -41,6 +41,8 @@ from eneo.flows.api.flow_authoring_router import (
 )
 from eneo.flows.api.flow_models import (
     FlowCreateRequest,
+    FlowFinalOutputContractPublic,
+    FlowOutputDelivery,
     FlowRunCreateRequest,
     FlowRunStepRerunRequest,
     FlowStepCreateRequest,
@@ -56,6 +58,14 @@ from eneo.flows.api.flow_run_execution_router import (
     rerun_flow_run_step,
 )
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
+from eneo.flows.application.flow_run_service import (
+    FlowRunPageWithResultFilesAndTokenUsage,
+    FlowRunWithResultFilesAndTokenUsage,
+)
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import (
     NotFoundException,
@@ -216,7 +226,10 @@ async def test_rerun_flow_run_step_permission_matrix_allows_service_key_principa
         active_api_key=_service_key(),
     )
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
-        update={"id": run_id}
+        update={
+            "id": run_id,
+            "output_payload_json": {"text": "Rerun finished"},
+        }
     )
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -226,8 +239,23 @@ async def test_rerun_flow_run_step_permission_matrix_allows_service_key_principa
         step_id,
         created=False,
     )
+    run_service = AsyncMock()
+    run_service.enrich_run_with_result_files_and_token_usage.return_value = (
+        FlowRunWithResultFilesAndTokenUsage(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            final_output=FlowFinalOutputContractPublic(
+                step_id=step_id,
+                step_order=1,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            ),
+        )
+    )
     container.flow_service.return_value = flow_service
-    container.flow_run_service.return_value = AsyncMock()
+    container.flow_run_service.return_value = run_service
     container.flow_run_rerun_service.return_value = rerun_service
     container.audit_service.return_value = AsyncMock()
     container.user.return_value = user
@@ -1095,7 +1123,9 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
     container = MagicMock()
     flow_id = uuid4()
     flow = _flow(flow_id)
-    run = _run(flow_id=flow_id, tenant_id=flow.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=flow.tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Finished"}}
+    )
 
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
@@ -1110,8 +1140,21 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_token_usage.return_value = (
-        SimpleNamespace(
-            items=(SimpleNamespace(run=run, result_files=(), token_usage=None),),
+        FlowRunPageWithResultFilesAndTokenUsage(
+            items=(
+                FlowRunWithResultFilesAndTokenUsage(
+                    run=run,
+                    result_files=(),
+                    token_usage=None,
+                    final_output=FlowFinalOutputContractPublic(
+                        step_id=uuid4(),
+                        step_order=1,
+                        output_type=FlowOutputType.TEXT,
+                        output_mode=FlowOutputMode.PASS_THROUGH,
+                        delivery=FlowOutputDelivery.PAYLOAD,
+                    ),
+                ),
+            ),
             has_more=False,
         )
     )
@@ -1181,7 +1224,9 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     flow = _flow(flow_id)
-    run = _run(flow_id=flow_id, tenant_id=flow.tenant_id)
+    run = _run(flow_id=flow_id, tenant_id=flow.tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Finished"}}
+    )
 
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
@@ -1196,8 +1241,21 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_token_usage.return_value = (
-        SimpleNamespace(
-            items=(SimpleNamespace(run=run, result_files=(), token_usage=None),),
+        FlowRunPageWithResultFilesAndTokenUsage(
+            items=(
+                FlowRunWithResultFilesAndTokenUsage(
+                    run=run,
+                    result_files=(),
+                    token_usage=None,
+                    final_output=FlowFinalOutputContractPublic(
+                        step_id=uuid4(),
+                        step_order=1,
+                        output_type=FlowOutputType.TEXT,
+                        output_mode=FlowOutputMode.PASS_THROUGH,
+                        delivery=FlowOutputDelivery.PAYLOAD,
+                    ),
+                ),
+            ),
             has_more=False,
         )
     )
