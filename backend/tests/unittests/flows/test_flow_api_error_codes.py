@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from eneo.flow_packages.domain.flow_package_errors import FlowPackageErrorCode
 from eneo.flows.flow_api_error_code import (
     FLOW_API_ERROR_CODES,
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -47,6 +48,15 @@ FLOW_ERROR_CODE_PATTERN = re.compile(r"^flow_[a-z0-9_]+$")
 FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN = re.compile(r"`((?:flow|typed_io)_[a-z0-9_]+)`")
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
+    "flow_run_history_minimum_retention_days": (
+        "retention policy field, not an error code"
+    ),
+    "flow_run_history_no_purge": "retention policy field, not an error code",
+    "flow_run_history_retention_days": "retention policy field, not an error code",
+    "flow_runtime_upload_abandonment_days": (
+        "runtime upload retention field, not an error code"
+    ),
+    "flow_version": "published run version field, not an error code",
 }
 PUBLIC_FLOW_ERROR_EMITTER_PATHS = (
     FLOW_SOURCE_ROOT / "flow_access_policy.py",
@@ -509,6 +519,7 @@ def test_public_flow_error_literals_are_cataloged() -> None:
 
 def test_flow_api_guide_backticked_flow_codes_are_cataloged() -> None:
     catalog_codes = {code.value for code in FLOW_API_ERROR_CODES}
+    catalog_codes.update(code.value for code in FlowPackageErrorCode)
     guide_text = DOCS_FLOW_API_GUIDE.read_text(encoding="utf-8")
     tokens = set(FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN.findall(guide_text))
     allowlisted_tokens = set(FLOW_GUIDE_NON_ERROR_CODE_TOKENS)
