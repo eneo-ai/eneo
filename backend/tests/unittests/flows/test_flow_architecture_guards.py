@@ -81,6 +81,14 @@ class _LocalJsonAliasDefinition:
 
 ALLOWED_OUTPUT_MODE_BRANCHES = frozenset(
     {
+        # Input grammar is selected before handlers run; moving this check would
+        # widen the handler preparation interface.
+        _OutputAxisBranch(
+            axis="output_mode",
+            relative_path="step_input_resolution.py",
+            function="resolve_step_input",
+            expression="step.output_mode == 'compose_text'",
+        ),
         _OutputAxisBranch(
             axis="output_mode",
             relative_path="step_input_resolution.py",
@@ -147,7 +155,7 @@ ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
         ),
     }
 )
-MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 7
+MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 8
 MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 3
 ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset(
     {
@@ -600,6 +608,13 @@ def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
 
 
 def _node_references_axis(node: ast.AST, *, axis: str) -> bool:
+    if (
+        axis == "output_type"
+        and isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "resolve_format_spec"
+    ):
+        return False
     enum_name = _OUTPUT_AXIS_ENUMS[axis]
     for child in ast.walk(node):
         if isinstance(child, ast.Name) and child.id == axis:

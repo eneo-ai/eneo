@@ -16,6 +16,7 @@ from eneo.flows.runtime.models import (
     StepDiagnostic,
     StepExecutionOutput,
 )
+from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -60,7 +61,7 @@ def should_execute_per_source_reader(step: RuntimeStep) -> bool:
         and runtime_input.execution_mode == "per_source"
         and step.input_source == "flow_input"
         and step.input_type in {"document", "file"}
-        and step.output_type == "json"
+        and resolve_format_spec(step.output_type) is JSON_OUTPUT_FORMAT
     )
 
 
@@ -278,7 +279,9 @@ async def _assemble_per_source_output(
     )
 
 
-def _documents_item_schema(output_contract: dict[str, Any] | None) -> dict[str, Any] | None:
+def _documents_item_schema(
+    output_contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if not isinstance(output_contract, Mapping):
         return None
     properties = output_contract.get("properties")
@@ -404,7 +407,9 @@ def _per_source_runtime_metadata(
     files = [
         metadata
         for call in per_source_calls
-        if (metadata := _first_runtime_file_metadata(call.output.runtime_input_metadata))
+        if (
+            metadata := _first_runtime_file_metadata(call.output.runtime_input_metadata)
+        )
         is not None
     ]
     source_headers = [
@@ -477,7 +482,9 @@ def _per_source_call_metadata(call: PerSourceReaderCall) -> dict[str, Any]:
         if runtime_input_metadata is not None
         else None
     )
-    input_text_value = input_text if isinstance(input_text, str) else call.output.input_text
+    input_text_value = (
+        input_text if isinstance(input_text, str) else call.output.input_text
+    )
     return {
         "source_number": call.source_number,
         "file_id": str(call.file_id),

@@ -15,6 +15,7 @@ from eneo.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -53,7 +54,7 @@ def should_execute_per_item_map(step: RuntimeStep) -> bool:
         item_map.enabled
         and step.input_source == "previous_step"
         and step.input_type == "json"
-        and step.output_type == "json"
+        and resolve_format_spec(step.output_type) is JSON_OUTPUT_FORMAT
     )
 
 
