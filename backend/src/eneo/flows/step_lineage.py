@@ -16,6 +16,9 @@ class _StepReferenceFields(Protocol):
     @property
     def existing_step_ref(self) -> str | None: ...
 
+    @property
+    def user_description(self) -> str | None: ...
+
 
 _StepReferenceSource: TypeAlias = Mapping[str, object] | _StepReferenceFields
 _EXISTING_STEP_REF_PREFIX = "existing_step_"
@@ -44,6 +47,7 @@ def existing_step_order_from_ref(existing_step_ref: str | None) -> int | None:
 
 def build_step_ref_mapping(steps: Iterable[_StepReferenceSource]) -> dict[str, int]:
     mapping: dict[str, int] = {}
+    display_labels: list[tuple[str, int]] = []
     for step in steps:
         step_order = _step_order(step)
         if not _is_step_order(step_order):
@@ -52,6 +56,12 @@ def build_step_ref_mapping(steps: Iterable[_StepReferenceSource]) -> dict[str, i
             raw_ref = _step_ref(step, key)
             if isinstance(raw_ref, str) and raw_ref.strip():
                 mapping[raw_ref.strip()] = step_order
+        raw_label = _step_ref(step, "user_description")
+        if isinstance(raw_label, str) and raw_label.strip():
+            display_labels.append((raw_label.strip(), step_order))
+    display_labels.sort(key=lambda item: item[1])
+    for display_label, step_order in display_labels:
+        mapping.setdefault(display_label, step_order)
     return mapping
 
 
@@ -104,10 +114,12 @@ def _is_step_order(value: object) -> TypeGuard[int]:
 
 def _step_ref(
     step: _StepReferenceSource,
-    key: Literal["plan_step_ref", "existing_step_ref"],
+    key: Literal["plan_step_ref", "existing_step_ref", "user_description"],
 ) -> object:
     if isinstance(step, Mapping):
         return step.get(key)
     if key == "plan_step_ref":
         return step.plan_step_ref
-    return step.existing_step_ref
+    if key == "existing_step_ref":
+        return step.existing_step_ref
+    return step.user_description

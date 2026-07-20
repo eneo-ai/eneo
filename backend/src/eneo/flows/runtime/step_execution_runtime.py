@@ -140,6 +140,7 @@ class VariableResolverProtocol(Protocol):
         *,
         current_step_order: int | None = None,
         step_names_by_order: dict[int, str] | None = None,
+        step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
@@ -917,6 +918,7 @@ async def prepare_step_execution(
         context_results,
         current_step_order=step.step_order,
         step_names_by_order=state.step_names_by_order,
+        step_ref_mapping=state.step_ref_mapping,
     )
     assistant = await deps.load_assistant(step.assistant_id, state)
     prompt_text = assistant.get_prompt_text()
@@ -990,6 +992,7 @@ async def prepare_step_execution(
         context_results,
         current_step_order=step.step_order,
         step_names_by_order=state.step_names_by_order,
+        step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
     )
     effective_prompt = (

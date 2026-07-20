@@ -169,6 +169,14 @@ Common input paths:
 | Runtime files | Loads, extracts, transcribes, or passes file data according to runtime input config and file policy. |
 | `http_get` | Fetches input through the runtime HTTP transport before step execution. |
 
+Earlier step text can also be interpolated with its trimmed display label, for
+example `{{ Collect intake }}` when that step's `user_description` is
+`Collect intake`. A display label is available only when the canonical
+step-reference mapping resolves it to that same step. If it collides with
+another step's `plan_step_ref` or `existing_step_ref`, the authored reference
+wins and the display label is unavailable. Authored refs remain analyzer and
+dependency identifiers; they are not bare-text interpolation aliases.
+
 Prefer explicit bindings over `all_previous_steps` when the Flow needs precise
 data flow. `all_previous_steps` is useful for broad summarization, but it hides
 which prior field is load-bearing and can waste context.

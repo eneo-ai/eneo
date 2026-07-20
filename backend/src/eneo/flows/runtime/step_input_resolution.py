@@ -250,6 +250,7 @@ async def resolve_step_input(
                     prior_results,
                     current_step_order=step.step_order,
                     step_names_by_order=state.step_names_by_order if state else None,
+                    step_ref_mapping=state.step_ref_mapping if state else None,
                     current_step_input=runtime_input_metadata,
                 )
                 interpolated_question = deps.variable_resolver.interpolate(
@@ -428,6 +429,7 @@ def _resolve_compose_source_refs_input(
             prior_results,
             current_step_order=step.step_order,
             step_names_by_order=state.step_names_by_order if state else None,
+            step_ref_mapping=state.step_ref_mapping if state else None,
             current_step_input=runtime_input_metadata,
         )
         rendered_question = deps.variable_resolver.interpolate(

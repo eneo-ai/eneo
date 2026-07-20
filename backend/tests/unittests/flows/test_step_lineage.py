@@ -23,6 +23,7 @@ class _RuntimeStepRef:
     step_order: int
     plan_step_ref: str | None = None
     existing_step_ref: str | None = None
+    user_description: str | None = None
 
 
 def _reference(step_order: int | None) -> TemplateReference:
@@ -38,12 +39,58 @@ def _reference(step_order: int | None) -> TemplateReference:
 def test_build_step_ref_mapping_reads_runtime_step_objects() -> None:
     mapping = build_step_ref_mapping(
         [
-            _RuntimeStepRef(1, plan_step_ref=" source ", existing_step_ref=None),
+            _RuntimeStepRef(
+                1,
+                plan_step_ref=" source ",
+                existing_step_ref=None,
+                user_description=" Source label ",
+            ),
             _RuntimeStepRef(2, plan_step_ref="", existing_step_ref="canonical"),
         ]
     )
 
-    assert mapping == {"source": 1, "canonical": 2}
+    assert mapping == {"source": 1, "canonical": 2, "Source label": 1}
+
+
+def test_build_step_ref_mapping_keeps_plan_ref_over_other_step_label() -> None:
+    mapping = build_step_ref_mapping(
+        [
+            _RuntimeStepRef(
+                1,
+                plan_step_ref="authored_ref",
+                user_description="Authored owner",
+            ),
+            _RuntimeStepRef(2, user_description=" authored_ref "),
+        ]
+    )
+
+    assert mapping == {"authored_ref": 1, "Authored owner": 1}
+
+
+def test_build_step_ref_mapping_keeps_existing_ref_over_other_step_label() -> None:
+    mapping = build_step_ref_mapping(
+        [
+            _RuntimeStepRef(
+                1,
+                existing_step_ref="authored_ref",
+                user_description="Authored owner",
+            ),
+            _RuntimeStepRef(2, user_description=" authored_ref "),
+        ]
+    )
+
+    assert mapping == {"authored_ref": 1, "Authored owner": 1}
+
+
+def test_build_step_ref_mapping_duplicate_label_uses_lowest_step_order() -> None:
+    mapping = build_step_ref_mapping(
+        [
+            {"step_order": 2, "user_description": "Duplicate"},
+            {"step_order": 1, "user_description": "Duplicate"},
+        ]
+    )
+
+    assert mapping == {"Duplicate": 1}
 
 
 def test_build_step_ref_mapping_reads_published_snapshot_mappings() -> None:

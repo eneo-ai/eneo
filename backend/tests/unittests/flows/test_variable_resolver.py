@@ -7,6 +7,7 @@ import pytest
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.step_lineage import build_step_ref_mapping
 from eneo.flows.variable_resolver import (
     FlowVariableResolver,
     iter_template_expressions,
@@ -148,6 +149,7 @@ def test_context_hides_file_backed_metadata_and_keeps_structured_output() -> Non
         prior_results=[result],
         current_step_order=2,
         step_names_by_order={1: "Previous report"},
+        step_ref_mapping={"Previous report": 1},
     )
 
     output = context["step_1"]["output"]
@@ -196,6 +198,7 @@ def test_interpolate_rejects_each_file_backed_text_alias_with_typed_code(
         ],
         current_step_order=2,
         step_names_by_order={1: "Previous report"},
+        step_ref_mapping={"Previous report": 1},
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -255,10 +258,60 @@ def test_build_context_exposes_named_step_aliases():
             1: "Sammanfattning av samtalet",
             2: "Identifiera behov",
         },
+        step_ref_mapping={
+            "Sammanfattning av samtalet": 1,
+            "Identifiera behov": 2,
+        },
     )
 
     assert context["Sammanfattning av samtalet"] == "Steg 1 text"
     assert context["Identifiera behov"] == "Steg 2 text"
+
+
+@pytest.mark.parametrize("authored_ref_field", ["plan_step_ref", "existing_step_ref"])
+def test_interpolate_rejects_step_label_colliding_with_other_authored_ref(
+    authored_ref_field: str,
+) -> None:
+    colliding_label = "shared_ref"
+    steps = [
+        {
+            "step_order": 1,
+            authored_ref_field: colliding_label,
+            "user_description": "Authored owner",
+        },
+        {
+            "step_order": 2,
+            "user_description": f" {colliding_label} ",
+        },
+    ]
+    context = FlowVariableResolver().build_context(
+        flow_input={},
+        prior_results=[
+            _result(step_order=1, output_payload={"text": "authored owner text"}),
+            _result(step_order=2, output_payload={"text": "display label text"}),
+        ],
+        current_step_order=3,
+        step_names_by_order={1: "Authored owner", 2: f" {colliding_label} "},
+        step_ref_mapping=build_step_ref_mapping(steps),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        FlowVariableResolver().interpolate(f"{{{{ {colliding_label} }}}}", context)
+
+    assert "authored owner text" not in str(exc_info.value)
+    assert "display label text" not in str(exc_info.value)
+
+
+def test_build_context_does_not_overwrite_reserved_key_with_step_label() -> None:
+    context = FlowVariableResolver().build_context(
+        flow_input={},
+        prior_results=[_result(step_order=1, output_payload={"text": "step text"})],
+        current_step_order=2,
+        step_names_by_order={1: "datum"},
+        step_ref_mapping={"datum": 1},
+    )
+
+    assert context["datum"] != "step text"
 
 
 def test_build_context_exposes_context_aware_system_aliases():

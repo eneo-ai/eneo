@@ -441,6 +441,28 @@ def test_build_graph_includes_explicit_underlag_dependencies() -> None:
     )
 
 
+def test_build_graph_includes_display_label_dependency() -> None:
+    steps = [
+        {
+            **_step(step_order=1, input_source="flow_input"),
+            "user_description": "Collect intake",
+        },
+        {
+            **_step(step_order=2, input_source="flow_input"),
+            "input_bindings": {"question": "Use {{ Collect intake }}"},
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+
+    assert any(
+        edge.source_step_order == 1
+        and edge.target_step_order == 2
+        and edge.kind == "input_bindings.question"
+        for edge in edges
+    )
+
+
 def test_build_graph_includes_source_ref_underlag_dependencies() -> None:
     steps = [
         _step(step_order=1, input_source="flow_input"),

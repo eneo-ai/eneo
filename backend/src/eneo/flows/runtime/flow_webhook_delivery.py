@@ -354,6 +354,7 @@ class FlowRunWebhookDeliveryService:
             state.prior_results,
             current_step_order=step.step_order + 1,
             step_names_by_order=state.step_names_by_order,
+            step_ref_mapping=state.step_ref_mapping,
         )
         context["text"] = text_payload
         structured = payload.get("structured")

@@ -45,6 +45,7 @@ class FlowVariableResolver:
         *,
         current_step_order: int | None = None,
         step_names_by_order: dict[int, str] | None = None,
+        step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_flow_input = flow_input or {}
@@ -117,6 +118,11 @@ class FlowVariableResolver:
             for result in prior_results:
                 step_name = step_names_by_order.get(result.step_order, "").strip()
                 if not step_name:
+                    continue
+                if (
+                    step_ref_mapping is None
+                    or step_ref_mapping.get(step_name) != result.step_order
+                ):
                     continue
                 if step_name in context:
                     continue

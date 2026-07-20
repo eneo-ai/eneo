@@ -2871,6 +2871,28 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
     ]
 
 
+def test_evidence_input_lineage_recognizes_display_label_alias() -> None:
+    run, _ = _evidence_run_and_version()
+    version = _evidence_version_with_steps(run, step_ids=[uuid4(), uuid4()])
+    steps = version.definition_json["steps"]
+    assert isinstance(steps, list)
+    first_step = steps[0]
+    second_step = steps[1]
+    assert isinstance(first_step, dict)
+    assert isinstance(second_step, dict)
+    first_step["user_description"] = "Collect evidence"
+    second_step["input_source"] = "flow_input"
+    second_step["input_bindings"] = {
+        "question": "Use {{ Collect evidence }}",
+    }
+
+    export = _render_raw_export(run, version)
+
+    assert export["summary"]["step_overview"][1]["input_lineage"][
+        "upstream_step_orders"
+    ] == [1]
+
+
 def test_evidence_bundle_export_prefers_typed_runtime_input_file_ids() -> None:
     run, _ = _evidence_run_and_version()
     relational_file_id = uuid4()

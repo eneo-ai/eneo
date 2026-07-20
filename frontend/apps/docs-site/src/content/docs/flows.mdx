@@ -258,6 +258,8 @@ This feature does **not** replace the step's instructions. It changes the **mate
 
 If you leave the advanced input template empty, the step uses its normal material based on `input_source`, form fields, runtime files, and previous outputs. If you override it, you can compose custom text with variables such as earlier step outputs.
 
+You can reference an earlier step's text by its trimmed display label, for example `{{ Collect intake }}` when the earlier step's `user_description` is `Collect intake`. Eneo exposes that bare label only when the canonical step-reference mapping resolves it to the same step. If the label collides with another step's `plan_step_ref` or `existing_step_ref`, the authored reference wins and the display label is unavailable. Authored refs remain analyzer and dependency identifiers; they are not bare-text interpolation aliases.
+
 ### What the LLM sees
 
 | Without custom material                                                                              | With custom material                                                        |

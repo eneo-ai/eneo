@@ -387,6 +387,7 @@ def _resolve_template_bindings(
         state.prior_results,
         current_step_order=step.step_order,
         step_names_by_order=state.step_names_by_order,
+        step_ref_mapping=state.step_ref_mapping,
     )
     resolved: dict[str, str] = {}
     for placeholder, expression in bindings.items():
