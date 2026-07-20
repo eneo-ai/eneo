@@ -112,6 +112,10 @@
   };
   const recordingSessionsByStepId: Record<string, RecordingSession | null> = {};
   const recorderRefsByStepId: Record<string, RecorderImperativeRef | null> = {};
+  let dialogGeneration = 0;
+  // Promise tails coordinate side effects and must not trigger rendering.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const uploadTailsByStepId = new Map<string, Promise<void>>();
 
   const AUDIO_ACCEPT_FILTER = "audio/*,video/webm,video/mp4";
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
@@ -338,6 +342,8 @@
   }
 
   function resetDialogState() {
+    dialogGeneration += 1;
+    uploadTailsByStepId.clear();
     runContractLoadedForFlowId = null;
     runContract = null;
     runContractError = null;
@@ -350,12 +356,15 @@
   }
 
   async function refreshRecoverableSessions() {
-    if (!flow?.id || !runContract || resumeScannedForFlowId === flow.id) return;
-    resumeScannedForFlowId = flow.id;
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
+    if (!operationFlowId || !runContract || resumeScannedForFlowId === operationFlowId) return;
+    resumeScannedForFlowId = operationFlowId;
     const hints = await scanRecoverableSessionsForSteps({
-      flowId: flow.id,
+      flowId: operationFlowId,
       steps: stepsRequiringInput
     });
+    if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     const firstWithHints = stepsRequiringInput.find((s) => hints[s.step_id]?.length);
     fileInputState.applyResumeScan(hints, firstWithHints?.step_id ?? null);
   }
@@ -420,6 +429,8 @@
   }
 
   function openFilePicker(step: DialogRuntimeStepInput) {
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
@@ -430,7 +441,13 @@
     input.onchange = (event) => {
       const target = event.target as HTMLInputElement;
       if (target.files) {
-        void uploadFilesForStep(step, Array.from(target.files));
+        void uploadFilesForStep(
+          step,
+          Array.from(target.files),
+          {},
+          operationGeneration,
+          operationFlowId
+        );
       }
       input.value = "";
     };
@@ -475,6 +492,7 @@
   }
 
   async function uploadRuntimeFileWithTimeout(
+    flowId: string,
     step: FlowRunContractStepInput,
     file: File
   ): Promise<UploadedFile> {
@@ -496,7 +514,7 @@
 
     try {
       const uploadPromise = eneo.flows.steps.runtimeFiles.upload({
-        id: flow.id,
+        id: flowId,
         stepId: step.step_id,
         file,
         abortController: controller,
@@ -512,21 +530,45 @@
 
   type StepUploadResult = {
     uploadedCount: number;
+    uploadedFiles: UploadedFile[];
     failed: boolean;
   };
 
   async function uploadFilesForStep(
     step: FlowRunContractStepInput,
     files: File[],
-    options: { clearRecordingNotice?: boolean } = {}
+    options: { clearRecordingNotice?: boolean } = {},
+    operationGeneration: number = dialogGeneration,
+    operationFlowId: string | undefined = flow.id
   ): Promise<StepUploadResult> {
-    if (!flow.id) return { uploadedCount: 0, failed: true };
-
+    const staleResult: StepUploadResult = {
+      uploadedCount: 0,
+      uploadedFiles: [],
+      failed: true
+    };
+    if (
+      !operationFlowId ||
+      operationGeneration !== dialogGeneration ||
+      flow.id !== operationFlowId
+    ) {
+      return staleResult;
+    }
     fileInputState.beginStepUpload(step.step_id, options);
+    const previousTail = uploadTailsByStepId.get(step.step_id) ?? Promise.resolve();
+    let releaseTail = () => {};
+    const currentTail = new Promise<void>((resolve) => {
+      releaseTail = resolve;
+    });
+    uploadTailsByStepId.set(step.step_id, currentTail);
     let uploadedCount = 0;
+    const uploadedFiles: UploadedFile[] = [];
     let failed = false;
 
     try {
+      await previousTail.catch(() => undefined);
+      if (operationGeneration !== dialogGeneration || flow.id !== operationFlowId) {
+        return staleResult;
+      }
       const currentFileCount = fileInputState.getUploadedFiles(step.step_id).length;
       const remainingSlots = step.max_files == null ? Infinity : step.max_files - currentFileCount;
       const toUpload =
@@ -545,7 +587,7 @@
       }
 
       if (toUpload.length === 0) {
-        return { uploadedCount, failed: files.length > 0 };
+        return { uploadedCount, uploadedFiles, failed: files.length > 0 };
       }
 
       for (const file of toUpload) {
@@ -561,10 +603,17 @@
         }
 
         try {
-          const uploaded = await uploadRuntimeFileWithTimeout(step, file);
+          const uploaded = await uploadRuntimeFileWithTimeout(operationFlowId, step, file);
+          if (operationGeneration !== dialogGeneration || flow.id !== operationFlowId) {
+            return staleResult;
+          }
           uploadedCount += 1;
+          uploadedFiles.push(uploaded);
           fileInputState.recordUploadedFile(step.step_id, uploaded);
         } catch (error) {
+          if (operationGeneration !== dialogGeneration || flow.id !== operationFlowId) {
+            return staleResult;
+          }
           failed = true;
           fileInputState.recordUploadFailure(
             step.step_id,
@@ -572,9 +621,15 @@
           );
         }
       }
-      return { uploadedCount, failed };
+      return { uploadedCount, uploadedFiles, failed };
     } finally {
-      fileInputState.finishStepUpload(step.step_id);
+      if (operationGeneration === dialogGeneration && flow.id === operationFlowId) {
+        fileInputState.finishStepUpload(step.step_id);
+        if (uploadTailsByStepId.get(step.step_id) === currentTail) {
+          uploadTailsByStepId.delete(step.step_id);
+        }
+      }
+      releaseTail();
     }
   }
 
@@ -725,10 +780,13 @@
   }
 
   async function discardRecordedFile(stepId: string) {
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
     const sessionId = fileInputState.sessionIdsByStepIdSnapshot[stepId];
     fileInputState.discardStepRecording(stepId);
-    if (flow?.id && sessionId) {
-      await purgeSession({ eneo, flowId: flow.id, stepId, sessionId });
+    if (operationFlowId && sessionId) {
+      await purgeSession({ eneo, flowId: operationFlowId, stepId, sessionId });
+      if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     }
     disposeRecordingSession(stepId);
   }
@@ -749,13 +807,22 @@
   }
 
   async function retryRecordedFileUpload(step: DialogRuntimeStepInput) {
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
     const file = fileInputState.getRecordedFile(step.step_id);
     if (!file) {
       openFilePicker(step);
       return;
     }
 
-    const result = await uploadFilesForStep(step, [file], { clearRecordingNotice: false });
+    const result = await uploadFilesForStep(
+      step,
+      [file],
+      { clearRecordingNotice: false },
+      operationGeneration,
+      operationFlowId
+    );
+    if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     if (result.uploadedCount > 0 && !result.failed) {
       fileInputState.clearPreservedRecording(step.step_id);
     }
@@ -765,7 +832,9 @@
     step: FlowRunContractStepInput,
     params: { blob: Blob; mimeType: string; reason: RecordingStopReason; durationMs: number }
   ) {
-    if (!flow?.id) return;
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
+    if (!operationFlowId) return;
     const prepared = fileInputState.prepareRecordedSegment(step.step_id);
     const capturedAt = Date.now();
     const filenameBase = buildSegmentFilenameBase(
@@ -782,7 +851,7 @@
     // Persist before upload so a refresh during the upload still leaves
     // the captured audio recoverable from IndexedDB.
     const persistResult = await persistRecordingSegment({
-      flowId: flow.id,
+      flowId: operationFlowId,
       stepId: step.step_id,
       sessionId: prepared.sessionId,
       segmentIndex: prepared.segmentIndex,
@@ -796,24 +865,32 @@
         runContract?.published_flow_version ?? null
       )
     });
+    if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     fileInputState.recordSegmentPersistence({
       stepId: step.step_id,
       file,
       notice: recordingNoticeForReason(params.reason),
       degraded: persistResult.degraded
     });
-    const beforeUploadCount = fileInputState.getUploadedFiles(step.step_id).length;
-    const result = await uploadFilesForStep(step, [file], { clearRecordingNotice: false });
+    const result = await uploadFilesForStep(
+      step,
+      [file],
+      { clearRecordingNotice: false },
+      operationGeneration,
+      operationFlowId
+    );
+    if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     if (result.uploadedCount > 0 && !result.failed) {
-      const uploaded = fileInputState.getUploadedFiles(step.step_id)[beforeUploadCount];
+      const uploaded = result.uploadedFiles[0];
       if (uploaded?.id) {
         await markSegmentUploaded({
-          flowId: flow.id,
+          flowId: operationFlowId,
           stepId: step.step_id,
           sessionId: prepared.sessionId,
           segmentIndex: prepared.segmentIndex,
           uploadedFileId: uploaded.id
         });
+        if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
       }
       fileInputState.clearPreservedRecording(step.step_id);
     }
@@ -821,6 +898,7 @@
     // After persistence + upload settles, hand the reason to the session
     // controller. error/stall trip the reconnect retry loop; manual/limit
     // close out the session so the next user-click starts fresh.
+    if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
     const session = recordingSessionsByStepId[step.step_id];
     if (session) {
       if (params.reason === "error" || params.reason === "stall") {
@@ -902,9 +980,12 @@
   }
 
   async function continueResumedSession(stepId: string, hint: SessionRecoveryHint) {
-    if (!flow?.id || !fileInputState.beginResumeAction(stepId)) return;
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
+    if (!operationFlowId || !fileInputState.beginResumeAction(stepId)) return;
     try {
-      const records = await readSessionRecords(flow.id, stepId, hint.sessionId);
+      const records = await readSessionRecords(operationFlowId, stepId, hint.sessionId);
+      if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
       if (records.length === 0) {
         fileInputState.dismissResumePrompt();
         return;
@@ -936,6 +1017,7 @@
         return;
       }
 
+      if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
       fileInputState.attachRecoveredSession(stepId, hint.sessionId, records.length);
       goToPageById(runtimeStepPageId(stepId));
 
@@ -945,41 +1027,54 @@
       // re-uploaded segments at the tail of the file input state.
       for (const record of records) {
         if (record.uploadedFileId) {
+          if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
           const synthesized = synthesizeUploadedFileFromRecord(record);
           fileInputState.recordUploadedFile(stepId, synthesized);
           continue;
         }
 
         const reuploadFile = makeReuploadFileFromRecord(record);
-        const before = fileInputState.getUploadedFiles(step.step_id).length;
-        const result = await uploadFilesForStep(step, [reuploadFile], {
-          clearRecordingNotice: false
-        });
+        const result = await uploadFilesForStep(
+          step,
+          [reuploadFile],
+          { clearRecordingNotice: false },
+          operationGeneration,
+          operationFlowId
+        );
+        if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
         if (result.uploadedCount > 0 && !result.failed) {
-          const uploaded = fileInputState.getUploadedFiles(step.step_id)[before];
+          const uploaded = result.uploadedFiles[0];
           if (uploaded?.id) {
             await markSegmentUploaded({
-              flowId: flow.id,
+              flowId: operationFlowId,
               stepId,
               sessionId: hint.sessionId,
               segmentIndex: record.segmentIndex,
               uploadedFileId: uploaded.id
             });
+            if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
           }
         }
       }
     } finally {
-      fileInputState.finishResumeAction();
+      if (operationGeneration === dialogGeneration && flow?.id === operationFlowId) {
+        fileInputState.finishResumeAction();
+      }
     }
   }
 
   async function discardResumedSession(stepId: string, hint: SessionRecoveryHint) {
-    if (!flow?.id || !fileInputState.beginResumeAction(stepId)) return;
+    const operationGeneration = dialogGeneration;
+    const operationFlowId = flow?.id;
+    if (!operationFlowId || !fileInputState.beginResumeAction(stepId)) return;
     try {
-      await purgeSession({ eneo, flowId: flow.id, stepId, sessionId: hint.sessionId });
+      await purgeSession({ eneo, flowId: operationFlowId, stepId, sessionId: hint.sessionId });
+      if (operationGeneration !== dialogGeneration || flow?.id !== operationFlowId) return;
       fileInputState.discardRecoveredSession(stepId);
     } finally {
-      fileInputState.finishResumeAction();
+      if (operationGeneration === dialogGeneration && flow?.id === operationFlowId) {
+        fileInputState.finishResumeAction();
+      }
     }
   }
 

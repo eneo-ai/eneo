@@ -101,6 +101,22 @@ describe("FlowRunFileInputState", () => {
     expect(state.getSkippedMessage("step-a")).toBeNull();
   });
 
+  it("keeps a step active until all of its uploads finish", () => {
+    const state = new FlowRunFileInputState();
+
+    state.beginStepUpload("step-a");
+    state.beginStepUpload("step-a");
+    state.finishStepUpload("step-a");
+
+    expect(state.isStepUploading("step-a")).toBe(true);
+    expect(state.uploadingStepIdsSnapshot).toEqual(["step-a"]);
+
+    state.finishStepUpload("step-a");
+
+    expect(state.isStepUploading("step-a")).toBe(false);
+    expect(state.uploadingStepIdsSnapshot).toEqual([]);
+  });
+
   it("preserves recorded files and discards a step as one state transition", () => {
     const state = new FlowRunFileInputState();
     const prepared = state.prepareRecordedSegment("step-a");
@@ -201,6 +217,8 @@ describe("FlowRunFileInputState", () => {
   it("resets all in-memory state between dialog opens and after accepted runs", () => {
     const state = new FlowRunFileInputState();
     state.recordUploadedFile("step-a", uploadedFile("file-a"));
+    state.beginStepUpload("step-a");
+    state.beginStepUpload("step-a");
     state.recordingStarted("step-a");
     state.dragEnteredStep("step-a");
     state.applyResumeScan({ "step-a": [recoveryHint("step-a", "session-a")] }, "step-a");
@@ -214,6 +232,7 @@ describe("FlowRunFileInputState", () => {
     state.resetForDialogClose();
 
     expect(state.getUploadedFiles("step-a")).toEqual([]);
+    expect(state.uploadingStepIdsSnapshot).toEqual([]);
     expect(state.hasActiveRecording).toBe(false);
     expect(state.isDraggingStep("step-a")).toBe(false);
     expect(state.getResumeHint("step-a")).toBeNull();

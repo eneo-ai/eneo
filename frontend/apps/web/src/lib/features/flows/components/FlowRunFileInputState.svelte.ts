@@ -23,7 +23,7 @@ export class FlowRunFileInputState {
   #uploadErrorsByStepId = $state<Record<string, string | null>>({});
   #recordingNoticesByStepId = $state<Record<string, string | null>>({});
   #skippedMessagesByStepId = $state<Record<string, string | null>>({});
-  #uploadingStepIds = $state<string[]>([]);
+  #activeUploadCountByStepId = $state<Record<string, number>>({});
   #recordingStepIds = $state<string[]>([]);
   #draggingStepId = $state<string | null>(null);
   #recordingSessionState = $state<RecordingSessionState>(emptyRecordingSessionState());
@@ -36,7 +36,7 @@ export class FlowRunFileInputState {
   }
 
   get uploadingStepIdsSnapshot(): string[] {
-    return [...this.#uploadingStepIds];
+    return Object.keys(this.#activeUploadCountByStepId);
   }
 
   get recordingStepIdsSnapshot(): string[] {
@@ -74,7 +74,7 @@ export class FlowRunFileInputState {
   }
 
   isStepUploading(stepId: string): boolean {
-    return this.#uploadingStepIds.includes(stepId);
+    return (this.#activeUploadCountByStepId[stepId] ?? 0) > 0;
   }
 
   isStepRecording(stepId: string): boolean {
@@ -127,7 +127,10 @@ export class FlowRunFileInputState {
       this.#recordingNoticesByStepId = { ...this.#recordingNoticesByStepId, [stepId]: null };
     }
     this.#skippedMessagesByStepId = { ...this.#skippedMessagesByStepId, [stepId]: null };
-    this.#uploadingStepIds = addUnique(this.#uploadingStepIds, stepId);
+    this.#activeUploadCountByStepId = {
+      ...this.#activeUploadCountByStepId,
+      [stepId]: (this.#activeUploadCountByStepId[stepId] ?? 0) + 1
+    };
   }
 
   recordUploadedFile(stepId: string, file: UploadedFile): void {
@@ -150,7 +153,18 @@ export class FlowRunFileInputState {
   }
 
   finishStepUpload(stepId: string): void {
-    this.#uploadingStepIds = this.#uploadingStepIds.filter((id) => id !== stepId);
+    const activeCount = this.#activeUploadCountByStepId[stepId] ?? 0;
+    if (activeCount > 1) {
+      this.#activeUploadCountByStepId = {
+        ...this.#activeUploadCountByStepId,
+        [stepId]: activeCount - 1
+      };
+      return;
+    }
+    if (activeCount === 0) return;
+    const next = { ...this.#activeUploadCountByStepId };
+    delete next[stepId];
+    this.#activeUploadCountByStepId = next;
   }
 
   removeUploadedFile(stepId: string, fileId: string): string | null {
@@ -318,7 +332,7 @@ export class FlowRunFileInputState {
     this.#uploadErrorsByStepId = {};
     this.#recordingNoticesByStepId = {};
     this.#skippedMessagesByStepId = {};
-    this.#uploadingStepIds = [];
+    this.#activeUploadCountByStepId = {};
     this.#recordingStepIds = [];
     this.#draggingStepId = null;
     this.#recordingSessionState = emptyRecordingSessionState();
