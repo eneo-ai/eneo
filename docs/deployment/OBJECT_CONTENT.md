@@ -260,6 +260,14 @@ registers and schedules it with ARQ; the lifecycle implementation does not
 import ARQ. Replacing ARQ with another worker implementation therefore changes
 the scheduling/registration adapter, not S3 or lifecycle logic.
 
+Every inventory page must provide a complete, advancing pagination cursor.
+Malformed or non-advancing pages fail that reconciliation run without
+completing the inventory cycle or marking unseen rows missing. A complete
+inventory marks absent `available` content failed; absent `retained` content
+keeps its retention state while health reports `remote_missing`.
+For multipart inventories, a truncated page must include both the next-key and
+next-upload-ID markers, and the marker pair must advance.
+
 ## Capacity and operations
 
 Alert before either PostgreSQL or object storage exhausts capacity. Monitor at

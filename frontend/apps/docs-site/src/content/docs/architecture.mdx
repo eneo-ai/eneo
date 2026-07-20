@@ -225,6 +225,13 @@ marker before any lifecycle or orphan mutation. A reachable empty or foreign
 bucket returns `configuration_required`; Eneo neither adopts it nor marks live
 rows missing.
 
+Reconciliation accepts an inventory cycle only when every page has a complete,
+advancing cursor. An invalid page fails the run before PostgreSQL records a
+completed cycle. A complete cycle marks absent available content failed; held
+or otherwise retained content stays retained while health reports the missing
+bytes. A truncated multipart page must provide an advancing next-key and
+next-upload-ID marker pair.
+
 The platform foundation does not itself cut existing File, InfoBlob, Icon, or
 Flow producers over to the new owner. Those migrations are separate vertical
 slices so each producer can copy and verify bytes before deleting its previous

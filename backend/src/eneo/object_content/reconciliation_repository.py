@@ -482,7 +482,17 @@ class ObjectContentReconciliationRepository:
             await self._session.scalars(
                 select(ObjectContents)
                 .where(
-                    ObjectContents.state == ContentState.AVAILABLE.value,
+                    or_(
+                        ObjectContents.state == ContentState.AVAILABLE.value,
+                        and_(
+                            ObjectContents.state == ContentState.RETAINED.value,
+                            or_(
+                                ObjectContents.failure_code.is_(None),
+                                ObjectContents.failure_code
+                                != ContentFailureCode.REMOTE_MISSING.value,
+                            ),
+                        ),
+                    ),
                     ObjectContents.available_at < cutoff,
                     or_(
                         ObjectContents.remote_observed_at.is_(None),
@@ -495,7 +505,8 @@ class ObjectContentReconciliationRepository:
             )
         ).all()
         for row in rows:
-            row.state = ContentState.FAILED.value
+            if row.state == ContentState.AVAILABLE.value:
+                row.state = ContentState.FAILED.value
             row.failure_code = ContentFailureCode.REMOTE_MISSING.value
             row.failure_detail = "complete object inventory did not observe the object"
         await self._session.flush()
@@ -835,6 +846,19 @@ class ObjectContentReconciliationRepository:
         lease: MultipartAbortLease,
         lease_owner: str,
     ) -> None:
+        candidate = (
+            await self._session.scalars(
+                select(ObjectContentMultipartCandidates)
+                .where(
+                    ObjectContentMultipartCandidates.object_key == lease.object_key,
+                    ObjectContentMultipartCandidates.upload_id == lease.upload_id,
+                    ObjectContentMultipartCandidates.lease_owner == lease_owner,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if candidate is None:
+            raise ObjectContentBusyError("The multipart-abort lease changed")
         await self._session.execute(
             delete(ObjectContentMultipartCandidates).where(
                 ObjectContentMultipartCandidates.object_key == lease.object_key,
@@ -860,6 +884,50 @@ class ObjectContentReconciliationRepository:
                 row.lease_until = None
             if row.state == ContentState.PENDING.value:
                 row.next_attempt_at = await self._database_now()
+        await self._session.flush()
+
+    async def renew_multipart_abort_lease(
+        self,
+        *,
+        lease: MultipartAbortLease,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> None:
+        candidate = (
+            await self._session.scalars(
+                select(ObjectContentMultipartCandidates)
+                .where(
+                    ObjectContentMultipartCandidates.object_key == lease.object_key,
+                    ObjectContentMultipartCandidates.upload_id == lease.upload_id,
+                    ObjectContentMultipartCandidates.lease_owner == lease_owner,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if candidate is None:
+            raise ObjectContentBusyError("The multipart-abort lease changed")
+
+        content = (
+            await self._session.scalars(
+                select(ObjectContents)
+                .where(
+                    ObjectContents.object_key == lease.object_key,
+                    ObjectContents.multipart_upload_id == lease.upload_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if (
+            content is not None
+            and content.state == ContentState.PENDING.value
+            and content.lease_owner != lease_owner
+        ):
+            raise ObjectContentBusyError("The multipart upload lease changed")
+
+        now = await self._database_now()
+        candidate.lease_until = now + timedelta(seconds=lease_seconds)
+        if content is not None and content.state == ContentState.PENDING.value:
+            content.lease_until = now + timedelta(seconds=lease_seconds)
         await self._session.flush()
 
     async def release_multipart_abort(

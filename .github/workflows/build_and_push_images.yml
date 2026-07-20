@@ -430,7 +430,7 @@ jobs:
           severity-cutoff: high
           only-fixed: false
           output-format: json
-          output-file: seaweedfs-${{ matrix.slug }}-evidence/grype.json
+          output-file: seaweedfs-${{ matrix.slug }}-evidence/grype-${{ matrix.slug }}.json
           grype-version: v0.110.0
 
       - name: Record exact platform digest
@@ -500,6 +500,21 @@ jobs:
           pattern: seaweedfs-*-evidence
           path: seaweedfs-evidence
           merge-multiple: true
+
+      - name: Verify both platform evidence sets survived the merge
+        run: |
+          set -euo pipefail
+          for platform in linux-amd64 linux-arm64; do
+            for evidence in \
+              "DIGEST-$platform" \
+              "grype-$platform.json" \
+              "IMAGE-PROVENANCE-$platform.txt" \
+              "IMAGE-SHA256SUMS-$platform" \
+              "seaweedfs-$platform.cyclonedx.json" \
+              "seaweedfs-$platform.spdx.json"; do
+              test -s "seaweedfs-evidence/$evidence"
+            done
+          done
 
       - name: Log in to GHCR with the workflow identity
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3

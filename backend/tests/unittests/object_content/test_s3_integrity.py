@@ -1,10 +1,11 @@
 import asyncio
 import base64
 import re
+from collections.abc import Awaitable, Callable
 from hashlib import sha256
 from io import BytesIO
 from threading import Lock
-from typing import TYPE_CHECKING, BinaryIO, cast
+from typing import TYPE_CHECKING, BinaryIO, TypeVar, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -25,6 +26,8 @@ from eneo.object_content.s3_object_store import (
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
+
+_ResultT = TypeVar("_ResultT")
 
 
 def _settings() -> ObjectContentSettings:
@@ -104,6 +107,25 @@ class _SingleUploadClient:
 class _EscapedInventoryClient:
     def list_objects_v2(self, **_request: object) -> dict[str, object]:
         return {"Contents": [{"Key": "another-deployment/object", "Size": 1}]}
+
+
+class _InvalidPaginationClient:
+    def __init__(
+        self,
+        *,
+        object_page: dict[str, object] | None = None,
+        multipart_page: dict[str, object] | None = None,
+    ) -> None:
+        self._object_page = object_page
+        self._multipart_page = multipart_page
+
+    def list_objects_v2(self, **_request: object) -> dict[str, object]:
+        assert self._object_page is not None
+        return self._object_page
+
+    def list_multipart_uploads(self, **_request: object) -> dict[str, object]:
+        assert self._multipart_page is not None
+        return self._multipart_page
 
 
 class _MultipartUploadClient:
@@ -295,6 +317,23 @@ class _BindingClient:
         }
 
 
+class _RecordingCheckpoint:
+    def __init__(self, record: Callable[[], None]) -> None:
+        self._record = record
+
+    async def __call__(self) -> None:
+        self._record()
+
+    async def run(
+        self,
+        operation: Callable[[], Awaitable[_ResultT]],
+    ) -> _ResultT:
+        await self()
+        result = await operation()
+        await self()
+        return result
+
+
 @pytest.mark.asyncio
 async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
     payload = b"content"
@@ -312,8 +351,7 @@ async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
         part_sha256=(digest,),
     )
 
-    async def checkpoint() -> None:
-        events.append("checkpoint")
+    checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
 
     head = await store.upload(
         new_object_key(_settings()),
@@ -323,7 +361,13 @@ async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
 
     assert head.size_bytes == len(payload)
     assert client.head_calls == 1
-    assert events == ["checkpoint", "put", "checkpoint", "head"]
+    assert events == [
+        "checkpoint",
+        "put",
+        "checkpoint",
+        "checkpoint",
+        "head",
+    ]
 
 
 @pytest.mark.asyncio
@@ -333,6 +377,74 @@ async def test_remote_inventory_cannot_escape_the_deployment_prefix() -> None:
 
     with pytest.raises(ObjectStoreIntegrityError, match="deployment prefix"):
         await store.list_object_page()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("continuation_token", "page"),
+    [
+        (None, {"IsTruncated": True, "Contents": []}),
+        (
+            "same-token",
+            {
+                "IsTruncated": True,
+                "NextContinuationToken": "same-token",
+                "Contents": [],
+            },
+        ),
+    ],
+    ids=("missing-token", "non-advancing-token"),
+)
+async def test_object_inventory_rejects_incomplete_pagination(
+    continuation_token: str | None,
+    page: dict[str, object],
+) -> None:
+    client = _InvalidPaginationClient(object_page=page)
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+
+    with pytest.raises(ObjectStoreIntegrityError, match="pagination"):
+        await store.list_object_page(continuation_token=continuation_token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("key_marker", "upload_id_marker", "page"),
+    [
+        (
+            None,
+            None,
+            {
+                "IsTruncated": True,
+                "NextKeyMarker": "next-key",
+                "Uploads": [],
+            },
+        ),
+        (
+            "same-key",
+            "same-upload",
+            {
+                "IsTruncated": True,
+                "NextKeyMarker": "same-key",
+                "NextUploadIdMarker": "same-upload",
+                "Uploads": [],
+            },
+        ),
+    ],
+    ids=("incomplete-marker-pair", "non-advancing-marker-pair"),
+)
+async def test_multipart_inventory_rejects_incomplete_pagination(
+    key_marker: str | None,
+    upload_id_marker: str | None,
+    page: dict[str, object],
+) -> None:
+    client = _InvalidPaginationClient(multipart_page=page)
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+
+    with pytest.raises(ObjectStoreIntegrityError, match="pagination"):
+        await store.list_multipart_page(
+            key_marker=key_marker,
+            upload_id_marker=upload_id_marker,
+        )
 
 
 @pytest.mark.asyncio
@@ -372,8 +484,7 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
         part_sha256=part_digests,
     )
 
-    async def checkpoint() -> None:
-        events.append("checkpoint")
+    checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
 
     await store.upload(
         new_object_key(settings),
@@ -385,11 +496,15 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
         "checkpoint",
         "create",
         "checkpoint",
+        "checkpoint",
         "part:1",
+        "checkpoint",
         "checkpoint",
         "part:2",
         "checkpoint",
+        "checkpoint",
         "complete",
+        "checkpoint",
         "checkpoint",
         "head",
     ]
@@ -416,9 +531,15 @@ async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
     )
     checkpoints = 0
 
-    async def checkpoint() -> None:
+    async def record_checkpoint() -> None:
         nonlocal checkpoints
         checkpoints += 1
+
+    class _CountingCheckpoint(_RecordingCheckpoint):
+        async def __call__(self) -> None:
+            await record_checkpoint()
+
+    checkpoint = _CountingCheckpoint(lambda: None)
 
     digest = await store.recompute_sha256(
         new_object_key(settings),
@@ -444,8 +565,7 @@ async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> No
     )
     store = S3ObjectStore(settings, client=cast("S3Client", client))
 
-    async def checkpoint() -> None:
-        events.append("checkpoint")
+    checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
 
     await store.delete_and_confirm(
         new_object_key(settings),
@@ -455,6 +575,7 @@ async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> No
     assert events == [
         "checkpoint",
         "delete",
+        "checkpoint",
         "checkpoint",
         "head",
         "checkpoint",
@@ -471,8 +592,7 @@ async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
         client=cast("S3Client", _AbortClient(events)),
     )
 
-    async def checkpoint() -> None:
-        events.append("checkpoint")
+    checkpoint = _RecordingCheckpoint(lambda: events.append("checkpoint"))
 
     await store.abort_multipart(
         new_object_key(settings),
@@ -480,7 +600,7 @@ async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
         operation_checkpoint=checkpoint,
     )
 
-    assert events == ["checkpoint", "abort"]
+    assert events == ["checkpoint", "abort", "checkpoint"]
 
 
 @pytest.mark.asyncio

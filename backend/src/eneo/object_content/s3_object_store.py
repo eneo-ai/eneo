@@ -11,7 +11,7 @@ from hashlib import sha256
 from secrets import token_hex
 from tempfile import SpooledTemporaryFile
 from time import monotonic
-from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, cast
+from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, TypeVar, cast
 from uuid import UUID
 
 from botocore.config import Config
@@ -26,6 +26,7 @@ from botocore.session import get_session
 
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import ByteRange, CapturedContent
+from eneo.object_content.lease import OperationCheckpoint
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -103,7 +104,16 @@ class MultipartUploadPage:
 
 
 MultipartStarted = Callable[[str], Awaitable[None]]
-OperationCheckpoint = Callable[[], Awaitable[None]]
+_MutationResultT = TypeVar("_MutationResultT")
+
+
+async def _run_mutation(
+    operation_checkpoint: OperationCheckpoint | None,
+    operation: Callable[[], Awaitable[_MutationResultT]],
+) -> _MutationResultT:
+    if operation_checkpoint is None:
+        return await operation()
+    return await operation_checkpoint.run(operation)
 
 
 class _FileSlice(io.RawIOBase):
@@ -357,16 +367,17 @@ class S3ObjectStore:
         expected_checksum = _base64_sha256(content.sha256)
         content.file.seek(0)
         try:
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            result = await asyncio.to_thread(
-                self._client.put_object,
-                Bucket=self._settings.bucket,
-                Key=key,
-                Body=content.file,
-                ContentLength=content.size_bytes,
-                ContentType=content.verified_media_type,
-                ChecksumSHA256=expected_checksum,
+            result = await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.put_object,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    Body=content.file,
+                    ContentLength=content.size_bytes,
+                    ContentType=content.verified_media_type,
+                    ChecksumSHA256=expected_checksum,
+                ),
             )
         except (BotoCoreError, ClientError) as error:
             raise ObjectStoreUnavailableError("Object upload failed") from error
@@ -403,15 +414,16 @@ class S3ObjectStore:
             )
 
         try:
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            created = await asyncio.to_thread(
-                self._client.create_multipart_upload,
-                Bucket=self._settings.bucket,
-                Key=key,
-                ContentType=content.verified_media_type,
-                ChecksumAlgorithm="SHA256",
-                ChecksumType="COMPOSITE",
+            created = await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.create_multipart_upload,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    ContentType=content.verified_media_type,
+                    ChecksumAlgorithm="SHA256",
+                    ChecksumType="COMPOSITE",
+                ),
             )
             upload_id = created.get("UploadId")
             if not upload_id:
@@ -428,15 +440,16 @@ class S3ObjectStore:
                 operation_checkpoint=operation_checkpoint,
             )
             expected_composite = composite_sha256(content.part_sha256)
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            completed = await asyncio.to_thread(
-                self._client.complete_multipart_upload,
-                Bucket=self._settings.bucket,
-                Key=key,
-                UploadId=upload_id,
-                MultipartUpload={"Parts": completed_parts},
-                ChecksumType="COMPOSITE",
+            completed = await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.complete_multipart_upload,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": completed_parts},
+                    ChecksumType="COMPOSITE",
+                ),
             )
         except ObjectStoreError:
             raise
@@ -499,17 +512,18 @@ class S3ObjectStore:
                 maximum_read_bytes=self._settings.io_chunk_bytes,
             )
 
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            result = await asyncio.to_thread(
-                self._client.upload_part,
-                Bucket=self._settings.bucket,
-                Key=key,
-                UploadId=upload_id,
-                PartNumber=index,
-                Body=part,
-                ContentLength=part_length,
-                ChecksumSHA256=expected_checksum,
+            result = await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.upload_part,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=index,
+                    Body=cast(BinaryIO, part),
+                    ContentLength=part_length,
+                    ChecksumSHA256=expected_checksum,
+                ),
             )
             if result.get("ChecksumSHA256") != expected_checksum:
                 raise ObjectStoreIntegrityError(
@@ -811,12 +825,13 @@ class S3ObjectStore:
     ) -> None:
         self._require_owned_key(key)
         try:
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            await asyncio.to_thread(
-                self._client.delete_object,
-                Bucket=self._settings.bucket,
-                Key=key,
+            await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.delete_object,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                ),
             )
         except (BotoCoreError, ClientError) as error:
             raise ObjectStoreUnavailableError("Object delete failed") from error
@@ -865,9 +880,33 @@ class S3ObjectStore:
                 raise ObjectStoreIntegrityError(
                     "Object inventory escaped the configured deployment prefix"
                 ) from error
+        raw_result = cast(Mapping[str, object], result)
+        is_truncated = raw_result.get("IsTruncated")
+        next_token = raw_result.get("NextContinuationToken")
+        normalized_next_token: str | None
+        if not isinstance(is_truncated, bool):
+            raise ObjectStoreIntegrityError(
+                "Object inventory pagination flag is missing or invalid"
+            )
+        if is_truncated:
+            if (
+                not isinstance(next_token, str)
+                or not next_token
+                or next_token == continuation_token
+            ):
+                raise ObjectStoreIntegrityError(
+                    "Object inventory pagination did not advance"
+                )
+            normalized_next_token = next_token
+        elif next_token is not None and next_token != "":
+            raise ObjectStoreIntegrityError(
+                "Object inventory pagination is inconsistent"
+            )
+        else:
+            normalized_next_token = None
         return RemoteObjectPage(
             objects=objects,
-            next_token=result.get("NextContinuationToken"),
+            next_token=normalized_next_token,
         )
 
     async def list_multipart_page(
@@ -932,10 +971,46 @@ class S3ObjectStore:
                 )
             )
         uploads = tuple(uploads_list)
+        raw_result = cast(Mapping[str, object], result)
+        is_truncated = raw_result.get("IsTruncated")
+        next_key_marker = raw_result.get("NextKeyMarker")
+        next_upload_id_marker = raw_result.get("NextUploadIdMarker")
+        normalized_key_marker: str | None
+        normalized_upload_id_marker: str | None
+        if not isinstance(is_truncated, bool):
+            raise ObjectStoreIntegrityError(
+                "Multipart inventory pagination flag is missing or invalid"
+            )
+        if is_truncated:
+            if (
+                not isinstance(next_key_marker, str)
+                or not next_key_marker
+                or not isinstance(next_upload_id_marker, str)
+                or not next_upload_id_marker
+                or (next_key_marker, next_upload_id_marker)
+                == (key_marker, upload_id_marker)
+            ):
+                raise ObjectStoreIntegrityError(
+                    "Multipart inventory pagination did not advance"
+                )
+            normalized_key_marker = next_key_marker
+            normalized_upload_id_marker = next_upload_id_marker
+        elif (
+            next_key_marker is not None
+            and next_key_marker != ""
+            or next_upload_id_marker is not None
+            and next_upload_id_marker != ""
+        ):
+            raise ObjectStoreIntegrityError(
+                "Multipart inventory pagination is inconsistent"
+            )
+        else:
+            normalized_key_marker = None
+            normalized_upload_id_marker = None
         return MultipartUploadPage(
             uploads=uploads,
-            next_key_marker=result.get("NextKeyMarker"),
-            next_upload_id_marker=result.get("NextUploadIdMarker"),
+            next_key_marker=normalized_key_marker,
+            next_upload_id_marker=normalized_upload_id_marker,
         )
 
     async def abort_multipart(
@@ -947,13 +1022,14 @@ class S3ObjectStore:
     ) -> None:
         self._require_owned_key(key)
         try:
-            if operation_checkpoint is not None:
-                await operation_checkpoint()
-            await asyncio.to_thread(
-                self._client.abort_multipart_upload,
-                Bucket=self._settings.bucket,
-                Key=key,
-                UploadId=upload_id,
+            await _run_mutation(
+                operation_checkpoint,
+                lambda: asyncio.to_thread(
+                    self._client.abort_multipart_upload,
+                    Bucket=self._settings.bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                ),
             )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchUpload", "NotFound"}:

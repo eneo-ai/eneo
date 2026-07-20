@@ -20,10 +20,12 @@ from eneo.database.tables.object_content_table import (
     ObjectContentHolds,
     ObjectContentMultipartCandidates,
     ObjectContentOrphanCandidates,
+    ObjectContentReconciliationState,
     ObjectContents,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
@@ -36,6 +38,7 @@ from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
 from eneo.object_content.s3_object_store import (
+    ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     S3ObjectStore,
     new_object_key,
@@ -45,6 +48,8 @@ from tests.integration.object_content.conftest import RealObjectStore
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import (
+        AbortMultipartUploadOutputTypeDef,
+        AbortMultipartUploadRequestTypeDef,
         DeleteObjectOutputTypeDef,
         DeleteObjectRequestTypeDef,
         HeadObjectOutputTypeDef,
@@ -98,6 +103,61 @@ class _DelayedDeleteClient:
     ) -> "ListMultipartUploadsOutputTypeDef":
         return self._delegate.list_multipart_uploads(
             **cast("ListMultipartUploadsRequestTypeDef", request)
+        )
+
+
+class _DelayedMultipartAbortClient:
+    def __init__(self, delegate: "S3Client") -> None:
+        self._delegate = delegate
+        self.abort_finished = Event()
+        self.release_abort = Event()
+
+    def abort_multipart_upload(
+        self,
+        **request: object,
+    ) -> "AbortMultipartUploadOutputTypeDef":
+        result = self._delegate.abort_multipart_upload(
+            **cast("AbortMultipartUploadRequestTypeDef", request)
+        )
+        self.abort_finished.set()
+        if not self.release_abort.wait(timeout=10):
+            raise TimeoutError("test did not release the completed multipart abort")
+        return result
+
+    def list_objects_v2(self, **request: object) -> "ListObjectsV2OutputTypeDef":
+        return self._delegate.list_objects_v2(
+            **cast("ListObjectsV2RequestTypeDef", request)
+        )
+
+    def list_multipart_uploads(
+        self,
+        **request: object,
+    ) -> "ListMultipartUploadsOutputTypeDef":
+        return self._delegate.list_multipart_uploads(
+            **cast("ListMultipartUploadsRequestTypeDef", request)
+        )
+
+
+class _TruncatedObjectInventoryClient:
+    def list_objects_v2(self, **_request: object) -> "ListObjectsV2OutputTypeDef":
+        return cast(
+            "ListObjectsV2OutputTypeDef",
+            {
+                "IsTruncated": True,
+                "Contents": [],
+            },
+        )
+
+    def list_multipart_uploads(
+        self,
+        **_request: object,
+    ) -> "ListMultipartUploadsOutputTypeDef":
+        return cast(
+            "ListMultipartUploadsOutputTypeDef",
+            {
+                "IsTruncated": False,
+                "Uploads": [],
+            },
         )
 
 
@@ -314,6 +374,103 @@ async def test_reconciliation_preserves_bytes_behind_an_active_hold(
             assert content is not None
             assert content.state == ContentState.RETAINED.value
         await real_object_store.store.head(pending.object_key)
+    finally:
+        await real_object_store.store.delete_and_confirm(pending.object_key)
+
+
+@pytest.mark.asyncio
+async def test_completed_inventory_reports_missing_retained_bytes_once(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    reconciler = ObjectContentReconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    await reconciler.run_once()
+
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        actor_user_id = (await session.scalars(select(Users.id))).one()
+        assert content is not None
+        await ObjectContentRepository(session).apply_hold(
+            tenant_id=content.tenant_id,
+            content_id=content.id,
+            kind="legal",
+            reason="retained bytes must remain under integrity monitoring",
+            actor_user_id=actor_user_id,
+            expires_at=None,
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+
+    await real_object_store.store.delete_and_confirm(pending.object_key)
+
+    observation_boundary = await reconciler.run_once()
+    first_missing = await reconciler.run_once()
+    repeated_missing = await reconciler.run_once()
+    facts = await reconciler.health_facts()
+
+    assert observation_boundary.missing_objects == 0
+    assert first_missing.missing_objects == 1
+    assert repeated_missing.missing_objects == 0
+    assert facts.integrity_failures >= 1
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        assert content is not None
+        assert content.state == ContentState.RETAINED.value
+        assert content.failure_code == ContentFailureCode.REMOTE_MISSING.value
+
+
+@pytest.mark.asyncio
+async def test_invalid_truncated_inventory_cannot_complete_a_cycle(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    healthy_reconciler = ObjectContentReconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    try:
+        await healthy_reconciler.run_once()
+        async with object_content_database.session() as session, session.begin():
+            state = await session.get(ObjectContentReconciliationState, 1)
+            assert state is not None
+            completed_cycles = state.object_completed_cycles
+
+        invalid_store = S3ObjectStore(
+            real_object_store.settings,
+            client=cast("S3Client", _TruncatedObjectInventoryClient()),
+        )
+        with pytest.raises(ObjectStoreIntegrityError, match="pagination"):
+            await ObjectContentReconciler(
+                real_object_store.settings,
+                invalid_store,
+                object_content_database,
+            ).run_once()
+
+        async with object_content_database.session() as session, session.begin():
+            state = await session.get(ObjectContentReconciliationState, 1)
+            content = await session.get(ObjectContents, pending.content_id)
+            assert state is not None
+            assert content is not None
+            assert state.object_completed_cycles == completed_cycles
+            assert content.state == ContentState.AVAILABLE.value
     finally:
         await real_object_store.store.delete_and_confirm(pending.object_key)
 
@@ -660,6 +817,94 @@ async def test_multipart_abort_rechecks_and_fences_a_stale_uploader(
         assert content is not None
         assert content.lease_owner is None
         assert content.lease_until is None
+
+
+@pytest.mark.asyncio
+async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = ObjectContentSettings.model_validate(
+        real_object_store.settings.model_dump()
+        | {
+            "connect_timeout_seconds": 0.01,
+            "read_timeout_seconds": 0.01,
+            "sdk_max_attempts": 1,
+            "reconciliation_lease_seconds": 6,
+        },
+    )
+    failed = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=False,
+    )
+    raw_client = _raw_client(real_object_store)
+    created = raw_client.create_multipart_upload(
+        Bucket=settings.bucket,
+        Key=failed.object_key,
+        ContentType="application/octet-stream",
+        ChecksumAlgorithm="SHA256",
+        ChecksumType="COMPOSITE",
+    )
+    upload_id = created["UploadId"]
+    delayed_client = _DelayedMultipartAbortClient(raw_client)
+    delayed_store = S3ObjectStore(
+        settings,
+        client=cast("S3Client", delayed_client),
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        content = await session.get(ObjectContents, failed.content_id)
+        assert content is not None
+        content.state = ContentState.FAILED.value
+        content.failure_code = ContentFailureCode.UPLOAD_REJECTED.value
+        content.multipart_upload_id = upload_id
+        content.multipart_initiated_at = now - timedelta(minutes=5)
+        content.lease_owner = None
+        content.lease_until = None
+        session.add(
+            ObjectContentMultipartCandidates(
+                object_key=failed.object_key,
+                upload_id=upload_id,
+                observed_cycle_id=uuid4(),
+                eligible_after=now - timedelta(minutes=1),
+                last_observed_at=now,
+                completed_observations=2,
+            )
+        )
+
+    running = asyncio.create_task(
+        ObjectContentReconciler(
+            settings,
+            delayed_store,
+            object_content_database,
+        ).run_once()
+    )
+    try:
+        await _wait_for(delayed_client.abort_finished)
+        await asyncio.sleep(settings.reconciliation_lease_seconds / 2 + 0.1)
+        delayed_client.release_abort.set()
+        result = await running
+
+        assert result.multipart_aborted == 1
+        async with object_content_database.session() as session, session.begin():
+            candidate = await session.get(
+                ObjectContentMultipartCandidates,
+                (failed.object_key, upload_id),
+            )
+            content = await session.get(ObjectContents, failed.content_id)
+            assert candidate is None
+            assert content is not None
+            assert content.state == ContentState.FAILED.value
+            assert content.multipart_upload_id is None
+    finally:
+        delayed_client.release_abort.set()
+        if not running.done():
+            await running
+        await real_object_store.store.abort_multipart(failed.object_key, upload_id)
+        raw_client.close()
 
 
 @pytest.mark.asyncio

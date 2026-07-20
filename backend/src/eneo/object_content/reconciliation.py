@@ -360,6 +360,7 @@ class ObjectContentReconciler:
         lease: MultipartAbortLease,
         lease_owner: str,
     ) -> int:
+        lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             confirmed = await ObjectContentReconciliationRepository(
                 session
@@ -370,8 +371,29 @@ class ObjectContentReconciler:
             )
         if not confirmed:
             return 0
+
+        async def renew_multipart_abort_lease() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).renew_multipart_abort_lease(
+                    lease=lease,
+                    lease_owner=lease_owner,
+                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                )
+
+        lease_checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=self._settings.reconciliation_lease_seconds,
+            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            renew=renew_multipart_abort_lease,
+        )
         try:
-            await self._store.abort_multipart(lease.object_key, lease.upload_id)
+            await self._store.abort_multipart(
+                lease.object_key,
+                lease.upload_id,
+                operation_checkpoint=lease_checkpoint,
+            )
         except ObjectStoreUnavailableError:
             async with self._database.session() as session, session.begin():
                 await ObjectContentReconciliationRepository(
@@ -381,13 +403,18 @@ class ObjectContentReconciler:
                     lease_owner=lease_owner,
                 )
             return 0
+        except (ObjectContentBusyError, ObjectContentStateError):
+            return 0
         async with self._database.session() as session, session.begin():
-            await ObjectContentReconciliationRepository(
-                session
-            ).complete_multipart_abort(
-                lease=lease,
-                lease_owner=lease_owner,
-            )
+            try:
+                await ObjectContentReconciliationRepository(
+                    session
+                ).complete_multipart_abort(
+                    lease=lease,
+                    lease_owner=lease_owner,
+                )
+            except ObjectContentBusyError:
+                return 0
         return 1
 
     async def _delete_orphans(self, lease_owner: str) -> int:

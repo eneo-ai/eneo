@@ -480,6 +480,12 @@ horizon as an immediate-delete default. Account erasure may clear the user
 attribution on a hold, but it does not release that hold or advance content
 deletion.
 
+Object inventory pages must return complete, advancing cursors. Eneo rejects an
+invalid page without completing the scan or marking unseen rows missing. A
+complete scan reports missing retained bytes as an integrity failure without
+changing the retained lifecycle state. A truncated multipart page must include
+an advancing next-key and next-upload-ID marker pair.
+
 Full and single-range reads recompute the PostgreSQL-owned SHA-256 before
 emitting response bytes. Memory use is bounded by the configured spool
 threshold; larger objects use temporary disk, and each verified read is linear

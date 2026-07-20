@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import timedelta
 from hashlib import sha256
 from threading import Event
@@ -21,12 +22,14 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
     ContentAccessClass,
     ContentFailureCode,
     ContentIntent,
     ContentReadGrant,
     ContentState,
+    ObjectContentBusyError,
     ObjectContentIntegrityError,
     ObjectContentStateError,
     ObjectContentUnavailableError,
@@ -43,10 +46,16 @@ from tests.integration.object_content.conftest import RealObjectStore
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
     from mypy_boto3_s3.type_defs import (
+        CompleteMultipartUploadOutputTypeDef,
+        CompleteMultipartUploadRequestTypeDef,
+        CreateMultipartUploadOutputTypeDef,
+        CreateMultipartUploadRequestTypeDef,
         HeadObjectOutputTypeDef,
         HeadObjectRequestTypeDef,
         PutObjectOutputTypeDef,
         PutObjectRequestTypeDef,
+        UploadPartOutputTypeDef,
+        UploadPartRequestTypeDef,
     )
 
 _MEBIBYTE = 1024 * 1024
@@ -109,6 +118,40 @@ class _DelayedSingleUploadClient:
         self.head_started.set()
         if not self.release_head.wait(timeout=10):
             raise TimeoutError("test did not release the verification HEAD")
+        return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
+
+
+class _DelayedMultipartUploadClient:
+    def __init__(self, delegate: "S3Client") -> None:
+        self._delegate = delegate
+        self.first_part_finished = Event()
+        self.release_first_part = Event()
+
+    def create_multipart_upload(
+        self,
+        **request: object,
+    ) -> "CreateMultipartUploadOutputTypeDef":
+        return self._delegate.create_multipart_upload(
+            **cast("CreateMultipartUploadRequestTypeDef", request)
+        )
+
+    def upload_part(self, **request: object) -> "UploadPartOutputTypeDef":
+        result = self._delegate.upload_part(**cast("UploadPartRequestTypeDef", request))
+        if request["PartNumber"] == 1:
+            self.first_part_finished.set()
+            if not self.release_first_part.wait(timeout=15):
+                raise TimeoutError("test did not release the completed first part")
+        return result
+
+    def complete_multipart_upload(
+        self,
+        **request: object,
+    ) -> "CompleteMultipartUploadOutputTypeDef":
+        return self._delegate.complete_multipart_upload(
+            **cast("CompleteMultipartUploadRequestTypeDef", request)
+        )
+
+    def head_object(self, **request: object) -> "HeadObjectOutputTypeDef":
         return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
 
 
@@ -256,6 +299,109 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
         delayed_client.release_head.set()
         if "prepared" in locals():
             await real_object_store.store.delete_and_confirm(prepared.object_key)
+        raw_client.close()
+
+
+@pytest.mark.asyncio
+async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = ObjectContentSettings.model_validate(
+        real_object_store.settings.model_dump()
+        | {
+            "connect_timeout_seconds": 0.01,
+            "read_timeout_seconds": 0.01,
+            "sdk_max_attempts": 1,
+            "reconciliation_lease_seconds": 6,
+            "multipart_part_bytes": 5 * _MEBIBYTE,
+            "multipart_threshold_bytes": 5 * _MEBIBYTE,
+        },
+    )
+    raw_client = _raw_client(real_object_store)
+    delayed_client = _DelayedMultipartUploadClient(raw_client)
+    delayed_store = S3ObjectStore(
+        settings,
+        client=cast("S3Client", delayed_client),
+    )
+    service = ObjectContentService(settings, delayed_store, object_content_database)
+    payload = b"x" * (5 * _MEBIBYTE + 17)
+
+    try:
+        async with capture_content(
+            _payload_bytes(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            maximum_size_bytes=len(payload),
+            spool_memory_bytes=settings.spool_memory_bytes,
+            multipart_part_bytes=settings.multipart_part_bytes,
+        ) as captured:
+            async with object_content_database.session() as session, session.begin():
+                tenant_id = (await session.scalars(select(Tenants.id))).one()
+                user_id = (await session.scalars(select(Users.id))).one()
+                owner = Files(
+                    name=f"{uuid4().hex}.bin",
+                    text=None,
+                    blob=None,
+                    checksum=captured.sha256.hex(),
+                    size=captured.size_bytes,
+                    mimetype=captured.verified_media_type,
+                    file_type="text",
+                    transcription=None,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    parent_file_id=None,
+                )
+                session.add(owner)
+                await session.flush()
+                prepared = await service.prepare_in_transaction(
+                    session,
+                    intent=ContentIntent(
+                        tenant_id=tenant_id,
+                        created_by_user_id=user_id,
+                        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                        idempotency_key=uuid4().hex,
+                        producer_receipt=f"file:{owner.id}:original:0",
+                    ),
+                    content=captured,
+                )
+                session.add(
+                    FileContentReferences(
+                        file_id=owner.id,
+                        content_id=prepared.id,
+                        variant="original",
+                        ordinal=0,
+                    )
+                )
+                await session.flush()
+
+            upload = asyncio.create_task(
+                service.store_and_verify(content_id=prepared.id, content=captured)
+            )
+            await _wait_for(delayed_client.first_part_finished)
+            await asyncio.sleep(settings.reconciliation_lease_seconds + 0.1)
+
+            concurrent = await ObjectContentReconciler(
+                settings,
+                real_object_store.store,
+                object_content_database,
+            ).run_once()
+
+            assert concurrent.content_processed == 0
+            assert concurrent.multipart_aborted == 0
+            delayed_client.release_first_part.set()
+            available = await upload
+            assert available.content_id == prepared.id
+    finally:
+        delayed_client.release_first_part.set()
+        if "upload" in locals():
+            with suppress(ObjectContentBusyError, ObjectContentUnavailableError):
+                await upload
+        if "prepared" in locals():
+            try:
+                await real_object_store.store.delete_and_confirm(prepared.object_key)
+            except ObjectStoreNotFoundError:
+                pass
         raw_client.close()
 
 
