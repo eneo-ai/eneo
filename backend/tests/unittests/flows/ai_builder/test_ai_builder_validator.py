@@ -457,6 +457,27 @@ class TestSemanticVariableValidation:
         assert not result.valid
         assert any(e.code == "invalid_runtime_variable_path" for e in result.errors)
 
+    def test_unknown_flow_input_key_rejected_at_plan_time(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Use unknown flow input",
+                        instructions="Use {{ flow_input.case_identifier }}.",
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        error = next(
+            error
+            for error in result.errors
+            if error.code == "invalid_runtime_variable_path"
+        )
+        assert "unknown flow_input key" in error.message
+
     def test_form_field_variable_reference_allowed(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Form flow",

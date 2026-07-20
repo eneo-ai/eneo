@@ -327,6 +327,40 @@ def test_prepare_create_spec_does_not_run_transition_normalizer() -> None:
     assert result.validation.valid
 
 
+def test_prepare_create_spec_rejects_unknown_flow_input_key() -> None:
+    spec = _make_spec()
+    step = spec.steps[0]
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                step.model_copy(
+                    update={
+                        "assistant_spec": step.assistant_spec.model_copy(
+                            update={
+                                "instructions": "Use {{ flow_input.case_identifier }}."
+                            }
+                        )
+                    }
+                )
+            ]
+        }
+    )
+
+    result = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+    )
+
+    assert result.validation is not None
+    assert not result.validation.valid
+    assert {error.code for error in result.validation.errors} == {
+        "invalid_runtime_variable_path"
+    }
+
+
 def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
     with (
         patch(

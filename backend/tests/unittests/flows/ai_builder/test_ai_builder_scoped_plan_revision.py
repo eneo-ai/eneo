@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -225,6 +225,68 @@ async def test_scoped_revision_uses_bounded_server_tool_call_id() -> None:
     )
     assert "scoped_step_revision" in request.tool_call_id
     assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_scoped_revision_rejects_unknown_flow_input_key() -> None:
+    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
+    prior_step = prior_spec.steps[0]
+    prior_spec = prior_spec.model_copy(
+        update={
+            "steps": [
+                prior_step.model_copy(
+                    update={
+                        "assistant_spec": prior_step.assistant_spec.model_copy(
+                            update={
+                                "instructions": "Use {{ flow_input.case_identifier }}."
+                            }
+                        )
+                    }
+                )
+            ]
+        }
+    )
+    prior_plan = _builder_plan(prior_spec)
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
+        ],
+        available_kbs=[],
+    )
+    repo = AsyncMock()
+    repo.savepoint = MagicMock(
+        side_effect=AssertionError("invalid scoped revision reached persistence")
+    )
+
+    result = await run_scoped_plan_revision_attempt(
+        request=_make_request(
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="byt modell till gpt 5.4 nano",
+                )
+            ],
+            prior_plan_for_revision=prior_plan,
+            plan_edit_context=AIBuilderPlanEditContext(
+                scope="step",
+                plan_id=prior_plan.id,
+                target_plan_step_ref="step_a",
+            ),
+            resource_catalog=catalog,
+            available_model_refs=catalog.model_refs,
+            request_id="req-invalid-flow-input",
+        ),
+        finalizer=CompiledProposalFinalizer(
+            repo=repo,
+            quality_retry_warning_codes=frozenset(),
+        ),
+    )
+
+    assert result is not None
+    assert len(result.events) == 1
+    payload = json.loads(encode_ai_builder_stream_event(result.events[0])["data"])
+    assert payload["details"] == {"failure_kind": "validation"}
 
 
 @pytest.mark.asyncio

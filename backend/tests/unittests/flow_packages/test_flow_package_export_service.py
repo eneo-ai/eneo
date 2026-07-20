@@ -564,7 +564,6 @@ def test_export_rejects_invalid_template_references_in_assistant_instructions() 
     [
         "{{ step_2.output.text }}",
         "{{ step_input.unknown_key }}",
-        "{{ flow_input.unregistered_field }}",
     ],
 )
 def test_export_rejects_forward_or_invalid_runtime_references(template: str) -> None:
@@ -578,6 +577,29 @@ def test_export_rejects_forward_or_invalid_runtime_references(template: str) -> 
                         1,
                         assistant_id=assistant_id,
                         input_bindings={"question": template},
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID
+
+
+def test_export_preserves_public_error_for_unknown_flow_input_key() -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        input_bindings={
+                            "question": "{{ flow_input.unregistered_field }}"
+                        },
                     )
                 ]
             ),

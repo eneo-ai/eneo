@@ -72,7 +72,6 @@ from eneo.flows.flow_resource_bindings import (
     local_resource_kinds_for_slot_kind,
 )
 from eneo.flows.flow_validators_template import has_template_fill_resource_reference
-from eneo.flows.flow_variable_definitions import PRIMARY_FLOW_INPUT_KEYS
 from eneo.flows.http_transport import contains_secret_sentinel, is_authored_config
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -658,20 +657,6 @@ def _validate_step_template_references(
             if reference.kind is TemplateReferenceKind.STEP:
                 step_ref = reference.step_ref or reference.head
                 if step_ref not in allowed_step_refs:
-                    _raise_invalid_variable_reference(
-                        reference.expression,
-                        current_step_order,
-                    )
-            if (
-                reference.kind is TemplateReferenceKind.RUNTIME
-                and reference.head == "flow_input"
-                and reference.tail
-            ):
-                flow_input_key = reference.tail.split(".", maxsplit=1)[0]
-                if (
-                    flow_input_key not in form_field_names
-                    and flow_input_key not in PRIMARY_FLOW_INPUT_KEYS
-                ):
                     _raise_invalid_variable_reference(
                         reference.expression,
                         current_step_order,

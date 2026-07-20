@@ -167,6 +167,31 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ordered_submission_rejects_unknown_flow_input_key() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Use case input."))
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Keep the current step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Use {{ flow_input.case_identifier }}."
+                    },
+                }
+            ],
+        },
+    )
+
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "unknown flow_input key" in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_ordered_submission_propagates_internal_compile_error() -> None:
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
 

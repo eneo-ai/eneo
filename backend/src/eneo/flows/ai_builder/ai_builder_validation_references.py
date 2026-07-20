@@ -226,7 +226,10 @@ def _runtime_path_error_message(reference: TemplateReference) -> str:
             f"Variable '{reference.expression}' uses a non-numeric index on '{reference.head}'. "
             "Sequence runtime variables require numeric indexes."
         )
-    if reference.path_error_code == "unknown_step_input_key":
+    if reference.path_error_code in {
+        "unknown_flow_input_key",
+        "unknown_step_input_key",
+    }:
         known_keys = ()
         if reference.path_error_context is not None:
             raw_known_keys = reference.path_error_context.get("known_keys", ())
@@ -238,7 +241,7 @@ def _runtime_path_error_message(reference: TemplateReference) -> str:
             set(known_keys),
         )
         return (
-            f"Variable '{reference.expression}' references an unknown step_input key."
+            f"Variable '{reference.expression}' references an unknown {reference.head} key."
             f"{suggestion}"
         )
     if reference.path_error_code == "step_input_key_required":
