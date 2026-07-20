@@ -210,9 +210,9 @@ class FlowFinalOutputContractPublic(BaseModel):
     output_type: FlowOutputType = Field(
         description=(
             "Terminal output type clients should expect after a successful run. "
-            "`docx` and `pdf` outputs are returned as generated file download "
-            "artifacts; "
-            "`text` and `json` outputs are returned as step output payloads."
+            "Read `FlowRunPublic.result.kind`: text is either exact `inline_text` "
+            "or `file_backed_text`, JSON is `structured`, and `docx` or `pdf` "
+            "is an `artifact` for generated file download."
         ),
     )
     output_mode: FlowOutputMode = Field(
@@ -224,10 +224,11 @@ class FlowFinalOutputContractPublic(BaseModel):
     )
     delivery: FlowOutputDelivery = Field(
         description=(
-            "How clients should retrieve or present the terminal result. `payload` "
-            "means read the final step output payload, `artifact` means offer a "
-            "generated file download, and `outbound_http` means the step sends its "
-            "result to the configured HTTP endpoint."
+            "How clients should retrieve or present the terminal result. For "
+            "`payload`, read `FlowRunPublic.result.kind` and handle exact "
+            "`inline_text` separately from `file_backed_text`; `artifact` means "
+            "offer a generated file download, and `outbound_http` means the step "
+            "sends its result to the configured HTTP endpoint."
         ),
     )
     output_contract: dict[str, Any] | None = Field(
@@ -247,6 +248,28 @@ class FlowRunInlineTextResultPublic(BaseModel):
     )
     text: str = Field(
         description="Exact terminal text produced by the published final step."
+    )
+
+
+class FlowRunFileBackedTextResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["file_backed_text"] = Field(
+        description="Discriminator for terminal text stored in a result file."
+    )
+    preview: str = Field(
+        description=(
+            "Bounded, incomplete, non-authoritative prefix of the terminal text. "
+            "When `file.availability` is `content_purged`, this incomplete preview "
+            "is the only remaining text and must not be treated as the full result."
+        )
+    )
+    file: FlowRunStepResultFile = Field(
+        description=(
+            "Current-attempt generated output containing the complete terminal "
+            "text. Download only when `availability` is `available`; "
+            "`content_purged` means the content is gone and download returns 410."
+        )
     )
 
 
@@ -301,6 +324,7 @@ class FlowRunOutboundHttpResultPublic(BaseModel):
 
 FlowRunResultPublic: TypeAlias = Annotated[
     FlowRunInlineTextResultPublic
+    | FlowRunFileBackedTextResultPublic
     | FlowRunStructuredResultPublic
     | FlowRunArtifactResultPublic
     | FlowRunOutboundHttpResultPublic,
@@ -368,8 +392,9 @@ class FlowRunContractPublic(BaseModel):
         description=(
             "Published terminal output contract for this flow version. API consumers "
             "should use this before starting a run to decide whether their app will "
-            "display text/JSON output or offer a generated file download such as "
-            "PDF or DOCX."
+            "display output or offer a generated file download. After success, "
+            "branch on `FlowRunPublic.result.kind`, including exact `inline_text` "
+            "and `file_backed_text` for terminal text."
         ),
     )
     form_fields: list[FormFieldPublic] = Field(

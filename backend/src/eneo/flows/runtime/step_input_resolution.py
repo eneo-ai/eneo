@@ -9,6 +9,12 @@ from uuid import UUID
 
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
@@ -22,7 +28,6 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import load_files_by_requested_ids
 from eneo.flows.runtime.models import (
-    OUTPUT_TEXT_OVERFLOW_KEY,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -506,12 +511,11 @@ def _source_ref_runtime_value(
         else {}
     )
     if ref_output == "text":
-        _raise_if_output_text_overflowed(
+        return _read_complete_output_text(
             result,
             consuming_step_order=consuming_step_order,
             input_source="input_bindings.source_refs",
         )
-        return payload.get("text", "")
     current: Any = payload.get("structured")
     for segment in field_path:
         if not isinstance(current, dict):
@@ -880,12 +884,13 @@ def resolve_input_source_text(
         )
         if previous and isinstance(previous.output_payload_json, dict):
             if not _can_read_structured_output(previous, input_type=input_type):
-                _raise_if_output_text_overflowed(
+                text = _read_complete_output_text(
                     previous,
                     consuming_step_order=step_order,
                     input_source=input_source,
                 )
-            text = str(previous.output_payload_json.get("text", ""))
+            else:
+                text = str(previous.output_payload_json.get("text", ""))
             if not text.strip():
                 logger.warning(
                     "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
@@ -921,9 +926,11 @@ def resolve_input_source_text(
         for previous in sorted(prior_results, key=lambda item: item.step_order):
             if previous.step_order >= step_order:
                 continue
-            text = ""
-            if isinstance(previous.output_payload_json, dict):
-                text = str(previous.output_payload_json.get("text", ""))
+            text = _read_complete_output_text(
+                previous,
+                consuming_step_order=step_order,
+                input_source=input_source,
+            )
             parts.append(
                 f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>"
             )
@@ -994,15 +1001,37 @@ def _raise_if_output_text_overflowed(
     consuming_step_order: int,
     input_source: str,
 ) -> None:
-    payload = result.output_payload_json
-    if not isinstance(payload, dict):
-        return
-    overflow = payload.get(OUTPUT_TEXT_OVERFLOW_KEY)
-    if not isinstance(overflow, dict):
-        return
-    raise TypedIOValidationException(
-        f"Step {consuming_step_order}: input_source '{input_source}' cannot consume "
-        f"step {result.step_order} text because that output exceeded inline storage "
-        "and was stored as generated output file(s).",
-        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+    _read_complete_output_text(
+        result,
+        consuming_step_order=consuming_step_order,
+        input_source=input_source,
     )
+
+
+def _read_complete_output_text(
+    result: FlowStepResult,
+    *,
+    consuming_step_order: int,
+    input_source: str,
+) -> str:
+    payload = result.output_payload_json
+    if not isinstance(payload, dict) or (
+        "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
+    ):
+        return ""
+    try:
+        text = interpret_step_text(payload)
+    except StepOutputMetadataError as exc:
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: input_source '{input_source}' cannot "
+            f"consume malformed persisted text from step {result.step_order}.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        ) from exc
+    if isinstance(text, FileBackedStepText):
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: input_source '{input_source}' cannot "
+            f"consume step {result.step_order} text because that output exceeded "
+            "inline storage and was stored as a generated output file.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    return text.text

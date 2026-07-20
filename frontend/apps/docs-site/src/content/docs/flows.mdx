@@ -138,6 +138,14 @@ Runtime files are uploaded through step-scoped paths and passed to run creation 
 
 The same run contract also tells clients whether the flow can pause for human review through `steps_requiring_review`, what final output shape to expect through `final_output`, and which runtime upload timeout policy to apply through `runtime_upload_policy`.
 
+Completed runs expose one closed `result.kind`. `inline_text` is exact complete
+text. If terminal text exceeds inline storage, `file_backed_text.preview` is
+only a bounded display prefix and `file_backed_text.file` identifies the
+current-attempt generated output to download through the authorized artifact
+endpoint only when `file.availability` is `available`. When it is
+`content_purged`, the complete text is unavailable and the artifact endpoint
+returns `410`. Clients must not treat the preview as complete text.
+
 A run can pause at `awaiting_review`. The runtime then exposes an active review checkpoint that a consumer app can edit, approve, reject, and resume. Initial execution still creates one run for the whole published flow; a later rerun can target one completed step in an existing completed or failed run.
 
 For audio-first workflows such as meeting transcript summaries or employee review notes, the intended runtime path is **completed upload first, then one published Flow run**:

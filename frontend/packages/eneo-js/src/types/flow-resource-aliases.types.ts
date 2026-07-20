@@ -350,6 +350,17 @@ const validInlineTextResult: FlowRunResult = {
   kind: "inline_text",
   text: "Decision support generated."
 };
+const validFileBackedTextResult: FlowRunResult = {
+  kind: "file_backed_text",
+  preview: "Decision support preview.",
+  file: {
+    ...validFlowRunResultFile,
+    source: "generated_output",
+    name: "decision-support.txt",
+    mimetype: "text/plain",
+    file_type: "text"
+  }
+};
 const validStructuredResult: FlowRunResult = {
   kind: "structured",
   value: {
@@ -374,6 +385,8 @@ function describeFlowRunResult(result: FlowRunResult): string {
   switch (result.kind) {
     case "inline_text":
       return result.text;
+    case "file_backed_text":
+      return result.file.name;
     case "structured":
       return JSON.stringify(result.value);
     case "artifact":
@@ -831,6 +844,7 @@ void validFlowRunStatusCapability;
 void validFlowRunStatusCapabilities;
 void validFlowRunOutputPayload;
 void describeFlowRunResult(validInlineTextResult);
+void describeFlowRunResult(validFileBackedTextResult);
 void describeFlowRunResult(validStructuredResult);
 void describeFlowRunResult(validArtifactResult);
 void describeFlowRunResult(validOutboundResult);

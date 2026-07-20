@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import AttemptStartProvenance
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File
     from eneo.spaces.space import Space
-
-
-OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -147,5 +150,19 @@ class RunExecutionState:
 
 
 def format_all_previous_step_segment(result: FlowStepResult) -> str:
-    text = str((result.output_payload_json or {}).get("text", ""))
-    return f"<step_{result.step_order}_output>\n{text}\n</step_{result.step_order}_output>\n"
+    payload = result.output_payload_json
+    if not isinstance(payload, dict) or (
+        "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
+    ):
+        return (
+            f"<step_{result.step_order}_output>\n\n</step_{result.step_order}_output>\n"
+        )
+    text = interpret_step_text(payload)
+    if isinstance(text, FileBackedStepText):
+        raise StepOutputMetadataError(
+            "Complete step text is stored in a generated output file."
+        )
+    return (
+        f"<step_{result.step_order}_output>\n{text.text}\n"
+        f"</step_{result.step_order}_output>\n"
+    )

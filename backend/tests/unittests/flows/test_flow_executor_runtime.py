@@ -49,6 +49,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
+from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
@@ -76,7 +77,6 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
-from eneo.flows.runtime.models import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -88,6 +88,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     build_output_payload,
     derive_rag_retrieval_query,
 )
+from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -3674,6 +3675,51 @@ def test_run_execution_state_all_previous_text_before_accumulates():
     assert "second" in accumulated_text
 
 
+def test_run_execution_state_preserves_structured_only_prior_output_as_empty_text(
+    user,
+):
+    now = datetime.now(timezone.utc)
+    result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json={},
+        effective_prompt="",
+        output_payload_json={"structured": {"decision": "approve"}},
+        model_parameters_json={},
+        num_tokens_input=1,
+        num_tokens_output=1,
+        status=FlowStepResultStatus.COMPLETED,
+        flow_step_execution_hash="h",
+        created_at=now,
+        updated_at=now,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: result},
+        prior_results=[result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    assert (
+        resolve_input_source_text(
+            input_source="all_previous_steps",
+            input_type="text",
+            run=_run(status=FlowRunStatus.RUNNING, user=user),
+            step_order=2,
+            prior_results=[result],
+            state=state,
+            logger=MagicMock(),
+        )
+        == "<step_1_output>\n\n</step_1_output>\n"
+    )
+
+
 # --- Assistant cache ---
 
 
@@ -4232,6 +4278,100 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
     assert attempt_start.input_text_length == 5
     assert attempt_start.effective_prompt_length >= 5
     assert state.attempt_start_by_step[step.step_id] == attempt_start
+
+
+@pytest.mark.asyncio
+async def test_assistant_prompt_file_backed_reference_persists_typed_failure_without_provider_io(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step(step_order=2)
+    prior = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="preview",
+    ).model_copy(
+        update={
+            "output_payload_json": {
+                "text": "preview",
+                "text_overflow": {
+                    "generated_file_ids": [str(uuid4())],
+                    "inline_text_bytes": 7,
+                    "full_text_bytes": 20,
+                },
+            }
+        }
+    )
+    state = _empty_execution_state()
+    state.completed_by_order[1] = prior
+    state.prior_results.append(prior)
+    assistant = _assistant_for_execute_step(has_knowledge=False)
+    assistant.get_prompt_text.return_value = "Use {{ step_1.output.text }}"
+    state.assistant_cache[step.assistant_id] = assistant
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="current input",
+            source_text="current input",
+            input_source="flow_input",
+        )
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(
+            step=step,
+            run=run,
+            state=state,
+            attempt_no=1,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assistant.get_response.assert_not_awaited()
+
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._rollback = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    claimed = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    ).model_copy(update={"step_order": step.step_order})
+
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=state,
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
+    assert (
+        finish_kwargs["error_code"] == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    )
+    assert finish_kwargs["requested_model"] == "gpt-4o-mini"
+    assert finish_kwargs["provider"] == "openai"
+    for response_field in (
+        "response_model",
+        "finish_reason",
+        "provider_response_id",
+        "num_tokens_input",
+        "num_tokens_output",
+    ):
+        assert finish_kwargs.get(response_field) is None
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
+    assert saved_result.status == FlowStepResultStatus.FAILED
+    assert saved_result.error_code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
 
 
 @pytest.mark.asyncio

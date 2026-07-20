@@ -2021,6 +2021,7 @@ def test_openapi_flow_run_result_is_closed_and_exhaustively_discriminated(
     )
     expected_variants = {
         "artifact": "FlowRunArtifactResultPublic",
+        "file_backed_text": "FlowRunFileBackedTextResultPublic",
         "inline_text": "FlowRunInlineTextResultPublic",
         "outbound_http": "FlowRunOutboundHttpResultPublic",
         "structured": "FlowRunStructuredResultPublic",
@@ -2056,6 +2057,32 @@ def test_openapi_flow_run_result_is_closed_and_exhaustively_discriminated(
         openapi_spec,
         outbound_properties["delivery_status"],
     ) == {"delivered"}
+
+
+def test_openapi_file_backed_text_describes_result_kind_and_availability(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_contract = schemas["FlowRunContractPublic"]["properties"]
+    final_output = schemas["FlowFinalOutputContractPublic"]["properties"]
+    file_backed = schemas["FlowRunFileBackedTextResultPublic"]["properties"]
+
+    for description in (
+        run_contract["final_output"]["description"],
+        final_output["output_type"]["description"],
+        final_output["delivery"]["description"],
+    ):
+        assert "FlowRunPublic.result.kind" in description
+        assert "inline_text" in description
+        assert "file_backed_text" in description
+
+    preview_description = file_backed["preview"]["description"]
+    file_description = file_backed["file"]["description"]
+    assert "incomplete" in preview_description
+    assert "content_purged" in preview_description
+    assert "available" in file_description
+    assert "content_purged" in file_description
+    assert "410" in file_description
 
 
 def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) -> None:

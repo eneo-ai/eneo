@@ -24,6 +24,11 @@ from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -55,7 +60,7 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.variable_resolver import FlowVariableResolver
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
@@ -164,6 +169,15 @@ class FlowRunWebhookDeliveryService:
                 BadRequestException,
                 FlowPublishedDefinitionWithoutExecutableStepsError,
             ) as exc:
+                resolver_text_failure = (
+                    payload_prepared
+                    and isinstance(exc.__cause__, TypedIOValidationException)
+                    and exc.__cause__.code
+                    in {
+                        FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+                        FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                    }
+                )
                 terminal_error = (
                     self._terminal_error_for_definition_failure(
                         error=exc,
@@ -178,7 +192,9 @@ class FlowRunWebhookDeliveryService:
                             row=row,
                             now=now,
                             error=exc,
-                            force_dead_letter=terminal_error is not None,
+                            force_dead_letter=(
+                                terminal_error is not None or resolver_text_failure
+                            ),
                             terminal_error=terminal_error,
                         )
                 except WebhookDeliveryClaimLostError:
@@ -316,9 +332,18 @@ class FlowRunWebhookDeliveryService:
             raise ValueError("Webhook delivery attempt no longer matches step result.")
         audit_actor = await self._resolve_audit_actor(run)
         payload = step_result.output_payload_json or {}
-        text_payload = payload.get("text")
-        if not isinstance(text_payload, str):
-            raise ValueError("Webhook delivery step result has no text payload.")
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError as exc:
+            raise ValueError(
+                "Webhook delivery step result has malformed text metadata."
+            ) from exc
+        if isinstance(text, FileBackedStepText):
+            raise ValueError(
+                "Webhook delivery requires complete text, but complete text is "
+                "stored in a generated output file."
+            )
+        text_payload = text.text
 
         state = build_run_execution_state(
             steps=steps,

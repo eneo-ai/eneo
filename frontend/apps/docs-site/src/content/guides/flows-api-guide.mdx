@@ -870,6 +870,11 @@ GET /api/v1/flows/{flow_id}/runs/{run_id}/
 successfully. A completed run returns exactly one closed result shape:
 
 - `inline_text` contains the final `text`.
+- `file_backed_text` contains a bounded, non-authoritative `preview` and one
+  current-attempt generated-output `file`. Use the authorized artifact endpoint
+  to download the complete text only when `file.availability` is `available`.
+  When it is `content_purged`, treat the complete text as unavailable and handle
+  the artifact endpoint's `410`; never treat `preview` as the full result.
 - `structured` contains the authored `value` and the `output_contract` from
   that run's published `flow_version`. Treat `value` as opaque application data;
   do not infer another Eneo envelope inside it.
@@ -890,6 +895,10 @@ function renderResult(result: FlowRunResult): string {
   switch (result.kind) {
     case "inline_text":
       return result.text;
+    case "file_backed_text":
+      return result.file.availability === "available"
+        ? `Download complete text from file ${result.file.file_id}`
+        : "Complete text is no longer available";
     case "structured":
       return JSON.stringify(result.value);
     case "artifact":

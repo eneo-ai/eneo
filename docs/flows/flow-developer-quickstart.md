@@ -197,6 +197,15 @@ The run contract exposes the terminal delivery mode:
 - `artifact` for generated PDF or DOCX output.
 - `outbound_http` for HTTP delivery.
 
+Completed payload delivery uses a closed result discriminator. `inline_text`
+contains exact complete text. When text exceeds inline storage,
+`file_backed_text.preview` is only a bounded, non-authoritative prefix and
+`file_backed_text.file` identifies the current-attempt generated output to
+download through the authorized artifact endpoint when `file.availability` is
+`available`. When it is `content_purged`, the complete text is unavailable and
+the artifact endpoint returns `410`; the preview still is not the full result.
+Structured results expose authored JSON under `structured.value`.
+
 ## Large inputs and source material
 
 Flow authoring should express whether the Flow needs exhaustive reading or

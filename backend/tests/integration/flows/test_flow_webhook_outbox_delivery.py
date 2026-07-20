@@ -69,7 +69,58 @@ def _build_flow(
     user_id: UUID,
     assistant_id: UUID,
     output_config: dict[str, object] | None = None,
+    include_prior_step: bool = False,
 ) -> Flow:
+    webhook_step_order = 2 if include_prior_step else 1
+    steps = (
+        [
+            FlowStep(
+                id=None,
+                flow_id=uuid4(),
+                tenant_id=tenant_id,
+                assistant_id=assistant_id,
+                step_order=1,
+                user_description="Prepare webhook content",
+                input_source="flow_input",
+                input_type="text",
+                input_contract=None,
+                output_mode="pass_through",
+                output_type="text",
+                output_contract=None,
+                input_bindings={"question": "{{flow.input.question}}"},
+                output_config=None,
+                output_classification_override=None,
+                input_config=None,
+            )
+        ]
+        if include_prior_step
+        else []
+    )
+    steps.append(
+        FlowStep(
+            id=None,
+            flow_id=uuid4(),
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+            step_order=webhook_step_order,
+            user_description="Send webhook",
+            input_source="previous_step" if include_prior_step else "flow_input",
+            input_type="text",
+            input_contract=None,
+            output_mode="http_post",
+            output_type="text",
+            output_contract=None,
+            input_bindings={"question": "{{flow.input.question}}"},
+            output_config=output_config
+            or {
+                "url": "https://example.org/hook/{{flow_input.case_id}}",
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+            },
+            output_classification_override=None,
+            input_config=None,
+        )
+    )
     return Flow(
         id=None,
         tenant_id=tenant_id,
@@ -83,31 +134,7 @@ def _build_flow(
         data_retention_days=30,
         created_at=None,
         updated_at=None,
-        steps=[
-            FlowStep(
-                id=None,
-                flow_id=uuid4(),
-                tenant_id=tenant_id,
-                assistant_id=assistant_id,
-                step_order=1,
-                user_description="Send webhook",
-                input_source="flow_input",
-                input_type="text",
-                input_contract=None,
-                output_mode="http_post",
-                output_type="text",
-                output_contract=None,
-                input_bindings={"question": "{{flow.input.question}}"},
-                output_config=output_config
-                or {
-                    "url": "https://example.org/hook/{{flow_input.case_id}}",
-                    "auth": {"mode": "none"},
-                    "timeout_seconds": 5,
-                },
-                output_classification_override=None,
-                input_config=None,
-            )
-        ],
+        steps=steps,
     )
 
 
@@ -119,6 +146,7 @@ async def _create_running_webhook_run(
     space_factory,
     assistant_factory,
     output_config: dict[str, object] | None = None,
+    prior_output_payload: dict[str, object] | None = None,
 ):
     model = await completion_model_factory(session, "gpt-4o-mini")
     space = await space_factory(session, "Webhook outbox delivery space", [model.id])
@@ -137,11 +165,12 @@ async def _create_running_webhook_run(
             user_id=admin_user.id,
             assistant_id=assistant.id,
             output_config=output_config,
+            include_prior_step=prior_output_payload is not None,
         ),
         tenant_id=admin_user.tenant_id,
     )
     assert flow.id is not None
-    step = flow.steps[0]
+    step = flow.steps[-1]
     assert step.id is not None
     await version_repo.create(
         flow_id=flow.id,
@@ -153,17 +182,18 @@ async def _create_running_webhook_run(
             metadata_json=flow.metadata_json,
             steps=[
                 {
-                    "step_id": str(step.id),
-                    "assistant_id": str(step.assistant_id),
-                    "step_order": 1,
-                    "user_description": step.user_description,
-                    "input_source": step.input_source,
-                    "input_type": step.input_type,
-                    "input_bindings": step.input_bindings,
-                    "output_mode": step.output_mode,
-                    "output_type": step.output_type,
-                    "output_config": step.output_config,
+                    "step_id": str(published_step.id),
+                    "assistant_id": str(published_step.assistant_id),
+                    "step_order": published_step.step_order,
+                    "user_description": published_step.user_description,
+                    "input_source": published_step.input_source,
+                    "input_type": published_step.input_type,
+                    "input_bindings": published_step.input_bindings,
+                    "output_mode": published_step.output_mode,
+                    "output_type": published_step.output_type,
+                    "output_config": published_step.output_config,
                 }
+                for published_step in flow.steps
             ],
         ),
         tenant_id=admin_user.tenant_id,
@@ -181,10 +211,11 @@ async def _create_running_webhook_run(
         input_payload_json={"question": "What happened?", "case_id": "case-123"},
         preseed_steps=[
             {
-                "step_id": step.id,
-                "assistant_id": step.assistant_id,
-                "step_order": 1,
+                "step_id": published_step.id,
+                "assistant_id": published_step.assistant_id,
+                "step_order": published_step.step_order,
             }
+            for published_step in flow.steps
         ],
     )
     await session.execute(
@@ -195,62 +226,74 @@ async def _create_running_webhook_run(
             updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
     )
-    await run_repo.create_or_get_attempt_started(
-        run_id=run.id,
-        flow_id=flow.id,
-        tenant_id=admin_user.tenant_id,
-        step_id=step.id,
-        step_order=step.step_order,
-        attempt_no=1,
-        celery_task_id="webhook-outbox-fixture",
+    output_payloads = (
+        [prior_output_payload, {"text": "done"}]
+        if prior_output_payload is not None
+        else [{"text": "done"}]
     )
-    pending_result = await run_repo.get_step_result(
-        run_id=run.id,
-        step_id=step.id,
-        tenant_id=admin_user.tenant_id,
-    )
-    assert pending_result is not None
-    completed_result = pending_result.model_copy(
-        update={
-            "status": FlowStepResultStatus.COMPLETED,
-            "current_attempt_no": 1,
-            "input_payload_json": {"text": "hello"},
-            "output_payload_json": {"text": "done"},
-            "effective_prompt": "prompt",
-            "model_parameters_json": {},
-            "num_tokens_input": 1,
-            "num_tokens_output": 1,
-            "flow_step_execution_hash": "hash",
-        },
-        deep=True,
-    )
-    await run_repo.save_step_result(
-        run.id,
-        completed_result,
-        tenant_id=admin_user.tenant_id,
-        attempt_no=1,
-    )
-    await run_repo.finish_attempt(
-        run_id=run.id,
-        step_id=step.id,
-        attempt_no=1,
-        tenant_id=admin_user.tenant_id,
-        status=FlowStepAttemptStatus.COMPLETED,
-        requested_model="gpt-4o-mini",
-        response_model="gpt-4o-mini",
-        provider="openai",
-        finish_reason="stop",
-        num_tokens_input=1,
-        num_tokens_output=1,
-    )
+    for published_step, output_payload in zip(flow.steps, output_payloads, strict=True):
+        assert published_step.id is not None
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=published_step.id,
+            step_order=published_step.step_order,
+            attempt_no=1,
+            celery_task_id=f"webhook-outbox-fixture-{published_step.step_order}",
+        )
+        pending_result = await run_repo.get_step_result(
+            run_id=run.id,
+            step_id=published_step.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert pending_result is not None
+        completed_result = pending_result.model_copy(
+            update={
+                "status": FlowStepResultStatus.COMPLETED,
+                "current_attempt_no": 1,
+                "input_payload_json": {"text": "hello"},
+                "output_payload_json": output_payload,
+                "effective_prompt": "prompt",
+                "model_parameters_json": {},
+                "num_tokens_input": 1,
+                "num_tokens_output": 1,
+                "flow_step_execution_hash": "hash",
+            },
+            deep=True,
+        )
+        await run_repo.save_step_result(
+            run.id,
+            completed_result,
+            tenant_id=admin_user.tenant_id,
+            attempt_no=1,
+        )
+        await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=published_step.id,
+            attempt_no=1,
+            tenant_id=admin_user.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            requested_model="gpt-4o-mini",
+            response_model="gpt-4o-mini",
+            provider="openai",
+            finish_reason="stop",
+            num_tokens_input=1,
+            num_tokens_output=1,
+        )
     return flow, run, step
 
 
-def _intent(*, run_id: UUID, step_id: UUID) -> WebhookDeliveryIntent:
+def _intent(
+    *,
+    run_id: UUID,
+    step_id: UUID,
+    step_order: int = 1,
+) -> WebhookDeliveryIntent:
     return WebhookDeliveryIntent(
         flow_run_id=run_id,
         step_id=step_id,
-        step_order=1,
+        step_order=step_order,
         attempt_no=1,
         idempotency_key=f"{run_id}:{step_id}:1:webhook",
         payload=WebhookPayloadRef(
@@ -555,6 +598,160 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
     assert result_payload == {"text": "done"}
     audit_service.log_async.assert_awaited_once()
     assert audit_service.log_async.await_args.kwargs["outcome"] == Outcome.SUCCESS
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_rejects_file_backed_preview_without_http(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(
+                FlowStepResults.flow_run_id == run.id,
+                FlowStepResults.step_id == step.id,
+            )
+            .values(
+                output_payload_json={
+                    "text": "preview",
+                    "text_overflow": {
+                        "generated_file_ids": [str(uuid4())],
+                        "inline_text_bytes": 7,
+                        "full_text_bytes": 20,
+                    },
+                }
+            )
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        send_http_request = AsyncMock()
+        service._send_http_request = send_http_request
+
+        result = await service.deliver_due(now=datetime.now(timezone.utc))
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_last_error,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert result.dead_lettered_count == 1
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert "complete text is stored in a generated output file" in (
+        delivery_state.delivery_last_error
+    )
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_dead_letters_file_backed_template_reference_once(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    file_id = uuid4()
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            output_config={
+                "url": "https://example.org/hook/{{step_1.output.text}}",
+                "auth": {"mode": "none"},
+                "timeout_seconds": 5,
+            },
+            prior_output_payload={
+                "text": "preview",
+                "text_overflow": {
+                    "generated_file_ids": [str(file_id)],
+                    "inline_text_bytes": 7,
+                    "full_text_bytes": 20,
+                },
+            },
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(
+                run_id=run.id,
+                step_id=step.id,
+                step_order=step.step_order,
+            ),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        send_http_request = AsyncMock()
+        service._send_http_request = send_http_request
+        now = datetime.now(timezone.utc)
+
+        result = await service.deliver_due(now=now)
+        repeated = await service.deliver_due(now=now)
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.delivery_last_error,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert result.attempted_count == 1
+    assert result.retry_scheduled_count == 0
+    assert result.dead_lettered_count == 1
+    assert repeated.attempted_count == 0
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert delivery_state.delivery_attempts == 1
+    assert "generated output file" in delivery_state.delivery_last_error
+    assert "preview" not in delivery_state.delivery_last_error
+    assert str(file_id) not in delivery_state.delivery_last_error
+    send_http_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio

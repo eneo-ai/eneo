@@ -35,11 +35,17 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.enums import FlowOutputType, FlowRunStatus
 from eneo.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
     FlowRunArtifactResultPublic,
+    FlowRunFileBackedTextResultPublic,
     FlowRunInlineTextResultPublic,
     FlowRunOutboundHttpResultPublic,
     FlowRunResultPublic,
@@ -267,12 +273,34 @@ def _project_run_result(
             output_contract=final_output.output_contract,
         )
     if final_output.output_type is FlowOutputType.TEXT:
-        text = payload.get("text")
-        if not isinstance(text, str):
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError as exc:
             raise FlowRunResultProjectionError(
-                "Completed text run has no text terminal value."
+                "Completed text run has malformed persisted text metadata."
+            ) from exc
+        if isinstance(text, FileBackedStepText):
+            matching_files = [
+                result_file
+                for result_file in result_files
+                if result_file.flow_run_id == run.id
+                and result_file.flow_id == run.flow_id
+                and result_file.tenant_id == run.tenant_id
+                and result_file.step_id == final_output.step_id
+                and result_file.file_id == text.file_id
+                and result_file.source == "generated_output"
+            ]
+            if len(matching_files) != 1:
+                raise FlowRunResultProjectionError(
+                    "Completed file-backed text run must have exactly one current "
+                    "final-step generated output file."
+                )
+            return FlowRunFileBackedTextResultPublic(
+                kind="file_backed_text",
+                preview=text.preview,
+                file=matching_files[0],
             )
-        return FlowRunInlineTextResultPublic(kind="inline_text", text=text)
+        return FlowRunInlineTextResultPublic(kind="inline_text", text=text.text)
     raise FlowRunResultProjectionError(
         "Completed payload run has an unsupported published output type."
     )

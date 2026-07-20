@@ -29,6 +29,8 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
     RerunStepInputOverride,
 )
+from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
@@ -41,7 +43,6 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
-from eneo.flows.runtime.models import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.step_input_resolution import (
@@ -489,6 +490,53 @@ async def test_resolve_step_input_compose_source_refs_render_item_template_witho
     assert '{"' not in resolved.text
     assert "source_sections" not in resolved.text
     assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_ref_rejects_file_backed_text(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="preview",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="flow_input",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "text",
+                }
+            ],
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert "input_bindings.source_refs" in str(exc_info.value)
+    assert "generated output file" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

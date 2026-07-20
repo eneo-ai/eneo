@@ -2,16 +2,30 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import get_close_matches
 from typing import Any, cast
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import can_expose_form_field_bare_alias
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
+
+
+@dataclass(frozen=True, slots=True)
+class _UnavailableStepText:
+    message: str
+    code: FlowApiErrorCode
 
 
 def iter_template_expressions(template: str) -> list[str]:
@@ -66,11 +80,18 @@ class FlowVariableResolver:
         if isinstance(json_value, (dict, list)):
             context["indata_json"] = json_value
 
+        step_text_by_order: dict[int, str | _UnavailableStepText] = {}
         for result in prior_results:
             runtime_input = self._extract_runtime_input(result)
+            output = dict(result.output_payload_json or {})
+            step_text = self._extract_step_text(result)
+            step_text_by_order[result.step_order] = step_text
+            if "text" in output or OUTPUT_TEXT_OVERFLOW_KEY in output:
+                output.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
+                output["text"] = step_text
             step_ctx = {
                 "input": runtime_input,
-                "output": result.output_payload_json or {},
+                "output": output,
                 "status": result.status.value,
                 "error_message": result.error_message,
             }
@@ -88,7 +109,9 @@ class FlowVariableResolver:
                 None,
             )
             if previous_result is not None:
-                context["föregående_steg"] = self._extract_step_text(previous_result)
+                context["föregående_steg"] = step_text_by_order[
+                    previous_result.step_order
+                ]
 
         if step_names_by_order:
             for result in prior_results:
@@ -97,7 +120,7 @@ class FlowVariableResolver:
                     continue
                 if step_name in context:
                     continue
-                context[step_name] = self._extract_step_text(result)
+                context[step_name] = step_text_by_order[result.step_order]
 
         if isinstance(current_step_input, dict):
             context["step_input"] = current_step_input
@@ -159,14 +182,18 @@ class FlowVariableResolver:
                 current = current_list[index]
                 continue
 
+            if isinstance(current, _UnavailableStepText):
+                self._raise_if_step_text_unavailable(current)
             raise BadRequestException(
                 f"Unknown variable reference: '{path}'. "
                 f"Cannot access '{token}' on value type '{type(current).__name__}'."
             )
 
+        self._raise_if_step_text_unavailable(current)
         return current
 
     def _to_prompt_string(self, value: Any) -> str:
+        self._raise_if_step_text_unavailable(value)
         if value is None:
             return ""
         if isinstance(value, str):
@@ -190,16 +217,45 @@ class FlowVariableResolver:
             return json.dumps(value, ensure_ascii=False, indent=2)
         return str(value)
 
+    @classmethod
+    def _raise_if_step_text_unavailable(cls, value: Any) -> None:
+        if isinstance(value, _UnavailableStepText):
+            raise TypedIOValidationException(
+                value.message,
+                code=value.code.value,
+            )
+        if isinstance(value, dict):
+            for child in cast(dict[object, Any], value).values():
+                cls._raise_if_step_text_unavailable(child)
+        elif isinstance(value, list):
+            for child in cast(list[Any], value):
+                cls._raise_if_step_text_unavailable(child)
+
     @staticmethod
-    def _extract_step_text(result: FlowStepResult) -> str:
+    def _extract_step_text(
+        result: FlowStepResult,
+    ) -> str | _UnavailableStepText:
         payload = result.output_payload_json or {}
-        text = payload.get("text")
-        if isinstance(text, str):
-            return text
-        if isinstance(text, (dict, list)):
-            return json.dumps(text, ensure_ascii=False)
-        if text is not None:
-            return str(text)
+        if "text" in payload or OUTPUT_TEXT_OVERFLOW_KEY in payload:
+            try:
+                text = interpret_step_text(payload)
+            except StepOutputMetadataError:
+                return _UnavailableStepText(
+                    message=(
+                        "Step text is unavailable to templates because it has "
+                        "malformed persisted text metadata."
+                    ),
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+                )
+            if isinstance(text, FileBackedStepText):
+                return _UnavailableStepText(
+                    message=(
+                        "Complete step text is unavailable to templates because it "
+                        "is stored in a generated output file."
+                    ),
+                    code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE,
+                )
+            return text.text
         structured = payload.get("structured")
         if isinstance(structured, (dict, list)):
             return json.dumps(structured, ensure_ascii=False)

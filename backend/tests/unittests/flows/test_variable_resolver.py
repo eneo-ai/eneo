@@ -6,11 +6,12 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.variable_resolver import (
     FlowVariableResolver,
     iter_template_expressions,
 )
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 def _result(step_order: int, output_payload: dict) -> FlowStepResult:
@@ -125,6 +126,120 @@ def test_build_context_exposes_previous_step_alias_for_step_two():
     )
 
     assert context["föregående_steg"] == "Sammanfattning steg 1"
+
+
+def test_context_hides_file_backed_metadata_and_keeps_structured_output() -> None:
+    file_id = uuid4()
+    result = _result(
+        step_order=1,
+        output_payload={
+            "text": "preview",
+            "structured": {"decision": "approve"},
+            "text_overflow": {
+                "generated_file_ids": [str(file_id)],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 20,
+            },
+        },
+    )
+
+    context = FlowVariableResolver().build_context(
+        flow_input={},
+        prior_results=[result],
+        current_step_order=2,
+        step_names_by_order={1: "Previous report"},
+    )
+
+    output = context["step_1"]["output"]
+    assert set(output) == {"text", "structured"}
+    assert output["text"] != "preview"
+    assert "text_overflow" not in output
+    assert (
+        FlowVariableResolver().interpolate(
+            "{{ step_1.output.structured.decision }}",
+            context,
+        )
+        == "approve"
+    )
+    assert FlowVariableResolver().interpolate("{{ step_1.status }}", context)
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "step_1",
+        "step_1.output",
+        "step_1.output.text",
+        "föregående_steg",
+        "Previous report",
+    ],
+)
+def test_interpolate_rejects_each_file_backed_text_alias_with_typed_code(
+    reference: str,
+) -> None:
+    file_id = uuid4()
+    context = FlowVariableResolver().build_context(
+        flow_input={},
+        prior_results=[
+            _result(
+                step_order=1,
+                output_payload={
+                    "text": "preview",
+                    "structured": {"decision": "approve"},
+                    "text_overflow": {
+                        "generated_file_ids": [str(file_id)],
+                        "inline_text_bytes": 7,
+                        "full_text_bytes": 20,
+                    },
+                },
+            )
+        ],
+        current_step_order=2,
+        step_names_by_order={1: "Previous report"},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        FlowVariableResolver().interpolate(f"{{{{ {reference} }}}}", context)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert "generated output file" in str(exc_info.value)
+    assert "preview" not in str(exc_info.value)
+    assert str(file_id) not in str(exc_info.value)
+
+
+def test_build_context_defers_malformed_text_failure_until_text_is_referenced() -> None:
+    context = FlowVariableResolver().build_context(
+        flow_input={},
+        prior_results=[
+            _result(
+                step_order=1,
+                output_payload={
+                    "text": "preview",
+                    "structured": {"decision": "approve"},
+                    "text_overflow": {
+                        "generated_file_ids": [],
+                        "inline_text_bytes": 7,
+                        "full_text_bytes": 20,
+                    },
+                },
+            )
+        ],
+    )
+
+    assert (
+        FlowVariableResolver().interpolate(
+            "{{ step_1.output.structured.decision }}",
+            context,
+        )
+        == "approve"
+    )
+    assert "text_overflow" not in context["step_1"]["output"]
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        FlowVariableResolver().interpolate("{{ step_1.output }}", context)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "malformed persisted text" in str(exc_info.value)
+    assert "preview" not in str(exc_info.value)
 
 
 def test_build_context_exposes_named_step_aliases():

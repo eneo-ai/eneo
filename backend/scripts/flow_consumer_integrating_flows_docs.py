@@ -231,7 +231,8 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "Call `runtime_paths.get_run_template` and switch exhaustively on `result.kind` after the run completes; `result` is null before a successful terminal result exists.",
             "Treat `structured.value` as authored data governed by that run's `flow_version` and `structured.output_contract`; do not infer another envelope inside it.",
             "For `artifact`, use the file id from `result.files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.",
-            "Use `inline_text` directly and treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.",
+            "Use `inline_text` as complete exact text. A `file_backed_text` preview is only a bounded prefix. Download `file` through `runtime_paths.artifact_signed_url_template` only when its availability is `available`; when it is `content_purged`, the complete text is unavailable and the artifact request returns `410`.",
+            "Treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.",
             "Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.",
             "Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.",
         ),
@@ -250,6 +251,10 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             TestReceipt(
                 CONSUMER_API_TEST_FILE,
                 "test_flow_run_public_projects_text_artifact_and_outbound_results",
+            ),
+            TestReceipt(
+                CONSUMER_API_TEST_FILE,
+                "test_flow_run_public_projects_file_backed_text_overflow",
             ),
             TestReceipt(
                 CONSUMER_API_TEST_FILE,

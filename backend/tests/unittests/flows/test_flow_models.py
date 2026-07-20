@@ -625,6 +625,113 @@ def test_run_public_projects_text_and_opaque_structured_results() -> None:
     }
 
 
+def test_run_public_projects_file_backed_text_with_exact_generated_file() -> None:
+    assembler = FlowAssembler()
+    final_step_id = uuid4()
+    file_id = uuid4()
+    run = _completed_run(
+        output_payload_json={
+            "text": "Bounded preview",
+            "text_overflow": {
+                "generated_file_ids": [str(file_id)],
+                "inline_text_bytes": 15,
+                "full_text_bytes": 30,
+            },
+        }
+    )
+    result_file = FlowRunStepResultFile(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_result_id=uuid4(),
+        step_id=final_step_id,
+        step_order=1,
+        attempt_no=2,
+        file_id=file_id,
+        ordinal=0,
+        source="generated_output",
+        name="full-output.txt",
+        checksum="text-checksum",
+        size=30,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        availability="content_purged",
+    )
+
+    public = assembler.to_run_public(
+        run,
+        result_files=(result_file,),
+        final_output=_final_output(
+            step_id=final_step_id,
+            output_type=FlowOutputType.TEXT,
+            delivery=FlowOutputDelivery.PAYLOAD,
+        ),
+    )
+
+    assert public.model_dump(mode="json")["result"] == {
+        "kind": "file_backed_text",
+        "preview": "Bounded preview",
+        "file": result_file.model_dump(mode="json"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("step_id_matches", "source"),
+    [
+        (False, "generated_output"),
+        (True, "declared_artifact"),
+    ],
+)
+def test_run_public_rejects_overflow_file_from_wrong_owner(
+    step_id_matches: bool,
+    source: str,
+) -> None:
+    final_step_id = uuid4()
+    file_id = uuid4()
+    run = _completed_run(
+        output_payload_json={
+            "text": "preview",
+            "text_overflow": {
+                "generated_file_ids": [str(file_id)],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 20,
+            },
+        }
+    )
+    result_file = FlowRunStepResultFile(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_result_id=uuid4(),
+        step_id=final_step_id if step_id_matches else uuid4(),
+        step_order=1,
+        attempt_no=1,
+        file_id=file_id,
+        ordinal=0,
+        source=source,
+        name="not-the-current-output.txt",
+        checksum="wrong-owner",
+        size=20,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        availability="available",
+    )
+
+    with pytest.raises(
+        FlowRunResultProjectionError,
+        match="exactly one current final-step generated output file",
+    ):
+        FlowAssembler().to_run_public(
+            run,
+            result_files=(result_file,),
+            final_output=_final_output(
+                step_id=final_step_id,
+                output_type=FlowOutputType.TEXT,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            ),
+        )
+
+
 def test_run_public_projects_current_artifact_metadata_and_outbound_receipt() -> None:
     assembler = FlowAssembler()
     artifact_run = _completed_run(output_payload_json=None)

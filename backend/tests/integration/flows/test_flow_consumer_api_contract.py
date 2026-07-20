@@ -442,6 +442,140 @@ async def _mark_run_completed_with_artifact(
         return artifact.id
 
 
+async def _mark_run_completed_with_file_backed_text(
+    *,
+    db_container,
+    run: dict,
+    flow: dict,
+) -> tuple[UUID, UUID, UUID]:
+    step = flow["steps"][-1]
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        run_row = await session.get(FlowRuns, UUID(run["id"]))
+        assert run_row is not None
+        assert run_row.principal_user_id is not None
+
+        def output_file(name: str, text: str) -> Files:
+            return Files(
+                name=name,
+                text=text,
+                blob=None,
+                checksum=f"{name}-checksum",
+                size=len(text.encode("utf-8")),
+                mimetype="text/plain",
+                file_type="text",
+                transcription=None,
+                owner_type="user",
+                owner_user_id=run_row.principal_user_id,
+                owner_service_id=None,
+                tenant_id=run_row.tenant_id,
+            )
+
+        historical = output_file("historical-output.txt", "historical complete text")
+        current = output_file("current-output.txt", "current complete terminal text")
+        declared = output_file("declared-artifact.txt", "declared artifact")
+        session.add_all((historical, current, declared))
+        await session.flush()
+
+        run_repo = container.flow_run_repo()
+        step_id = UUID(step["id"])
+
+        def step_result(output_payload_json: dict[str, object]) -> FlowStepResult:
+            return FlowStepResult(
+                id=uuid4(),
+                flow_run_id=run_row.id,
+                flow_id=run_row.flow_id,
+                tenant_id=run_row.tenant_id,
+                step_id=step_id,
+                step_order=int(step["step_order"]),
+                assistant_id=UUID(step["assistant_id"]),
+                input_payload_json={"text": "produce complete text"},
+                effective_prompt="Produce complete text",
+                output_payload_json=output_payload_json,
+                model_parameters_json=None,
+                num_tokens_input=2,
+                num_tokens_output=4,
+                status=FlowStepResultStatus.COMPLETED,
+                error_message=None,
+                flow_step_execution_hash="consumer-file-backed-text",
+                created_at=now,
+                updated_at=now,
+            )
+
+        await run_repo.create_or_get_attempt_started(
+            run_id=run_row.id,
+            flow_id=run_row.flow_id,
+            tenant_id=run_row.tenant_id,
+            step_id=step_id,
+            step_order=int(step["step_order"]),
+            attempt_no=1,
+            celery_task_id=f"consumer-text-history-{run['id']}",
+        )
+        historical_result = step_result({"text": "historical complete text"})
+        assert (
+            await run_repo.save_step_result(
+                run_row.id,
+                historical_result,
+                tenant_id=run_row.tenant_id,
+                attempt_no=1,
+                result_file_references=(
+                    FlowStepResultFileReference(
+                        file_id=historical.id,
+                        source="generated_output",
+                    ),
+                ),
+            )
+            is not None
+        )
+
+        await run_repo.create_or_get_attempt_started(
+            run_id=run_row.id,
+            flow_id=run_row.flow_id,
+            tenant_id=run_row.tenant_id,
+            step_id=step_id,
+            step_order=int(step["step_order"]),
+            attempt_no=2,
+            celery_task_id=f"consumer-text-current-{run['id']}",
+        )
+        terminal_payload = {
+            "text": "current",
+            "text_overflow": {
+                "generated_file_ids": [str(current.id)],
+                "inline_text_bytes": 7,
+                "full_text_bytes": len(
+                    "current complete terminal text".encode("utf-8")
+                ),
+            },
+        }
+        current_result = step_result(terminal_payload)
+        assert (
+            await run_repo.save_step_result(
+                run_row.id,
+                current_result,
+                tenant_id=run_row.tenant_id,
+                attempt_no=2,
+                result_file_references=(
+                    FlowStepResultFileReference(
+                        file_id=current.id,
+                        source="generated_output",
+                    ),
+                    FlowStepResultFileReference(
+                        file_id=declared.id,
+                        source="declared_artifact",
+                    ),
+                ),
+            )
+            is not None
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_row.id)
+            .values(status="completed", output_payload_json=terminal_payload)
+        )
+        return current.id, historical.id, declared.id
+
+
 async def _create_completed_runtime_input_run(
     *,
     client,
@@ -1085,6 +1219,66 @@ async def test_flow_run_public_projects_text_artifact_and_outbound_results(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert wrong_flow_response.status_code == 404, wrong_flow_response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_public_projects_file_backed_text_overflow(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_execution_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        output_type="text",
+    )
+    run_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "produce result"},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+    (
+        current_file_id,
+        historical_file_id,
+        declared_file_id,
+    ) = await _mark_run_completed_with_file_backed_text(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    public = response.json()
+    assert public["result"]["kind"] == "file_backed_text"
+    assert public["result"]["preview"] == "current"
+    assert public["result"]["file"]["file_id"] == str(current_file_id)
+    assert public["result"]["file"]["source"] == "generated_output"
+    assert public["result"]["file"]["attempt_no"] == 2
+    assert public["result"]["file"]["availability"] == "available"
+    assert public["result"]["kind"] != "inline_text"
+    result_file_ids = {item["file_id"] for item in public["result_files"]}
+    assert len(public["result_files"]) == 2
+    assert result_file_ids == {str(current_file_id), str(declared_file_id)}
+    assert str(historical_file_id) not in result_file_ids
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,10 @@ from eneo.flows.citation_sidecar import (
     strip_inline_reference_tags,
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    build_text_overflow_metadata,
+)
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
@@ -34,7 +38,6 @@ from eneo.flows.runtime.inherited_citations import (
     collect_inherited_citation_context,
 )
 from eneo.flows.runtime.models import (
-    OUTPUT_TEXT_OVERFLOW_KEY,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -632,13 +635,11 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
     if output.output_payload_extensions:
         payload.update(output.output_payload_extensions)
     if output.generated_file_ids:
-        payload[OUTPUT_TEXT_OVERFLOW_KEY] = {
-            "generated_file_ids": [
-                str(file_id) for file_id in output.generated_file_ids
-            ],
-            "inline_text_bytes": len(output.persisted_text.encode("utf-8")),
-            "full_text_bytes": len(output.full_text.encode("utf-8")),
-        }
+        payload[OUTPUT_TEXT_OVERFLOW_KEY] = build_text_overflow_metadata(
+            file_ids=output.generated_file_ids,
+            preview=output.persisted_text,
+            full_text=output.full_text,
+        )
     return payload
 
 
