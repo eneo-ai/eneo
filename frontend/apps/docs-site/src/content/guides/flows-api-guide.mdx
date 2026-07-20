@@ -923,6 +923,14 @@ Use this endpoint when a consumer UI needs intermediate outputs, diagnostics,
 token counts, prompts, or step progress without depending on the heavier debug
 export. For the stable final result, use the run-level `result` above.
 
+`output_payload_json.text` is complete only when
+`output_payload_json.text_overflow` is absent. When the marker is present,
+`text` is a bounded preview, and its single `generated_file_ids` entry identifies
+the current-attempt `generated_output` item in `result_files`. Download that file
+only when `availability` is `available`. `content_purged` leaves the preview
+incomplete, and the artifact endpoint returns `410`. Final-result consumers
+should prefer the run-level `result`.
+
 Important runtime rule: initial execution creates one run for the whole published flow. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, awaiting review, completed, or failed.
 
 Example step-list response:

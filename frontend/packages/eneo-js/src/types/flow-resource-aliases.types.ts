@@ -417,7 +417,12 @@ const validFlowRun = {
 } satisfies FlowRun & FlowRunPublic;
 
 const validFlowRunOutputPayload: FlowRunOutputPayload = {
-  text: "Decision support generated."
+  text: "Decision support preview.",
+  text_overflow: {
+    generated_file_ids: [resultFileId],
+    inline_text_bytes: 25,
+    full_text_bytes: 4096
+  }
 };
 const validFlowRunTokenUsage: FlowRunTokenUsage = {
   num_tokens_input: 120,

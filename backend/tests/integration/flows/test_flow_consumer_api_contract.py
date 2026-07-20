@@ -1280,6 +1280,38 @@ async def test_flow_run_public_projects_file_backed_text_overflow(
     assert result_file_ids == {str(current_file_id), str(declared_file_id)}
     assert str(historical_file_id) not in result_file_ids
 
+    steps_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/steps/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert steps_response.status_code == 200, steps_response.text
+    current_step = next(
+        step
+        for step in steps_response.json()
+        if step["step_id"] == flow["steps"][-1]["id"]
+    )
+    assert current_step["output_payload_json"] == {
+        "text": "current",
+        "text_overflow": {
+            "generated_file_ids": [str(current_file_id)],
+            "inline_text_bytes": 7,
+            "full_text_bytes": len("current complete terminal text".encode()),
+        },
+    }
+    current_attempt_files = [
+        file
+        for file in current_step["result_files"]
+        if file["attempt_no"] == current_step["current_attempt_no"]
+    ]
+    generated_output_files = [
+        file for file in current_attempt_files if file["source"] == "generated_output"
+    ]
+    assert len(generated_output_files) == 1
+    assert generated_output_files[0]["file_id"] == str(current_file_id)
+    assert generated_output_files[0]["attempt_no"] == 2
+    current_attempt_file_ids = {file["file_id"] for file in current_attempt_files}
+    assert str(historical_file_id) not in current_attempt_file_ids
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration

@@ -234,6 +234,8 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "Use `inline_text` as complete exact text. A `file_backed_text` preview is only a bounded prefix. Download `file` through `runtime_paths.artifact_signed_url_template` only when its availability is `available`; when it is `content_purged`, the complete text is unavailable and the artifact request returns `410`.",
             "Treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.",
             "Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.",
+            "`output_payload_json.text` is complete only when `output_payload_json.text_overflow` is absent; when present, `text` is a bounded preview and its single `generated_file_ids` entry identifies the current-attempt `generated_output` item in `result_files`.",
+            "Download that file only when `availability` is `available`; `content_purged` leaves the preview incomplete and the artifact endpoint returns `410`. Final-result consumers should prefer the run-level `result`.",
             "Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.",
         ),
         runtime_path_fields=(

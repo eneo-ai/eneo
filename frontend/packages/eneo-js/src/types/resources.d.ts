@@ -222,6 +222,11 @@ export type FlowRunError = components["schemas"]["FlowRunError"];
 
 export type FlowRunOutputPayload = {
   text?: string;
+  text_overflow?: {
+    generated_file_ids: [string];
+    inline_text_bytes: number;
+    full_text_bytes: number;
+  };
   structured?: Record<string, unknown> | unknown[];
   template_fill_debug?: Record<string, unknown>;
   template_provenance?: Record<string, unknown>;

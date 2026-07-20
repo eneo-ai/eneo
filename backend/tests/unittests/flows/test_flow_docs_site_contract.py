@@ -3477,11 +3477,34 @@ def test_flow_api_guide_documents_closed_final_result_without_raw_run_payload() 
 
     assert '"result": null' in run_example
     assert '"output_payload_json"' not in run_example
-    for result_kind in ("inline_text", "structured", "artifact", "outbound_http"):
+    for result_kind in (
+        "inline_text",
+        "file_backed_text",
+        "structured",
+        "artifact",
+        "outbound_http",
+    ):
         assert f"`{result_kind}`" in guide
     assert "const unreachable: never = result" in guide
     assert "that run's published `flow_version`" in guide
     assert "URLs, headers, credentials, or the sent" in guide
+
+
+def test_flow_api_guide_documents_step_output_text_overflow() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    integrating = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
+
+    for page in (guide, integrating):
+        assert "`output_payload_json.text` is complete only when" in page
+        assert "`output_payload_json.text_overflow` is absent" in page
+        assert "bounded preview" in page
+        assert "single `generated_file_ids` entry" in page
+        assert "current-attempt `generated_output` item in `result_files`" in page
+        assert "`availability` is `available`" in page
+        assert "`content_purged`" in page
+        assert "incomplete" in page
+        assert "`410`" in page
+        assert "prefer the run-level `result`" in page
 
 
 def test_flow_api_guide_documents_runtime_path_fields() -> None:
