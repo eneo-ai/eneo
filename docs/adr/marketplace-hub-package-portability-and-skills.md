@@ -26,6 +26,14 @@ instruction sets. Authors can reuse a Skill across suitable Assistants and
 create new revisions without changing parents pinned to older content. An
 Assistant can later travel with its exact Skills as one complete package.
 
+Each Eneo installation also gets an **Organisation Skill catalogue**. It is not
+the external Marketplace. A municipality publishes approved local Skill
+revisions there; builders with Use Skills permission can install an approved
+copy into a Space they may edit. Skill managers author revisions, while tenant
+administrators decide what is published and what Personal Chat may use. Local
+copies keep working when the catalogue is unpublished or unavailable, never
+update silently, and may be customised without changing the approved source.
+
 The central Hub manages approved contributors and instances, review, versions,
 audiences, publication, downloads, and Hub audit. Each Eneo installation owns
 browsing, preview, local mappings, tenant-admin confirmation, installation,
@@ -35,10 +43,13 @@ Hub.
 
 Municipal staff spend less time duplicating work. They can share solutions that
 have worked elsewhere, understand Assistants as smaller named capabilities, and
-choose when to adopt a new version. Delivery follows that value chain: local
-Skills first, selective loading for Assistants and personal chat after the
-internal MCP foundation, portable Skill/Assistant packages next, and then the
-central Marketplace and native Eneo connection.
+choose when to adopt a new version. Delivery follows two safe tracks. The local
+track finishes Skills, then adds revision restore, organisation publication and
+install-by-copy; selective loading can proceed in parallel once its MCP
+dependency is ready, and portable Skill/Assistant packages follow. The external
+track may start the Hub baseline and a Flow-only pilot now because the Flow
+package already exists. Skill and Assistant Marketplace listings remain disabled
+until their local package contracts ship.
 
 ## Outcome
 
@@ -67,6 +78,13 @@ invocation, in binding order. A later gated delivery may load selected Assistant
 and personal-chat Skills on demand; Apps remain eager. A Skill is not executable
 code, a tool, an Assistant, or a Group Chat.
 
+An organisation catalogue uses that same Skill aggregate; it does not create a
+second global Skill type. Organisation-Space Skills have one explicitly
+published revision. Installing one creates or updates a normal Skill in the
+chosen target Space through `eneo.skills`. Direct Assistant/App bindings remain
+same-Space. Personal Chat remains the one intentional direct consumer of
+published organisation revisions through Governance Policy.
+
 The Hub and Eneo keep human identity completely separate. The Hub authenticates
 a registered Eneo installation as a machine. A logged-in local tenant
 administrator chooses and confirms installation. The Hub never receives an Eneo
@@ -78,24 +96,30 @@ the team accepts it and revises the existing launch decision identified below.
 
 ### Independent decision layers
 
-This blueprint has four independently acceptable layers. Acceptance of one does
+This blueprint has five independently acceptable layers. Acceptance of one does
 not authorize implementation of the next:
 
 1. **Local Skills:** immutable Skill revisions, revision-pinned Assistant/App
    bindings, deterministic always-on composition, local permissions, and package-
    ready snapshots. This layer has no Hub dependency.
-2. **Selective activation:** trusted on-demand loading for Assistant and
+2. **Organisation Skill catalogue:** approval of exact organisation revisions,
+   tenant-scoped discovery, and explicit install-by-copy into editable Spaces.
+   It has no Hub dependency and never introduces live cross-Space parent
+   bindings.
+3. **Selective activation:** trusted on-demand loading for Assistant and
    organisation-configured personal-chat bindings after the internal MCP
    foundation. Apps remain eager.
-3. **Package verticals:** strict Assistant, App, Skill, and later Knowledge Bundle
+4. **Package verticals:** strict Assistant, App, Skill, and later Knowledge Bundle
    profiles. Each owns its plan, apply, receipt, and failure behavior. The
    Assistant profile starts only after the selective-activation contract is
    implemented, so it preserves binding behavior rather than freezing an
    always-only shape. App knowledge and Flow Skill snapshots retain separate
    gates.
-4. **Marketplace Hub:** one external catalog and distribution service plus the
-   native Eneo connector. A Flow-only pilot proves this trust boundary before the
-   Hub enables later package kinds.
+5. **Marketplace Hub:** one external catalogue and distribution service plus the
+   native Eneo connector. Its baseline and Flow-only pilot can proceed without
+   Skills because the existing Flow package is the first enabled kind. The Hub
+   advertises later Skill/Assistant kinds only after their contracts pass the
+   cross-repository gates.
 
 The first end-to-end Marketplace slice is Flow-only because the Flow package
 vertical already exists. The first local Skill slice has one deterministic
@@ -152,36 +176,37 @@ and name any later source-asset exception through the Knowledge Bundle gate.
 
 The design extends the current owners instead of copying their behavior.
 
-| Concept                             | Current evidence                                                                                                                                                                                                                                                              | Decision                                                                                                                                                                       |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Assistant base instructions and run | `backend/src/eneo/assistants/assistant.py:347-481` resolves one prompt, retrieves Assistant knowledge, and calls the completion module.                                                                                                                                       | Reuse the Assistant authoring and run owner. Compose pinned Skills before retrieval/completion; do not create a second Assistant runtime.                                      |
-| App base instructions and run       | `backend/src/eneo/apps/apps/app.py:134-138,275-325` resolves one prompt and calls the same completion module. Apps have no knowledge-retrieval owner.                                                                                                                         | Reuse the App owner for instruction-only Skills. Reject Skill knowledge in Apps until App knowledge has a real runtime owner.                                                  |
-| Final context construction          | `backend/src/eneo/completion_models/infrastructure/context_builder.py:431-435,580-733` assembles system instructions, attachments, knowledge, messages, tools, and token accounting.                                                                                          | Keep this module authoritative for final context and token accounting. It consumes one resolved effective-instructions value from the Skill module.                            |
-| Personal-chat governance            | `backend/src/eneo/governance_policy/domain/policy_resolver.py` resolves the effective model and prompt; `frontend/apps/web/src/routes/(app)/admin/personal-assistant/configuration` owns administrator editing.                                                            | Extend these owners with exact organizational-Space Skill revisions. Do not bind Skills directly to the personal default Assistant or create another policy page.              |
-| Group Chat routing                  | `backend/src/eneo/group_chat/application/group_chat_service.py:233-341,435-560` selects and invokes a separate Assistant.                                                                                                                                                     | Retain Group Chat unchanged. Do not reuse it as a Skill router or create a generic model-router framework.                                                                     |
-| Flow Assistant snapshots            | `backend/src/eneo/flows/assistant_authoring_snapshot.py:30-38` and `backend/src/eneo/flows/assistant_execution_snapshot.py:9-39` capture instructions, model, and knowledge only.                                                                                             | Flow use of Skills requires an explicit snapshot-schema revision and runtime slice. No implicit field addition.                                                                |
-| Package kinds                       | `backend/src/eneo/flow_packages/domain/flow_package_manifest.py:20-34` closes dispatch over Flow, Assistant, and App.                                                                                                                                                         | Add `skill` only when the standalone Skill package vertical is implemented. Keep dispatch closed and exhaustive.                                                               |
-| Current archive profile             | `backend/src/eneo/flow_packages/infrastructure/flow_package_zip_reader.py:38-45` accepts four bounded JSON entries.                                                                                                                                                           | Preserve the strict Flow profile. Asset support gets a new explicit profile/schema; it does not weaken v1 or merely raise constants.                                           |
-| Flow install owner and receipt      | `backend/src/eneo/flow_packages/application/flow_package_install_service.py:159-197` applies through `FlowAuthoringCommandService`; `backend/src/eneo/database/tables/flow_tables.py:623-680` stores a concrete Flow import record with target FKs and terminal-shape checks. | Reuse this pattern for the Flow-only Hub pilot. Each later kind gets its own command owner and concrete receipt rather than a generic Marketplace install table.               |
-| Local machine keys                  | `frontend/apps/docs-site/src/content/docs/api-key-management.mdx:45-67` states that Eneo service keys cannot create user-owned resources such as Assistants, Apps, Collections, Prompts, and Files.                                                                           | The Hub machine credential fetches bytes only. Local installation runs under the logged-in tenant administrator.                                                               |
-| Assistant/App editor state and save | `frontend/apps/web/src/lib/features/assistants/AssistantEditor.ts:12-51` and `frontend/apps/web/src/lib/features/apps/AppEditor.ts:11-38` own editable parent state from generated types; existing parent commands own persistence.                                              | Keep ordered binding drafts in these editors and persist them only through canonical parent update. Do not add parallel DTOs, component-owned save lifecycles, or binding write calls. |
-| Existing catalogs                   | `backend/src/eneo/templates/assistant_template/api/assistant_template_router.py:17-80` and `backend/src/eneo/templates/app_template/api/app_template_router.py:17-84` expose tenant and global galleries.                                                                     | Tenant templates may remain local shortcuts. Gate 0 must choose whether global templates migrate to curated Hub releases and remove the duplicate cross-instance catalog path. |
+| Concept                             | Current evidence                                                                                                                                                                                                                                                              | Decision                                                                                                                                                                               |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Assistant base instructions and run | `backend/src/eneo/assistants/assistant.py:347-481` resolves one prompt, retrieves Assistant knowledge, and calls the completion module.                                                                                                                                       | Reuse the Assistant authoring and run owner. Compose pinned Skills before retrieval/completion; do not create a second Assistant runtime.                                              |
+| App base instructions and run       | `backend/src/eneo/apps/apps/app.py:134-138,275-325` resolves one prompt and calls the same completion module. Apps have no knowledge-retrieval owner.                                                                                                                         | Reuse the App owner for instruction-only Skills. Reject Skill knowledge in Apps until App knowledge has a real runtime owner.                                                          |
+| Final context construction          | `backend/src/eneo/completion_models/infrastructure/context_builder.py:431-435,580-733` assembles system instructions, attachments, knowledge, messages, tools, and token accounting.                                                                                          | Keep this module authoritative for final context and token accounting. It consumes one resolved effective-instructions value from the Skill module.                                    |
+| Personal-chat governance            | `backend/src/eneo/governance_policy/domain/policy_resolver.py` resolves the effective model and prompt; `frontend/apps/web/src/routes/(app)/admin/personal-assistant/configuration` owns administrator editing.                                                               | Extend these owners with exact organizational-Space Skill revisions. Do not bind Skills directly to the personal default Assistant or create another policy page.                      |
+| Group Chat routing                  | `backend/src/eneo/group_chat/application/group_chat_service.py:233-341,435-560` selects and invokes a separate Assistant.                                                                                                                                                     | Retain Group Chat unchanged. Do not reuse it as a Skill router or create a generic model-router framework.                                                                             |
+| Flow Assistant snapshots            | `backend/src/eneo/flows/assistant_authoring_snapshot.py:30-38` and `backend/src/eneo/flows/assistant_execution_snapshot.py:9-39` capture instructions, model, and knowledge only.                                                                                             | Flow use of Skills requires an explicit snapshot-schema revision and runtime slice. No implicit field addition.                                                                        |
+| Package kinds                       | `backend/src/eneo/flow_packages/domain/flow_package_manifest.py:20-34` closes dispatch over Flow, Assistant, and App.                                                                                                                                                         | Add `skill` only when the standalone Skill package vertical is implemented. Keep dispatch closed and exhaustive.                                                                       |
+| Current archive profile             | `backend/src/eneo/flow_packages/infrastructure/flow_package_zip_reader.py:38-45` accepts four bounded JSON entries.                                                                                                                                                           | Preserve the strict Flow profile. Asset support gets a new explicit profile/schema; it does not weaken v1 or merely raise constants.                                                   |
+| Flow install owner and receipt      | `backend/src/eneo/flow_packages/application/flow_package_install_service.py:159-197` applies through `FlowAuthoringCommandService`; `backend/src/eneo/database/tables/flow_tables.py:623-680` stores a concrete Flow import record with target FKs and terminal-shape checks. | Reuse this pattern for the Flow-only Hub pilot. Each later kind gets its own command owner and concrete receipt rather than a generic Marketplace install table.                       |
+| Local machine keys                  | `frontend/apps/docs-site/src/content/docs/api-key-management.mdx:45-67` states that Eneo service keys cannot create user-owned resources such as Assistants, Apps, Collections, Prompts, and Files.                                                                           | The Hub machine credential fetches bytes only. Local installation runs under the logged-in tenant administrator.                                                                       |
+| Assistant/App editor state and save | `frontend/apps/web/src/lib/features/assistants/AssistantEditor.ts:12-51` and `frontend/apps/web/src/lib/features/apps/AppEditor.ts:11-38` own editable parent state from generated types; existing parent commands own persistence.                                           | Keep ordered binding drafts in these editors and persist them only through canonical parent update. Do not add parallel DTOs, component-owned save lifecycles, or binding write calls. |
+| Existing catalogs                   | `backend/src/eneo/templates/assistant_template/api/assistant_template_router.py:17-80` and `backend/src/eneo/templates/app_template/api/app_template_router.py:17-84` expose tenant and global galleries.                                                                     | Tenant templates may remain local shortcuts. Gate 0 must choose whether global templates migrate to curated Hub releases and remove the duplicate cross-instance catalog path.         |
 
 ## Canonical ownership
 
-| Responsibility                                                                      | Canonical owner                                                                    | Disposition                                                                                                                                                                                                                       |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Skill identity, revisions, binding validation/resolution, composition, and portable snapshots | New `eneo.skills` module                                                  | Create one deep module because Assistants and Apps are two real consumers.                                                                                                                                                        |
-| Assistant/App ordered binding replacement                                           | Existing Assistant/App update commands and routers                                | Extend the canonical parent save with an optional full binding facet. It owns atomic parent-field/binding persistence and the one parent audit event; no dedicated binding write command.                                          |
-| Base Assistant/App prompt history                                                   | Existing Prompt, Assistant, and App modules                                        | Reuse unchanged. A Skill revision is a different aggregate and does not turn `Prompts` into a generic metadata bucket.                                                                                                            |
-| Effective system context and token accounting                                       | Existing completion context module                                                 | Reuse and deepen only as needed to accept a typed effective-instructions result.                                                                                                                                                  |
-| Organizational Skills for personal chat                                             | Existing Governance Policy and effective-config owners                             | Extend with exact ordered revisions from the tenant organizational Space. Prompt enforcement remains compatible; no parallel global-Skill catalog or human-identity coupling.                                                      |
-| Choosing a separate Assistant                                                       | Existing Group Chat module                                                         | Retain. No merge with Skill activation.                                                                                                                                                                                           |
-| ZIP safety, manifest coordinates, exact archive digest, and closed kind dispatch    | Current Flow package mechanics, later moved to `eneo.packages`                     | Move only kind-agnostic mechanics in the portability PR when Flow plus Assistant/Skill profiles are real consumers. Kind entry sets and profile validators stay in their verticals. Delete the old generic copies after the move. |
-| Product payload, requirement topology, local planning, installation, and receipt    | `flow_packages`, future `assistant_packages`, `app_packages`, and `skill_packages` | Keep separate vertical modules. No generic installer.                                                                                                                                                                             |
-| Publisher, listing, immutable release, audience, moderation, and object storage     | `eneo-ai/eneo-marketplace`                                                         | Create as a separately deployed Hub. It validates artifacts but never owns destination installation semantics.                                                                                                                    |
-| Hub connection, verified download, and native Marketplace projection                | `eneo-ai/eneo`                                                                     | Create a thin server-side adapter. It never creates product resources itself.                                                                                                                                                     |
-| Files, Collections, ingestion, embeddings, and local retrieval                      | Existing Eneo file/knowledge owners                                                | Reuse. Packages carry source bytes or logical requirements, never derived vector state.                                                                                                                                           |
+| Responsibility                                                                                | Canonical owner                                                                    | Disposition                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skill identity, revisions, binding validation/resolution, composition, and portable snapshots | New `eneo.skills` module                                                           | Create one deep module because Assistants and Apps are two real consumers.                                                                                                                                                        |
+| Assistant/App ordered binding replacement                                                     | Existing Assistant/App update commands and routers                                 | Extend the canonical parent save with an optional full binding facet. It owns atomic parent-field/binding persistence and the one parent audit event; no dedicated binding write command.                                         |
+| Base Assistant/App prompt history                                                             | Existing Prompt, Assistant, and App modules                                        | Reuse unchanged. A Skill revision is a different aggregate and does not turn `Prompts` into a generic metadata bucket.                                                                                                            |
+| Effective system context and token accounting                                                 | Existing completion context module                                                 | Reuse and deepen only as needed to accept a typed effective-instructions result.                                                                                                                                                  |
+| Organisation Skill publication and local distribution                                         | `eneo.skills`, the organisation Space, and existing Space Skill page               | Extend the one Skill aggregate with an exact published pointer and concrete install-to-Space command. No parallel Skill type, live cross-Space parent binding, or generic installer.                                              |
+| Organizational Skills for personal chat                                                       | Existing Governance Policy and effective-config owners                             | Extend with exact ordered published revisions from the tenant organisational Space. Prompt enforcement remains compatible; no Hub human-identity coupling.                                                                        |
+| Choosing a separate Assistant                                                                 | Existing Group Chat module                                                         | Retain. No merge with Skill activation.                                                                                                                                                                                           |
+| ZIP safety, manifest coordinates, exact archive digest, and closed kind dispatch              | Current Flow package mechanics, later moved to `eneo.packages`                     | Move only kind-agnostic mechanics in the portability PR when Flow plus Assistant/Skill profiles are real consumers. Kind entry sets and profile validators stay in their verticals. Delete the old generic copies after the move. |
+| Product payload, requirement topology, local planning, installation, and receipt              | `flow_packages`, future `assistant_packages`, `app_packages`, and `skill_packages` | Keep separate vertical modules. No generic installer.                                                                                                                                                                             |
+| Publisher, listing, immutable release, audience, moderation, and object storage               | `eneo-ai/eneo-marketplace`                                                         | Create as a separately deployed Hub. It validates artifacts but never owns destination installation semantics.                                                                                                                    |
+| Hub connection, verified download, and native Marketplace projection                          | `eneo-ai/eneo`                                                                     | Create a thin server-side adapter. It never creates product resources itself.                                                                                                                                                     |
+| Files, Collections, ingestion, embeddings, and local retrieval                                | Existing Eneo file/knowledge owners                                                | Reuse. Packages carry source bytes or logical requirements, never derived vector state.                                                                                                                                           |
 
 ## Repository and contract ownership
 
@@ -245,12 +270,18 @@ flowchart LR
         CON["Server-side Hub connector"]
         PLAN["Kind-owned package planner and installer"]
         DOM["Flow / Assistant / App / Skill owners"]
+        ORG["Organisation Skill catalogue\nexact published revision"]
+        LOCAL["Target-Space local Skill copy"]
+        GOV["Governance Policy / Personal Chat"]
         KNO["Local files, knowledge ingestion and embeddings"]
         LA --> UI
         UI --> CON
         CON --> PLAN
         PLAN --> DOM
         PLAN --> KNO
+        ORG -- "explicit install" --> LOCAL
+        ORG -- "exact policy pin" --> GOV
+        LOCAL --> DOM
     end
 
     CON -- "machine OAuth + TLS\nno Eneo human identity" --> CAT
@@ -371,17 +402,40 @@ from the locked persistence boundary; routers never infer audit events from a
 stale pre-mutation snapshot. Concurrent identical requests therefore produce
 one mutation and at most one corresponding lifecycle audit event.
 
+App queue planning also holds every referenced Skill while it persists the
+App-run execution snapshot. Skill deletion locks that same Skill and rejects
+while a queued or running App run still retains its identity in
+`skill_provenance`. A JSONB containment index keeps that retained-reference
+check bounded as execution history grows. Completed and failed runs remain audit
+evidence but no longer block deletion. This ordering guarantees that deletion
+either wins before a queue snapshot can reference the Skill, or observes the
+committed nonterminal run and fails without invalidating it.
+
 ### Local authorization, API, and parent-save boundary
 
-S1 adds `Permission.SKILLS` and `SpaceResourceType.SKILL` to the existing
-Space authorization model. Role migration grants Skill permission to roles that
-already author Assistants or Apps, and to administrators. It does not invent a
+S1 adds `Permission.SKILLS`, `Permission.SKILLS_MANAGEMENT`, and
+`SpaceResourceType.SKILL` to the existing authorization model. The two tenant
+capabilities intentionally separate approved reuse from free-form authoring:
+
+- **Use Skills** (`skills`) permits reading existing Skills and attaching,
+  reordering, or removing them on parents the user may already edit.
+- **Manage Skills** (`skills_management`) additionally permits creating,
+  revising, changing availability, and deleting Skills where the Space role
+  allows that action.
+
+Mutation requires both capabilities; Manage Skills never implies Use Skills.
+Running an already configured Assistant, App, or Personal Chat requires neither,
+because these are authoring permissions rather than runtime entitlements.
+Predefined User roles receive Use Skills. AI Configurator and Owner receive
+both. Migration grants Use Skills to existing Assistant/App/admin-capable roles
+and Manage Skills to existing AI/admin-capable roles. It does not invent a
 parallel role system.
 
 The authorization rules are:
 
 - list/read requires Skill read permission in the Skill's Space;
-- create, revise, activate/deactivate, and delete require Skill edit permission;
+- create, revise, activate/deactivate, and delete require Use Skills, Manage
+  Skills, and the corresponding Space action;
 - saving bindings requires edit permission on the Assistant/App and read
   permission on every referenced Skill;
 - Skill-library routes and Assistant/App binding GET routes require a human
@@ -457,13 +511,13 @@ validate the destination's configured guardrail during planning.
 
 The fixed limits are limited to stable schema/interoperability constraints:
 
-| Field | Limit | Reason |
-| --- | ---: | --- |
-| Slug | 64 characters | Agent Skills name interoperability and stable coordinates |
-| Description | 1,024 characters | Agent Skills metadata interoperability |
-| Display name | 200 characters | Existing Eneo prompt-library convention |
-| Instructions | No character or line cap | Capacity is measured against the effective model context |
-| Bindings per parent/policy | `SKILL_MAX_BINDINGS`, default 100 | Configurable abuse/operational guardrail |
+| Field                      |                             Limit | Reason                                                    |
+| -------------------------- | --------------------------------: | --------------------------------------------------------- |
+| Slug                       |                     64 characters | Agent Skills name interoperability and stable coordinates |
+| Description                |                  1,024 characters | Agent Skills metadata interoperability                    |
+| Display name               |                    200 characters | Existing Eneo prompt-library convention                   |
+| Instructions               |          No character or line cap | Capacity is measured against the effective model context  |
+| Bindings per parent/policy | `SKILL_MAX_BINDINGS`, default 100 | Configurable abuse/operational guardrail                  |
 
 ### Organizational Skills for personal chat
 
@@ -483,15 +537,124 @@ is the stored base prompt. The Skill composer then adds its fixed boundary and
 the ordered governance Skill revisions. A package cannot carry or alter this
 policy.
 
+### Organisation Skill catalogue
+
+The Organisation Skill catalogue is the approved local library for one Eneo
+tenant. It is not the external Marketplace and has no Marketplace URL,
+credential, release, audience, or Hub identity. It reuses organisation-Space
+Skills and the existing `/spaces/organization/skills` management route. A
+dedicated tenant-scoped catalogue query exposes approved summaries and selected
+full previews to Use Skills users without granting access to organisation drafts
+or unrelated organisation-Space resources.
+
+#### Publication lifecycle
+
+Only organisation-Space Skills gain publication state. `skills` adds a nullable
+`published_revision_number` pointer with the same deferrable composite
+Skill/revision proof used by the current-revision pointer. The Skill domain owns
+one typed publication-status derivation used by API assembly and UI:
+
+- **Draft:** no revision has been published. It is visible only to Skill managers
+  and tenant administrators and cannot be installed or selected for Personal
+  Chat.
+- **Published:** the exact published revision is available to the organisation
+  catalogue and Personal Chat. Creating a newer revision does not change that
+  approved content.
+- **Unpublished:** an exact revision has previously been published but is no
+  longer offered for new installs or policy selection. Existing local copies and
+  existing exact policy pins continue to work.
+- **Update pending:** a derived badge when the latest local revision differs from
+  the published pointer, never a fourth persisted state.
+
+Organisation drafts do not expose the ordinary active toggle. Publish sets the
+pointer to the current revision and makes it active; unpublish makes the
+published Skill inactive; republish explicitly selects the current revision and
+makes it active. A previously published Skill is retained and unpublished
+rather than hard-deleted. Only a never-published, unbound draft may be deleted.
+Publication transitions and their exact revisions are recorded by the existing
+audit owner; a second publication-history table would duplicate immutable
+revision and audit evidence.
+
+#### Local roles and catalogue actions
+
+Use Skills users may browse published summaries, open a full approved preview,
+and install that exact revision into a Space they may edit. Manage Skills users
+who also have Use Skills may author and revise organisation drafts. Tenant
+administrators alone publish, unpublish, republish, select Personal Chat Skills,
+and delete eligible organisation drafts.
+
+Organisation draft authoring is a tenant-capability exception scoped only to
+Skill actions. It does not synthesize organisation-Space membership or an Editor
+role. The existing Space actor must deny the same user every non-Skill
+organisation resource, member list, and Space-management action. Published
+catalogue reads use their dedicated projection rather than broad organisation
+Space access.
+
+The management page uses Eneo's installed shadcn-svelte components and
+progressive disclosure: searchable list, Draft/Published/Unpublished and Update
+pending badges, description and published-version preview, revision history,
+restore, and permission-aware actions. The existing Personal Chat page keeps its
+inline creation path until this management page ships, then replaces it with a
+link to the canonical page and selects published revisions only.
+
+#### Install, update, and local customisation
+
+Assistants and Apps never bind live across Spaces. Installing an approved
+organisation Skill calls a concrete `eneo.skills` command that creates or
+updates a normal Skill in the selected target Space. Personal Chat remains the
+one direct organisation-revision consumer because Governance Policy already owns
+the tenant-wide integrity boundary.
+
+The target Skill records the exact source organisation Skill/revision and
+install actor/time. A partial unique constraint on
+`(space_id, source_organization_skill_id)` creates one canonical local
+installation per source and target Space. A deferrable composite foreign key
+proves the source revision belongs to the source Skill and uses `ON DELETE NO
+ACTION`: a published source cannot disappear while installations reference it,
+while whole-tenant cascade deletion is verified separately. Because `skills`
+does not duplicate `tenant_id`, the install service must prove the source
+organisation Space and target Space belong to the same tenant; a real
+cross-tenant attempt is a required integration test.
+
+Installing the same source again is idempotent and returns the existing target
+with explicit state:
+
+- **Locally modified** when the target's current digest differs from the last
+  installed source revision;
+- **Update available** when the source's published revision differs from the
+  last installed source revision; and
+- **Up to date** only when neither condition applies.
+
+Editing an installed Skill is ordinary local authoring and creates a new
+immutable local revision. Applying an approved source update also creates the
+next local revision and atomically advances the recorded source revision. A Use
+Skills user may apply that approved content, but a locally modified target
+requires a typed preview and explicit replacement confirmation. No path merges
+text, overwrites history, advances existing Assistant/App pins, or updates
+silently. A manager may instead fork the local content into a new independent
+Skill.
+
+Three version concepts remain separate:
+
+1. a monotonic local Skill revision is immutable audit history;
+2. the organisation published revision is the exact approved local revision; and
+3. an external Marketplace SemVer belongs to an immutable Hub release.
+
+“Restore this revision” always copies old content into the next local revision;
+the current pointer never moves backwards, published state changes only through
+publish, and existing parent pins remain unchanged. Marketplace installations
+later retain kind-owned receipts and do not reuse the organisation-source
+columns as a premature generic provenance model.
+
 ### Difference from Group Chat
 
-| Question | Skill | Group Chat |
-| --- | --- | --- |
-| What changes for a request? | The same Assistant/App receives additional ordered instructions. | A different Assistant is selected. |
-| Model and principal | The parent keeps its model, identity, permissions, tools, and base behavior. | Each Assistant may have its own model, knowledge, permissions, and lifecycle. |
-| How many can apply? | Every bound revision applies, subject to configuration and model context fit. | Normally one Assistant answers, with optional explicit mention. |
-| User-facing identity | The same Assistant/App answers. | The selected Assistant may have a distinct identity. |
-| Use it when | One product needs separately owned instructions or a capability shared in one Space. | Expertise needs an independently managed Assistant, model, permissions, or response identity. |
+| Question                    | Skill                                                                                | Group Chat                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| What changes for a request? | The same Assistant/App receives additional ordered instructions.                     | A different Assistant is selected.                                                            |
+| Model and principal         | The parent keeps its model, identity, permissions, tools, and base behavior.         | Each Assistant may have its own model, knowledge, permissions, and lifecycle.                 |
+| How many can apply?         | Every bound revision applies, subject to configuration and model context fit.        | Normally one Assistant answers, with optional explicit mention.                               |
+| User-facing identity        | The same Assistant/App answers.                                                      | The selected Assistant may have a distinct identity.                                          |
+| Use it when                 | One product needs separately owned instructions or a capability shared in one Space. | Expertise needs an independently managed Assistant, model, permissions, or response identity. |
 
 A Skill cannot call another Assistant, become a hidden Group Chat participant, or
 acquire independent tool permissions.
@@ -1263,25 +1426,26 @@ ADR that defines that feature.
 
 An unresolved row blocks only the dependent layer named in the last column.
 
-| Decision                                | Current direction                                                                                              | State                                                                    | Blocks                        |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- |
-| Repository ownership                    | `eneo-ai/eneo` owns Skills, packages, installers, and connector; `eneo-ai/eneo-marketplace` owns the Hub.      | Resolved                                                                 | Repository bootstrap          |
-| Execution order                         | Merge S1 and then S2 into `develop`; begin Marketplace implementation only afterward.                          | Resolved by product request                                              | Marketplace implementation    |
-| Hub operator/topology                   | Sundsvalls kommun/Eneo operates one central Hub.                                                               | Resolved by product request; legal/controller roles still need sign-off. | Production Hub                |
-| Local install authority                 | Local Eneo tenant administrator configures, plans, confirms, and installs.                                     | Resolved                                                                 | Connector/install             |
-| Human identity boundary                 | Hub and Eneo human identities remain completely separate.                                                      | Resolved                                                                 | All Hub integration           |
-| First end-to-end kind                   | Prove the Hub/connector with existing Flow packages before enabling new kinds.                                 | Recommended for acceptance                                               | Hub pilot                     |
-| Publisher organizations and visibility  | Explicit allowlist; public-authenticated, organization, and selected-instance audiences; no per-user audience. | Policy owner/initial allowlist open                                      | Hub publication               |
-| Moderation/separation of duties         | Public/inter-municipal releases require review; private organization policy may be lighter.                    | Exact self-approval rule open                                            | Hub publication               |
-| Licenses, source rights, classification | Controlled vocabulary, attestation, takedown, incident, residency, retention, and prohibited-data policy.      | Open                                                                     | Source-bearing publication    |
-| Hub human authentication                | Hub-owned identity provider and provisioning/offboarding; never Eneo OIDC coupling.                            | Provider/owner open                                                      | Hub human portal              |
-| Instance authentication                 | OAuth client credentials using `private_key_jwt` or mTLS, short-lived scoped tokens.                           | Mechanism/lifetime/rotation owner open                                   | Connector enrollment          |
-| Release version/update                  | Hub SemVer, immutable/yank/revoke, install-new only; no auto-update or merge.                                  | Recommended for acceptance                                               | Hub release/install           |
-| Signing                                 | Deferred until offline Hub-origin proof, mirrors, federation, third parties, or regulation creates the threat. | Deferred trigger                                                         | No first-release blocker      |
-| Selective Skill activation               | S1 stays eager. Task #553 adds the complete trusted runtime after PR #538 and before S2 freezes Assistant bindings. | Planned; no partial schema or UI in S1                                   | PR #538 and Task #553         |
-| Source asset limits/scanning            | Separate Knowledge Bundle Gate 0 selects media types, caps, scanners, quarantine SLA, and cleanup.             | Open                                                                     | Source-bearing packages       |
-| Template catalogs                       | Keep tenant templates as local shortcuts; choose migration/deletion plan for global galleries.                 | Deployed-row preflight and product decision open                         | Cross-instance catalog launch |
-| Telemetry/privacy                       | Instance-level authorized/denied download counts only by default; no Eneo human/content/local IDs.             | Retention/analytics policy open                                          | Publisher analytics           |
+| Decision                                | Current direction                                                                                                                                                                                    | State                                                                    | Blocks                           |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------- |
+| Repository ownership                    | `eneo-ai/eneo` owns Skills, packages, installers, and connector; `eneo-ai/eneo-marketplace` owns the Hub.                                                                                            | Resolved                                                                 | Repository bootstrap             |
+| Execution order                         | Finish S1 first. Organisation catalogue and selective activation may then proceed independently. Hub Gate 0 and the Flow-only vertical may proceed now; Skill/Assistant Hub enablement waits for S2. | Resolved by product request                                              | Package-kind enablement          |
+| Hub operator/topology                   | Sundsvalls kommun/Eneo operates one central Hub.                                                                                                                                                     | Resolved by product request; legal/controller roles still need sign-off. | Production Hub                   |
+| Local install authority                 | Local Eneo tenant administrator configures, plans, confirms, and installs.                                                                                                                           | Resolved                                                                 | Connector/install                |
+| Human identity boundary                 | Hub and Eneo human identities remain completely separate.                                                                                                                                            | Resolved                                                                 | All Hub integration              |
+| First end-to-end kind                   | Prove the Hub/connector with existing Flow packages before enabling new kinds.                                                                                                                       | Recommended for acceptance                                               | Hub pilot                        |
+| Publisher organizations and visibility  | Explicit allowlist; public-authenticated, organization, and selected-instance audiences; no per-user audience.                                                                                       | Policy owner/initial allowlist open                                      | Hub publication                  |
+| Moderation/separation of duties         | Public/inter-municipal releases require review; private organization policy may be lighter.                                                                                                          | Exact self-approval rule open                                            | Hub publication                  |
+| Licenses, source rights, classification | Controlled vocabulary, attestation, takedown, incident, residency, retention, and prohibited-data policy.                                                                                            | Open                                                                     | Source-bearing publication       |
+| Hub human authentication                | Hub-owned identity provider and provisioning/offboarding; never Eneo OIDC coupling.                                                                                                                  | Provider/owner open                                                      | Hub human portal                 |
+| Instance authentication                 | OAuth client credentials using `private_key_jwt` or mTLS, short-lived scoped tokens.                                                                                                                 | Mechanism/lifetime/rotation owner open                                   | Connector enrollment             |
+| Release version/update                  | Hub SemVer, immutable/yank/revoke, install-new only; no auto-update or merge.                                                                                                                        | Recommended for acceptance                                               | Hub release/install              |
+| Signing                                 | Deferred until offline Hub-origin proof, mirrors, federation, third parties, or regulation creates the threat.                                                                                       | Deferred trigger                                                         | No first-release blocker         |
+| Selective Skill activation              | S1 stays eager. Task #553 adds the complete trusted runtime after PR #538 and before S2 freezes Assistant bindings.                                                                                  | Planned; no partial schema or UI in S1                                   | PR #538 and Task #553            |
+| Organisation Skill catalogue            | One organisation-Space aggregate, exact published pointer, tenant-scoped browse, and install-by-copy. No live cross-Space binding.                                                                   | Planned after S1                                                         | Organisation publication/install |
+| Source asset limits/scanning            | Separate Knowledge Bundle Gate 0 selects media types, caps, scanners, quarantine SLA, and cleanup.                                                                                                   | Open                                                                     | Source-bearing packages          |
+| Template catalogs                       | Keep tenant templates as local shortcuts; choose migration/deletion plan for global galleries.                                                                                                       | Deployed-row preflight and product decision open                         | Cross-instance catalog launch    |
+| Telemetry/privacy                       | Instance-level authorized/denied download counts only by default; no Eneo human/content/local IDs.                                                                                                   | Retention/analytics policy open                                          | Publisher analytics              |
 
 ## Delivery sequence and implementation gates
 
@@ -1294,26 +1458,38 @@ The canonical delivery records are
 [Marketplace Epic #546](https://github.com/eneo-ai/eneo/issues/546). This ADR
 defines the contract and gates; the Epics track status and implementation work.
 
-The selected execution order is Skills first. S1 merges into `develop`; the
-internal MCP foundation in PR #538 then enables Task #553 to add selective
-Assistant and personal-chat activation; S2 starts from the resulting `develop`
-and adds portability. No Marketplace implementation, native connector work,
-scaffold, or deployment change begins before S2 merges. A planning-only
-Marketplace README is the sole permitted repository change during this phase.
+The selected product priority is Skills first, but the dependency graph does not
+create a false Marketplace blocker. S1 merges into `develop`. Revision restore
+and the organisation catalogue then deepen the local Skill owner. The internal
+MCP foundation in PR #538 independently enables Task #553; organisation
+catalogue work does not wait for selective activation, and Task #553 does not
+wait for the catalogue. S2 starts after S1 and Task #553 because the Assistant
+package must preserve the closed binding-mode contract.
+
+The external Hub baseline and Flow-only vertical may start before S1 or S2
+merges because they consume the already supported Flow package profile. The
+native Flow connector starts after the Hub discovery/download contract and the
+Flow lifecycle record are accepted. Neither track advertises Skill or Assistant
+releases until S2 passes the cross-repository contract gates. This allows useful
+work today without letting unfinished Skill schemas leak into the Hub.
 
 ### Active Skills phase
 
-The initial capability has three product review units in `eneo-ai/eneo`. S1 is
-the complete eager local vertical, not separate backend and frontend deliveries.
-Task #553 is one end-to-end selective-activation vertical after PR #538. S2 then
-adds package portability from updated `develop`. Marketplace implementation
-begins only after all three merge.
+S1 is the complete eager local vertical, not separate backend and frontend
+deliveries. H1, O1, and O2 are later local review units. O1 depends on H1 only
+where the management page exposes restore, and O2 depends on O1. Task #553 is
+one end-to-end selective-activation vertical after PR #538 and may proceed in
+parallel. S2 adds portability after S1 and Task #553; it does not turn the
+organisation catalogue into a package or runtime dependency.
 
-| Review unit | Included outcome | Required proof before merge | Deliberately excluded |
-| --- | --- | --- | --- |
-| **S1 — First-class local Skills** | Instruction-only Space-owned Skills; immutable revisions; reusable exact-revision Assistant/App bindings; governance-owned organizational Skills for personal chat; deterministic runtime composition; provenance; permissions, generated contracts, editors, migration, and audit. | Database/domain invariants, session and permission checks, context-fit rejection, provider-prompt and queue-snapshot behavior, governance precedence, transfer/deletion safety, generated-client checks, Swedish/English UI, accessibility, and unchanged behavior without Skills. | Package changes, Marketplace code, activation modes, selectors, Skill knowledge, scripts/assets, App knowledge, Flow snapshots, and Group Chat changes. |
-| **Selective Assistant and personal-chat activation — Task #553** | Closed binding mode, immutable turn plan, trusted internal activation effect, context recheck, capability fallback, truthful available/active evidence, and honest generated UI. Apps remain eager. | Existing rows stay `always`; exact pinned activation works in streaming and non-streaming paths; sibling calls, external forgery, concurrent edits, overflow, abort/error, fallback, governance precedence, and zero-Skill behavior are tested. | Packages, Marketplace code, App activation, Skill knowledge, Group Chat routing, and generic control-effect/plugin frameworks. |
-| **S2 — Portable Skill and Assistant packages** | Earned package-mechanics extraction; exact instruction-only Skill snapshot; standalone Skill and Assistant-with-nested-Skills plus binding modes export/read/plan/install; concrete receipts; versioned contract bundle, digest, and valid/invalid fixtures. | Existing Flow behavior stays green; closed-kind rejection, exact round trips, clean installs, conflict plans, activation-mode preservation, context-fit and configured-guardrail checks, concrete receipts, generated contracts, and cross-consumer fixture conformance pass. | Hub/connector code, App portability, Flow Skills, source bytes, mutable dependencies, automatic reuse/merge, in-place update, or a generic installer. |
+| Review unit                                                      | Included outcome                                                                                                                                                                                                                                                                                                                                                                                                                | Required proof before merge                                                                                                                                                                                                                                                                                               | Deliberately excluded                                                                                                                                                                     |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S1 — First-class local Skills**                                | Instruction-only Space-owned Skills; immutable revisions; reusable exact-revision Assistant/App bindings; governance-owned organizational Skills for personal chat; deterministic runtime composition; queue-safe retained provenance; separate Use/Manage permissions, generated contracts, editors, migration, and audit.                                                                                                     | Database/domain invariants, session and permission checks, context-fit rejection, provider-prompt and queue-snapshot behavior, queued/running deletion serialization, governance precedence, transfer/deletion safety, generated-client checks, Swedish/English UI, accessibility, and unchanged behavior without Skills. | Organisation publication/install, package changes, Marketplace code, activation modes, selectors, Skill knowledge, scripts/assets, App knowledge, Flow snapshots, and Group Chat changes. |
+| **H1 — Revision restore and history UX**                         | Restore an earlier immutable revision by creating the next revision; preview/compare history without changing parent pins or publication state.                                                                                                                                                                                                                                                                                 | Monotonic restore, no-op and repeated-digest behavior, unchanged exact pins, generated contracts, Swedish/English UI, and accessible confirmation.                                                                                                                                                                        | Publication, automatic downgrade, mutable history, or parent-binding advance.                                                                                                             |
+| **O1 — Organisation publication and catalogue**                  | Exact published-revision pointer, typed Draft/Published/Unpublished state, admin publish controls, tenant-scoped approved summaries/details, Personal Chat approved-only selection, and the existing organisation Skill page as the management owner. If review size requires a split, merge the backend pointer/transitions/query/audit contract before the page; do not split by horizontal technical layer inside either PR. | Migration constraints, transition concurrency/audit, Use/Manage/Admin matrix, no draft leakage, denial of every non-Skill organisation resource, cross-tenant isolation, generated contracts, shadcn-svelte UI, and Swedish/English browser journeys.                                                                     | Cross-Space direct bindings, install/update provenance, Hub code, or a second Skill aggregate/admin editor.                                                                               |
+| **O2 — Organisation install and update**                         | Tenant-safe idempotent install-to-Space, exact source provenance, one canonical installation per source/target, locally-modified/update-available plans, explicit approved update, and grouped Organisation/This Space selection.                                                                                                                                                                                               | Composite/partial constraints, cross-tenant source rejection, tenant-cascade behavior, idempotent retry, locally-modified confirmation, monotonic local update, unchanged parent pins, and accessible preview/error recovery.                                                                                             | Auto-update, text merge, digest/semantic deduplication, generic installers, or Marketplace receipt generalisation.                                                                        |
+| **Selective Assistant and personal-chat activation — Task #553** | Closed binding mode, immutable turn plan, trusted internal activation effect, context recheck, capability fallback, truthful available/active evidence, and honest generated UI. Apps remain eager.                                                                                                                                                                                                                             | Existing rows stay `always`; exact pinned activation works in streaming and non-streaming paths; sibling calls, external forgery, concurrent edits, overflow, abort/error, fallback, governance precedence, and zero-Skill behavior are tested.                                                                           | Packages, Marketplace code, App activation, Skill knowledge, Group Chat routing, and generic control-effect/plugin frameworks.                                                            |
+| **S2 — Portable Skill and Assistant packages**                   | Earned package-mechanics extraction; exact instruction-only Skill snapshot; standalone Skill and Assistant-with-nested-Skills plus binding modes export/read/plan/install; concrete receipts; versioned contract bundle, digest, and valid/invalid fixtures.                                                                                                                                                                    | Existing Flow behavior stays green; closed-kind rejection, exact round trips, clean installs, conflict plans, activation-mode preservation, context-fit and configured-guardrail checks, concrete receipts, generated contracts, and cross-consumer fixture conformance pass.                                             | Hub/connector code, App portability, Flow Skills, source bytes, mutable dependencies, automatic reuse/merge, in-place update, or a generic installer.                                     |
 
 These review units may use several focused commits. They remain one reviewable
 change set per unit unless a concrete review or migration risk forces the team
@@ -1321,15 +1497,15 @@ to revise this record.
 
 #### S1 implementation slices
 
-| Slice and canonical owner | Change | Depends on | Acceptance evidence |
-| --- | --- | --- | --- |
-| **S1.1 — Domain, tables, and migration**: `eneo.skills`, database tables, Alembic, and existing role permissions | Add stable Skill identity, immutable revisions, three concrete binding tables, provenance columns, same-Space/same-tenant/exact-revision constraints, reverse binding indexes, `Permission.SKILLS`, and role backfill. Add only the candidate composite parent indexes needed by those FKs. Update both migration backfill and post-migration tenant bootstrap so upgraded and fresh installations create equivalent owner permissions. | Current `develop`; read-only deployed-schema preflight. | Fresh and current-schema PostgreSQL upgrades reach one head; interrupted index creation is retry-safe; database constraints reject cross-Space, mismatched revision, duplicate position, and invalid current pointers; pre-use downgrade succeeds; role tests prove the intended backfill; a fresh-install owner can manage Skills. |
-| **S1.2 — Skill library/API owner**: Skill repository, service, session-only router, audit | Implement create/list/read, revision history, no-op save, monotonic revert, status, conflict-safe delete, exact-reference resolution, and session-only Assistant/App binding GET projections. Enforce slug uniqueness, permissions, and typed conflict responses. Return lifecycle mutation outcomes from the locked repository/service boundary so audit never depends on a stale router snapshot. Add no direct binding write route. | S1.1. | Service/API and real two-session tests cover duplicate-slug conflict, current-content no-op, concurrent identical revision/status/delete outcomes, monotonic revert with a repeated digest, inactive state, deletion race, at-most-one lifecycle audit event, body-free GET projection, and no partial library mutation. OpenAPI contains GET binding routes but no dedicated binding PUT/POST route. |
-| **S1.3 — Parent save, runtime composition, and capacity**: existing Assistant/App update services and routers, `SkillService`, App-run queue owner, completion context/budget owner, parent audit | Add an optional ordered exact Skill facet to canonical Assistant/App update. When supplied, lock the parent and replace bindings atomically with ordinary parent fields; hold referenced Skill lifecycle state through resolution and commit; reject the facet for API keys in the router and again in `SkillService`; run composed-context validation on binding-only saves before commit; fold body-free binding evidence into the one parent update audit event. Compose the fixed boundary and ordered pinned bodies, preserve byte-identical instructions when empty, snapshot App bindings when queuing, and retain bounded provenance without bodies. | S1.2 and the existing parent update/context owners. | Tests cover same-Space reuse, cross-Space/missing/inactive revision rejection, concurrent Assistant/App replacement including clear, deactivation-versus-new-binding serialization, configured guardrail, API-key rejection at both boundaries, binding-only context-fit rejection including an explicit clear, rollback of fields and bindings together, one body-free audit event, actual Assistant/App provider instructions, exact order/revision, App queue-time stability, defensive runtime failure, unchanged zero-Skill App create/update/publish/queue/run behavior, and acceptance of a long multi-line Skill when the selected model can fit it. |
-| **S1.4 — Organizational personal-chat policy**: existing Governance Policy, organizational Space, and personal-session owners | Store ordered exact revisions from the tenant organizational Space; expose them only through the admin governance contract; compose them after the enforced administrator prompt or stored base prompt; reject direct bindings on the personal default Assistant and fail closed on corrupt state. | S1.2 and S1.3 composition. | Tests cover tenant/Space isolation, admin and session enforcement, API-key rejection for the Skill facet, prompt enforcement plus Skills, ordinary stored prompt plus Skills, direct-binding rejection, exact retained provenance, and sequential repository loading so request-scoped reads never overlap on one SQLAlchemy `AsyncSession`. |
-| **S1.5 — Lifecycle integration**: current Assistant transfer owner and Skill deletion owner | Block Assistant Space transfer while bindings remain; never auto-copy, detach, rebind, or advance revisions. Report affected binding conflicts for deletion. | S1.1 and S1.2. | Transfer and bound-deletion tests prove failure before mutation; transfer or deletion succeeds only after explicit detach; retained run provenance remains bounded IDs/digests without instruction bodies. |
-| **S1.6 — Generated contracts and editors**: OpenAPI/generated SDK, existing Assistant/App editor state, existing admin personal-chat page | Generate Skill and parent-update binding types; add one reusable Space-library picker/editor pattern; keep ordered binding drafts inside the existing Assistant/App editor and persist them only through parent save; add ordered organizational Skill configuration to personal-chat administration; show revision pin/update, loading, empty, error, permission-aware read-only, and conflict states. State explicitly that every attached Skill applies to every request in displayed instruction order in S1, and that an inactive existing pin still applies while rejecting new attachment. Creating a Skill is a visible library action: explain that discard/failed parent save can leave it unbound, and never show it attached before save succeeds. | Stable S1.2–S1.4 APIs. | Generation diff is clean; frontend calls no dedicated binding write endpoint and uses generated types; editor tests prove create-then-save, create-then-discard, failed-save, reorder, permission gating, and conflict behavior; Swedish and English copy ship together; keyboard, invalid-field focus, semantics, status beyond color, and WCAG 2.2 AA checks pass. |
-| **S1.7 — Integrated release proof**: owning backend/frontend test suites and documentation | Run migration, strict typing, formatting, OpenAPI/client generation, API/domain/runtime/governance tests, frontend tests, i18n validation, and browser journeys. Record operational rollback and the exact S2 dependency. | S1.1–S1.6. | All required commands pass, `git diff --check` is clean, no portable or Marketplace API changed, and a clean tenant can author, reuse, run, govern, deactivate, detach, and delete Skills according to this contract. |
+| Slice and canonical owner                                                                                                                                                                                       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Depends on                                              | Acceptance evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S1.1 — Domain, tables, and migration**: `eneo.skills`, database tables, Alembic, and existing role permissions                                                                                                | Add stable Skill identity, immutable revisions, three concrete binding tables, provenance columns, same-Space/same-tenant/exact-revision constraints, reverse binding indexes, `Permission.SKILLS`, `Permission.SKILLS_MANAGEMENT`, and role backfill. Add only the candidate composite parent indexes needed by those FKs and the App-run provenance containment index required by deletion safety. Update both migration backfill and post-migration tenant bootstrap so upgraded and fresh installations create equivalent permissions.                                                                                                                                                                                                                                                                             | Current `develop`; read-only deployed-schema preflight. | Fresh and current-schema PostgreSQL upgrades reach one head; interrupted index creation is retry-safe; database constraints reject cross-Space, mismatched revision, duplicate position, and invalid current pointers; pre-use downgrade succeeds; role tests prove Use-only User and Use+Manage AI Configurator/Owner behavior; a fresh-install owner can manage Skills.                                                                                                                                                                                                                                                                                                                                                                         |
+| **S1.2 — Skill library/API owner**: Skill repository, service, session-only router, audit                                                                                                                       | Implement create/list/read, revision history, no-op save, monotonic revert, status, conflict-safe delete, exact-reference resolution, and session-only Assistant/App binding GET projections. Enforce slug uniqueness, permissions, and typed conflict responses. Return lifecycle mutation outcomes from the locked repository/service boundary so audit never depends on a stale router snapshot. Add no direct binding write route.                                                                                                                                                                                                                                                                                                                                                                                 | S1.1.                                                   | Service/API and real two-session tests cover duplicate-slug conflict, current-content no-op, concurrent identical revision/status/delete outcomes, monotonic revert with a repeated digest, inactive state, deletion race, at-most-one lifecycle audit event, body-free GET projection, and no partial library mutation. OpenAPI contains GET binding routes but no dedicated binding PUT/POST route.                                                                                                                                                                                                                                                                                                                                             |
+| **S1.3 — Parent save, runtime composition, queue safety, and capacity**: existing Assistant/App update services and routers, `SkillService`, App-run queue owner, completion context/budget owner, parent audit | Add an optional ordered exact Skill facet to canonical Assistant/App update. When supplied, lock the parent and replace bindings atomically with ordinary parent fields; hold referenced Skill lifecycle state through resolution and commit; reject the facet for API keys in the router and again in `SkillService`; run composed-context validation on binding-only saves before commit; fold body-free binding evidence into the one parent update audit event. Compose the fixed boundary and ordered pinned bodies, preserve byte-identical instructions when empty, and snapshot App bindings while holding referenced Skills until the queued App run is durable. Deletion uses the same Skill lock and rejects retained provenance from queued/running runs.                                                  | S1.2 and the existing parent update/context owners.     | Tests cover same-Space reuse, cross-Space/missing/inactive revision rejection, concurrent Assistant/App replacement including clear, deactivation-versus-new-binding serialization, configured guardrail, API-key rejection at both boundaries, binding-only context-fit rejection including an explicit clear, rollback of fields and bindings together, one body-free audit event, actual Assistant/App provider instructions, exact order/revision, App queue-time stability, snapshot-versus-delete serialization, queued/running conflict and terminal recovery, defensive runtime failure, unchanged zero-Skill App create/update/publish/queue/run behavior, and acceptance of a long multi-line Skill when the selected model can fit it. |
+| **S1.4 — Organizational personal-chat policy**: existing Governance Policy, organizational Space, and personal-session owners                                                                                   | Store ordered exact revisions from the tenant organizational Space; expose them only through the admin governance contract; compose them after the enforced administrator prompt or stored base prompt; reject direct bindings on the personal default Assistant and fail closed on corrupt state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | S1.2 and S1.3 composition.                              | Tests cover tenant/Space isolation, admin and session enforcement, API-key rejection for the Skill facet, prompt enforcement plus Skills, ordinary stored prompt plus Skills, direct-binding rejection, exact retained provenance, and sequential repository loading so request-scoped reads never overlap on one SQLAlchemy `AsyncSession`.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **S1.5 — Lifecycle integration**: current Assistant transfer owner and Skill deletion owner                                                                                                                     | Block Assistant Space transfer while bindings remain; never auto-copy, detach, rebind, or advance revisions. Report direct binding and nonterminal App-run conflicts for deletion; completed/failed provenance remains evidence without retaining the Skill forever.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | S1.1–S1.3.                                              | Transfer and bound-deletion tests prove failure before mutation; queue/delete concurrency proves an exact queued snapshot remains executable; deletion succeeds only after explicit detach and terminal App status; retained run provenance remains bounded IDs/digests without instruction bodies.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **S1.6 — Generated contracts and editors**: OpenAPI/generated SDK, existing Assistant/App editor state, existing admin personal-chat page, existing role editor                                                 | Generate Skill and parent-update binding types; expose separate Use Skills and Manage Skills role copy; add one reusable Space-library picker/editor pattern; keep ordered binding drafts inside the existing Assistant/App editor and persist them only through parent save; add ordered organizational Skill configuration to personal-chat administration; show revision pin/update, loading, empty, error, permission-aware read-only, and conflict states. State explicitly that every attached Skill applies to every request in displayed instruction order in S1, and that an inactive existing pin still applies while rejecting new attachment. Creating a Skill is a visible library action: explain that discard/failed parent save can leave it unbound, and never show it attached before save succeeds. | Stable S1.2–S1.4 APIs.                                  | Generation diff is clean; frontend calls no dedicated binding write endpoint and uses generated types; role tests prove a Use-only builder can select but cannot create/revise/delete; editor tests prove create-then-save, create-then-discard, failed-save, reorder, permission gating, and conflict behavior; Swedish and English copy ship together; keyboard, invalid-field focus, semantics, status beyond color, and WCAG 2.2 AA checks pass.                                                                                                                                                                                                                                                                                              |
+| **S1.7 — Integrated release proof**: owning backend/frontend test suites and documentation                                                                                                                      | Run migration, strict typing, formatting, OpenAPI/client generation, API/domain/runtime/governance tests, frontend tests, i18n validation, and browser journeys. Record operational rollback and the exact S2 dependency.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | S1.1–S1.6.                                              | All required commands pass, `git diff --check` is clean, no portable or Marketplace API changed, and a clean tenant can author, reuse, run, govern, deactivate, detach, and delete Skills according to this contract.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 S1 uses one Skill identity for both focused and broadly reused capabilities. The
 picker reduces accidental duplicate creation, while slug uniqueness and explicit
@@ -1339,41 +1515,40 @@ governance.
 
 #### S2 implementation slices
 
-| Slice and canonical owner | Change | Depends on | Acceptance evidence |
-| --- | --- | --- | --- |
-| **S2.1 — Earned package mechanics**: current Flow package mechanics, then `eneo.packages` | Move only archive, manifest-coordinate, exact-digest, and closed-dispatch code that now has at least two consumers. Keep kind entry sets and validation in their verticals; delete the old generic copies in the same mechanical commit. | S1 and Task #553 merged to `develop`. | Existing Flow package bytes, plans, receipts, round trips, and strict invalid fixtures remain unchanged immediately after the move; dependency tests forbid vertical imports and kind-named validators in `eneo.packages`. |
-| **S2.2 — Canonical Skill snapshot**: `eneo.skills` portable contract | Define the strict fields above, Agent Skills core-field mapping, binding-mode mapping, digest rules, fixed metadata constraints, destination guardrail/context checks, generated schema, and valid/invalid conformance fixtures. | S2.1. | Supported `name`/description/Markdown and closed binding-mode mapping round-trip; unknown/extra fields, invalid modes, local IDs, knowledge, executable content, bad references, duplicate keys/positions, digest mismatch, unsafe archives, configured-limit failure, and context-fit failure reject before mutation. |
-| **S2.3 — Standalone Skill vertical**: `skill_packages` | Export one exact revision; read and plan a target Space/slug; apply through the Skill owner; create one inactive, unbound Skill at local revision 1; write a concrete Skill receipt. | S2.2. | Export-read-plan-install-export preserves semantic content; slug conflict is explicit; retries are idempotent; wrong-kind and unauthorized installs fail before mutation; receipt FK and terminal invariants hold. |
-| **S2.4 — Assistant with nested Skills vertical**: `assistant_packages` and canonical Assistant authoring owner | Export base Assistant content plus exact pinned Skill snapshots, positions, and activation modes; plan model/knowledge mappings and every new identity; install nested Skills and one unpublished Assistant transactionally; write a concrete Assistant receipt. | S2.2 and S2.3 primitives, without calling the standalone installer as a generic wrapper. | Clean-instance round trip preserves instructions, positions, modes, digests, and unpublished state; destination conflicts and unsupported fields are visible; failure creates no partial parent or Skills; installed execution matches the preview. |
-| **S2.5 — Contract release gate**: package contract bundle and both product verticals | Publish a release-ready versioned bundle and digest from an exact Eneo commit through the later approved artifact channel; document compatibility and Marketplace dependencies. | S2.1–S2.4. | Eneo passes all canonical valid/invalid fixtures, generated clients/examples agree, and the bundle contains no planner, installer, receipt, ORM, or runtime dependency. No Hub advertises the profile yet. |
+| Slice and canonical owner                                                                                      | Change                                                                                                                                                                                                                                                           | Depends on                                                                               | Acceptance evidence                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **S2.1 — Earned package mechanics**: current Flow package mechanics, then `eneo.packages`                      | Move only archive, manifest-coordinate, exact-digest, and closed-dispatch code that now has at least two consumers. Keep kind entry sets and validation in their verticals; delete the old generic copies in the same mechanical commit.                         | S1 and Task #553 merged to `develop`.                                                    | Existing Flow package bytes, plans, receipts, round trips, and strict invalid fixtures remain unchanged immediately after the move; dependency tests forbid vertical imports and kind-named validators in `eneo.packages`.                                                                                             |
+| **S2.2 — Canonical Skill snapshot**: `eneo.skills` portable contract                                           | Define the strict fields above, Agent Skills core-field mapping, binding-mode mapping, digest rules, fixed metadata constraints, destination guardrail/context checks, generated schema, and valid/invalid conformance fixtures.                                 | S2.1.                                                                                    | Supported `name`/description/Markdown and closed binding-mode mapping round-trip; unknown/extra fields, invalid modes, local IDs, knowledge, executable content, bad references, duplicate keys/positions, digest mismatch, unsafe archives, configured-limit failure, and context-fit failure reject before mutation. |
+| **S2.3 — Standalone Skill vertical**: `skill_packages`                                                         | Export one exact revision; read and plan a target Space/slug; apply through the Skill owner; create one inactive, unbound Skill at local revision 1; write a concrete Skill receipt.                                                                             | S2.2.                                                                                    | Export-read-plan-install-export preserves semantic content; slug conflict is explicit; retries are idempotent; wrong-kind and unauthorized installs fail before mutation; receipt FK and terminal invariants hold.                                                                                                     |
+| **S2.4 — Assistant with nested Skills vertical**: `assistant_packages` and canonical Assistant authoring owner | Export base Assistant content plus exact pinned Skill snapshots, positions, and activation modes; plan model/knowledge mappings and every new identity; install nested Skills and one unpublished Assistant transactionally; write a concrete Assistant receipt. | S2.2 and S2.3 primitives, without calling the standalone installer as a generic wrapper. | Clean-instance round trip preserves instructions, positions, modes, digests, and unpublished state; destination conflicts and unsupported fields are visible; failure creates no partial parent or Skills; installed execution matches the preview.                                                                    |
+| **S2.5 — Contract release gate**: package contract bundle and both product verticals                           | Publish a release-ready versioned bundle and digest from an exact Eneo commit through the later approved artifact channel; document compatibility and Marketplace dependencies.                                                                                  | S2.1–S2.4.                                                                               | Eneo passes all canonical valid/invalid fixtures, generated clients/examples agree, and the bundle contains no planner, installer, receipt, ORM, or runtime dependency. No Hub advertises the profile yet.                                                                                                             |
 
 S2 deliberately stops at standalone Skill and Assistant portability. App
 portability, Flow Skill snapshots, and all knowledge-bearing profiles retain their
 own product and runtime gates.
 
-### Later Marketplace phase
+### Marketplace track
 
-The Marketplace Epic remains `Future` and blocked until the eager local Skills,
-selective-activation, and package-portability review units have merged into
-`develop`. Clearing this execution-order blocker permits Marketplace task
-planning; it does not resolve the Marketplace Gate-0 decisions.
+The Marketplace track is no longer blocked as one unit by unfinished Skills.
+The existing Flow package provides a real first consumer, so Hub decision
+closure, repository baseline, contract conformance, and the Flow-only Hub
+vertical may begin now. Teams may still staff Skills first as a product
+priority; that staffing choice is not encoded as a technical dependency.
 
-A planning-only README may record the Hub mission, repository boundary, and this
-blocker in `eneo-ai/eneo-marketplace` before S2. It must not add a service
-scaffold, endpoint, deployment, schema, dependency, or implied launch commitment.
+The first Marketplace kind remains Flow. It proves external identity,
+authorization, moderation, artifact, download, connector, and local-install
+seams without importing an unfinished Skill contract. The Hub keeps closed
+profile advertisement: `skill` and Assistant-with-Skills remain hidden and
+rejected until S2 publishes the exact contract bundle and both repositories pass
+the cross-repository gates.
 
-The first Marketplace kind remains Flow. This proves the external identity,
-authorization, moderation, artifact, download, connector, and local-install seams
-with the existing Flow package vertical before the Hub advertises the new Skill or
-Assistant profiles.
-
-| Later slice                               | Repository                                   | Outcome                                                                                                                                                                                                                                                                            | Gate                                                                                                                              |
-| ----------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **M0 — Hub baseline and accepted Gate 0** | `eneo-ai/eneo-marketplace`                   | Add repository guidance, build/test/release baseline, deployment environments, Hub migrations, object-storage and secret ownership, accepted identity/authentication/retention/backup decisions, and the approved channel for publishing and pinning the S2 contract bundle.       | Begins only after S2. No product endpoint ships until the operational owners and recovery procedure are named.                    |
-| **M1 — Flow Hub vertical**                | `eneo-ai/eneo-marketplace`                   | Hub-owned humans/organizations/roles, registered instances and rotating machine credentials, discovery, Flow upload/quarantine/validation, immutable releases, moderation, audiences, cursor catalog, authenticated download, audit, and operations.                               | Serves only the existing supported Flow profile and cannot call Eneo.                                                             |
-| **E1 — Native Flow Marketplace vertical** | `eneo-ai/eneo`                               | Tenant-admin enrollment, server-held credential reference, trusted discovery, bounded catalog projection, exact-byte verification, full Flow plan preview, confirmation recheck, current Flow installer reuse, provenance receipt, local audit, and accessible Swedish/English UI. | Browser receives no Hub credential; only the current tenant administrator can install; Hub outage leaves local runtime unchanged. |
-| **I1 — Flow municipal pilot**             | Both repositories                            | Prove publish, audience denial, authenticated download, local install, Hub outage, yank/revoke warning, credential rotation/revocation, rate limits, and digest-consistent backup/restore.                                                                                         | The Hub advertises no Assistant or Skill profile until this pilot and the cross-repository gates below pass.                      |
-| **I2 — Assistant-with-Skills enablement** | Repository-specific implementation changes | The Hub pins the S2 contract, reviews and projects exact nested Skills, and enables an end-to-end Assistant-with-Skills publish/preview/install/execute journey between supported Eneo releases.                                                                                   | Exact contract pins and all compatibility tests pass; App packages remain a later kind-owned vertical.                            |
+| Later slice                               | Repository                                 | Outcome                                                                                                                                                                                                                                                                                                        | Gate                                                                                                                                                                                                 |
+| ----------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0 — Hub Gate 0 and delivery baseline** | `eneo-ai/eneo-marketplace`                 | Add repository guidance, build/test/release baseline, deployment environments, accepted identity/authentication/retention/backup decisions, object-storage and secret ownership, Flow-package conformance fixtures, and named operations/recovery owners. No product endpoint is implied by scaffolding alone. | May start now. Production or release publication waits for the open Gate-0 policy owners and tested backup/restore procedure.                                                                        |
+| **M1 — Flow Hub vertical**                | `eneo-ai/eneo-marketplace`                 | Hub-owned humans/organizations/roles, registered instances and rotating machine credentials, discovery, Flow upload/quarantine/validation, immutable releases, moderation, audiences, cursor catalogue, authenticated download, audit, and operations.                                                         | M0 decisions accepted; serves only the current Flow profile and cannot call Eneo.                                                                                                                    |
+| **E1 — Native Flow Marketplace vertical** | `eneo-ai/eneo`                             | Tenant-admin enrollment, server-held credential reference, trusted discovery, bounded catalogue projection, exact-byte verification, full Flow plan preview, confirmation recheck, current Flow installer reuse, provenance receipt, local audit, and accessible Swedish/English UI.                           | M1 discovery/download contract and Flow lifecycle record accepted. Browser receives no Hub credential; only the current tenant administrator can install; Hub outage leaves local runtime unchanged. |
+| **I1 — Flow municipal pilot**             | Both repositories                          | Prove publish, audience denial, authenticated download, local install, Hub outage, yank/revoke warning, credential rotation/revocation, rate limits, and digest-consistent backup/restore.                                                                                                                     | The Hub advertises no Assistant or Skill profile until this pilot and the cross-repository gates below pass.                                                                                         |
+| **I2 — Assistant-with-Skills enablement** | Repository-specific implementation changes | The Hub pins the S2 contract, reviews and projects exact nested Skills, and enables an end-to-end Assistant-with-Skills publish/preview/install/execute journey between supported Eneo releases.                                                                                                               | Exact contract pins and all compatibility tests pass; App packages remain a later kind-owned vertical.                                                                                               |
 
 ### Cross-repository release gates
 
@@ -1405,7 +1580,8 @@ access, and retention; otherwise Gate 0 selects the smallest mechanism that does
 Selective Skill activation remains outside S1 and is owned by Task #553 before
 S2. Skill knowledge, source-bearing packages and Knowledge Bundles, App package
 portability, App knowledge retrieval, Flow Skill snapshots/runtime, detached
-signing, federation/mirrors, direct publish from Eneo, non-admin local browsing,
+signing, federation/mirrors, direct publish from Eneo, non-admin external
+Marketplace browsing,
 automatic update/merge, Solution Bundles, generic dependency graphs, catalog
 Collections, and global-template migration retain their named gates below. They
 are not hidden work inside another delivery.
@@ -1433,6 +1609,9 @@ are not hidden work inside another delivery.
 - Skill-library and Assistant/App binding GET APIs require a session and existing
   Space/parent permissions. No dedicated Assistant/App binding PUT/POST route
   ships.
+- Use Skills permits reading and attaching existing Skills. Creating, revising,
+  changing availability, and deleting additionally require Manage Skills and
+  the applicable Space action. Runtime use requires neither permission.
 - Canonical Assistant/App update atomically saves ordinary parent fields and the
   full ordered exact binding list. Omitting the Skill facet preserves bindings;
   including it on an API-key request fails in both the router and `SkillService`.
@@ -1452,6 +1631,9 @@ are not hidden work inside another delivery.
   boundary. A parent without Skills preserves its exact base instructions.
 - Apps preserve queue-time Skill snapshots. Questions and App runs retain exact
   ordered IDs, revisions, digests, and positions without instruction bodies.
+- Queue snapshot creation and deletion serialize on referenced Skills. A queued
+  or running App run blocks deletion; after the Job becomes complete or failed,
+  retained provenance remains readable and deletion may proceed.
 - Tenant administrators apply organizational-Space Skills to personal chat only
   through Governance Policy. Enforced prompts and governance Skills compose
   together; direct personal-default bindings are rejected and corrupt state fails
@@ -1460,7 +1642,32 @@ are not hidden work inside another delivery.
   parents. Bound deletion and Assistant Space transfer return conflict.
 - Group Chat and existing Assistants/Apps without Skills remain unchanged.
 - Existing-role migration backfill and fresh-tenant bootstrap grant the same
-  intended Skills permissions.
+  intended Use/Manage Skills combinations.
+
+### Organisation catalogue
+
+- One organisation-Space Skill aggregate owns drafts and exact published
+  revisions; API and UI derive Draft, Published, Unpublished, and Update pending
+  through one typed domain status.
+- Use Skills users see only published summaries and explicitly selected full
+  previews from their own tenant. Organisation drafts and unpublished Skills do
+  not leak through catalogue, search, counts, or errors.
+- Manage Skills plus Use Skills permits organisation draft authoring without
+  granting organisation-Space membership or access to any non-Skill resource.
+  Tenant admin alone publishes, unpublishes, governs Personal Chat, and deletes
+  eligible never-published drafts.
+- Restoring history creates the next immutable revision and changes no parent
+  pin or publication pointer.
+- Install-to-Space proves same tenant and target edit authority, is idempotent
+  per exact source/target identity, and retains one canonical local installation.
+- Cross-tenant source attempts fail before mutation. Composite provenance and
+  tenant-cascade migration tests prove the selected deferrable deletion behavior.
+- Local modifications and source updates are independent visible states.
+  Applying approved content requires preview and explicit confirmation when
+  locally modified, creates the next local revision, and never advances parent
+  pins or merges text automatically.
+- Organisation catalogue outage or unpublication never affects installed local
+  runtime behavior.
 
 ### Packages and knowledge
 
@@ -1510,8 +1717,10 @@ are not hidden work inside another delivery.
   existing editor state owners. They persist ordered bindings only through the
   parent save and never show a newly created library Skill as attached before
   that save succeeds. Discard/failure copy explains that the Skill remains
-  unbound in the Space library. The personal-chat admin page owns ordered
-  organizational Skill policy; no second admin surface appears.
+  unbound in the Space library. The existing organisation-Space Skill page owns
+  organisation catalogue management; the personal-chat admin page owns only its
+  ordered policy selection and links back to that page. No duplicate Skill
+  editor appears under Admin.
 - Installation preview shows every resource, full instruction text, asset,
   mapping, unsupported capability, and draft/unpublished result before confirm.
 - Marketplace connection and install routes are tenant-admin only in the first
@@ -1530,20 +1739,26 @@ The expected gates include:
   current-content no-op, monotonic revert, non-unique digest evidence,
   same-Space reuse, binding order, configurable guardrail, governance, deletion,
   and transfer;
-- API authorization/OpenAPI tests for Skill permission, session-only library and
-  binding GET routes, absence of dedicated binding write routes, parent Skill-
-  facet API-key rejection in both router and service, tenant-admin governance,
-  and conflict races;
+- API authorization/OpenAPI tests for separate Use/Manage Skill permissions,
+  session-only library and binding GET routes, absence of dedicated binding
+  write routes, parent Skill-facet API-key rejection in both router and service,
+  tenant-admin governance, and conflict races;
 - parent-update transaction tests for complete ordered replacement, omitted-
   facet preservation, binding-only composed-context validation before commit,
   rollback of ordinary fields and bindings together, separately committed
   unbound Skill creation, and one body-free parent audit event;
 - Assistant/App integration tests that inspect the actual provider prompt,
-  queue-time App snapshot, model context-fit behavior, and exact revision
+  queue-time App snapshot, queue/delete lock ordering, nonterminal deletion
+  conflict, terminal recovery, model context-fit behavior, and exact revision
   provenance for streaming and non-streaming paths;
 - personal-chat tests for organizational-Space isolation, enforced-prompt plus
   Skill composition, stored-prompt composition, direct-binding rejection, and
   corrupt-state failure;
+- organisation catalogue tests for typed status derivation, draft/unpublished
+  non-disclosure, Skill-only management authority, denial of other organisation
+  resources, publish/revise/unpublish concurrency and audit, cross-tenant source
+  rejection, idempotent install, locally-modified confirmation, source deletion
+  constraints, and whole-tenant cascade;
 - Flow snapshot/hash/runtime tests before enabling Flow Skills;
 - strict package unit/integration tests for every supported kind/profile and
   every enabled asset failure mode;
@@ -1572,22 +1787,24 @@ mock architecture.
 
 ## Risk, rollback, and recovery
 
-| Risk                                                 | Prevention and recovery                                                                                                                                                                                                                                                     |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Risk                                                 | Prevention and recovery                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bound Skills conflict or are irrelevant              | S1 is explicit always-composition. Editors show complete ordered content and exact revisions; the fixed boundary preserves platform and governance precedence. Authors remove/reorder bindings or revise content. Task #553 adds selective loading as a separate tested runtime. |
-| Skills bypass governance                             | Governance Policy is the only personal-chat Skill owner; direct bindings are rejected and corrupt state fails closed. Prompt enforcement and policy Skills compose in the documented order. Packages cannot carry tenant policy.                                            |
-| Skill revisions drift across parents                 | Bind exact revisions, show update availability, require a per-parent diff/confirmation, and retain old referenced revisions. No edit silently changes a parent.                                                                                                             |
-| Prompt/context growth causes provider failures       | Validate worst permitted combination with the effective model and shared context accounting. Reject before run; never truncate silently.                                                                                                                                    |
-| Duplicate Skill identities confuse authors           | Search/select existing same-Space Skills and enforce unique slugs. Keep digest non-unique and never merge by text similarity; explicit identities preserve ownership and revision history.                                                                                  |
-| Author assumes library creation attached the Skill   | Distinguish the committed library action from the unsaved parent draft. Show attached state only after parent save succeeds; on discard/failure, explain that the valid unbound Skill remains available for reuse or explicit deletion. No hidden cleanup deletes it.       |
-| A binding cap is too low or implies false capacity   | Make `SKILL_MAX_BINDINGS` operator-configurable with default 100. Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                                      |
-| Knowledge import leaks or strands data               | Strict sharing policy, quarantine/scan, hidden staging, local policy, durable ingestion state, global reference fence, and cleanup_pending recovery. Disable asset-bearing publication/install while instruction-only packages remain available.                            |
-| Hub or object-store compromise                       | Narrow roles/scopes, isolated workers, immutable release rows, append-only audit, authenticated metadata, exact digest verification, and restore drills. Revoke/yank affected releases; local content is not remotely changed. Signing requires its separate named trigger. |
-| Hub outage                                           | Local content has no Hub runtime dependency. Marketplace reports outage/stale cache; offline package transfer remains separate.                                                                                                                                             |
-| Credential theft                                     | Private-key/mTLS authentication, short-lived tokens, server secret storage, expiry/rotation, scope/audience binding, and instance revocation.                                                                                                                               |
-| Release is yanked during install                     | Recheck after download and before mutation. Block new install and retain a failed/aborted local receipt without product resources.                                                                                                                                          |
-| Package-platform abstraction grows into a god module | Shared module owns artifact mechanics only. Kind verticals retain payload, planning, install, and receipts. Delete pass-through wrappers and compatibility re-exports.                                                                                                      |
-| Migration rollback after real Skill use              | Before production use, normal downgrade is permitted after preflight. Once revisions/runs exist, disable authoring/runtime first, export/retain audit-required revisions, and use a forward recovery migration rather than destructive downgrade.                           |
+| Skills bypass governance                             | Governance Policy is the only personal-chat Skill owner; direct bindings are rejected and corrupt state fails closed. Prompt enforcement and policy Skills compose in the documented order. Packages cannot carry tenant policy.                                                 |
+| Skill revisions drift across parents                 | Bind exact revisions, show update availability, require a per-parent diff/confirmation, and retain old referenced revisions. No edit silently changes a parent.                                                                                                                  |
+| Queue deletion invalidates an App run                | Queue planning and deletion lock the same Skill rows. Nonterminal App-run provenance blocks deletion; terminal runs retain body-free evidence without retaining the Skill forever.                                                                                               |
+| Approved and locally customised Skills diverge       | Show source revision, local revision, Locally modified, and Update available independently. Applying approved content is an explicit previewed new revision; never merge, overwrite history, or advance parent pins automatically.                                               |
+| Prompt/context growth causes provider failures       | Validate worst permitted combination with the effective model and shared context accounting. Reject before run; never truncate silently.                                                                                                                                         |
+| Duplicate Skill identities confuse authors           | Search/select existing same-Space Skills and enforce unique slugs. Keep digest non-unique and never merge by text similarity; explicit identities preserve ownership and revision history.                                                                                       |
+| Author assumes library creation attached the Skill   | Distinguish the committed library action from the unsaved parent draft. Show attached state only after parent save succeeds; on discard/failure, explain that the valid unbound Skill remains available for reuse or explicit deletion. No hidden cleanup deletes it.            |
+| A binding cap is too low or implies false capacity   | Make `SKILL_MAX_BINDINGS` operator-configurable with default 100. Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                                         |
+| Knowledge import leaks or strands data               | Strict sharing policy, quarantine/scan, hidden staging, local policy, durable ingestion state, global reference fence, and cleanup_pending recovery. Disable asset-bearing publication/install while instruction-only packages remain available.                                 |
+| Hub or object-store compromise                       | Narrow roles/scopes, isolated workers, immutable release rows, append-only audit, authenticated metadata, exact digest verification, and restore drills. Revoke/yank affected releases; local content is not remotely changed. Signing requires its separate named trigger.      |
+| Hub outage                                           | Local content has no Hub runtime dependency. Marketplace reports outage/stale cache; offline package transfer remains separate.                                                                                                                                                  |
+| Credential theft                                     | Private-key/mTLS authentication, short-lived tokens, server secret storage, expiry/rotation, scope/audience binding, and instance revocation.                                                                                                                                    |
+| Release is yanked during install                     | Recheck after download and before mutation. Block new install and retain a failed/aborted local receipt without product resources.                                                                                                                                               |
+| Package-platform abstraction grows into a god module | Shared module owns artifact mechanics only. Kind verticals retain payload, planning, install, and receipts. Delete pass-through wrappers and compatibility re-exports.                                                                                                           |
+| Migration rollback after real Skill use              | Before production use, normal downgrade is permitted after preflight. Once revisions/runs exist, disable authoring/runtime first, export/retain audit-required revisions, and use a forward recovery migration rather than destructive downgrade.                                |
 
 S1 rollback depends on data state. Before any production Skill exists, revert
 the product change and use the tested downgrade. After authoring or execution,
@@ -1614,9 +1831,10 @@ resources.
   Assistant binding mode; it does not own activation runtime or inference.
 - No semantic/text/digest-based deduplication, automatic merge, reusable/local
   subtype, or implicit binding upgrade.
-- No cross-Space direct binding, tenant-global Skill catalog, direct personal-
-  default binding, or organizational-Space bypass. Tenant-wide personal-chat
-  Skills flow only through Governance Policy.
+- No cross-Space direct binding, tenant-global live Skill object, direct
+  personal-default binding, or organizational-Space bypass. The organisation
+  catalogue distributes explicit local copies; tenant-wide personal-chat Skills
+  flow only through Governance Policy.
 - No combined Skill-creation/parent-binding command and no dedicated Assistant/
   App binding PUT/POST route. Ordered direct bindings save only through the
   canonical parent update; Governance Policy keeps its separate tenant-admin
