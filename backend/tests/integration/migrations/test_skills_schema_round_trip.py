@@ -337,6 +337,12 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
             label="admin",
             permissions=["admin"],
         ),
+        "ai": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="ai",
+            permissions=["AI"],
+        ),
         "unrelated": _insert_role(
             connection,
             tenant_id=tenant_id,
@@ -348,6 +354,12 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
             tenant_id=tenant_id,
             label="already-granted",
             permissions=["assistants", "skills"],
+        ),
+        "already_managed": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="already-managed",
+            permissions=["AI", "skills", "skills_management"],
         ),
     }
 
@@ -374,10 +386,18 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     command.upgrade(config, SKILLS_HEAD_REVISION)
 
     assert _current_revision(connection) == SKILLS_HEAD_REVISION
-    for qualifying_role in ("assistants", "apps", "admin", "already_granted"):
+    for qualifying_role in ("assistants", "apps", "admin", "ai", "already_granted"):
         permissions = _permissions(connection, role_ids[qualifying_role])
         assert permissions.count("skills") == 1
+    for qualifying_role in ("admin", "ai", "already_managed"):
+        permissions = _permissions(connection, role_ids[qualifying_role])
+        assert permissions.count("skills_management") == 1
+    for use_only_role in ("assistants", "apps", "already_granted"):
+        assert "skills_management" not in _permissions(
+            connection, role_ids[use_only_role]
+        )
     assert "skills" not in _permissions(connection, role_ids["unrelated"])
+    assert "skills_management" not in _permissions(connection, role_ids["unrelated"])
 
     expected_indexes = {
         "uq_assistants_space_id_id",
@@ -420,6 +440,7 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     assert _current_revision(connection) == SKILLS_SCHEMA_REVISION
     for role_id in role_ids.values():
         assert "skills" not in _permissions(connection, role_id)
+        assert "skills_management" not in _permissions(connection, role_id)
 
     command.downgrade(config, PRE_SKILLS_REVISION)
     assert _current_revision(connection) == PRE_SKILLS_REVISION

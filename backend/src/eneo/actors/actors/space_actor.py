@@ -639,6 +639,13 @@ class SpaceActor:
             ):
                 return False
 
+            if (
+                resource_type == SpaceResourceType.SKILL
+                and action in {SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE}
+                and Permission.SKILLS_MANAGEMENT not in self.user.permissions
+            ):
+                return False
+
         # The personal chat (personal space default assistant) is gated by its
         # own tenant permission, decoupled from ASSISTANTS so a baseline role can
         # grant chat without management of assistants. Service keys authorize via

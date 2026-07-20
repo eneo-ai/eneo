@@ -1241,23 +1241,71 @@ def _skill_actions(actor: SpaceActor) -> tuple[bool, bool, bool, bool]:
 
 
 @pytest.mark.parametrize(
-    ("space_kind", "role", "expected"),
+    ("space_kind", "role", "permissions", "expected"),
     [
-        ("shared", MockSpaceRole.VIEWER, _READ_ONLY_SKILL_ACTIONS),
-        ("shared", MockSpaceRole.EDITOR, _ALL_SKILL_ACTIONS),
-        ("shared", MockSpaceRole.ADMIN, _ALL_SKILL_ACTIONS),
-        ("personal", "owner", _ALL_SKILL_ACTIONS),
-        ("organization", MockSpaceRole.VIEWER, _NO_SKILL_ACTIONS),
-        ("organization", MockSpaceRole.EDITOR, _NO_SKILL_ACTIONS),
-        ("organization", MockSpaceRole.ADMIN, _ALL_SKILL_ACTIONS),
+        (
+            "shared",
+            MockSpaceRole.VIEWER,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "personal",
+            "owner",
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.VIEWER,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _NO_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _NO_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
     ],
 )
 def test_skill_actions_follow_space_role(
     space_kind: str,
     role: str,
+    permissions: set[Permission],
     expected: tuple[bool, bool, bool, bool],
 ):
-    user = MockUser(id=70, role=role, permissions={Permission.SKILLS})
+    user = MockUser(id=70, role=role, permissions=permissions)
 
     if space_kind == "personal":
         space = MockSpace(user_id=user.id, personal=True, id="personal-skills")
@@ -1279,6 +1327,7 @@ def test_skill_actions_follow_space_role(
         ("shared", MockSpaceRole.EDITOR, {Permission.ASSISTANTS}),
         ("organization", MockSpaceRole.ADMIN, {Permission.ADMIN}),
         ("personal", "owner", {Permission.ASSISTANTS}),
+        ("personal", "owner", {Permission.SKILLS_MANAGEMENT}),
     ],
 )
 def test_skill_actions_require_tenant_skill_permission(

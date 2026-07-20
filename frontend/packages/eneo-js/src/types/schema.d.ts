@@ -14238,6 +14238,7 @@ export interface components {
     Permission:
       | "assistants"
       | "skills"
+      | "skills_management"
       | "personal_chat"
       | "group_chats"
       | "apps"

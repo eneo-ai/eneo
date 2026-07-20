@@ -191,6 +191,7 @@ class TestPermissionSemantics:
         expected = {
             "assistants",
             "skills",
+            "skills_management",
             "personal_chat",
             "group_chats",
             "apps",
@@ -257,6 +258,8 @@ class TestRoleTemplates:
         user = templates["User"]
         assert "personal_chat" in user
         assert "assistants" in user
+        assert "skills" in user
+        assert "skills_management" not in user
         assert "shared_spaces" in user
         assert "collections" in user
         assert "admin" not in user
@@ -266,6 +269,8 @@ class TestRoleTemplates:
         ai = templates["AI Configurator"]
         assert "AI" in ai
         assert "assistants" in ai
+        assert "skills" in ai
+        assert "skills_management" in ai
         assert "shared_spaces" in ai
         assert "admin" not in ai
 
