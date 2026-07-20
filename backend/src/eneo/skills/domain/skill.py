@@ -123,6 +123,10 @@ class SkillHasBindingsError(Exception):
     pass
 
 
+class SkillHasActiveAppRunsError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class SkillBindingReference:
     skill_id: UUID

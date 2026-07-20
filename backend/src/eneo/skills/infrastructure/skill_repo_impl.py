@@ -4,8 +4,9 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 
 from eneo.database.database import AsyncSession
-from eneo.database.tables.app_table import Apps
+from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.skill_table import (
     AppSkillBindings,
     AssistantSkillBindings,
@@ -13,10 +14,12 @@ from eneo.database.tables.skill_table import (
     SkillRevisions,
     Skills,
 )
+from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
@@ -238,6 +241,8 @@ class SkillRepoImpl:
         skill = self._to_skill(row[0], row[1])
         if await self._is_bound(skill_id=skill_id):
             raise SkillHasBindingsError
+        if await self._has_nonterminal_app_run(skill_id=skill_id):
+            raise SkillHasActiveAppRunsError
         await self.session.execute(sa.delete(Skills).where(Skills.id == skill_id))
         return skill
 
@@ -250,6 +255,23 @@ class SkillRepoImpl:
             )
         )
         return any(bool(value) for value in counts.one())
+
+    async def _has_nonterminal_app_run(self, *, skill_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        AppRuns.job_id == Jobs.id,
+                        Jobs.status.in_(
+                            (Status.QUEUED.value, Status.IN_PROGRESS.value)
+                        ),
+                        AppRuns.skill_provenance.contains(
+                            [{"skill_id": str(skill_id)}]
+                        ),
+                    )
+                )
+            )
+        )
 
     @staticmethod
     def _resolved_query(
@@ -414,6 +436,20 @@ class SkillRepoImpl:
             self._resolved_query(AppSkillBindings)
             .where(AppSkillBindings.app_id == app_id)
             .order_by(AppSkillBindings.position)
+        )
+        return [
+            self._to_resolved(skill, revision, binding.position)
+            for binding, skill, revision in rows.all()
+        ]
+
+    async def list_app_bindings_for_execution_plan(
+        self, *, app_id: UUID
+    ) -> list[ResolvedSkillBinding]:
+        rows = await self.session.execute(
+            self._resolved_query(AppSkillBindings)
+            .where(AppSkillBindings.app_id == app_id)
+            .order_by(AppSkillBindings.position)
+            .with_for_update(read=True, of=Skills)
         )
         return [
             self._to_resolved(skill, revision, binding.position)

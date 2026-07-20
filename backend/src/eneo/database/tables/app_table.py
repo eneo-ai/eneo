@@ -87,6 +87,15 @@ class AppRuns(BasePublic):
     user: Mapped[Users] = relationship()
     job: Mapped[Jobs] = relationship()
 
+    __table_args__ = (
+        Index(
+            "ix_app_runs_skill_provenance_gin",
+            "skill_provenance",
+            postgresql_using="gin",
+            postgresql_ops={"skill_provenance": "jsonb_path_ops"},
+        ),
+    )
+
 
 class InputFields(BasePublic):
     type: Mapped[str] = mapped_column()

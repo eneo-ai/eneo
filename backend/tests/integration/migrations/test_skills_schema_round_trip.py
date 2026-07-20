@@ -406,6 +406,7 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
         "uq_governance_policies_tenant_id_id",
         "ix_assistant_skill_bindings_skill_id",
         "ix_app_skill_bindings_skill_id",
+        "ix_app_runs_skill_provenance_gin",
         "ix_governance_policy_skill_bindings_skill_id",
         "ix_governance_policy_skill_bindings_tenant_space",
     }
@@ -431,6 +432,10 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     assert all(index[0] for index in indexes.values())
     assert indexes["uq_spaces_tenant_id_id"][1] is True
     assert "(tenant_id, id)" in indexes["uq_spaces_tenant_id_id"][2]
+    assert (
+        "USING gin (skill_provenance jsonb_path_ops)"
+        in indexes["ix_app_runs_skill_provenance_gin"][2]
+    )
     assert (
         "(tenant_id, skill_space_id)"
         in indexes["ix_governance_policy_skill_bindings_tenant_space"][2]

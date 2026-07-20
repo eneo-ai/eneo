@@ -1,22 +1,29 @@
 import asyncio
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.jobs.job_models import Task
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
 )
+from eneo.main.models import Status
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingReference
+from eneo.skills.domain.skill import SkillBindingReference, SkillExecutionReference
 
 
 @dataclass(frozen=True)
 class SkillConcurrencyResources:
+    tenant_id: UUID
+    user_id: UUID
+    completion_model_id: UUID
     space_id: UUID
     assistant_id: UUID
     app_id: UUID
@@ -97,8 +104,12 @@ async def skill_concurrency_resources(
         space_id = space.id
         assistant_id = assistant.id
         app_id = app.id
+        completion_model_id = model.id
 
     return SkillConcurrencyResources(
+        tenant_id=admin_user.tenant_id,
+        user_id=admin_user.id,
+        completion_model_id=completion_model_id,
         space_id=space_id,
         assistant_id=assistant_id,
         app_id=app_id,
@@ -152,6 +163,21 @@ async def _wait_for_held_write(
         if not event_waiter.done():
             event_waiter.cancel()
             await asyncio.gather(event_waiter, return_exceptions=True)
+
+
+def _serialize_provenance(
+    provenance: tuple[SkillExecutionReference, ...],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "skill_id": str(reference.skill_id),
+            "skill_revision_id": str(reference.skill_revision_id),
+            "revision_number": reference.revision_number,
+            "content_digest": reference.content_digest,
+            "position": reference.position,
+        }
+        for reference in provenance
+    ]
 
 
 async def test_fresh_install_owner_has_every_tenant_permission(admin_user):
@@ -370,6 +396,115 @@ async def test_new_binding_serializes_before_delete_validation(
         )
     assert skill is not None
     assert [binding.skill_id for binding in persisted] == [resources.first_skill_id]
+
+
+async def test_queued_app_run_snapshot_blocks_concurrent_skill_deletion(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    snapshot_ready = asyncio.Event()
+    persist_snapshot = asyncio.Event()
+    snapshot_persisted = asyncio.Event()
+    release_snapshot = asyncio.Event()
+    delete_pid = asyncio.get_running_loop().create_future()
+
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[resources.first_reference],
+        )
+
+    async def queue_snapshot():
+        async with db_container() as container:
+            composition = await container.skill_service().compose_for_app(
+                app_id=resources.app_id,
+                base_instructions="App instructions",
+            )
+            snapshot_ready.set()
+            await persist_snapshot.wait()
+            job_id = uuid4()
+            container.session().add(
+                Jobs(
+                    id=job_id,
+                    user_id=resources.user_id,
+                    task=Task.RUN_APP.value,
+                    status=Status.QUEUED.value,
+                )
+            )
+            container.session().add(
+                AppRuns(
+                    tenant_id=resources.tenant_id,
+                    user_id=resources.user_id,
+                    app_id=resources.app_id,
+                    job_id=job_id,
+                    completion_model_id=resources.completion_model_id,
+                    skill_provenance=_serialize_provenance(composition.provenance),
+                )
+            )
+            await container.session().flush()
+            snapshot_persisted.set()
+            await release_snapshot.wait()
+            return composition.provenance, job_id
+
+    async def delete():
+        async with db_container() as container:
+            delete_pid.set_result(await _backend_pid(container))
+            with pytest.raises(
+                NameCollisionException, match="queued or running App run"
+            ):
+                await container.skill_service().delete_skill(
+                    skill_id=resources.first_skill_id
+                )
+
+    snapshot_task = asyncio.create_task(queue_snapshot())
+    await _wait_for_held_write(snapshot_ready, snapshot_task)
+
+    async with db_container() as container:
+        await container.skill_service().replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[],
+        )
+
+    persist_snapshot.set()
+    await _wait_for_held_write(snapshot_persisted, snapshot_task)
+
+    delete_task = asyncio.create_task(delete())
+    pid = await asyncio.wait_for(delete_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_snapshot.set()
+
+    snapshot, _ = await asyncio.gather(snapshot_task, delete_task)
+    provenance, job_id = snapshot
+
+    async with db_container() as container:
+        skill = await container.skill_repo().get(skill_id=resources.first_skill_id)
+        composition = await container.skill_service().compose_for_execution_snapshot(
+            space_id=resources.space_id,
+            provenance=provenance,
+            base_instructions="App instructions",
+        )
+
+    assert skill is not None
+    assert composition.provenance == provenance
+    assert "First instructions" in composition.prompt
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(status=Status.COMPLETE.value)
+        )
+        deleted = await container.skill_service().delete_skill(
+            skill_id=resources.first_skill_id
+        )
+
+    assert deleted.id == resources.first_skill_id
 
 
 async def test_concurrent_same_content_revision_has_one_created_outcome(

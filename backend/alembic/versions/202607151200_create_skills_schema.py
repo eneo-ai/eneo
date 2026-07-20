@@ -356,9 +356,18 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
+    op.create_index(
+        "ix_app_runs_skill_provenance_gin",
+        "app_runs",
+        ["skill_provenance"],
+        unique=False,
+        postgresql_using="gin",
+        postgresql_ops={"skill_provenance": "jsonb_path_ops"},
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_app_runs_skill_provenance_gin", table_name="app_runs")
     op.drop_column("app_runs", "skill_provenance")
     op.drop_column("questions", "skill_provenance")
     op.drop_index(

@@ -18,6 +18,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillComposition,
     SkillExecutionReference,
+    SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
@@ -182,6 +183,11 @@ class SkillService:
             )
         try:
             deleted = await self.repo.delete(skill_id=skill.id)
+        except SkillHasActiveAppRunsError as error:
+            raise NameCollisionException(
+                "This Skill is required by a queued or running App run. "
+                "Wait for it to finish before deleting the Skill."
+            ) from error
         except SkillHasBindingsError as error:
             raise NameCollisionException(
                 "This Skill is still attached. Remove every binding before deleting it."
@@ -401,7 +407,7 @@ class SkillService:
     async def compose_for_app(
         self, *, app_id: UUID, base_instructions: str
     ) -> SkillComposition:
-        bindings = await self.repo.list_app_bindings(app_id=app_id)
+        bindings = await self.repo.list_app_bindings_for_execution_plan(app_id=app_id)
         return compose_skill_instructions(
             base_instructions=base_instructions, bindings=bindings
         )

@@ -85,6 +85,10 @@ class SkillRepo(Protocol):
         self, *, app_id: UUID
     ) -> list[ResolvedSkillBinding]: ...
 
+    async def list_app_bindings_for_execution_plan(
+        self, *, app_id: UUID
+    ) -> list[ResolvedSkillBinding]: ...
+
     async def replace_app_bindings(
         self,
         *,
