@@ -7,9 +7,11 @@ from typing import cast
 from uuid import UUID
 
 from eneo.flows.enums import FlowInputSource, RerunDependencyKind
+from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.http_transport import HttpAuthMode, HttpBodyMode, is_authored_config
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.runtime.models import RuntimeStep
+from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.step_lineage import build_step_ref_mapping
 from eneo.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -101,13 +103,29 @@ def _build_dependency_edges(
     steps: Sequence[RuntimeStep],
 ) -> tuple[RerunDependencyEdge, ...]:
     steps_by_order = {step.step_order: step for step in steps}
-    step_ref_mapping = _build_rerun_step_ref_mapping(steps)
+    step_ref_mapping = build_step_ref_mapping(steps)
+    transcription_producer_orders: list[int] = []
+    for step in steps:
+        if (
+            step.input_source != FlowInputSource.FLOW_INPUT.value
+            or step.input_type != "audio"
+        ):
+            continue
+        runtime_input = build_runtime_input_config(step.input_config)
+        if runtime_input.enabled and runtime_input.input_format == "audio":
+            transcription_producer_orders.append(step.step_order)
+    transcription_producer_order = (
+        transcription_producer_orders[0]
+        if len(transcription_producer_orders) == 1
+        else None
+    )
     grouped_kinds: dict[tuple[UUID, UUID], set[RerunDependencyKind]] = {}
 
     for step in steps:
         for upstream_order, dependency_kind in _dependency_orders_for_step(
             step=step,
             step_ref_mapping=step_ref_mapping,
+            transcription_producer_order=transcription_producer_order,
         ):
             upstream_step = steps_by_order.get(upstream_order)
             if upstream_step is None or upstream_order >= step.step_order:
@@ -145,6 +163,7 @@ def _dependency_orders_for_step(
     *,
     step: RuntimeStep,
     step_ref_mapping: Mapping[str, int],
+    transcription_producer_order: int | None,
 ) -> list[tuple[int, RerunDependencyKind]]:
     dependencies: list[tuple[int, RerunDependencyKind]] = []
     if step.input_source == FlowInputSource.PREVIOUS_STEP.value and step.step_order > 1:
@@ -156,13 +175,20 @@ def _dependency_orders_for_step(
             (upstream_order, RerunDependencyKind.INPUT_SOURCE_ALL_PREVIOUS_STEPS)
             for upstream_order in range(1, step.step_order)
         )
-    dependencies.extend(_template_dependency_orders(step, step_ref_mapping))
+    dependencies.extend(
+        _template_dependency_orders(
+            step,
+            step_ref_mapping,
+            transcription_producer_order,
+        )
+    )
     return dependencies
 
 
 def _template_dependency_orders(
     step: RuntimeStep,
     step_ref_mapping: Mapping[str, int],
+    transcription_producer_order: int | None,
 ) -> list[tuple[int, RerunDependencyKind]]:
     references: list[tuple[str, RerunDependencyKind]] = []
     input_bindings = _mapping(step.input_bindings)
@@ -210,6 +236,7 @@ def _template_dependency_orders(
                 current_step_order=step.step_order,
                 step_ref_mapping=step_ref_mapping,
                 dependency_kind=dependency_kind,
+                transcription_producer_order=transcription_producer_order,
             )
         )
     return dependency_orders
@@ -344,6 +371,7 @@ def _template_reference_dependency_orders(
     current_step_order: int,
     step_ref_mapping: Mapping[str, int],
     dependency_kind: RerunDependencyKind,
+    transcription_producer_order: int | None,
 ) -> tuple[tuple[int, RerunDependencyKind], ...]:
     references = analyze_template(
         template,
@@ -356,6 +384,14 @@ def _template_reference_dependency_orders(
             reference.step_order, int
         ):
             dependency_orders.append((reference.step_order, dependency_kind))
+            continue
+        if (
+            reference.kind is TemplateReferenceKind.RUNTIME
+            and reference.head == FLOW_INPUT_TRANSCRIPTION_KEY
+            and transcription_producer_order is not None
+            and transcription_producer_order < current_step_order
+        ):
+            dependency_orders.append((transcription_producer_order, dependency_kind))
             continue
         if (
             reference.kind is TemplateReferenceKind.RUNTIME
@@ -414,15 +450,6 @@ def _dependency_kinds_by_invalidated_step(
         step_id: tuple(sorted(kinds, key=lambda kind: kind.value))
         for step_id, kinds in kinds_by_step_id.items()
     }
-
-
-def _build_rerun_step_ref_mapping(steps: Sequence[RuntimeStep]) -> dict[str, int]:
-    mapping = build_step_ref_mapping(steps)
-    for step in sorted(steps, key=lambda item: item.step_order):
-        user_description = step.user_description
-        if isinstance(user_description, str) and user_description.strip():
-            mapping.setdefault(user_description.strip(), step.step_order)
-    return mapping
 
 
 def _mapping(value: object) -> Mapping[str, object] | None:

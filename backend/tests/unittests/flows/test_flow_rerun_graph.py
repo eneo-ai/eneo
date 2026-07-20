@@ -21,6 +21,7 @@ def _step(
     order: int,
     *,
     input_source: str = "flow_input",
+    input_type: str = "text",
     input_bindings: dict[str, Any] | None = None,
     input_config: dict[str, Any] | None = None,
     output_config: dict[str, Any] | None = None,
@@ -36,6 +37,7 @@ def _step(
         assistant_id=_uuid(1000 + order),
         user_description=user_description,
         input_source=input_source,
+        input_type=input_type,
         input_bindings=input_bindings,
         input_config=input_config,
         output_mode=output_mode,
@@ -206,6 +208,55 @@ def test_runtime_interpolated_fields_create_rerun_dependencies(
 
     assert graph.invalidated_step_ids == (_uuid(1), _uuid(2))
     assert graph.invalidated_steps[1].dependency_kinds == (dependency_kind,)
+
+
+def test_transcription_runtime_alias_invalidates_only_its_http_consumer():
+    graph = build_rerun_invalidation_graph(
+        steps=[
+            _step(
+                1,
+                user_description="Transcribe audio",
+                input_source="flow_input",
+                input_type="audio",
+                output_mode="transcribe_only",
+                input_config={
+                    "runtime_input": {
+                        "enabled": True,
+                        "required": True,
+                        "input_format": "audio",
+                    }
+                },
+            ),
+            _step(
+                2,
+                user_description="Independent lookup",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.test/static",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            _step(
+                3,
+                user_description="Transcript lookup",
+                input_source="http_get",
+                input_config={
+                    "url": ("https://example.test/search?q={{ transkribering }}"),
+                    "auth": {"mode": "none"},
+                },
+            ),
+        ],
+        root_step_id=_uuid(1),
+    )
+
+    assert graph.invalidated_step_ids == (_uuid(1), _uuid(3))
+    assert graph.invalidated_steps[1].dependency_kinds == (
+        RerunDependencyKind.INPUT_CONFIG_URL,
+    )
+    assert len(graph.dependency_edges) == 1
+    edge = graph.dependency_edges[0]
+    assert (edge.upstream_step_order, edge.downstream_step_order) == (1, 3)
+    assert edge.dependency_kinds == (RerunDependencyKind.INPUT_CONFIG_URL,)
 
 
 @pytest.mark.parametrize(
