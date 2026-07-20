@@ -208,6 +208,13 @@ async def update_governance_policy(
         prompt_enforcement=prompt_enforcement,
         skill_references=skill_references,
     )
+    if (
+        models_restriction is not None
+        or prompt_enforcement is not None
+        or skill_references is not None
+    ):
+        assistant_service = container.assistant_service()
+        await assistant_service.assert_personal_default_governance_context_fit()
     assert policy.id is not None
     after_skills = await service.get_skill_bindings(policy)
     changes = _policy_changes(

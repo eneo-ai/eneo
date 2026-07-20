@@ -35,6 +35,7 @@ from eneo.database.tables.org_space_assistant_roles_table import (
     OrgSpaceAssistantRoles,
 )
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.files.file_models import File
@@ -505,6 +506,64 @@ class AssistantRepository:
         return [
             self.factory.create_assistant_from_db(
                 record, completion_model_list=completion_models
+            )
+            for record in records
+        ]
+
+    async def get_personal_defaults_for_tenant(
+        self, *, tenant_id: UUID
+    ) -> list[Assistant]:
+        """Load the persisted baselines affected by personal-chat governance.
+
+        This deliberately does not apply the helper-assistant exclusion used by
+        user-facing lists: governance must validate every personal default row,
+        even if an unrelated role assignment has left one in an invalid state.
+        """
+        query = (
+            sa.select(Assistants)
+            .join(Spaces, Assistants.space_id == Spaces.id)
+            .where(
+                Spaces.tenant_id == tenant_id,
+                Spaces.user_id.is_not(None),
+                Assistants.is_default.is_(True),
+            )
+            .options(
+                selectinload(Assistants.user).selectinload(Users.tenant),
+                selectinload(Assistants.user).selectinload(Users.roles),
+                selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
+                selectinload(Assistants.template).selectinload(
+                    AssistantTemplates.completion_model
+                ),
+            )
+            .order_by(Assistants.created_at)
+        )
+        records = list((await self.session.scalars(query)).all())
+        if not records:
+            return []
+
+        prompt_rows = (
+            await self.session.execute(
+                sa.select(Prompts, PromptsAssistants.assistant_id)
+                .join(PromptsAssistants)
+                .where(
+                    PromptsAssistants.assistant_id.in_(
+                        [record.id for record in records]
+                    ),
+                    PromptsAssistants.is_selected,
+                )
+                .options(selectinload(Prompts.user))
+            )
+        ).all()
+        prompts_by_assistant = {
+            assistant_id: prompt for prompt, assistant_id in prompt_rows
+        }
+        completion_models = await self.completion_model_repo.all()
+
+        return [
+            self.factory.create_assistant_from_db(
+                record,
+                completion_model_list=completion_models,
+                prompt=prompts_by_assistant.get(record.id),
             )
             for record in records
         ]

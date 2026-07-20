@@ -257,21 +257,30 @@ class AssistantService:
             assistant, space_is_personal=space.is_personal()
         )
 
+    @staticmethod
+    def _governed_base_instructions(
+        assistant: Assistant, effective_config: "EffectiveConfig | None"
+    ) -> str:
+        if (
+            effective_config is not None
+            and effective_config.prompt_enforced
+            and effective_config.enforced_prompt_text
+        ):
+            return effective_config.enforced_prompt_text
+        return assistant.get_prompt_text()
+
     async def _compose_assistant_prompt(
         self,
         *,
-        space: "Space",
         assistant: Assistant,
         effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
     ) -> SkillComposition:
-        base_instructions = assistant.get_prompt_text()
+        base_instructions = self._governed_base_instructions(
+            assistant, effective_config
+        )
         governance_bindings = ()
         if effective_config is not None:
-            if (
-                effective_config.prompt_enforced
-                and effective_config.enforced_prompt_text
-            ):
-                base_instructions = effective_config.enforced_prompt_text
             governance_bindings = effective_config.governance_skill_bindings
 
         assistant_id = cast(UUID | None, assistant.id)
@@ -285,7 +294,7 @@ class AssistantService:
                 base_instructions=base_instructions,
             )
 
-        if not (space.is_personal() and assistant.is_default):
+        if not (space_is_personal and assistant.is_default):
             return direct_composition
         if direct_composition.provenance:
             raise BadRequestException(
@@ -508,28 +517,50 @@ class AssistantService:
         The prompt counts toward the ceiling on its own, so a prompt that alone
         overflows is rejected even with no attachments. Skipped only when no
         model is resolved."""
-        model = assistant.completion_model
-
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        if effective_config is not None:
-            if effective_config.models_enforced:
-                resolved_model = select_effective_completion_model(
-                    current_model=model, effective_config=effective_config
-                )
-                if resolved_model is not None:
-                    model = resolved_model  # type: ignore[assignment]
         composition = await self._compose_assistant_prompt(
-            space=space,
             assistant=assistant,
             effective_config=effective_config,
+            space_is_personal=space.is_personal(),
         )
+        model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
             return
 
+        await self._assert_persistent_baseline_fits(
+            assistant=assistant,
+            model=model,
+            prompt_text=composition.prompt,
+        )
+
+    @staticmethod
+    def _context_model(
+        assistant: Assistant, *, effective_config: "EffectiveConfig | None"
+    ) -> "CompletionModel | None":
+        model = assistant.completion_model
+        if effective_config is None or not effective_config.models_enforced:
+            return model
+        resolved_model = select_effective_completion_model(
+            current_model=model, effective_config=effective_config
+        )
+        if resolved_model is None:
+            raise BadRequestException(
+                "Personal assistant governance policy has no allowed models — "
+                "contact admin"
+            )
+        return resolved_model
+
+    async def _assert_persistent_baseline_fits(
+        self,
+        *,
+        assistant: Assistant,
+        model: "CompletionModel",
+        prompt_text: str,
+    ) -> None:
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
@@ -537,9 +568,53 @@ class AssistantService:
         assert_prompt_and_files_fit_context(
             max_input_tokens=model.max_input_tokens,
             model_name=model.name,
-            prompt_text=composition.prompt,
+            prompt_text=prompt_text,
             files=completion_prompt_files,
         )
+
+    async def assert_personal_default_governance_context_fit(self) -> None:
+        """Reject a candidate governance baseline that existing chats cannot run.
+
+        Policy and Skill writes are staged in the request transaction before
+        this method runs, so the effective-config read sees the candidate state.
+        The policy catalogs are identical for every personal default Assistant;
+        resolve them once, then select the actual runtime model per Assistant.
+        The scan is intentionally linear because prompts and attachments differ,
+        and runs only for admin changes that alter the persistent baseline.
+        Disabling governance may still fail closed if the stored baseline that
+        becomes effective is itself too large for its model.
+        """
+        if self.effective_config_service is None:
+            raise RuntimeError(
+                "EffectiveConfigService is required for governance context preflight"
+            )
+        assistants = await self.repo.get_personal_defaults_for_tenant(
+            tenant_id=self.user.tenant_id
+        )
+        if not assistants:
+            return
+
+        effective_config = await self.effective_config_service.resolve_for(
+            assistants[0], space_is_personal=True
+        )
+        for assistant in assistants:
+            # Personal-default binding writes are rejected at their boundary.
+            # Ask/save still detect corrupt direct bindings for one Assistant;
+            # this tenant scan avoids repeating that empty query for every user.
+            composition = compose_skill_instructions(
+                base_instructions=self._governed_base_instructions(
+                    assistant, effective_config
+                ),
+                bindings=list(effective_config.governance_skill_bindings),
+            )
+            model = self._context_model(assistant, effective_config=effective_config)
+            if model is None:
+                continue
+            await self._assert_persistent_baseline_fits(
+                assistant=assistant,
+                model=model,
+                prompt_text=composition.prompt,
+            )
 
     async def _assert_message_attachments_fit(
         self,
@@ -1035,9 +1110,9 @@ class AssistantService:
             space=space, assistant=assistant
         )
         composition = await self._compose_assistant_prompt(
-            space=space,
             assistant=assistant,
             effective_config=effective_config,
+            space_is_personal=space.is_personal(),
         )
 
         return composition.prompt, assistant.attachments
@@ -1782,9 +1857,9 @@ class AssistantService:
                 prompt_override = effective_config.enforced_prompt_text
 
         skill_composition = await self._compose_assistant_prompt(
-            space=space,
             assistant=assistant_to_ask,
             effective_config=effective_config,
+            space_is_personal=space.is_personal(),
         )
         if skill_composition.provenance:
             prompt_override = skill_composition.prompt
@@ -1820,7 +1895,13 @@ class AssistantService:
             model=effective_completion_model,
             prompt_text=skill_composition.prompt,
             files=files,
-            validate_persistent_baseline=bool(skill_composition.provenance),
+            validate_persistent_baseline=bool(skill_composition.provenance)
+            or bool(
+                effective_config is not None
+                and (
+                    effective_config.models_enforced or effective_config.prompt_enforced
+                )
+            ),
         )
 
         question_id: UUID | None = None

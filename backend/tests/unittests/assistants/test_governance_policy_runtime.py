@@ -809,3 +809,31 @@ async def test_governance_skill_composes_after_enforced_prompt():
         "skill_provenance"
     ]
     assert provenance[0].skill_revision_id == binding.skill_revision_id
+
+
+async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
+    skill_service = _empty_skill_service()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=True,
+        enforced_prompt_text="Enforced tenant base",
+        governance_skill_bindings=(),
+    )
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=effective_config,
+    )
+    service._assert_message_attachments_fit = AsyncMock()
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert (
+        service._assert_message_attachments_fit.await_args.kwargs[
+            "validate_persistent_baseline"
+        ]
+        is True
+    )

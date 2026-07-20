@@ -1,10 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Request
 
+from eneo.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
+    PolicyScope,
+)
 from eneo.governance_policy.presentation.governance_policy_models import (
     GovernancePolicyUpdate,
+    McpRestrictionInput,
     ModelsRestrictionInput,
     SkillsPolicyInput,
 )
@@ -24,6 +30,17 @@ def _api_key_request() -> Request:
     )
     request.state.api_key = MagicMock()
     return request
+
+
+def _session_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "path": "/admin/governance-policy/",
+            "headers": [],
+        }
+    )
 
 
 async def test_governance_router_rejects_api_key_skill_facet_before_service_call():
@@ -59,3 +76,32 @@ async def test_governance_router_keeps_api_key_access_to_non_skill_facets():
         )
 
     service.get_policy_for_update.assert_awaited_once()
+
+
+async def test_mcp_only_update_skips_personal_baseline_scan():
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+    )
+    service = MagicMock()
+    service.get_policy_for_update = AsyncMock(return_value=policy)
+    service.get_skill_bindings = AsyncMock(return_value=[])
+    service.update_policy = AsyncMock(return_value=policy)
+    assistant_service = MagicMock()
+    assistant_service.assert_personal_default_governance_context_fit = AsyncMock()
+    assembler = MagicMock()
+    container = MagicMock()
+    container.governance_policy_service.return_value = service
+    container.governance_policy_assembler.return_value = assembler
+    container.assistant_service.return_value = assistant_service
+
+    await update_governance_policy(
+        payload=GovernancePolicyUpdate(
+            mcp_restriction=McpRestrictionInput(enabled=False)
+        ),
+        request=_session_request(),
+        container=container,
+    )
+
+    assistant_service.assert_personal_default_governance_context_fit.assert_not_awaited()

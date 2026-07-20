@@ -9,6 +9,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException
+from eneo.skills.domain.skill import SkillComposition
 
 
 def _settings(**overrides):
@@ -371,6 +372,77 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
         await service._validate_attachments_fit(
             _assistant_with(100, n_attachments=0, prompt_text=None), space=MagicMock()
         )
+
+
+@pytest.mark.asyncio
+async def test_governance_preflight_uses_each_assistants_effective_model():
+    allowed_current = SimpleNamespace(
+        id=MagicMock(),
+        max_input_tokens=100,
+        name="allowed-current",
+        vision=False,
+    )
+    policy_default = SimpleNamespace(
+        id=MagicMock(),
+        max_input_tokens=200,
+        name="policy-default",
+        vision=False,
+    )
+    stale_model = SimpleNamespace(
+        id=MagicMock(),
+        max_input_tokens=300,
+        name="stale",
+        vision=False,
+    )
+    assistants = [
+        SimpleNamespace(
+            id=MagicMock(),
+            is_default=True,
+            completion_model=allowed_current,
+            attachments=[],
+            get_prompt_text=lambda: "first",
+        ),
+        SimpleNamespace(
+            id=MagicMock(),
+            is_default=True,
+            completion_model=stale_model,
+            attachments=[],
+            get_prompt_text=lambda: "second",
+        ),
+    ]
+    effective_config = SimpleNamespace(
+        models_enforced=True,
+        available_models=[allowed_current, policy_default],
+        locked_model=None,
+        policy_default_model=policy_default,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_bindings=(),
+    )
+    service = _service()
+    service.repo.get_personal_defaults_for_tenant.return_value = assistants
+    service.effective_config_service = AsyncMock()
+    service.effective_config_service.resolve_for.return_value = effective_config
+    service.skill_service.compose_for_assistant.side_effect = (
+        lambda *, base_instructions, **_: SkillComposition(
+            prompt=base_instructions, provenance=()
+        )
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    await service.assert_personal_default_governance_context_fit()
+
+    selected_models = [
+        call.kwargs["model"]
+        for call in service._assert_persistent_baseline_fits.await_args_list
+    ]
+    assert selected_models == [allowed_current, policy_default]
+    service.effective_config_service.resolve_for.assert_awaited_once_with(
+        assistants[0], space_is_personal=True
+    )
+    service.skill_service.compose_for_assistant.assert_not_awaited()
 
 
 # --- context fit: per-message ask-time guard (uploads have no save-time gate) ---
