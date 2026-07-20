@@ -32,7 +32,9 @@ from eneo.database.tables.object_content_table import (
 from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
+    ObjectContentBusyError,
     ObjectContentConfigurationError,
+    ObjectContentStateError,
 )
 from eneo.object_content.s3_object_store import (
     MultipartUpload,
@@ -244,7 +246,13 @@ class ObjectContentReconciliationRepository:
         delete_due = and_(
             ObjectContents.state == ContentState.DELETE_PENDING.value,
             ObjectContents.reference_count == 0,
-            ObjectContents.next_attempt_at <= now,
+            or_(
+                ObjectContents.next_attempt_at <= now,
+                and_(
+                    ObjectContents.next_attempt_at.is_(None),
+                    ObjectContents.updated_at <= stale_before,
+                ),
+            ),
             _no_concrete_references(),
         )
         rows = (
@@ -563,6 +571,43 @@ class ObjectContentReconciliationRepository:
             )
         )
         return not bool(live_content_exists)
+
+    async def renew_orphan_delete_lease(
+        self,
+        *,
+        object_key: str,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> None:
+        candidate = (
+            await self._session.scalars(
+                select(ObjectContentOrphanCandidates)
+                .where(
+                    ObjectContentOrphanCandidates.object_key == object_key,
+                    ObjectContentOrphanCandidates.lease_owner == lease_owner,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if candidate is None:
+            raise ObjectContentBusyError("The orphan-delete lease changed")
+        live_content_exists = await self._session.scalar(
+            select(
+                exists(
+                    select(ObjectContents.id).where(
+                        ObjectContents.object_key == object_key,
+                        ObjectContents.state != ContentState.TOMBSTONED.value,
+                    )
+                )
+            )
+        )
+        if live_content_exists:
+            raise ObjectContentStateError(
+                "An object-content owner appeared during orphan deletion"
+            )
+        now = await self._database_now()
+        candidate.lease_until = now + timedelta(seconds=lease_seconds)
+        await self._session.flush()
 
     async def complete_orphan_delete(
         self,

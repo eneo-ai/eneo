@@ -210,6 +210,22 @@ class ObjectContentRepository:
         row.lease_until = now + timedelta(seconds=lease_seconds)
         await self._session.flush()
 
+    async def renew_delete_lease(
+        self,
+        *,
+        content_id: UUID,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> None:
+        row = await self._leased_content_for_update(content_id, lease_owner)
+        if row.state != ContentState.DELETE_PENDING.value or row.reference_count != 0:
+            raise ObjectContentStateError(
+                "Only unreferenced delete-pending content can renew its operation lease"
+            )
+        now = await self._database_now()
+        row.lease_until = now + timedelta(seconds=lease_seconds)
+        await self._session.flush()
+
     async def promote_available(
         self,
         *,

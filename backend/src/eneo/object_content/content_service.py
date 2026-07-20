@@ -27,6 +27,7 @@ from eneo.object_content.content_repository import (
     ReadableContent,
     UploadLease,
 )
+from eneo.object_content.lease import OperationLeaseCheckpoint
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
@@ -143,6 +144,7 @@ class ObjectContentService:
         content: CapturedContent,
     ) -> ReadableContent:
         lease_owner = token_hex(16)
+        lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             lease = await ObjectContentRepository(session).claim_upload(
                 content_id=content_id,
@@ -156,13 +158,27 @@ class ObjectContentService:
                     content_id
                 )
 
-        lease_deadline = monotonic() + self._settings.reconciliation_lease_seconds
+        async def renew_upload_lease() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentRepository(session).renew_pending_lease(
+                    content_id=content_id,
+                    lease_owner=lease_owner,
+                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                )
+
+        lease_checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=self._settings.reconciliation_lease_seconds,
+            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            renew=renew_upload_lease,
+        )
 
         if lease.previous_multipart_upload_id is not None:
             try:
                 await self._store.abort_multipart(
                     lease.object_key,
                     lease.previous_multipart_upload_id,
+                    operation_checkpoint=lease_checkpoint,
                 )
             except ObjectStoreUnavailableError as error:
                 await self._record_retryable_upload(lease, lease_owner)
@@ -184,25 +200,12 @@ class ObjectContentService:
                     upload_id=upload_id,
                 )
 
-        async def renew_upload_lease() -> None:
-            nonlocal lease_deadline
-            now = monotonic()
-            if lease_deadline - now > self._settings.sdk_request_budget_seconds:
-                return
-            async with self._database.session() as session, session.begin():
-                await ObjectContentRepository(session).renew_pending_lease(
-                    content_id=content_id,
-                    lease_owner=lease_owner,
-                    lease_seconds=self._settings.reconciliation_lease_seconds,
-                )
-            lease_deadline = monotonic() + self._settings.reconciliation_lease_seconds
-
         try:
             await self._store.upload(
                 lease.object_key,
                 content,
                 multipart_started=record_multipart_started,
-                upload_checkpoint=renew_upload_lease,
+                operation_checkpoint=lease_checkpoint,
             )
         except ObjectStoreIntegrityError as error:
             async with self._database.session() as session, session.begin():

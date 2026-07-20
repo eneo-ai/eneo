@@ -103,8 +103,7 @@ class MultipartUploadPage:
 
 
 MultipartStarted = Callable[[str], Awaitable[None]]
-UploadCheckpoint = Callable[[], Awaitable[None]]
-ReadCheckpoint = Callable[[], Awaitable[None]]
+OperationCheckpoint = Callable[[], Awaitable[None]]
 
 
 class _FileSlice(io.RawIOBase):
@@ -322,7 +321,7 @@ class S3ObjectStore:
         content: CapturedContent,
         *,
         multipart_started: MultipartStarted | None = None,
-        upload_checkpoint: UploadCheckpoint | None = None,
+        operation_checkpoint: OperationCheckpoint | None = None,
     ) -> ObjectHead:
         self._require_owned_key(key)
         if content.size_bytes >= self._settings.multipart_threshold_bytes:
@@ -330,10 +329,14 @@ class S3ObjectStore:
                 key,
                 content,
                 multipart_started=multipart_started,
-                upload_checkpoint=upload_checkpoint,
+                operation_checkpoint=operation_checkpoint,
             )
         else:
-            head = await self._upload_single(key, content)
+            head = await self._upload_single(
+                key,
+                content,
+                operation_checkpoint=operation_checkpoint,
+            )
         if head.size_bytes != content.size_bytes:
             raise ObjectStoreIntegrityError(
                 "Stored object length does not match intent"
@@ -348,10 +351,14 @@ class S3ObjectStore:
         self,
         key: str,
         content: CapturedContent,
+        *,
+        operation_checkpoint: OperationCheckpoint | None,
     ) -> ObjectHead:
         expected_checksum = _base64_sha256(content.sha256)
         content.file.seek(0)
         try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             result = await asyncio.to_thread(
                 self._client.put_object,
                 Bucket=self._settings.bucket,
@@ -369,6 +376,8 @@ class S3ObjectStore:
                 "Object store did not confirm the full-object SHA-256"
             )
 
+        if operation_checkpoint is not None:
+            await operation_checkpoint()
         head = await self.head(key)
         if head.checksum_sha256 != expected_checksum:
             raise ObjectStoreIntegrityError(
@@ -386,7 +395,7 @@ class S3ObjectStore:
         content: CapturedContent,
         *,
         multipart_started: MultipartStarted | None,
-        upload_checkpoint: UploadCheckpoint | None,
+        operation_checkpoint: OperationCheckpoint | None,
     ) -> ObjectHead:
         if content.size_bytes > self._settings.maximum_multipart_bytes:
             raise ObjectStoreIntegrityError(
@@ -394,6 +403,8 @@ class S3ObjectStore:
             )
 
         try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             created = await asyncio.to_thread(
                 self._client.create_multipart_upload,
                 Bucket=self._settings.bucket,
@@ -414,11 +425,11 @@ class S3ObjectStore:
                 key,
                 upload_id,
                 content,
-                upload_checkpoint=upload_checkpoint,
+                operation_checkpoint=operation_checkpoint,
             )
             expected_composite = composite_sha256(content.part_sha256)
-            if upload_checkpoint is not None:
-                await upload_checkpoint()
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             completed = await asyncio.to_thread(
                 self._client.complete_multipart_upload,
                 Bucket=self._settings.bucket,
@@ -444,8 +455,8 @@ class S3ObjectStore:
         if completed.get("ChecksumType") not in {None, "COMPOSITE"}:
             raise ObjectStoreIntegrityError("Unexpected multipart checksum type")
 
-        if upload_checkpoint is not None:
-            await upload_checkpoint()
+        if operation_checkpoint is not None:
+            await operation_checkpoint()
         head = await self.head(key)
         if head.checksum_sha256 != expected_composite:
             raise ObjectStoreIntegrityError(
@@ -461,7 +472,7 @@ class S3ObjectStore:
         upload_id: str,
         content: CapturedContent,
         *,
-        upload_checkpoint: UploadCheckpoint | None,
+        operation_checkpoint: OperationCheckpoint | None,
     ) -> list[CompletedPartTypeDef]:
         completed_parts: list[CompletedPartTypeDef] = []
         transferred = 0
@@ -488,8 +499,8 @@ class S3ObjectStore:
                 maximum_read_bytes=self._settings.io_chunk_bytes,
             )
 
-            if upload_checkpoint is not None:
-                await upload_checkpoint()
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             result = await asyncio.to_thread(
                 self._client.upload_part,
                 Bucket=self._settings.bucket,
@@ -663,11 +674,11 @@ class S3ObjectStore:
         *,
         expected_size_bytes: int,
         expected_media_type: str,
-        read_checkpoint: ReadCheckpoint | None = None,
+        operation_checkpoint: OperationCheckpoint | None = None,
     ) -> bytes:
         digest = sha256()
-        if read_checkpoint is not None:
-            await read_checkpoint()
+        if operation_checkpoint is not None:
+            await operation_checkpoint()
         async with self.open_read(
             key,
             expected_size_bytes=expected_size_bytes,
@@ -675,8 +686,8 @@ class S3ObjectStore:
         ) as content:
             chunks = aiter(content.chunks)
             while True:
-                if read_checkpoint is not None:
-                    await read_checkpoint()
+                if operation_checkpoint is not None:
+                    await operation_checkpoint()
                 try:
                     chunk = await anext(chunks)
                 except StopAsyncIteration:
@@ -792,9 +803,16 @@ class S3ObjectStore:
                 "Unpaired object content storage already contains durable bytes"
             )
 
-    async def delete_and_confirm(self, key: str) -> None:
+    async def delete_and_confirm(
+        self,
+        key: str,
+        *,
+        operation_checkpoint: OperationCheckpoint | None = None,
+    ) -> None:
         self._require_owned_key(key)
         try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             await asyncio.to_thread(
                 self._client.delete_object,
                 Bucket=self._settings.bucket,
@@ -806,6 +824,8 @@ class S3ObjectStore:
         deadline = monotonic() + self._settings.delete_visibility_timeout_seconds
         while True:
             try:
+                if operation_checkpoint is not None:
+                    await operation_checkpoint()
                 await self.head(key)
             except ObjectStoreNotFoundError:
                 return
@@ -918,9 +938,17 @@ class S3ObjectStore:
             next_upload_id_marker=result.get("NextUploadIdMarker"),
         )
 
-    async def abort_multipart(self, key: str, upload_id: str) -> None:
+    async def abort_multipart(
+        self,
+        key: str,
+        upload_id: str,
+        *,
+        operation_checkpoint: OperationCheckpoint | None = None,
+    ) -> None:
         self._require_owned_key(key)
         try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
             await asyncio.to_thread(
                 self._client.abort_multipart_upload,
                 Bucket=self._settings.bucket,

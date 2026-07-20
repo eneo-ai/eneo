@@ -78,15 +78,20 @@ def test_file_slice_bounds_unbounded_reader_requests() -> None:
 
 
 class _SingleUploadClient:
-    def __init__(self, expected_checksum: str) -> None:
+    def __init__(self, expected_checksum: str, events: list[str] | None = None) -> None:
         self.expected_checksum = expected_checksum
+        self.events = events
         self.head_calls = 0
 
     def put_object(self, **request: object) -> dict[str, str]:
+        if self.events is not None:
+            self.events.append("put")
         assert request["ChecksumSHA256"] == self.expected_checksum
         return {"ChecksumSHA256": self.expected_checksum}
 
     def head_object(self, **request: object) -> dict[str, object]:
+        if self.events is not None:
+            self.events.append("head")
         self.head_calls += 1
         return {
             "ContentLength": 7,
@@ -102,14 +107,25 @@ class _EscapedInventoryClient:
 
 
 class _MultipartUploadClient:
-    def __init__(self, *, size_bytes: int, composite_checksum: str) -> None:
+    def __init__(
+        self,
+        *,
+        size_bytes: int,
+        composite_checksum: str,
+        events: list[str] | None = None,
+    ) -> None:
         self._size_bytes = size_bytes
         self._composite_checksum = composite_checksum
+        self.events = events
 
     def create_multipart_upload(self, **_request: object) -> dict[str, str]:
+        if self.events is not None:
+            self.events.append("create")
         return {"UploadId": "bounded-upload"}
 
     def upload_part(self, **request: object) -> dict[str, str]:
+        if self.events is not None:
+            self.events.append(f"part:{request['PartNumber']}")
         body = cast(BinaryIO, request["Body"])
         while body.read(1024 * 1024):
             pass
@@ -119,18 +135,54 @@ class _MultipartUploadClient:
         }
 
     def complete_multipart_upload(self, **_request: object) -> dict[str, str]:
+        if self.events is not None:
+            self.events.append("complete")
         return {
             "ChecksumSHA256": self._composite_checksum,
             "ChecksumType": "COMPOSITE",
         }
 
     def head_object(self, **_request: object) -> dict[str, object]:
+        if self.events is not None:
+            self.events.append("head")
         return {
             "ContentLength": self._size_bytes,
             "ContentType": "application/octet-stream",
             "ChecksumSHA256": self._composite_checksum,
             "ChecksumType": "COMPOSITE",
         }
+
+
+class _EventuallyDeletedClient:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+        self._head_calls = 0
+
+    def delete_object(self, **_request: object) -> dict[str, object]:
+        self._events.append("delete")
+        return {}
+
+    def head_object(self, **_request: object) -> dict[str, object]:
+        self._events.append("head")
+        self._head_calls += 1
+        if self._head_calls == 1:
+            return {
+                "ContentLength": 7,
+                "ContentType": "text/plain",
+            }
+        raise ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
+            "HeadObject",
+        )
+
+
+class _AbortClient:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def abort_multipart_upload(self, **_request: object) -> dict[str, object]:
+        self._events.append("abort")
+        return {}
 
 
 class _DownloadClient:
@@ -244,11 +296,12 @@ class _BindingClient:
 
 
 @pytest.mark.asyncio
-async def test_single_upload_verifies_with_one_head_request() -> None:
+async def test_single_upload_checkpoints_before_each_sdk_request() -> None:
     payload = b"content"
     digest = sha256(payload).digest()
     checksum = base64.b64encode(digest).decode()
-    client = _SingleUploadClient(checksum)
+    events: list[str] = []
+    client = _SingleUploadClient(checksum, events)
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
     captured = CapturedContent(
         file=BytesIO(payload),
@@ -259,10 +312,18 @@ async def test_single_upload_verifies_with_one_head_request() -> None:
         part_sha256=(digest,),
     )
 
-    head = await store.upload(new_object_key(_settings()), captured)
+    async def checkpoint() -> None:
+        events.append("checkpoint")
+
+    head = await store.upload(
+        new_object_key(_settings()),
+        captured,
+        operation_checkpoint=checkpoint,
+    )
 
     assert head.size_bytes == len(payload)
     assert client.head_calls == 1
+    assert events == ["checkpoint", "put", "checkpoint", "head"]
 
 
 @pytest.mark.asyncio
@@ -283,9 +344,11 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
         sha256(payload[:part_bytes]).digest(),
         sha256(payload[part_bytes:]).digest(),
     )
+    events: list[str] = []
     client = _MultipartUploadClient(
         size_bytes=len(payload),
         composite_checksum=composite_sha256(part_digests),
+        events=events,
     )
     settings = ObjectContentSettings(
         _env_file=None,
@@ -308,19 +371,28 @@ async def test_multipart_upload_emits_bounded_lease_checkpoints() -> None:
         verified_media_type="application/octet-stream",
         part_sha256=part_digests,
     )
-    checkpoints = 0
 
     async def checkpoint() -> None:
-        nonlocal checkpoints
-        checkpoints += 1
+        events.append("checkpoint")
 
     await store.upload(
         new_object_key(settings),
         captured,
-        upload_checkpoint=checkpoint,
+        operation_checkpoint=checkpoint,
     )
 
-    assert checkpoints == 4  # two parts, completion, and verification HEAD
+    assert events == [
+        "checkpoint",
+        "create",
+        "checkpoint",
+        "part:1",
+        "checkpoint",
+        "part:2",
+        "checkpoint",
+        "complete",
+        "checkpoint",
+        "head",
+    ]
 
 
 @pytest.mark.asyncio
@@ -352,12 +424,63 @@ async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
         new_object_key(settings),
         expected_size_bytes=len(payload),
         expected_media_type="application/octet-stream",
-        read_checkpoint=checkpoint,
+        operation_checkpoint=checkpoint,
     )
 
     assert digest == sha256(payload).digest()
     # Before GET, before each of three reads, and before the terminal read.
     assert checkpoints == 5
+
+
+@pytest.mark.asyncio
+async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> None:
+    events: list[str] = []
+    client = _EventuallyDeletedClient(events)
+    settings = _settings().model_copy(
+        update={
+            "delete_poll_interval_seconds": 0.001,
+            "delete_visibility_timeout_seconds": 1,
+        }
+    )
+    store = S3ObjectStore(settings, client=cast("S3Client", client))
+
+    async def checkpoint() -> None:
+        events.append("checkpoint")
+
+    await store.delete_and_confirm(
+        new_object_key(settings),
+        operation_checkpoint=checkpoint,
+    )
+
+    assert events == [
+        "checkpoint",
+        "delete",
+        "checkpoint",
+        "head",
+        "checkpoint",
+        "head",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
+    events: list[str] = []
+    settings = _settings()
+    store = S3ObjectStore(
+        settings,
+        client=cast("S3Client", _AbortClient(events)),
+    )
+
+    async def checkpoint() -> None:
+        events.append("checkpoint")
+
+    await store.abort_multipart(
+        new_object_key(settings),
+        "upload-id",
+        operation_checkpoint=checkpoint,
+    )
+
+    assert events == ["checkpoint", "abort"]
 
 
 @pytest.mark.asyncio

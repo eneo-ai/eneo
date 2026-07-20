@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from threading import Event
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
@@ -32,11 +33,25 @@ from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
-from eneo.object_content.s3_object_store import ObjectStoreNotFoundError, new_object_key
+from eneo.object_content.s3_object_store import (
+    ObjectStoreNotFoundError,
+    S3ObjectStore,
+    new_object_key,
+)
 from tests.integration.object_content.conftest import RealObjectStore
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
+    from mypy_boto3_s3.type_defs import (
+        DeleteObjectOutputTypeDef,
+        DeleteObjectRequestTypeDef,
+        HeadObjectOutputTypeDef,
+        HeadObjectRequestTypeDef,
+        ListMultipartUploadsOutputTypeDef,
+        ListMultipartUploadsRequestTypeDef,
+        ListObjectsV2OutputTypeDef,
+        ListObjectsV2RequestTypeDef,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +60,47 @@ class _PendingContent:
     file_id: UUID
     object_key: str
     payload: bytes
+
+
+class _DelayedDeleteClient:
+    def __init__(self, delegate: "S3Client") -> None:
+        self._delegate = delegate
+        self.delete_finished = Event()
+        self.release_delete = Event()
+        self.head_started = Event()
+        self.release_head = Event()
+
+    def delete_object(self, **request: object) -> "DeleteObjectOutputTypeDef":
+        result = self._delegate.delete_object(
+            **cast("DeleteObjectRequestTypeDef", request)
+        )
+        self.delete_finished.set()
+        if not self.release_delete.wait(timeout=10):
+            raise TimeoutError("test did not release the completed DELETE")
+        return result
+
+    def head_object(self, **request: object) -> "HeadObjectOutputTypeDef":
+        self.head_started.set()
+        if not self.release_head.wait(timeout=10):
+            raise TimeoutError("test did not release the visibility HEAD")
+        return self._delegate.head_object(**cast("HeadObjectRequestTypeDef", request))
+
+    def list_objects_v2(self, **request: object) -> "ListObjectsV2OutputTypeDef":
+        return self._delegate.list_objects_v2(
+            **cast("ListObjectsV2RequestTypeDef", request)
+        )
+
+    def list_multipart_uploads(
+        self,
+        **request: object,
+    ) -> "ListMultipartUploadsOutputTypeDef":
+        return self._delegate.list_multipart_uploads(
+            **cast("ListMultipartUploadsRequestTypeDef", request)
+        )
+
+
+async def _wait_for(event: Event) -> None:
+    assert await asyncio.to_thread(event.wait, 10)
 
 
 async def _source(payload: bytes) -> AsyncIterator[bytes]:
@@ -204,6 +260,139 @@ async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones
         assert complete_row.tombstone_purge_after is None
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(complete.object_key)
+
+
+@pytest.mark.asyncio
+async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        row.state = ContentState.DELETE_PENDING.value
+        row.delete_requested_at = now
+        row.next_attempt_at = None
+        row.lease_owner = "crashed-delete-worker"
+        row.lease_until = now - timedelta(seconds=1)
+        row.updated_at = now - timedelta(
+            seconds=real_object_store.settings.pending_stale_seconds + 1
+        )
+
+    result = await ObjectContentReconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.content_processed == 1
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        assert row.state == ContentState.TOMBSTONED.value
+        assert row.remote_deleted_at is not None
+    with pytest.raises(ObjectStoreNotFoundError):
+        await real_object_store.store.head(pending.object_key)
+
+
+@pytest.mark.asyncio
+async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(
+        "eneo.object_content.reconciliation.monotonic",
+        lambda: clock[0],
+    )
+    monkeypatch.setattr(
+        "eneo.object_content.lease.monotonic",
+        lambda: clock[0],
+    )
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        row.state = ContentState.DELETE_PENDING.value
+        row.delete_requested_at = now
+        row.next_attempt_at = now
+        row.lease_owner = None
+        row.lease_until = None
+
+    raw_client = _raw_client(real_object_store)
+    delayed_client = _DelayedDeleteClient(raw_client)
+    delayed_store = S3ObjectStore(
+        real_object_store.settings,
+        client=cast("S3Client", delayed_client),
+    )
+    first_run = asyncio.create_task(
+        ObjectContentReconciler(
+            real_object_store.settings,
+            delayed_store,
+            object_content_database,
+        ).run_once()
+    )
+    try:
+        await _wait_for(delayed_client.delete_finished)
+        async with object_content_database.session() as session, session.begin():
+            now = await session.scalar(select(func.now()))
+            assert now is not None
+            row = await session.get(ObjectContents, pending.content_id)
+            assert row is not None
+            row.lease_until = now - timedelta(seconds=1)
+            row.updated_at = now - timedelta(
+                seconds=real_object_store.settings.pending_stale_seconds + 1
+            )
+        clock[0] = (
+            real_object_store.settings.reconciliation_lease_seconds
+            - real_object_store.settings.sdk_request_budget_seconds
+            + 1
+        )
+        delayed_client.release_delete.set()
+        await _wait_for(delayed_client.head_started)
+
+        concurrent = await ObjectContentReconciler(
+            real_object_store.settings,
+            real_object_store.store,
+            object_content_database,
+        ).run_once()
+    finally:
+        delayed_client.release_delete.set()
+        delayed_client.release_head.set()
+    first = await first_run
+    raw_client.close()
+
+    assert first.content_processed == 1
+    assert concurrent.content_processed == 0
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        assert row.state == ContentState.TOMBSTONED.value
+        assert row.remote_deleted_at is not None
 
 
 @pytest.mark.asyncio

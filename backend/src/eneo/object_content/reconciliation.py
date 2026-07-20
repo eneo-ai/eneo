@@ -16,6 +16,7 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import retry_delay_seconds
+from eneo.object_content.lease import OperationLeaseCheckpoint
 from eneo.object_content.reconciliation_repository import (
     MultipartAbortLease,
     ObjectContentHealthFacts,
@@ -71,6 +72,7 @@ class ObjectContentReconciler:
 
     async def run_once(self) -> ReconciliationResult:
         lease_owner = token_hex(16)
+        content_lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             repository = ObjectContentReconciliationRepository(session)
             lifecycle_advanced = await repository.advance_local_lifecycle(
@@ -88,7 +90,14 @@ class ObjectContentReconciler:
             )
 
         await asyncio.gather(
-            *(self._process_content(item, lease_owner) for item in work)
+            *(
+                self._process_content(
+                    item,
+                    lease_owner,
+                    lease_started_at=content_lease_started_at,
+                )
+                for item in work
+            )
         )
 
         async with self._database.session() as session, session.begin():
@@ -129,12 +138,22 @@ class ObjectContentReconciler:
         self,
         work: ReconciliationWork,
         lease_owner: str,
+        *,
+        lease_started_at: float,
     ) -> None:
         if work.state is ContentState.PENDING:
-            await self._reconcile_pending(work, lease_owner)
+            await self._reconcile_pending(
+                work,
+                lease_owner,
+                lease_started_at=lease_started_at,
+            )
             return
         if work.state is ContentState.DELETE_PENDING:
-            await self._reconcile_delete(work, lease_owner)
+            await self._reconcile_delete(
+                work,
+                lease_owner,
+                lease_started_at=lease_started_at,
+            )
             return
         raise RuntimeError(f"Unsupported reconciliation state: {work.state}")
 
@@ -142,33 +161,36 @@ class ObjectContentReconciler:
         self,
         work: ReconciliationWork,
         lease_owner: str,
+        *,
+        lease_started_at: float,
     ) -> None:
-        lease_deadline = monotonic() + self._settings.reconciliation_lease_seconds
-
         async def renew_pending_lease() -> None:
-            nonlocal lease_deadline
-            now = monotonic()
-            if lease_deadline - now > self._settings.sdk_request_budget_seconds:
-                return
             async with self._database.session() as session, session.begin():
                 await ObjectContentRepository(session).renew_pending_lease(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
                     lease_seconds=self._settings.reconciliation_lease_seconds,
                 )
-            lease_deadline = monotonic() + self._settings.reconciliation_lease_seconds
+
+        lease_checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=self._settings.reconciliation_lease_seconds,
+            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            renew=renew_pending_lease,
+        )
 
         try:
             if work.multipart_upload_id is not None:
                 await self._store.abort_multipart(
                     work.object_key,
                     work.multipart_upload_id,
+                    operation_checkpoint=lease_checkpoint,
                 )
             digest = await self._store.recompute_sha256(
                 work.object_key,
                 expected_size_bytes=work.size_bytes,
                 expected_media_type=work.media_type,
-                read_checkpoint=renew_pending_lease,
+                operation_checkpoint=lease_checkpoint,
             )
         except ObjectStoreNotFoundError:
             async with self._database.session() as session, session.begin():
@@ -205,20 +227,44 @@ class ObjectContentReconciler:
         self,
         work: ReconciliationWork,
         lease_owner: str,
+        *,
+        lease_started_at: float,
     ) -> None:
+        async def renew_delete_lease() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentRepository(session).renew_delete_lease(
+                    content_id=work.content_id,
+                    lease_owner=lease_owner,
+                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                )
+
+        lease_checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=self._settings.reconciliation_lease_seconds,
+            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            renew=renew_delete_lease,
+        )
         try:
-            await self._store.delete_and_confirm(work.object_key)
+            await self._store.delete_and_confirm(
+                work.object_key,
+                operation_checkpoint=lease_checkpoint,
+            )
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
             return
-        async with self._database.session() as session, session.begin():
-            await ObjectContentRepository(session).mark_tombstoned(
-                content_id=work.content_id,
-                lease_owner=lease_owner,
-                # WI-26B's database-owned retention policy supplies this horizon.
-                # The foundation must not invent an environment business policy.
-                purge_after=None,
-            )
+        except (ObjectContentBusyError, ObjectContentStateError):
+            return
+        try:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentRepository(session).mark_tombstoned(
+                    content_id=work.content_id,
+                    lease_owner=lease_owner,
+                    # WI-26B's database-owned retention policy supplies this horizon.
+                    # The foundation must not invent an environment business policy.
+                    purge_after=None,
+                )
+        except (ObjectContentBusyError, ObjectContentStateError):
+            return
 
     async def _record_integrity_failure(
         self,
@@ -345,6 +391,7 @@ class ObjectContentReconciler:
         return 1
 
     async def _delete_orphans(self, lease_owner: str) -> int:
+        lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             leases = await ObjectContentReconciliationRepository(
                 session
@@ -357,7 +404,14 @@ class ObjectContentReconciler:
                 ),
             )
         results = await asyncio.gather(
-            *(self._delete_orphan(lease, lease_owner) for lease in leases)
+            *(
+                self._delete_orphan(
+                    lease,
+                    lease_owner,
+                    lease_started_at=lease_started_at,
+                )
+                for lease in leases
+            )
         )
         return sum(results)
 
@@ -365,6 +419,8 @@ class ObjectContentReconciler:
         self,
         lease: OrphanDeleteLease,
         lease_owner: str,
+        *,
+        lease_started_at: float,
     ) -> int:
         async with self._database.session() as session, session.begin():
             confirmed = await ObjectContentReconciliationRepository(
@@ -375,8 +431,28 @@ class ObjectContentReconciler:
             )
         if not confirmed:
             return 0
+
+        async def renew_orphan_delete_lease() -> None:
+            async with self._database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).renew_orphan_delete_lease(
+                    object_key=lease.object_key,
+                    lease_owner=lease_owner,
+                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                )
+
+        lease_checkpoint = OperationLeaseCheckpoint(
+            lease_started_at=lease_started_at,
+            lease_seconds=self._settings.reconciliation_lease_seconds,
+            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            renew=renew_orphan_delete_lease,
+        )
         try:
-            await self._store.delete_and_confirm(lease.object_key)
+            await self._store.delete_and_confirm(
+                lease.object_key,
+                operation_checkpoint=lease_checkpoint,
+            )
         except ObjectStoreUnavailableError:
             async with self._database.session() as session, session.begin():
                 await ObjectContentReconciliationRepository(
@@ -385,6 +461,8 @@ class ObjectContentReconciler:
                     object_key=lease.object_key,
                     lease_owner=lease_owner,
                 )
+            return 0
+        except (ObjectContentBusyError, ObjectContentStateError):
             return 0
         async with self._database.session() as session, session.begin():
             await ObjectContentReconciliationRepository(session).complete_orphan_delete(
