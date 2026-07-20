@@ -255,9 +255,9 @@ class SkillService:
         space = await self._space(space_id)
         assistant = space.get_assistant(assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_assistants():
+        if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
-                "You do not have permission to edit this Assistant"
+                "You do not have permission to read this Assistant"
             )
         if not actor.can_read_skills():
             raise UnauthorizedException(
@@ -315,10 +315,10 @@ class SkillService:
         self, *, space_id: UUID, app_id: UUID
     ) -> list[ResolvedSkillBinding]:
         space = await self._space(space_id)
-        space.get_app(app_id)
+        app = space.get_app(app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_apps():
-            raise UnauthorizedException("You do not have permission to edit this App")
+        if not actor.can_read_app(app=app):
+            raise UnauthorizedException("You do not have permission to read this App")
         if not actor.can_read_skills():
             raise UnauthorizedException(
                 "You do not have permission to read Skills in this Space"

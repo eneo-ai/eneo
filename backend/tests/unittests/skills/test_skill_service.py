@@ -44,7 +44,9 @@ def _binding_reference(binding: ResolvedSkillBinding) -> SkillBindingReference:
 
 def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=None):
     actor = actor or MagicMock(
+        can_read_assistant=MagicMock(return_value=True),
         can_edit_assistants=MagicMock(return_value=True),
+        can_read_app=MagicMock(return_value=True),
         can_edit_apps=MagicMock(return_value=True),
         can_read_skills=MagicMock(return_value=True),
         can_create_skills=MagicMock(return_value=True),
@@ -238,6 +240,147 @@ async def test_personal_default_assistant_direct_binding_fails_closed():
             space_id=space.id,
             assistant_id=space.assistant.id,
         )
+
+
+@pytest.mark.parametrize(
+    ("list_method", "parent_id_name", "parent_attribute", "read_permission"),
+    [
+        (
+            "list_assistant_bindings",
+            "assistant_id",
+            "assistant",
+            "can_read_assistant",
+        ),
+        ("list_app_bindings", "app_id", "app", "can_read_app"),
+    ],
+)
+async def test_parent_reader_can_list_skill_bindings(
+    list_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+    read_permission: str,
+):
+    space = _space()
+    parent = getattr(space, parent_attribute)
+    binding = _binding()
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [binding]
+    repo.list_app_bindings.return_value = [binding]
+    actor = MagicMock(
+        can_read_assistant=MagicMock(return_value=True),
+        can_edit_assistants=MagicMock(return_value=False),
+        can_read_app=MagicMock(return_value=True),
+        can_edit_apps=MagicMock(return_value=False),
+        can_read_skills=MagicMock(return_value=True),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    result = await getattr(service, list_method)(
+        space_id=space.id,
+        **{parent_id_name: parent.id},
+    )
+
+    assert result == [binding]
+    getattr(actor, read_permission).assert_called_once_with(
+        **{parent_attribute: parent}
+    )
+
+
+@pytest.mark.parametrize(
+    ("list_method", "parent_id_name", "parent_attribute"),
+    [
+        ("list_assistant_bindings", "assistant_id", "assistant"),
+        ("list_app_bindings", "app_id", "app"),
+    ],
+)
+async def test_parent_reader_without_skill_read_permission_cannot_list_bindings(
+    list_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+):
+    space = _space()
+    parent = getattr(space, parent_attribute)
+    repo = AsyncMock()
+    actor = MagicMock(
+        can_read_assistant=MagicMock(return_value=True),
+        can_read_app=MagicMock(return_value=True),
+        can_read_skills=MagicMock(return_value=False),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    with pytest.raises(UnauthorizedException, match="permission to read Skills"):
+        await getattr(service, list_method)(
+            space_id=space.id,
+            **{parent_id_name: parent.id},
+        )
+
+    repo.list_assistant_bindings.assert_not_awaited()
+    repo.list_app_bindings.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("list_method", "parent_id_name", "parent_attribute"),
+    [
+        ("list_assistant_bindings", "assistant_id", "assistant"),
+        ("list_app_bindings", "app_id", "app"),
+    ],
+)
+async def test_unreadable_parent_skill_bindings_are_not_disclosed(
+    list_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+):
+    space = _space()
+    parent = getattr(space, parent_attribute)
+    repo = AsyncMock()
+    actor = MagicMock(
+        can_read_assistant=MagicMock(return_value=False),
+        can_read_app=MagicMock(return_value=False),
+        can_read_skills=MagicMock(return_value=True),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    with pytest.raises(UnauthorizedException, match="permission to read this"):
+        await getattr(service, list_method)(
+            space_id=space.id,
+            **{parent_id_name: parent.id},
+        )
+
+    repo.list_assistant_bindings.assert_not_awaited()
+    repo.list_app_bindings.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("replace_method", "parent_id_name", "parent_attribute"),
+    [
+        ("replace_assistant_bindings", "assistant_id", "assistant"),
+        ("replace_app_bindings", "app_id", "app"),
+    ],
+)
+async def test_parent_reader_cannot_replace_skill_bindings(
+    replace_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+):
+    space = _space()
+    parent = getattr(space, parent_attribute)
+    repo = AsyncMock()
+    actor = MagicMock(
+        can_edit_assistants=MagicMock(return_value=False),
+        can_edit_apps=MagicMock(return_value=False),
+        can_read_skills=MagicMock(return_value=True),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    with pytest.raises(UnauthorizedException, match="permission to edit"):
+        await getattr(service, replace_method)(
+            space_id=space.id,
+            **{parent_id_name: parent.id},
+            references=[],
+        )
+
+    repo.replace_assistant_bindings.assert_not_awaited()
+    repo.replace_app_bindings.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
