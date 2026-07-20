@@ -226,7 +226,11 @@ capability/readiness projection; after a row exists, the disabled process fails
 the guard. Process liveness itself does not depend on the object store.
 Readiness uses a separate short-timeout S3 client when enabled. Health output
 includes only a status and stable code, never endpoint, bucket, key,
-credentials, or provider details.
+credentials, or provider details. Each process coalesces concurrent
+object-content probes and caches the latest result for at most one second. This
+protects PostgreSQL and the object store from probe bursts; an outage or
+recovery may therefore take up to one second to appear. `/api/livez` remains
+dependency-free and uncached.
 
 The first enabled startup creates one random database identity in PostgreSQL
 and atomically places its private marker in the configured bucket. Later

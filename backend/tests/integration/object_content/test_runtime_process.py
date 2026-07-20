@@ -169,7 +169,13 @@ async def test_readiness_tracks_real_postgres_stop_and_restart_without_process_r
             assert ready.code is ObjectContentReadinessCode.READY
 
             postgres.get_wrapped_container().stop(timeout=10)
-            unavailable = await runtime.readiness()
+            for _attempt in range(20):
+                unavailable = await runtime.readiness()
+                if not unavailable.ready:
+                    break
+                await asyncio.sleep(0.25)
+            else:
+                pytest.fail("PostgreSQL outage did not fail readiness")
             assert unavailable.ready is False
             assert unavailable.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
 

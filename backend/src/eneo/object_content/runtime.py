@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
+from time import monotonic
 
 from sqlalchemy import exists, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +31,9 @@ from eneo.object_content.s3_object_store import S3ObjectStore
 _ACTIVE_CONTENT_STATES = tuple(
     state.value for state in ContentState if state is not ContentState.TOMBSTONED
 )
+# Bound dependency amplification without hiding an outage or recovery for more
+# than one second. This is an internal probe-safety invariant, not product policy.
+_READINESS_CACHE_SECONDS = 1.0
 
 
 class ObjectContentReadinessCode(StrEnum):
@@ -64,6 +68,7 @@ class ObjectContentRuntime:
         self._service: ObjectContentService | None = None
         self._reconciler: ObjectContentReconciler | None = None
         self._readiness_lock = asyncio.Lock()
+        self._readiness_cache: tuple[ObjectContentReadiness, float] | None = None
 
     def start(
         self,
@@ -74,6 +79,7 @@ class ObjectContentRuntime:
         if self._state is not ObjectContentRuntimeState.NOT_STARTED:
             raise RuntimeError("Object-content runtime is already initialized")
 
+        self._readiness_cache = None
         resolved_settings = (
             settings if settings is not None else load_object_content_settings()
         )
@@ -102,6 +108,7 @@ class ObjectContentRuntime:
 
     async def stop(self) -> None:
         store = self._store
+        self._readiness_cache = None
         self._settings = None
         self._store = None
         self._service = None
@@ -141,21 +148,53 @@ class ObjectContentRuntime:
         return reconciler
 
     async def readiness(self) -> ObjectContentReadiness:
+        if self._state is ObjectContentRuntimeState.NOT_STARTED:
+            return ObjectContentReadiness(
+                ready=False,
+                code=ObjectContentReadinessCode.NOT_INITIALIZED,
+            )
+
+        cached = self._cached_readiness()
+        if cached is not None:
+            return cached
+
+        # One caller refreshes dependency state. Waiters check the cache again
+        # after acquiring the lock instead of repeating the same remote work.
+        async with self._readiness_lock:
+            cached = self._cached_readiness()
+            if cached is not None:
+                return cached
+            readiness = await self._refresh_readiness()
+            self._readiness_cache = (
+                readiness,
+                monotonic() + _READINESS_CACHE_SECONDS,
+            )
+            return readiness
+
+    def _cached_readiness(self) -> ObjectContentReadiness | None:
+        cached = self._readiness_cache
+        if cached is None:
+            return None
+        readiness, expires_at = cached
+        if monotonic() >= expires_at:
+            return None
+        return readiness
+
+    async def _refresh_readiness(self) -> ObjectContentReadiness:
         if self._state is ObjectContentRuntimeState.DISABLED:
             # PostgreSQL must remain reachable to prove disabled is still safe.
-            async with self._readiness_lock:
-                try:
-                    await self.validate_configuration()
-                except ObjectContentConfigurationError:
-                    return ObjectContentReadiness(
-                        ready=False,
-                        code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
-                    )
-                except ObjectContentUnavailableError:
-                    return ObjectContentReadiness(
-                        ready=False,
-                        code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
-                    )
+            try:
+                await self.validate_configuration()
+            except ObjectContentConfigurationError:
+                return ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
+                )
+            except ObjectContentUnavailableError:
+                return ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
+                )
             return ObjectContentReadiness(
                 ready=True,
                 code=ObjectContentReadinessCode.DISABLED,
@@ -168,33 +207,29 @@ class ObjectContentRuntime:
                 code=ObjectContentReadinessCode.NOT_INITIALIZED,
             )
 
-        # Serialize concurrent deployment probes into bounded SDK calls. The
-        # concrete adapter owns connect/read/retry timeouts; cancelling a
-        # to_thread call here would not stop its worker thread.
-        async with self._readiness_lock:
-            try:
-                async with self._database.connect() as connection:
-                    await connection.execute(text("SELECT 1"))
-            except (OSError, SQLAlchemyError):
-                # Readiness is a failure boundary: driver and pool failures must
-                # produce one sanitized status instead of escaping through the
-                # public probe.
-                return ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
-                )
-            try:
-                await self.validate_configuration()
-            except ObjectContentConfigurationError:
-                return ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
-                )
-            except ObjectContentUnavailableError:
-                return ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.STORE_UNAVAILABLE,
-                )
+        try:
+            async with self._database.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+        except (OSError, SQLAlchemyError):
+            # Readiness is a failure boundary: driver and pool failures must
+            # produce one sanitized status instead of escaping through the
+            # public probe.
+            return ObjectContentReadiness(
+                ready=False,
+                code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
+            )
+        try:
+            await self.validate_configuration()
+        except ObjectContentConfigurationError:
+            return ObjectContentReadiness(
+                ready=False,
+                code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
+            )
+        except ObjectContentUnavailableError:
+            return ObjectContentReadiness(
+                ready=False,
+                code=ObjectContentReadinessCode.STORE_UNAVAILABLE,
+            )
         return ObjectContentReadiness(
             ready=True,
             code=ObjectContentReadinessCode.READY,

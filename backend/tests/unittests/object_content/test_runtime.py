@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -42,16 +43,30 @@ class _ReadinessDatabase(DatabaseSessionManager):
         self.available = available
         self.active_object_content = active_object_content
         self.binding_state = ObjectContentReconciliationState()
+        self.connect_count = 0
+        self.connect_in_flight = 0
+        self.peak_connect_in_flight = 0
 
     @asynccontextmanager
     async def connect(self) -> AsyncGenerator[AsyncConnection]:
-        if not self.available:
-            raise OSError("test PostgreSQL outage")
-        connection = MagicMock(spec=AsyncConnection)
-        result = MagicMock()
-        result.scalar_one.return_value = self.active_object_content
-        connection.execute = AsyncMock(return_value=result)
-        yield cast(AsyncConnection, connection)
+        self.connect_count += 1
+        self.connect_in_flight += 1
+        self.peak_connect_in_flight = max(
+            self.peak_connect_in_flight,
+            self.connect_in_flight,
+        )
+        try:
+            # Force overlap so this test proves the runtime lock is load-bearing.
+            await asyncio.sleep(0)
+            if not self.available:
+                raise OSError("test PostgreSQL outage")
+            connection = MagicMock(spec=AsyncConnection)
+            result = MagicMock()
+            result.scalar_one.return_value = self.active_object_content
+            connection.execute = AsyncMock(return_value=result)
+            yield cast(AsyncConnection, connection)
+        finally:
+            self.connect_in_flight -= 1
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession]:
@@ -78,8 +93,11 @@ class _ReadinessStore:
     def __init__(self, ready: list[bool] | None = None) -> None:
         self._ready = list(ready or [True])
         self.closed = False
+        self.check_ready_count = 0
+        self.binding_create_flags: list[bool] = []
 
     async def check_ready(self) -> None:
+        self.check_ready_count += 1
         ready = self._ready.pop(0) if len(self._ready) > 1 else self._ready[0]
         if not ready:
             raise ObjectStoreUnavailableError("test object-store outage")
@@ -90,7 +108,9 @@ class _ReadinessStore:
         *,
         allow_create: bool,
     ) -> None:
-        assert allow_create
+        if not self.binding_create_flags:
+            assert allow_create
+        self.binding_create_flags.append(allow_create)
 
     async def close(self) -> None:
         self.closed = True
@@ -177,16 +197,24 @@ async def test_reconciliation_before_start_remains_a_loud_initialization_error()
 
 
 @pytest.mark.asyncio
-async def test_readiness_recovers_without_restarting_the_process() -> None:
+async def test_readiness_recovers_after_cache_expiry_without_process_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr("eneo.object_content.runtime.monotonic", lambda: now)
     store = _ReadinessStore([False, True])
     runtime = ObjectContentRuntime(database=_ReadinessDatabase())
     runtime.start(settings=_settings(), store=cast("S3ObjectStore", store))
 
     unavailable = await runtime.readiness()
+    cached_unavailable = await runtime.readiness()
+    now = 1.1
     recovered = await runtime.readiness()
 
     assert unavailable.ready is False
     assert unavailable.code is ObjectContentReadinessCode.STORE_UNAVAILABLE
+    assert cached_unavailable == unavailable
+    assert store.check_ready_count == 2
     assert recovered.ready is True
     assert recovered.code is ObjectContentReadinessCode.READY
 
@@ -195,7 +223,11 @@ async def test_readiness_recovers_without_restarting_the_process() -> None:
 
 
 @pytest.mark.asyncio
-async def test_readiness_reports_database_outage_without_leaking_details() -> None:
+async def test_readiness_reports_database_outage_and_recovers_after_cache_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr("eneo.object_content.runtime.monotonic", lambda: now)
     store = _ReadinessStore()
     database = _ReadinessDatabase(available=False)
     runtime = ObjectContentRuntime(database=database)
@@ -203,12 +235,48 @@ async def test_readiness_reports_database_outage_without_leaking_details() -> No
 
     unavailable = await runtime.readiness()
     database.available = True
+    cached_unavailable = await runtime.readiness()
+    now = 1.1
     recovered = await runtime.readiness()
 
     assert unavailable.ready is False
     assert unavailable.code is ObjectContentReadinessCode.DATABASE_UNAVAILABLE
+    assert cached_unavailable == unavailable
+    assert database.connect_count == 2
     assert recovered.ready is True
     assert recovered.code is ObjectContentReadinessCode.READY
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_enabled_readiness_coalesces_dependency_probes_and_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(
+        "eneo.object_content.runtime.monotonic",
+        lambda: now,
+    )
+    store = _ReadinessStore()
+    database = _ReadinessDatabase()
+    runtime = ObjectContentRuntime(database=database)
+    runtime.start(settings=_settings(), store=cast("S3ObjectStore", store))
+
+    readiness = await asyncio.gather(*(runtime.readiness() for _ in range(16)))
+
+    assert all(result.ready for result in readiness)
+    assert {result.code for result in readiness} == {ObjectContentReadinessCode.READY}
+    assert database.connect_count == 1
+    assert database.peak_connect_in_flight == 1
+    assert store.check_ready_count == 1
+
+    now = 1.1
+    refreshed = await runtime.readiness()
+
+    assert refreshed.ready is True
+    assert database.connect_count == 2
+    assert store.check_ready_count == 2
 
     await runtime.stop()
 
