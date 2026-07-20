@@ -1619,6 +1619,7 @@ class FlowRunExecutor:
             run_error_message=build_typed_failure_run_error_message(
                 step_order=step.step_order,
                 error_code=error_code,
+                error_message=str(typed_exc),
                 contract_validation=getattr(typed_exc, "contract_validation", None),
             ),
         )

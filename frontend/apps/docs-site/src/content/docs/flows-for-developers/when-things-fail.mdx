@@ -172,7 +172,7 @@ flowchart LR
 ### Typed input/output
 
 <details>
-<summary>43 error codes</summary>
+<summary>44 error codes</summary>
 
 | Code                                        | Surface                            | Cause                                                                     | Consumer action                                                                               | User action                                                                                      |
 | ------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -182,6 +182,7 @@ flowchart LR
 | `flow_unsupported_output_type`              | Run error payload                  | The step uses an output type the runtime cannot render.                   | Choose a supported output type and republish the flow.                                        | Ask a flow editor to choose a supported output type.                                             |
 | `typed_io_contract_violation`               | API response and run error payload | A submitted or generated value does not match the step output contract.   | Fix the JSON shape against the contract before saving or rerunning.                           | Fix the structured output and save again.                                                        |
 | `typed_io_validation_failed`                | Run error payload                  | The step input or output failed validation without a more specific code.  | Open step diagnostics and correct the input, schema, or configuration.                        | Open the step details, fix input or configuration, and rerun.                                    |
+| `typed_io_variable_resolution_failed`       | Run error payload                  | A runtime variable reference names a missing or invalid path.             | Use the precise run error to correct the variable path, then republish or rerun.              | Ask a flow editor to correct the variable reference and republish.                               |
 | `typed_io_audio_invalid_file_type`          | Run error payload                  | An audio step received a file type it cannot transcribe.                  | Validate accepted audio types before upload or rerun.                                         | Upload a supported audio file and start again.                                                   |
 | `typed_io_audio_missing_file`               | Run error payload                  | An audio step expected a runtime file but none was available.             | Attach the required audio file to the step before creating the run.                           | Attach the required audio file and start again.                                                  |
 | `typed_io_audio_source_unsupported`         | Run error payload                  | An audio step uses an input source that runtime does not support.         | Configure the step for runtime files or a supported previous step output.                     | Ask a flow editor to change the audio input source.                                              |

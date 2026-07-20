@@ -4348,6 +4348,7 @@
   "flow_error_flow_unsupported_output_mode": "This step uses an output mode the runtime cannot execute. Change the output mode and republish the flow.",
   "flow_error_flow_unsupported_output_type": "This step uses an output type the runtime cannot render. Choose a supported output type and republish the flow.",
   "flow_error_typed_io_validation_failed": "The step input or output did not pass validation. Open the step details, fix the input or configuration, and rerun.",
+  "flow_error_typed_io_variable_resolution_failed": "A runtime variable reference is missing or invalid. Open the step error, correct the variable path, and republish.",
   "flow_error_typed_io_audio_invalid_file_type": "One audio file has an unsupported type. Upload a supported audio file and start the run again.",
   "flow_error_typed_io_audio_missing_file": "The audio step is missing its input file. Attach the required audio file and start the run again.",
   "flow_error_typed_io_audio_source_unsupported": "This audio step uses an unsupported input source. Configure it to use runtime files or a supported previous step and republish.",

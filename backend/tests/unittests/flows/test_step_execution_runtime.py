@@ -198,6 +198,56 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
 
 
 @pytest.mark.asyncio
+async def test_prepare_step_execution_reports_prompt_variable_miss_before_provider_io():
+    run = _run()
+    state = _state()
+    step = _step()
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = "Review {{flow_input.missing}}"
+    assistant.get_response = AsyncMock()
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(return_value=assistant),
+        resolve_step_input=AsyncMock(
+            return_value=StepInputValue(
+                text="Input",
+                source_text="Input",
+                input_source="flow_input",
+            )
+        ),
+        retrieve_rag_chunks=AsyncMock(),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+        attach_typed_failure_context=lambda exc, **kwargs: exc,
+        effective_model_parameters=lambda assistant_obj: {},
+        json_mode_cache_key=lambda assistant_obj: "unused",
+        is_json_mode_rejection=lambda exc: False,
+        count_tokens=lambda text: len(text),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await prepare_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            version_metadata=None,
+            deps=deps,
+            requested_file_ids=(),
+        )
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value
+    )
+    assert str(exc_info.value) == (
+        "Unknown variable reference: 'flow_input.missing'. Missing key 'missing'. "
+        "Available keys: text."
+    )
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_prepare_step_execution_keeps_json_binding_underlag_without_contract_failure():
     run = _run()
     state = _state()

@@ -165,6 +165,7 @@ async def _create_runtime_worker_context(
     output_mode: str = "pass_through",
     output_type: str = "text",
     output_contract: FlowPersistedJsonObject | None = None,
+    input_payload_json: FlowPersistedJsonObject | None = None,
 ) -> _RuntimeWorkerContext:
     enable_autobegin_for_flow_task_session(session)
     setup_container = Container(
@@ -237,7 +238,11 @@ async def _create_runtime_worker_context(
     )
     create_result = await setup_container.flow_run_service().create_run(
         flow_id=flow.id,
-        input_payload_json={"question": "What happened?"},
+        input_payload_json=(
+            {"question": "What happened?"}
+            if input_payload_json is None
+            else input_payload_json
+        ),
         expected_flow_version=1,
         step_inputs=None,
         idempotency_key=f"runtime-worker-contract-{uuid4()}",
@@ -1096,6 +1101,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
     expected_message = build_typed_failure_run_error_message(
         step_order=1,
         error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        error_message="The model output is not valid JSON.",
         contract_validation=None,
     )
     assert result["status"] == "failed"
@@ -1125,6 +1131,70 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
     assert [row.source for row in outbox_rows] == [
         FlowRunLifecycleSource.EXECUTOR_FAILED.value
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_question_binding_variable_miss_persists_precise_typed_failure_without_provider_io(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            input_payload_json={},
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            celery_task_id=f"runtime-variable-resolution-failure-{uuid4()}",
+            retry_count=0,
+        )
+
+    resolver_message = (
+        "Unknown variable reference: 'flow.input.question'. Missing key 'question'. "
+        "Available keys: expected_flow_version."
+    )
+    run_message = f"Step 1: {resolver_message} (typed_io_variable_resolution_failed)."
+    assert result == {"status": "failed", "error": run_message}
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert FlowRunError.model_validate(run_row.error_json).message == run_message
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.error_message == resolver_message
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
+    assert (
+        attempt_rows[0].error_code
+        == FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value
+    )
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
+    completion_service.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio

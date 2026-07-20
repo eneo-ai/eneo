@@ -583,6 +583,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Open step diagnostics and correct the input, schema, or configuration.",
         user_action="Open the step details, fix input or configuration, and rerun.",
     ),
+    FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A runtime variable reference names a missing or invalid path.",
+        consumer_action="Use the precise run error to correct the variable path, then republish or rerun.",
+        user_action="Ask a flow editor to correct the variable reference and republish.",
+    ),
     FlowApiErrorCode.TYPED_IO_AUDIO_INVALID_FILE_TYPE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

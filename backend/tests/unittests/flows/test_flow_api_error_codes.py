@@ -64,6 +64,7 @@ PUBLIC_FLOW_ERROR_EMITTER_PATHS = (
     FLOW_SOURCE_ROOT / "flow_run_step_inputs.py",
     FLOW_SOURCE_ROOT / "flow_run_payload_validation.py",
     FLOW_SOURCE_ROOT / "flow_runtime_file_service.py",
+    FLOW_SOURCE_ROOT / "variable_resolver.py",
     FLOW_SOURCE_ROOT / "application" / "flow_run_service.py",
     FLOW_SOURCE_ROOT / "application" / "flow_run_rerun_service.py",
     FLOW_SOURCE_ROOT / "application" / "flow_run_review_checkpoint_service.py",

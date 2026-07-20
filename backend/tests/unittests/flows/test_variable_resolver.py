@@ -430,11 +430,20 @@ def test_interpolate_error_includes_available_keys_for_small_dicts():
         prior_results=[],
     )
 
-    with pytest.raises(BadRequestException, match="Available keys: namn, roll"):
+    with pytest.raises(TypedIOValidationException) as exc_info:
         resolver.interpolate(
             template="{{ flow_input.person }}",
             context=context,
         )
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value
+    )
+    assert str(exc_info.value) == (
+        "Unknown variable reference: 'flow_input.person'. Missing key 'person'. "
+        "Available keys: namn, roll."
+    )
 
 
 def test_interpolate_raises_for_non_numeric_list_index():

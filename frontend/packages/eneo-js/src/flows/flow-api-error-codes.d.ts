@@ -68,6 +68,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   UNSUPPORTED_OUTPUT_TYPE: "flow_unsupported_output_type";
   TYPED_IO_CONTRACT_VIOLATION: "typed_io_contract_violation";
   TYPED_IO_VALIDATION_FAILED: "typed_io_validation_failed";
+  TYPED_IO_VARIABLE_RESOLUTION_FAILED: "typed_io_variable_resolution_failed";
   TYPED_IO_AUDIO_INVALID_FILE_TYPE: "typed_io_audio_invalid_file_type";
   TYPED_IO_AUDIO_MISSING_FILE: "typed_io_audio_missing_file";
   TYPED_IO_AUDIO_SOURCE_UNSUPPORTED: "typed_io_audio_source_unsupported";
@@ -210,6 +211,7 @@ export type FlowApiErrorCode =
   | "flow_unsupported_output_type"
   | "typed_io_contract_violation"
   | "typed_io_validation_failed"
+  | "typed_io_variable_resolution_failed"
   | "typed_io_audio_invalid_file_type"
   | "typed_io_audio_missing_file"
   | "typed_io_audio_source_unsupported"

@@ -195,6 +195,7 @@ def test_typed_failure_run_error_uses_public_taxonomy_summary() -> None:
     message = build_typed_failure_run_error_message(
         step_order=1,
         error_code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
+        error_message="provider secret must remain private",
         contract_validation=None,
     )
 
@@ -209,6 +210,7 @@ def test_typed_failure_run_error_preserves_contract_validation_summary() -> None
     message = build_typed_failure_run_error_message(
         step_order=2,
         error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        error_message="raw parse detail",
         contract_validation={
             "parse_attempted": True,
             "parse_succeeded": False,
@@ -222,6 +224,24 @@ def test_typed_failure_run_error_preserves_contract_validation_summary() -> None
     )
 
 
+def test_variable_resolution_run_error_preserves_precise_resolver_message() -> None:
+    resolver_message = (
+        "Unknown variable reference: 'flow.input.question'. "
+        "Missing key 'question'. Available keys: case_id."
+    )
+
+    message = build_typed_failure_run_error_message(
+        step_order=3,
+        error_code=FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED,
+        error_message=resolver_message,
+        contract_validation=None,
+    )
+
+    assert message == (
+        f"Step 3: {resolver_message} (typed_io_variable_resolution_failed)."
+    )
+
+
 def test_typed_failure_plan_keeps_raw_detail_out_of_run_error() -> None:
     claimed = _claimed_result()
     raw_detail = (
@@ -231,6 +251,7 @@ def test_typed_failure_plan_keeps_raw_detail_out_of_run_error() -> None:
     run_error_message = build_typed_failure_run_error_message(
         step_order=1,
         error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR,
+        error_message=raw_detail,
         contract_validation=None,
     )
 

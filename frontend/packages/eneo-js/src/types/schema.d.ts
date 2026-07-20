@@ -13686,6 +13686,7 @@ export interface components {
       | "flow_unsupported_output_type"
       | "typed_io_contract_violation"
       | "typed_io_validation_failed"
+      | "typed_io_variable_resolution_failed"
       | "typed_io_audio_invalid_file_type"
       | "typed_io_audio_missing_file"
       | "typed_io_audio_source_unsupported"
@@ -16093,7 +16094,8 @@ export interface components {
         | "typed_io_transcription_model_unavailable"
         | "typed_io_transcription_not_enabled"
         | "typed_io_unsupported_type"
-        | "typed_io_validation_failed";
+        | "typed_io_validation_failed"
+        | "typed_io_variable_resolution_failed";
       /**
        * Message
        * @description Human-readable technical detail for logs, support and fallback UI. This text is not a stable client contract.
@@ -17464,6 +17466,7 @@ export interface components {
             | "typed_io_transcription_not_enabled"
             | "typed_io_unsupported_type"
             | "typed_io_validation_failed"
+            | "typed_io_variable_resolution_failed"
           )
         | null;
       /** Failure Message */
@@ -18310,6 +18313,7 @@ export interface components {
             | "typed_io_transcription_not_enabled"
             | "typed_io_unsupported_type"
             | "typed_io_validation_failed"
+            | "typed_io_variable_resolution_failed"
           )
         | null;
       /** Error Message */
@@ -19155,6 +19159,7 @@ export interface components {
             | "typed_io_transcription_not_enabled"
             | "typed_io_unsupported_type"
             | "typed_io_validation_failed"
+            | "typed_io_variable_resolution_failed"
           )
         | null;
       /** Error Message */

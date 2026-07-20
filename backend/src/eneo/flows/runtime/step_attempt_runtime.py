@@ -136,8 +136,11 @@ def build_typed_failure_run_error_message(
     *,
     step_order: int,
     error_code: FlowApiErrorCode,
+    error_message: str,
     contract_validation: object | None,
 ) -> str:
+    if error_code is FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED:
+        return f"Step {step_order}: {error_message} ({error_code.value})."
     summary = _contract_validation_summary(contract_validation)
     if summary is None:
         summary = FLOW_ERROR_TAXONOMY[error_code].cause

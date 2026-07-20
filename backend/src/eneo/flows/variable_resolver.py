@@ -17,9 +17,16 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import can_expose_form_field_bare_alias
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import TypedIOValidationException
 
 _TEMPLATE_VAR_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
+
+
+def _variable_resolution_error(message: str) -> TypedIOValidationException:
+    return TypedIOValidationException(
+        message,
+        code=FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +163,7 @@ class FlowVariableResolver:
         for token in path.split("."):
             token = token.strip()
             if not token:
-                raise BadRequestException(
+                raise _variable_resolution_error(
                     f"Unknown variable reference: '{path}'. Empty path segment is not allowed."
                 )
             if isinstance(current, dict):
@@ -166,7 +173,7 @@ class FlowVariableResolver:
                     suggestion = _format_missing_key_suggestion(
                         token=token, available_keys=available_keys
                     )
-                    raise BadRequestException(
+                    raise _variable_resolution_error(
                         f"Unknown variable reference: '{path}'. Missing key '{token}'.{suggestion}"
                     )
                 current = current_dict[token]
@@ -175,13 +182,13 @@ class FlowVariableResolver:
             if isinstance(current, list):
                 current_list = cast(list[Any], current)
                 if not token.isdigit():
-                    raise BadRequestException(
+                    raise _variable_resolution_error(
                         f"Unknown variable reference: '{path}'. "
                         f"Expected numeric index for list access, got '{token}'."
                     )
                 index = int(token)
                 if index >= len(current_list):
-                    raise BadRequestException(
+                    raise _variable_resolution_error(
                         f"Unknown variable reference: '{path}'. "
                         f"List index '{index}' is out of range."
                     )
@@ -190,7 +197,7 @@ class FlowVariableResolver:
 
             if isinstance(current, _UnavailableStepText):
                 self._raise_if_step_text_unavailable(current)
-            raise BadRequestException(
+            raise _variable_resolution_error(
                 f"Unknown variable reference: '{path}'. "
                 f"Cannot access '{token}' on value type '{type(current).__name__}'."
             )

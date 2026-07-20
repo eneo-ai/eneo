@@ -4348,6 +4348,7 @@
   "flow_error_flow_unsupported_output_mode": "Steget använder ett utdataläge som runtime inte kan köra. Ändra utdataläget och publicera flödet igen.",
   "flow_error_flow_unsupported_output_type": "Steget använder en utdatatyp som runtime inte kan skapa. Välj en stödd utdatatyp och publicera flödet igen.",
   "flow_error_typed_io_validation_failed": "Stegets indata eller utdata klarade inte valideringen. Öppna stegdetaljerna, rätta indata eller konfigurationen och kör om.",
+  "flow_error_typed_io_variable_resolution_failed": "En variabelreferens vid körning saknas eller är ogiltig. Öppna stegfelet, rätta variabelsökvägen och publicera igen.",
   "flow_error_typed_io_audio_invalid_file_type": "En ljudfil har en filtyp som inte stöds. Ladda upp en stödd ljudfil och starta körningen igen.",
   "flow_error_typed_io_audio_missing_file": "Ljudsteget saknar sin indatafil. Koppla den obligatoriska ljudfilen och starta körningen igen.",
   "flow_error_typed_io_audio_source_unsupported": "Ljudsteget använder en indatakälla som inte stöds. Konfigurera det för runtime-filer eller ett stött föregående steg och publicera igen.",
