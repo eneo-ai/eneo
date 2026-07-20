@@ -63,9 +63,12 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
         permissions=permissions or {Permission.SKILLS, Permission.ASSISTANTS},
         active_api_key=active_api_key,
     )
+    repo = repo or AsyncMock()
+    repo.lock_assistant_space_for_update.return_value = space.id
+    repo.lock_app_for_binding_update.return_value = True
     return SkillService(
         user=user,
-        repo=repo or AsyncMock(),
+        repo=repo,
         space_service=space_service,
         actor_manager=actor_manager,
     )
@@ -150,6 +153,23 @@ async def test_same_space_skill_can_be_reused_by_multiple_parents():
     assert first == [binding]
     assert second == [binding]
     assert repo.replace_assistant_bindings.await_count == 2
+
+
+async def test_assistant_binding_update_rejects_a_concurrent_space_move():
+    space = _space()
+    repo = AsyncMock()
+    service = _service(space=space, repo=repo)
+    repo.lock_assistant_space_for_update.return_value = uuid4()
+
+    with pytest.raises(NotFoundException):
+        await service.replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=space.assistant.id,
+            references=[],
+        )
+
+    repo.list_assistant_bindings.assert_not_awaited()
+    repo.replace_assistant_bindings.assert_not_awaited()
 
 
 async def test_missing_or_cross_space_revision_fails_before_replacing_bindings():

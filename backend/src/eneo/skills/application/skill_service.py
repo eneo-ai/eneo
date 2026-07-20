@@ -296,9 +296,10 @@ class SkillService:
             raise BadRequestException(
                 "Personal default Assistant Skills are controlled by tenant governance"
             )
-        if not await self.repo.lock_assistant_for_binding_update(
+        locked_space_id = await self.repo.lock_assistant_space_for_update(
             assistant_id=assistant_id
-        ):
+        )
+        if locked_space_id != space_id:
             raise NotFoundException()
         existing = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
         resolved = await self._resolve_references(

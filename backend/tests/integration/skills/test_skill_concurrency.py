@@ -6,6 +6,7 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.jobs.job_models import Task
@@ -25,6 +26,7 @@ class SkillConcurrencyResources:
     user_id: UUID
     completion_model_id: UUID
     space_id: UUID
+    target_space_id: UUID
     assistant_id: UUID
     app_id: UUID
     first_skill_id: UUID
@@ -64,9 +66,21 @@ async def skill_concurrency_resources(
             "Skills concurrency space",
             [model.id],
         )
+        target_space = await space_factory(
+            session,
+            "Skills concurrency target space",
+            [model.id],
+        )
         session.add(
             SpacesUsers(
                 space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        session.add(
+            SpacesUsers(
+                space_id=target_space.id,
                 user_id=admin_user.id,
                 role="admin",
             )
@@ -105,12 +119,14 @@ async def skill_concurrency_resources(
         assistant_id = assistant.id
         app_id = app.id
         completion_model_id = model.id
+        target_space_id = target_space.id
 
     return SkillConcurrencyResources(
         tenant_id=admin_user.tenant_id,
         user_id=admin_user.id,
         completion_model_id=completion_model_id,
         space_id=space_id,
+        target_space_id=target_space_id,
         assistant_id=assistant_id,
         app_id=app_id,
         first_skill_id=first.id,
@@ -247,6 +263,78 @@ async def test_parent_binding_replacements_are_serialized(
     expected_ids = [] if second_clears else [resources.second_skill_id]
     assert [binding.skill_id for binding in bindings] == expected_ids
     assert [binding.position for binding in bindings] == list(range(len(expected_ids)))
+
+
+@pytest.mark.parametrize("first_operation", ["move", "bind"])
+async def test_assistant_move_and_skill_binding_update_are_serialized(
+    first_operation: str,
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    resources = skill_concurrency_resources
+    first_finished = asyncio.Event()
+    release_first = asyncio.Event()
+    second_pid = asyncio.get_running_loop().create_future()
+
+    async def move(container):
+        return await container.resource_mover_service().move_assistant_to_space(
+            assistant_id=resources.assistant_id,
+            space_id=resources.target_space_id,
+        )
+
+    async def bind(container):
+        return await container.skill_service().replace_assistant_bindings(
+            space_id=resources.space_id,
+            assistant_id=resources.assistant_id,
+            references=[resources.first_reference],
+        )
+
+    first_action = move if first_operation == "move" else bind
+    second_action = bind if first_operation == "move" else move
+    second_error = (
+        NotFoundException if first_operation == "move" else BadRequestException
+    )
+
+    async def first_writer():
+        async with db_container() as container:
+            result = await first_action(container)
+            first_finished.set()
+            await release_first.wait()
+            return result
+
+    async def second_writer():
+        async with db_container() as container:
+            second_pid.set_result(await _backend_pid(container))
+            with pytest.raises(second_error):
+                await second_action(container)
+
+    first_task = asyncio.create_task(first_writer())
+    await _wait_for_held_write(first_finished, first_task)
+    second_task = asyncio.create_task(second_writer())
+    pid = await asyncio.wait_for(second_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_first.set()
+    await asyncio.gather(first_task, second_task)
+
+    async with db_container() as container:
+        assistant_space_id = await container.session().scalar(
+            sa.select(Assistants.space_id).where(
+                Assistants.id == resources.assistant_id
+            )
+        )
+        bindings = await container.skill_repo().list_assistant_bindings(
+            assistant_id=resources.assistant_id
+        )
+
+    if first_operation == "move":
+        assert assistant_space_id == resources.target_space_id
+        assert bindings == []
+    else:
+        assert assistant_space_id == resources.space_id
+        assert [binding.skill_id for binding in bindings] == [resources.first_skill_id]
 
 
 async def test_deactivation_serializes_with_new_binding_validation(

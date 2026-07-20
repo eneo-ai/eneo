@@ -12,6 +12,7 @@ async def test_bound_assistant_cannot_move_between_spaces() -> None:
     target_space_id = uuid4()
     assistant = MagicMock(id=assistant_id)
     source_space = MagicMock()
+    source_space.id = uuid4()
     source_space.get_assistant.return_value = assistant
     target_space = MagicMock()
 
@@ -23,12 +24,16 @@ async def test_bound_assistant_cannot_move_between_spaces() -> None:
     actor_manager.get_space_actor_from_space.side_effect = [
         source_actor,
         target_actor,
+        source_actor,
     ]
 
     space_service = AsyncMock()
     space_service.get_space_by_assistant.return_value = source_space
-    space_service.get_space.return_value = target_space
+    space_service.get_space.side_effect = lambda space_id: (
+        source_space if space_id == source_space.id else target_space
+    )
     skill_repo = AsyncMock()
+    skill_repo.lock_assistant_space_for_update.return_value = source_space.id
     skill_repo.has_assistant_bindings.return_value = True
     space_repo = AsyncMock()
 

@@ -366,13 +366,14 @@ class SkillRepoImpl:
             lock_active_state=True,
         )
 
-    async def lock_assistant_for_binding_update(self, *, assistant_id: UUID) -> bool:
-        parent_id = await self.session.scalar(
-            sa.select(Assistants.id)
+    async def lock_assistant_space_for_update(
+        self, *, assistant_id: UUID
+    ) -> UUID | None:
+        return await self.session.scalar(
+            sa.select(Assistants.space_id)
             .where(Assistants.id == assistant_id)
             .with_for_update()
         )
-        return parent_id is not None
 
     async def lock_app_for_binding_update(self, *, app_id: UUID) -> bool:
         parent_id = await self.session.scalar(

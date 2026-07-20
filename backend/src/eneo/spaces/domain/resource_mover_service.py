@@ -1,6 +1,10 @@
 from typing import TYPE_CHECKING
 
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -125,6 +129,19 @@ class ResourceMoverService:
         if not target_space_actor.can_create_assistants():
             raise UnauthorizedException(
                 "User does not have permission to create assistants in the space"
+            )
+
+        locked_source_space_id = await self.skill_repo.lock_assistant_space_for_update(
+            assistant_id=assistant_id
+        )
+        if locked_source_space_id is None:
+            raise NotFoundException()
+
+        source_space = await self.space_service.get_space(locked_source_space_id)
+        source_space_actor = self.actor_manager.get_space_actor_from_space(source_space)
+        if not source_space_actor.can_delete_assistants():
+            raise UnauthorizedException(
+                "User does not have permission to move assistant from space"
             )
 
         assistant = source_space.get_assistant(assistant_id)
