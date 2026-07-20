@@ -5,7 +5,11 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepValidationError,
+    flow_step_validation_views_from_flow_steps,
+)
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
 from eneo.flows.flow_review_policy import (
@@ -15,6 +19,7 @@ from eneo.flows.flow_review_policy import (
 )
 from eneo.flows.flow_validators import (
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    collect_step_graph_issues,
     validate_form_schema,
     validate_steps,
 )
@@ -42,6 +47,16 @@ def _audio_metadata() -> dict:
             "transcription_enabled": True,
             "transcription_model": {"id": str(uuid4())},
             "transcription_language": "sv",
+        }
+    }
+
+
+def _form_metadata(*field_names: str) -> dict:
+    return {
+        "form_schema": {
+            "fields": [
+                {"name": field_name, "type": "text"} for field_name in field_names
+            ]
         }
     }
 
@@ -396,6 +411,241 @@ def test_validate_steps_rejects_forward_binding_reference_directly():
         )
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "{{ case_id }}",
+        "{{ flow_input.case_id }}",
+        "{{ flow_input }}",
+        "{{ flow_input.text }}",
+        "{{ datum }}",
+        "{{ indata_text }}",
+        "{{ transkribering }}",
+        "{{ flow_input.datum }}",
+        "{{ flow_input.indata_text }}",
+    ],
+)
+def test_validate_steps_publish_accepts_declared_and_runtime_input_names(
+    question: str,
+) -> None:
+    validate_steps(
+        [_step(input_bindings={"question": question})],
+        metadata_json=_form_metadata("case_id", "datum", "indata_text"),
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("question", "code", "context"),
+    [
+        (
+            "{{ undeclared }}",
+            "flow_input_binding_invalid_step_reference",
+            {
+                "field": "input_bindings.question",
+                "reference": "undeclared",
+            },
+        ),
+        (
+            "{{ flow_input.undeclared }}",
+            "flow_input_binding_unsupported_key",
+            {
+                "field": "input_bindings.question",
+                "key": "flow_input.undeclared",
+            },
+        ),
+        (
+            "{{ datum.year }}",
+            "flow_input_binding_unsupported_key",
+            {
+                "field": "input_bindings.question",
+                "key": "datum.year",
+            },
+        ),
+    ],
+)
+def test_validate_steps_publish_rejects_unknown_input_names_with_precise_context(
+    question: str,
+    code: str,
+    context: dict[str, str],
+) -> None:
+    exc = _assert_validate_steps_rejects(
+        [_step(input_bindings={"question": question})],
+        expected_type=FlowStepValidationError,
+        match=question.strip("{} "),
+        code=code,
+        step_order=1,
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == context
+
+
+def test_validate_steps_projects_publish_binding_error_to_exact_issue() -> None:
+    steps = [_step(input_bindings={"question": "{{ undeclared }}"})]
+
+    issues = collect_step_graph_issues(
+        flow_step_validation_views_from_flow_steps(steps),
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=True,
+    )
+
+    issue = next(issue for issue in issues if issue.step_order == 1)
+    assert issue.code is FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE
+    assert issue.exception_code == "flow_input_binding_invalid_step_reference"
+    assert issue.context == {
+        "field": "input_bindings.question",
+        "reference": "undeclared",
+    }
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["{{ undeclared }}", "{{ flow_input.undeclared }}", "{{ datum.year }}"],
+)
+def test_validate_steps_draft_preserves_non_numeric_binding_acceptance(
+    question: str,
+) -> None:
+    validate_steps(
+        [_step(input_bindings={"question": question})],
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "{{ step_1 }}",
+        "{{ step_1.output }}",
+        "{{ step_1.output.text }}",
+        "{{ Collect intake }}",
+    ],
+)
+def test_validate_steps_publish_accepts_prior_numeric_and_label_questions(
+    question: str,
+) -> None:
+    validate_steps(
+        [
+            _step(1, user_description="Collect intake"),
+            _step(
+                2,
+                user_description="Summarize",
+                input_bindings={"question": question},
+            ),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("question", "current_step_order", "code"),
+    [
+        (
+            "{{ step_bad.output.text }}",
+            2,
+            "flow_input_binding_invalid_step_reference",
+        ),
+        (
+            "{{ step_2.output.text }}",
+            2,
+            "flow_input_binding_future_step_reference",
+        ),
+        (
+            "{{ step_3.output.text }}",
+            2,
+            "flow_input_binding_future_step_reference",
+        ),
+        (
+            "{{ step_0.output.text }}",
+            2,
+            "flow_input_binding_unknown_step_order",
+        ),
+        (
+            "{{ Summarize }}",
+            2,
+            "flow_input_binding_future_step_reference",
+        ),
+        (
+            "{{ Deliver }}",
+            2,
+            "flow_input_binding_future_step_reference",
+        ),
+        (
+            "{{ Unknown label }}",
+            2,
+            "flow_input_binding_invalid_step_reference",
+        ),
+        (
+            "{{ Collect intake.output.text }}",
+            2,
+            "flow_input_binding_invalid_step_reference",
+        ),
+        (
+            "{{ collect_input }}",
+            2,
+            "flow_input_binding_invalid_step_reference",
+        ),
+        (
+            "{{ existing_step_1 }}",
+            2,
+            "flow_input_binding_invalid_step_reference",
+        ),
+    ],
+)
+def test_validate_steps_publish_rejects_invalid_numeric_label_and_authored_questions(
+    question: str,
+    current_step_order: int,
+    code: str,
+) -> None:
+    steps = [
+        _step(1, user_description="Collect intake"),
+        _step(2, user_description="Summarize"),
+        _step(3, user_description="Deliver"),
+    ]
+    steps[current_step_order - 1] = steps[current_step_order - 1].model_copy(
+        update={"input_bindings": {"question": question}}
+    )
+
+    exc = _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match=question.strip("{} "),
+        code=code,
+        step_order=current_step_order,
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == {
+        "field": "input_bindings.question",
+        "reference": question.strip("{} "),
+    }
+
+
+@pytest.mark.parametrize(
+    ("question", "code"),
+    [
+        ("{{ step_bad }}", "flow_input_binding_invalid_step_reference"),
+        ("{{ step_2 }}", "flow_input_binding_future_step_reference"),
+        ("{{ step_0 }}", "flow_input_binding_unknown_step_order"),
+    ],
+)
+def test_validate_steps_draft_preserves_numeric_reference_rejection(
+    question: str,
+    code: str,
+) -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(1),
+            _step(2, input_bindings={"question": question}),
+        ],
+        expected_type=FlowStepValidationError,
+        match="step",
+        code=code,
+    )
+
+
 def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
     validate_steps(
         [
@@ -529,6 +779,198 @@ def _source_sections_contract() -> dict[str, object]:
             "report_title": {"type": "string"},
         },
     }
+
+
+@pytest.mark.parametrize("step_ref", ["step_1", "Collect intake"])
+def test_validate_steps_publish_accepts_prior_numeric_and_label_source_refs(
+    step_ref: str,
+) -> None:
+    validate_steps(
+        [
+            _step(1, user_description="Collect intake"),
+            _step(
+                2,
+                user_description="Summarize",
+                input_bindings={
+                    "source_refs": [{"step_ref": step_ref, "output": "text"}]
+                },
+            ),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_validate_steps_publish_accepts_label_structured_source_ref() -> None:
+    validate_steps(
+        [
+            _step(
+                1,
+                user_description="Collect intake",
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                user_description="Summarize",
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "Collect intake",
+                            "output": "structured",
+                            "field_path": "report_title",
+                        }
+                    ]
+                },
+            ),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("step_ref", "code"),
+    [
+        ("step_bad", "flow_input_binding_invalid_step_reference"),
+        ("step_2", "flow_input_binding_future_step_reference"),
+        ("step_3", "flow_input_binding_future_step_reference"),
+        ("step_0", "flow_input_binding_unknown_step_order"),
+        ("Summarize", "flow_input_binding_future_step_reference"),
+        ("Deliver", "flow_input_binding_future_step_reference"),
+        ("Unknown label", "flow_input_binding_invalid_step_reference"),
+        ("collect_input", "flow_input_binding_invalid_step_reference"),
+        ("existing_step_1", "flow_input_binding_invalid_step_reference"),
+    ],
+)
+def test_validate_steps_publish_rejects_source_refs_with_indexed_context(
+    step_ref: str,
+    code: str,
+) -> None:
+    exc = _assert_validate_steps_rejects(
+        [
+            _step(1, user_description="Collect intake"),
+            _step(
+                2,
+                user_description="Summarize",
+                input_bindings={
+                    "source_refs": [
+                        {"step_ref": "step_1", "output": "text"},
+                        {"step_ref": step_ref, "output": "text"},
+                    ]
+                },
+            ),
+            _step(3, user_description="Deliver"),
+        ],
+        expected_type=FlowStepValidationError,
+        match=step_ref,
+        code=code,
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == {
+        "field": "input_bindings.source_refs[1].step_ref",
+        "reference": step_ref,
+    }
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "{{ step_1.output.structured }}",
+        "{{ step_1.output.structured.report_title }}",
+        "{{ step_1.output.structured.source_sections }}",
+    ],
+)
+def test_validate_steps_publish_accepts_contract_proven_structured_question_paths(
+    question: str,
+) -> None:
+    validate_steps(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(2, input_bindings={"question": question}),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("question", "output_contract"),
+    [
+        ("{{ step_1.output.structured }}", None),
+        ("{{ step_1.output.structured.report_title }}", None),
+        (
+            "{{ step_1.output.structured.unknown }}",
+            _source_sections_contract(),
+        ),
+        (
+            "{{ step_1.output.structured.report_title.value }}",
+            _source_sections_contract(),
+        ),
+        ("{{ step_1.output.unknown }}", _source_sections_contract()),
+    ],
+)
+def test_validate_steps_publish_rejects_unproven_structured_question_paths(
+    question: str,
+    output_contract: dict[str, object] | None,
+) -> None:
+    key = question.strip("{} ")
+    exc = _assert_validate_steps_rejects(
+        [
+            _step(1, output_type="json", output_contract=output_contract),
+            _step(2, input_bindings={"question": question}),
+        ],
+        expected_type=FlowStepValidationError,
+        match="step_1",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == {
+        "field": "input_bindings.question",
+        "key": key,
+    }
+
+
+def test_validate_steps_preserves_source_ref_schema_error_context() -> None:
+    exc = _assert_validate_steps_rejects(
+        [
+            _step(
+                1,
+                output_type="json",
+                output_contract=_source_sections_contract(),
+            ),
+            _step(
+                2,
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "step_1",
+                            "output": "structured",
+                            "field_path": "unknown",
+                        }
+                    ]
+                },
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="unknown field",
+        code="flow_input_binding_unsupported_key",
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == {"field": "input_bindings", "key": "source_refs"}
 
 
 def test_validate_steps_accepts_compose_item_template_source_refs() -> None:

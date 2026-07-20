@@ -161,6 +161,35 @@ The Flow runtime does **not** require browser-side streaming transcription for t
 
 If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.
 
+### Binding references at publish
+
+Publish validates questions and source references against the persisted form,
+runtime input names, earlier steps, and their output contracts:
+
+- `{"{{ flow_input.<field> }}"}` accepts a declared form field. A declared field
+  can also be bare, such as `{"{{ case_id }}"}`, only when the runtime exposes
+  that safe alias. Bare `flow_input` and its primary input keys are valid;
+  undeclared names and unknown `flow_input` keys are rejected.
+- In a valid publish graph, bare `datum`, `indata_text`, and `transkribering`
+  keep their runtime meanings. Form fields named `datum` or `indata_text` are
+  reached through `flow_input.datum` or `flow_input.indata_text`.
+  `transkribering` is a primary runtime input key, not a custom form field.
+- Questions accept an earlier `step_N` reference or the exact trimmed earlier
+  display label as a bare expression. Labels represent complete step text, so
+  current, future, unknown, and dotted label paths are rejected. `source_refs`
+  accept the same prior numeric refs and exact labels.
+- Structured question paths such as
+  `step_1.output.structured.report_title` publish only when the earlier step's
+  `output_contract` proves every path segment. Missing contracts, unknown
+  fields, and traversal through scalar values are rejected before runtime.
+- Authoring lowers `plan_step_ref` to `step_N` before persisting a `FlowStep`.
+  `existing_step_ref` is edit identity only. Publish rejects either raw identity
+  token if it survives authoring as binding syntax.
+
+Publish errors identify the exact location: question errors point to
+`input_bindings.question`, and source-reference errors point to the indexed
+`input_bindings.source_refs[i].step_ref`.
+
 ## Output modes and what they mean
 
 | `output_mode`     | What it is for                                    | Constraints                                                                          |

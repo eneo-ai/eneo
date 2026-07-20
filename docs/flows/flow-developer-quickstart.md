@@ -169,13 +169,33 @@ Common input paths:
 | Runtime files | Loads, extracts, transcribes, or passes file data according to runtime input config and file policy. |
 | `http_get` | Fetches input through the runtime HTTP transport before step execution. |
 
-Earlier step text can also be interpolated with its trimmed display label, for
-example `{{ Collect intake }}` when that step's `user_description` is
-`Collect intake`. A display label is available only when the canonical
-step-reference mapping resolves it to that same step. If it collides with
-another step's `plan_step_ref` or `existing_step_ref`, the authored reference
-wins and the display label is unavailable. Authored refs remain analyzer and
-dependency identifiers; they are not bare-text interpolation aliases.
+Publish validates every question and source reference against the persisted
+form, runtime names, earlier steps, and declared output contracts:
+
+- `{{ flow_input.<field> }}` accepts a declared form field. A declared field can
+  also be bare, such as `{{ case_id }}`, only when the runtime exposes that safe
+  alias. Bare `flow_input` and its primary input keys are valid; undeclared
+  names and unknown `flow_input` keys are rejected.
+- In a valid publish graph, bare `datum`, `indata_text`, and `transkribering`
+  keep their runtime meanings. Form fields named `datum` or `indata_text` are
+  reached as `flow_input.datum` or `flow_input.indata_text`.
+  `transkribering` is a primary runtime input key, not a custom form field.
+- A question can use an earlier numeric reference (`step_N`) or the exact
+  trimmed earlier display label, for example `{{ Collect intake }}`. A label is
+  a complete text value: current, future, unknown, and dotted label paths are
+  rejected. `source_refs` accept the same prior numeric refs and exact labels.
+- Numeric structured paths such as
+  `step_1.output.structured.report_title` publish only when the referenced
+  earlier step's `output_contract` proves every segment. Missing contracts,
+  unknown fields, and paths through scalar values are rejected before runtime.
+- Authoring lowers `plan_step_ref` values to `step_N` before persisting a
+  `FlowStep`. `existing_step_ref` identifies an edited step only; neither raw
+  identity token is persisted binding syntax, and publish rejects either if it
+  survives authoring.
+
+Publish errors identify the precise binding location: question reference and
+path errors point to `input_bindings.question`, while source-reference errors
+point to the indexed `input_bindings.source_refs[i].step_ref`.
 
 Prefer explicit bindings over `all_previous_steps` when the Flow needs precise
 data flow. `all_previous_steps` is useful for broad summarization, but it hides
