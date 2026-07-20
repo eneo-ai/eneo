@@ -14,6 +14,8 @@ from eneo.skills.domain.skill import (
     Skill,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionPage,
+    SkillRevisionSummary,
     SkillStatusChange,
 )
 from eneo.skills.presentation import skill_models, skill_router
@@ -63,6 +65,16 @@ def _skill(*, revision_number: int = 1, active: bool = True) -> Skill:
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
         current_revision=revision,
+    )
+
+
+def _summary(revision: SkillRevision) -> SkillRevisionSummary:
+    return SkillRevisionSummary(
+        id=revision.id,
+        skill_id=revision.skill_id,
+        revision_number=revision.revision_number,
+        display_name=revision.display_name,
+        created_at=revision.created_at,
     )
 
 
@@ -130,8 +142,93 @@ def test_parent_binding_projection_routes_are_get_only():
 def test_duplicate_binding_mutation_contracts_are_absent():
     assert not hasattr(SkillService, "create_and_attach_to_assistant")
     assert not hasattr(SkillService, "create_and_attach_to_app")
+    assert not hasattr(SkillService, "list_revisions")
     assert not hasattr(skill_models, "SkillBindingReplaceRequest")
     assert not hasattr(skill_models, "CreateAndAttachSkillResponse")
+
+
+async def test_revision_history_returns_a_bounded_body_free_cursor_page():
+    skill = _skill(revision_number=3)
+    revisions = (
+        _summary(skill.current_revision),
+        replace(
+            _summary(skill.current_revision),
+            id=uuid4(),
+            revision_number=2,
+        ),
+    )
+    service = SimpleNamespace(
+        list_revision_summaries=AsyncMock(
+            return_value=SkillRevisionPage(
+                items=revisions,
+                limit=2,
+                next_cursor=2,
+                total_count=3,
+            )
+        ),
+    )
+    assembler = SimpleNamespace(
+        revision_summary_to_public=MagicMock(
+            side_effect=lambda revision: skill_models.SkillRevisionSummaryPublic(
+                **revision.__dict__
+            )
+        )
+    )
+    container, _ = _router_container(service=service, assembler=assembler)
+
+    response = await skill_router.list_skill_revisions(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        limit=2,
+        cursor=None,
+        container=container,
+    )
+
+    assert [revision.revision_number for revision in response.items] == [3, 2]
+    assert not hasattr(response.items[0], "instructions")
+    assert not hasattr(response.items[0], "description")
+    assert not hasattr(response.items[0], "content_digest")
+    assert not hasattr(response.items[0], "created_by_user_id")
+    assert response.limit == 2
+    assert response.next_cursor == "2"
+    assert response.total_count == 3
+    service.list_revision_summaries.assert_awaited_once_with(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        limit=2,
+        cursor=None,
+    )
+
+
+async def test_exact_revision_endpoint_returns_the_full_immutable_body():
+    skill = _skill(revision_number=3)
+    revision = replace(
+        skill.current_revision,
+        id=uuid4(),
+        revision_number=2,
+        instructions="Exact historical instructions",
+    )
+    service = SimpleNamespace(get_revision=AsyncMock(return_value=revision))
+    assembler = SimpleNamespace(
+        revision_to_public=MagicMock(
+            return_value=skill_models.SkillRevisionPublic(**revision.__dict__)
+        )
+    )
+    container, _ = _router_container(service=service, assembler=assembler)
+
+    response = await skill_router.get_skill_revision(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        revision_id=revision.id,
+        container=container,
+    )
+
+    assert response.instructions == "Exact historical instructions"
+    service.get_revision.assert_awaited_once_with(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        revision_id=revision.id,
+    )
 
 
 async def test_revision_noop_result_does_not_emit_created_audit():

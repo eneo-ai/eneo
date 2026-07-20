@@ -5,7 +5,8 @@ export const load = async (event) => {
   event.depends("space:skills");
   const { eneo, currentSpace } = await event.parent();
   const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
-  const supportsDirectSkills = currentSpace.default_assistant?.id !== event.params.assistantId;
+  const supportsDirectSkills =
+    !currentSpace.personal || currentSpace.default_assistant?.id !== event.params.assistantId;
   const [assistant, mcpServers, promptGuideAvailability, skills, skillBindings] = await Promise.all(
     [
       eneo.assistants.get({ id: event.params.assistantId }),

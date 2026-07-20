@@ -41,4 +41,79 @@ describe("Assistant edit loader", () => {
     });
     expect(result.skillBindings).toEqual(bindings);
   });
+
+  test("keeps direct Skills disabled for the personal default Assistant", async () => {
+    const list = vi.fn();
+    const listAssistantBindings = vi.fn();
+    const event = {
+      depends: vi.fn(),
+      params: { assistantId: "default-assistant" },
+      parent: vi.fn().mockResolvedValue({
+        currentSpace: {
+          id: "personal-space",
+          personal: true,
+          default_assistant: { id: "default-assistant" },
+          skill_permissions: [READ_SKILL_PERMISSION]
+        },
+        eneo: {
+          assistants: {
+            get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+          },
+          helpAssistants: {
+            runs: { availability: vi.fn().mockResolvedValue(null) }
+          },
+          skills: { list, listAssistantBindings }
+        }
+      })
+    };
+
+    const result = await load(event as never);
+
+    expect(result.supportsDirectSkills).toBe(false);
+    expect(result.skills).toEqual([]);
+    expect(result.skillBindings).toEqual([]);
+    expect(list).not.toHaveBeenCalled();
+    expect(listAssistantBindings).not.toHaveBeenCalled();
+  });
+
+  test("loads direct Skills for a shared default Assistant", async () => {
+    const skills = [{ id: "skill-1" }];
+    const bindings = [{ skill_id: "skill-1" }];
+    const list = vi.fn().mockResolvedValue(skills);
+    const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
+    const event = {
+      depends: vi.fn(),
+      params: { assistantId: "default-assistant" },
+      parent: vi.fn().mockResolvedValue({
+        currentSpace: {
+          id: "shared-space",
+          personal: false,
+          default_assistant: { id: "default-assistant" },
+          skill_permissions: [READ_SKILL_PERMISSION]
+        },
+        eneo: {
+          assistants: {
+            get: vi.fn().mockResolvedValue({ id: "default-assistant" }),
+            listMCPServers: vi.fn().mockResolvedValue({ items: [] })
+          },
+          helpAssistants: {
+            runs: { availability: vi.fn().mockResolvedValue(null) }
+          },
+          skills: { list, listAssistantBindings }
+        }
+      })
+    };
+
+    const result = await load(event as never);
+
+    expect(result.supportsDirectSkills).toBe(true);
+    expect(result.skills).toEqual(skills);
+    expect(result.skillBindings).toEqual(bindings);
+    expect(list).toHaveBeenCalledWith({ spaceId: "shared-space" });
+    expect(listAssistantBindings).toHaveBeenCalledWith({
+      spaceId: "shared-space",
+      assistantId: "default-assistant"
+    });
+  });
 });

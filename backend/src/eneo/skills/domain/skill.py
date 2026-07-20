@@ -93,6 +93,23 @@ class SkillRevision:
 
 
 @dataclass(frozen=True)
+class SkillRevisionSummary:
+    id: UUID
+    skill_id: UUID
+    revision_number: int
+    display_name: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class SkillRevisionPage:
+    items: tuple[SkillRevisionSummary, ...]
+    limit: int
+    next_cursor: int | None
+    total_count: int
+
+
+@dataclass(frozen=True)
 class SkillRevisionChange:
     revision: SkillRevision
     created: bool

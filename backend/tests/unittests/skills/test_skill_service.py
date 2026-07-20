@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -11,7 +12,12 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
-from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingReference
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingReference,
+    SkillRevision,
+    SkillRevisionSummary,
+)
 
 
 def _binding(
@@ -39,6 +45,32 @@ def _binding_reference(binding: ResolvedSkillBinding) -> SkillBindingReference:
     return SkillBindingReference(
         skill_id=binding.skill_id,
         skill_revision_id=binding.skill_revision_id,
+    )
+
+
+def _revision(*, skill_id=None, revision_number: int = 1) -> SkillRevision:
+    return SkillRevision(
+        id=uuid4(),
+        skill_id=skill_id or uuid4(),
+        revision_number=revision_number,
+        display_name=f"Payroll {revision_number}",
+        description=f"Payroll guidance {revision_number}",
+        instructions=f"Use approved payroll guidance {revision_number}.",
+        content_digest=str(revision_number) * 64,
+        created_by_user_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def _revision_summary(
+    *, skill_id=None, revision_number: int = 1
+) -> SkillRevisionSummary:
+    return SkillRevisionSummary(
+        id=uuid4(),
+        skill_id=skill_id or uuid4(),
+        revision_number=revision_number,
+        display_name=f"Payroll {revision_number}",
+        created_at=datetime.now(timezone.utc),
     )
 
 
@@ -89,13 +121,22 @@ def _space(*, personal=False, organization=False, default_assistant=False):
     )
 
 
-async def test_reader_can_open_skill_detail_and_revision_history():
+async def test_reader_can_open_skill_detail_and_bounded_revision_history():
     space = _space()
-    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
-    revisions = [SimpleNamespace(id=uuid4())]
+    skill = SimpleNamespace(
+        id=uuid4(),
+        space_id=space.id,
+        current_revision_number=5,
+    )
+    revisions = [
+        _revision_summary(skill_id=skill.id, revision_number=5),
+        _revision_summary(skill_id=skill.id, revision_number=4),
+        _revision_summary(skill_id=skill.id, revision_number=3),
+    ]
     repo = AsyncMock()
     repo.get.return_value = skill
-    repo.list_revisions.return_value = revisions
+    repo.list_revision_summaries.return_value = revisions
+    repo.count_revisions.return_value = 5
     actor = MagicMock(
         can_read_skills=MagicMock(return_value=True),
         can_edit_skills=MagicMock(return_value=False),
@@ -103,10 +144,103 @@ async def test_reader_can_open_skill_detail_and_revision_history():
     service = _service(space=space, actor=actor, repo=repo)
 
     assert await service.get_skill(skill_id=skill.id) is skill
-    assert await service.list_revisions(skill_id=skill.id) == revisions
+    page = await service.list_revision_summaries(
+        space_id=space.id,
+        skill_id=skill.id,
+        limit=2,
+        cursor="6",
+    )
 
+    assert [revision.revision_number for revision in page.items] == [5, 4]
+    assert page.next_cursor == 4
+    assert page.total_count == 5
+    repo.list_revision_summaries.assert_awaited_once_with(
+        skill_id=skill.id,
+        limit=3,
+        before_revision_number=6,
+    )
+    repo.count_revisions.assert_awaited_once_with(skill_id=skill.id)
     actor.can_read_skills.assert_called()
     actor.can_edit_skills.assert_not_called()
+
+
+@pytest.mark.parametrize("cursor", ["0", "-1", "not-a-number"])
+async def test_revision_history_rejects_invalid_cursors(cursor: str):
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="revision cursor"):
+        await service.list_revision_summaries(
+            space_id=space.id,
+            skill_id=skill.id,
+            limit=25,
+            cursor=cursor,
+        )
+
+    repo.list_revision_summaries.assert_not_awaited()
+
+
+async def test_reader_can_get_one_exact_skill_revision():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    revision = _revision(skill_id=skill.id, revision_number=2)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    repo.get_revision.return_value = revision
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=True),
+        can_edit_skills=MagicMock(return_value=False),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    result = await service.get_revision(
+        space_id=space.id,
+        skill_id=skill.id,
+        revision_id=revision.id,
+    )
+
+    assert result is revision
+    repo.get_revision.assert_awaited_once_with(
+        skill_id=skill.id,
+        revision_id=revision.id,
+    )
+    actor.can_edit_skills.assert_not_called()
+
+
+async def test_exact_skill_revision_rejects_a_different_space_path():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.get_revision(
+            space_id=uuid4(),
+            skill_id=skill.id,
+            revision_id=uuid4(),
+        )
+
+    repo.get_revision.assert_not_awaited()
+
+
+async def test_missing_or_cross_skill_revision_is_not_found():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    repo.get_revision.return_value = None
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.get_revision(
+            space_id=space.id,
+            skill_id=skill.id,
+            revision_id=uuid4(),
+        )
 
 
 async def test_reader_cannot_create_skill_revision():
@@ -441,6 +575,84 @@ async def test_api_key_cannot_replace_governance_skill_bindings():
     )
 
     with pytest.raises(UnauthorizedException, match="session token"):
+        await service.replace_governance_bindings(
+            policy_id=uuid4(),
+            organization_space_id=space.id,
+            references=[],
+        )
+
+    repo.list_policy_bindings.assert_not_awaited()
+
+
+async def test_tenant_admin_with_skill_use_can_replace_governance_bindings():
+    space = _space(organization=True)
+    binding = _binding()
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = []
+    repo.resolve_references_for_binding_update.return_value = [binding]
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=True),
+        can_edit_skills=MagicMock(return_value=False),
+    )
+    service = _service(
+        space=space,
+        actor=actor,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+    policy_id = uuid4()
+
+    result = await service.replace_governance_bindings(
+        policy_id=policy_id,
+        organization_space_id=space.id,
+        references=[_binding_reference(binding)],
+    )
+
+    assert result == [binding]
+    repo.replace_policy_bindings.assert_awaited_once_with(
+        policy_id=policy_id,
+        tenant_id=space.tenant_id,
+        skill_space_id=space.id,
+        bindings=[binding],
+    )
+
+
+async def test_tenant_admin_without_skill_use_cannot_replace_governance_bindings():
+    space = _space(organization=True)
+    repo = AsyncMock()
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=False),
+        can_edit_skills=MagicMock(return_value=True),
+    )
+    service = _service(
+        space=space,
+        actor=actor,
+        repo=repo,
+        permissions={Permission.ADMIN},
+    )
+
+    with pytest.raises(UnauthorizedException, match="configure organisation Skills"):
+        await service.replace_governance_bindings(
+            policy_id=uuid4(),
+            organization_space_id=space.id,
+            references=[],
+        )
+
+    repo.list_policy_bindings.assert_not_awaited()
+
+
+async def test_skill_user_without_tenant_admin_cannot_replace_governance_bindings():
+    space = _space(organization=True)
+    repo = AsyncMock()
+    actor = MagicMock(can_read_skills=MagicMock(return_value=True))
+    service = _service(
+        space=space,
+        actor=actor,
+        repo=repo,
+        permissions={Permission.SKILLS},
+    )
+
+    with pytest.raises(UnauthorizedException, match="permission admin"):
         await service.replace_governance_bindings(
             policy_id=uuid4(),
             organization_space_id=space.id,

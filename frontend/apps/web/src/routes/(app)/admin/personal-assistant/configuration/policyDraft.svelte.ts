@@ -111,7 +111,6 @@ export type BadgeVariant = "default" | "outline" | "destructive";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
 const CREATE_SKILL_PERMISSION: ResourcePermission = "create";
-const EDIT_SKILL_PERMISSION: ResourcePermission = "edit";
 
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
@@ -135,7 +134,7 @@ export class PolicyDraft {
   promptOptions = $state<PromptOption[]>([]);
   availableSkills = $state<SkillSparse[]>([]);
   skillBindingSummaries = $state<SkillBindingSummary[]>([]);
-  canEditSkills = $state(false);
+  canUseSkills = $state(false);
   canCreateSkills = $state(false);
 
   // ---- Editable state ------------------------------------------------------
@@ -172,8 +171,7 @@ export class PolicyDraft {
     this.promptOptions = data.promptLibrary.items;
     this.availableSkills = data.skills;
     const canReadSkills = data.organizationSpace.skill_permissions.includes(READ_SKILL_PERMISSION);
-    this.canEditSkills =
-      canReadSkills && data.organizationSpace.skill_permissions.includes(EDIT_SKILL_PERMISSION);
+    this.canUseSkills = canReadSkills;
     this.canCreateSkills =
       canReadSkills && data.organizationSpace.skill_permissions.includes(CREATE_SKILL_PERMISSION);
     this.#seed(data.policy, selectableModels);

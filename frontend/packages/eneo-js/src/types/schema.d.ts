@@ -5743,7 +5743,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List Skill Revisions */
+    /**
+     * List Skill Revisions
+     * @description List immutable Skill revision summaries using a stable cursor.
+     */
     get: operations["list_skill_revisions_api_v1_spaces__space_id__skills__skill_id__revisions__get"];
     put?: never;
     /**
@@ -5751,6 +5754,26 @@ export interface paths {
      * @description Create the next immutable Skill revision; identical current content is a no-op.
      */
     post: operations["create_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{revision_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Skill Revision
+     * @description Get one immutable Skill revision for review.
+     */
+    get: operations["get_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__revision_id___get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -10406,6 +10429,27 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[SkillRevisionSummaryPublic] */
+    CursorPaginatedResponse_SkillRevisionSummaryPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SkillRevisionSummaryPublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[UserSparse] */
     CursorPaginatedResponse_UserSparse_: {
       /**
@@ -13704,19 +13748,6 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[SkillRevisionPublic] */
-    PaginatedResponse_SkillRevisionPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["SkillRevisionPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
     /** PaginatedResponse[SkillSparse] */
     PaginatedResponse_SkillSparse_: {
       /**
@@ -15630,6 +15661,28 @@ export interface components {
        * Format: uuid
        */
       created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /** SkillRevisionSummaryPublic */
+    SkillRevisionSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
       /**
        * Created At
        * Format: date-time
@@ -38124,7 +38177,10 @@ export interface operations {
   };
   list_skill_revisions_api_v1_spaces__space_id__skills__skill_id__revisions__get: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
       header?: never;
       path: {
         space_id: string;
@@ -38140,7 +38196,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_SkillRevisionPublic_"];
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
         };
       };
       /** @description Forbidden */
@@ -38204,6 +38260,57 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__revision_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+        revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
         };
       };
       /** @description Forbidden */

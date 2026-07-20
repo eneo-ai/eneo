@@ -40,6 +40,14 @@ class SkillRevisionPublic(BaseModel):
     created_at: datetime
 
 
+class SkillRevisionSummaryPublic(BaseModel):
+    id: UUID
+    skill_id: UUID
+    revision_number: int
+    display_name: str
+    created_at: datetime
+
+
 class SkillSparse(BaseModel):
     id: UUID
     space_id: UUID

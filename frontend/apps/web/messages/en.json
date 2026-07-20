@@ -3234,6 +3234,8 @@
   "skills_library_current_revision": "Current",
   "skills_library_view_revision_aria": "View revision {revision}",
   "skills_library_view_revision_title": "Revision {revision}",
+  "skills_library_load_older": "Load older revisions",
+  "skills_library_loading_older": "Loading older revisions…",
   "skills_revision_form_error_title": "The Skill revision could not be saved",
   "governance_skills_heading": "Organisation Skills",
   "governance_skills_section_description": "Choose ordered, revision-pinned Skills that supplement the personal assistant for the whole organisation.",

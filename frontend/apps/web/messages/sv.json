@@ -3267,6 +3267,8 @@
   "skills_library_current_revision": "Aktuell",
   "skills_library_view_revision_aria": "Visa revision {revision}",
   "skills_library_view_revision_title": "Revision {revision}",
+  "skills_library_load_older": "Läs in äldre revisioner",
+  "skills_library_loading_older": "Läser in äldre revisioner…",
   "skills_revision_form_error_title": "Skillrevisionen kunde inte sparas",
   "governance_skills_heading": "Organisationens Skills",
   "governance_skills_section_description": "Välj ordnade och revisionsbundna Skills som kompletterar den personliga assistenten för hela organisationen.",

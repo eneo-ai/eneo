@@ -1,6 +1,7 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
 /** @typedef {import('../types/resources').SkillPublic} SkillPublic */
 /** @typedef {import('../types/resources').SkillRevisionPublic} SkillRevisionPublic */
+/** @typedef {import('../types/resources').SkillRevisionSummaryPage} SkillRevisionSummaryPage */
 /** @typedef {import('../types/resources').SkillSparse} SkillSparse */
 /** @typedef {import('../types/resources').SkillBindingSummary} SkillBindingSummary */
 
@@ -52,17 +53,41 @@ export function initSkills(client) {
     },
 
     /**
-     * List all immutable revisions for a Skill.
-     * @param {{spaceId: string, skillId: string}} params
-     * @returns {Promise<SkillRevisionPublic[]>}
+     * List immutable revision summaries using a stable cursor.
+     * @param {{spaceId: string, skillId: string, limit?: number, cursor?: string | null}} params
+     * @returns {Promise<SkillRevisionSummaryPage>}
      * @throws {EneoError}
      */
-    listRevisions: async ({ spaceId, skillId }) => {
-      const res = await client.fetch("/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/", {
+    listRevisionSummaries: async ({ spaceId, skillId, limit, cursor }) => {
+      return await client.fetch("/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/", {
         method: "get",
-        params: { path: { space_id: spaceId, skill_id: skillId } }
+        params: {
+          path: { space_id: spaceId, skill_id: skillId },
+          query: { limit, cursor }
+        }
       });
-      return res.items;
+    },
+
+    /**
+     * Get one immutable Skill revision with its full content.
+     * @param {{spaceId: string, skillId: string, revisionId: string}} params
+     * @returns {Promise<SkillRevisionPublic>}
+     * @throws {EneoError}
+     */
+    getRevision: async ({ spaceId, skillId, revisionId }) => {
+      return await client.fetch(
+        "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{revision_id}/",
+        {
+          method: "get",
+          params: {
+            path: {
+              space_id: spaceId,
+              skill_id: skillId,
+              revision_id: revisionId
+            }
+          }
+        }
+      );
     },
 
     /**

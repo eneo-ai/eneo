@@ -636,10 +636,25 @@ async def test_concurrent_same_content_revision_has_one_created_outcome(
     assert first_change.previous_revision_number == 1
     assert second_change.previous_revision_number == 2
     async with db_container() as container:
-        revisions = await container.skill_repo().list_revisions(
-            skill_id=resources.first_skill_id
+        repo = container.skill_repo()
+        revisions = await repo.list_revision_summaries(
+            skill_id=resources.first_skill_id,
+            limit=3,
+            before_revision_number=None,
+        )
+        revision_count = await repo.count_revisions(skill_id=resources.first_skill_id)
+        exact_revision = await repo.get_revision(
+            skill_id=resources.first_skill_id,
+            revision_id=first_change.revision.id,
+        )
+        cross_skill_revision = await repo.get_revision(
+            skill_id=resources.first_skill_id,
+            revision_id=resources.second_revision_id,
         )
     assert [revision.revision_number for revision in revisions] == [2, 1]
+    assert revision_count == 2
+    assert exact_revision == first_change.revision
+    assert cross_skill_revision is None
 
 
 async def test_concurrent_identical_status_change_has_one_changed_outcome(

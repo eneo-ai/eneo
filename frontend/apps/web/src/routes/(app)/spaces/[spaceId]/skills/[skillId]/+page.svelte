@@ -6,19 +6,16 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Dialog from "$lib/components/ui/dialog/index.js";
-  import * as Table from "$lib/components/ui/table/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
+  import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import { Eye, Info } from "lucide-svelte";
+  import { Info } from "lucide-svelte";
 
   const EDIT_SKILL_PERMISSION: ResourcePermission = "edit";
 
   let { data } = $props();
 
-  let viewedRevision = $state<(typeof data.revisions)[number] | null>(null);
   let statusError = $state<string | null>(null);
   let statusSaving = $state(false);
   let formDirty = $state(false);
@@ -31,13 +28,6 @@
         : data.currentSpace.id
   );
   const canEdit = $derived(data.currentSpace.skill_permissions.includes(EDIT_SKILL_PERMISSION));
-
-  function formatCreatedAt(value: string): string {
-    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
-      dateStyle: "short",
-      timeStyle: "short"
-    });
-  }
 
   async function createRevision(value: SkillRevisionFormValue) {
     await data.eneo.skills.createRevision({
@@ -66,6 +56,22 @@
     } finally {
       statusSaving = false;
     }
+  }
+
+  async function loadOlderRevisions(cursor: string) {
+    return await data.eneo.skills.listRevisionSummaries({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id,
+      cursor
+    });
+  }
+
+  async function viewRevision(revisionId: string) {
+    return await data.eneo.skills.getRevision({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id,
+      revisionId
+    });
   }
 
   beforeNavigate((navigation) => {
@@ -189,86 +195,15 @@
         <p class="text-muted-foreground mb-4 text-sm">
           {m.skills_library_history_description()}
         </p>
-        <Card.Root>
-          <Table.Root>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>{m.skills_library_revision_column()}</Table.Head>
-                <Table.Head>{m.name()}</Table.Head>
-                <Table.Head>{m.skills_library_created_column()}</Table.Head>
-                <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {#each data.revisions as revision (revision.id)}
-                <Table.Row>
-                  <Table.Cell>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-medium">
-                        {m.skills_revision_label({ revision: String(revision.revision_number) })}
-                      </span>
-                      {#if revision.id === data.skill.current_revision_id}
-                        <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
-                      {/if}
-                    </div>
-                  </Table.Cell>
-                  <Table.Cell>{revision.display_name}</Table.Cell>
-                  <Table.Cell class="text-muted-foreground text-sm">
-                    {formatCreatedAt(revision.created_at)}
-                  </Table.Cell>
-                  <Table.Cell class="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title={m.view()}
-                      aria-label={m.skills_library_view_revision_aria({
-                        revision: String(revision.revision_number)
-                      })}
-                      onclick={() => (viewedRevision = revision)}
-                    >
-                      <Eye aria-hidden="true" />
-                    </Button>
-                  </Table.Cell>
-                </Table.Row>
-              {/each}
-            </Table.Body>
-          </Table.Root>
-        </Card.Root>
+        {#key data.skill.current_revision_id}
+          <SkillRevisionHistory
+            currentRevision={data.skill.current_revision}
+            initialPage={data.revisionPage}
+            onLoadMore={loadOlderRevisions}
+            onView={viewRevision}
+          />
+        {/key}
       </section>
     </div>
   </Page.Main>
 </Page.Root>
-
-<Dialog.Root
-  open={viewedRevision !== null}
-  onOpenChange={(open) => !open && (viewedRevision = null)}
->
-  <Dialog.Content
-    class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl"
-    closeLabel={m.close()}
-  >
-    <Dialog.Header>
-      <Dialog.Title>
-        {m.skills_library_view_revision_title({
-          revision: String(viewedRevision?.revision_number ?? "")
-        })}
-      </Dialog.Title>
-      <Dialog.Description>{viewedRevision?.description}</Dialog.Description>
-    </Dialog.Header>
-    <div class="flex flex-col gap-1">
-      <p class="text-muted-foreground text-xs font-medium">{m.name()}</p>
-      <p class="text-foreground text-sm">{viewedRevision?.display_name}</p>
-    </div>
-    <div class="flex flex-col gap-1">
-      <p class="text-muted-foreground text-xs font-medium">{m.skills_instructions_label()}</p>
-      <div
-        class="border-border bg-muted/25 max-h-[45vh] overflow-y-auto rounded-md border p-3 text-sm break-words whitespace-pre-wrap"
-      >
-        {viewedRevision?.instructions}
-      </div>
-    </div>
-    <Dialog.Footer>
-      <Button onclick={() => (viewedRevision = null)}>{m.close()}</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>

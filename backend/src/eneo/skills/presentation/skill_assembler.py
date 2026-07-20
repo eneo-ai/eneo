@@ -3,12 +3,14 @@ from eneo.skills.domain.skill import (
     Skill,
     SkillBindingReference,
     SkillRevision,
+    SkillRevisionSummary,
 )
 from eneo.skills.presentation.skill_models import (
     SkillBindingReferenceInput,
     SkillBindingSummary,
     SkillPublic,
     SkillRevisionPublic,
+    SkillRevisionSummaryPublic,
     SkillSparse,
 )
 
@@ -52,6 +54,18 @@ class SkillAssembler:
             instructions=revision.instructions,
             content_digest=revision.content_digest,
             created_by_user_id=revision.created_by_user_id,
+            created_at=revision.created_at,
+        )
+
+    @staticmethod
+    def revision_summary_to_public(
+        revision: SkillRevisionSummary,
+    ) -> SkillRevisionSummaryPublic:
+        return SkillRevisionSummaryPublic(
+            id=revision.id,
+            skill_id=revision.skill_id,
+            revision_number=revision.revision_number,
+            display_name=revision.display_name,
             created_at=revision.created_at,
         )
 

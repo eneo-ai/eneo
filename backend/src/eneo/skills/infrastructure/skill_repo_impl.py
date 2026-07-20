@@ -23,6 +23,7 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionSummary,
     SkillStatusChange,
 )
 
@@ -132,13 +133,63 @@ class SkillRepoImpl:
         )
         return [self._to_skill(row[0], row[1]) for row in result.all()]
 
-    async def list_revisions(self, *, skill_id: UUID) -> list[SkillRevision]:
-        rows = await self.session.scalars(
-            sa.select(SkillRevisions)
+    async def get_revision(
+        self, *, skill_id: UUID, revision_id: UUID
+    ) -> SkillRevision | None:
+        row = await self.session.scalar(
+            sa.select(SkillRevisions).where(
+                SkillRevisions.skill_id == skill_id,
+                SkillRevisions.id == revision_id,
+            )
+        )
+        return self._to_revision(row) if row is not None else None
+
+    async def list_revision_summaries(
+        self,
+        *,
+        skill_id: UUID,
+        limit: int,
+        before_revision_number: int | None,
+    ) -> list[SkillRevisionSummary]:
+        query = (
+            sa.select(
+                SkillRevisions.id,
+                SkillRevisions.skill_id,
+                SkillRevisions.revision_number,
+                SkillRevisions.display_name,
+                SkillRevisions.created_at,
+            )
             .where(SkillRevisions.skill_id == skill_id)
             .order_by(SkillRevisions.revision_number.desc())
+            .limit(limit)
         )
-        return [self._to_revision(row) for row in rows.all()]
+        if before_revision_number is not None:
+            query = query.where(SkillRevisions.revision_number < before_revision_number)
+        rows = await self.session.execute(query)
+        return [
+            SkillRevisionSummary(
+                id=revision_id,
+                skill_id=row_skill_id,
+                revision_number=revision_number,
+                display_name=display_name,
+                created_at=created_at,
+            )
+            for (
+                revision_id,
+                row_skill_id,
+                revision_number,
+                display_name,
+                created_at,
+            ) in rows.tuples()
+        ]
+
+    async def count_revisions(self, *, skill_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(SkillRevisions)
+            .where(SkillRevisions.skill_id == skill_id)
+        )
+        return int(count or 0)
 
     async def create_revision(
         self,

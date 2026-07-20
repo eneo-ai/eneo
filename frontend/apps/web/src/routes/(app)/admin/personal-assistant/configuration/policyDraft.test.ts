@@ -6,6 +6,31 @@ vi.mock("$app/navigation", () => ({
 }));
 
 describe("PolicyDraft", () => {
+  it("allows binding existing Skills with use permission without authoring permission", () => {
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update: vi.fn() } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      organizationSpace: {
+        id: "organization-space",
+        skill_permissions: ["read"]
+      },
+      skills: []
+    });
+
+    expect(draft.canUseSkills).toBe(true);
+    expect(draft.canCreateSkills).toBe(false);
+  });
+
   it("does not submit hidden MCP grants when only the prompt changes", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();

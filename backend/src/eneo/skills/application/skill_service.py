@@ -22,6 +22,7 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionPage,
     SkillStatusChange,
     compose_skill_instructions,
     create_content_digest,
@@ -156,9 +157,58 @@ class SkillService:
             raise NotFoundException()
         return change
 
-    async def list_revisions(self, *, skill_id: UUID) -> list[SkillRevision]:
+    async def list_revision_summaries(
+        self,
+        *,
+        space_id: UUID,
+        skill_id: UUID,
+        limit: int,
+        cursor: str | None,
+    ) -> SkillRevisionPage:
         skill = await self.get_skill(skill_id=skill_id)
-        return await self.repo.list_revisions(skill_id=skill.id)
+        if skill.space_id != space_id:
+            raise NotFoundException()
+        before_revision_number = None
+        if cursor is not None:
+            try:
+                before_revision_number = int(cursor)
+            except ValueError as error:
+                raise BadRequestException("Invalid Skill revision cursor") from error
+            if before_revision_number < 1:
+                raise BadRequestException("Invalid Skill revision cursor")
+        revisions = await self.repo.list_revision_summaries(
+            skill_id=skill.id,
+            limit=limit + 1,
+            before_revision_number=before_revision_number,
+        )
+        visible = revisions[:limit]
+        next_cursor = (
+            visible[-1].revision_number if len(revisions) > limit and visible else None
+        )
+        return SkillRevisionPage(
+            items=tuple(visible),
+            limit=limit,
+            next_cursor=next_cursor,
+            total_count=await self.repo.count_revisions(skill_id=skill.id),
+        )
+
+    async def get_revision(
+        self,
+        *,
+        space_id: UUID,
+        skill_id: UUID,
+        revision_id: UUID,
+    ) -> SkillRevision:
+        skill = await self.get_skill(skill_id=skill_id)
+        if skill.space_id != space_id:
+            raise NotFoundException()
+        revision = await self.repo.get_revision(
+            skill_id=skill.id,
+            revision_id=revision_id,
+        )
+        if revision is None:
+            raise NotFoundException()
+        return revision
 
     async def set_active(self, *, skill_id: UUID, is_active: bool) -> SkillStatusChange:
         skill = await self.get_skill(skill_id=skill_id)
@@ -373,7 +423,7 @@ class SkillService:
                 "Governance Skills must belong to this tenant's organisation Space"
             )
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_skills():
+        if not actor.can_read_skills():
             raise UnauthorizedException(
                 "You do not have permission to configure organisation Skills"
             )

@@ -7,6 +7,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionSummary,
     SkillStatusChange,
 )
 
@@ -28,7 +29,19 @@ class SkillRepo(Protocol):
 
     async def list_for_space(self, *, space_id: UUID) -> list[Skill]: ...
 
-    async def list_revisions(self, *, skill_id: UUID) -> list[SkillRevision]: ...
+    async def get_revision(
+        self, *, skill_id: UUID, revision_id: UUID
+    ) -> SkillRevision | None: ...
+
+    async def list_revision_summaries(
+        self,
+        *,
+        skill_id: UUID,
+        limit: int,
+        before_revision_number: int | None,
+    ) -> list[SkillRevisionSummary]: ...
+
+    async def count_revisions(self, *, skill_id: UUID) -> int: ...
 
     async def create_revision(
         self,

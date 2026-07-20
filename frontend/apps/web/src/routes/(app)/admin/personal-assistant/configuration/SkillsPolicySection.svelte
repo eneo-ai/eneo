@@ -17,7 +17,7 @@
     availableSkills: SkillSparse[];
     bindingSummaries: SkillBindingSummary[];
     summary: string;
-    canEditSkills: boolean;
+    canUseSkills: boolean;
     canCreateSkills: boolean;
     onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
   };
@@ -27,7 +27,7 @@
     availableSkills,
     bindingSummaries,
     summary,
-    canEditSkills,
+    canUseSkills,
     canCreateSkills,
     onCreateSkill
   }: Props = $props();
@@ -54,7 +54,7 @@
     bind:bindings={skillBindings}
     {availableSkills}
     {bindingSummaries}
-    canEditBindings={canEditSkills}
+    canEditBindings={canUseSkills}
     {canCreateSkills}
     {onCreateSkill}
   />

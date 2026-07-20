@@ -73,7 +73,7 @@
         availableSkills={draft.availableSkills}
         bindingSummaries={draft.skillBindingSummaries}
         summary={draft.skillsSummary}
-        canEditSkills={draft.canEditSkills}
+        canUseSkills={draft.canUseSkills}
         canCreateSkills={draft.canCreateSkills}
         onCreateSkill={draft.createSkill}
       />

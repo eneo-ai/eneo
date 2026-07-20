@@ -7,6 +7,9 @@ export type AssistantSparse = Omit<components["schemas"]["AssistantSparse"], "us
 export type SkillSparse = components["schemas"]["SkillSparse"];
 export type SkillPublic = components["schemas"]["SkillPublic"];
 export type SkillRevisionPublic = components["schemas"]["SkillRevisionPublic"];
+export type SkillRevisionSummaryPublic = components["schemas"]["SkillRevisionSummaryPublic"];
+export type SkillRevisionSummaryPage =
+  components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
 export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
 export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
 export type AssistantResponse = Omit<

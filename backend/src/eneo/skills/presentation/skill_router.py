@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -9,7 +9,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_session_auth
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
-from eneo.main.models import PaginatedResponse
+from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.skills.domain.skill import Skill
@@ -20,6 +20,7 @@ from eneo.skills.presentation.skill_models import (
     SkillPublic,
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
+    SkillRevisionSummaryPublic,
     SkillSparse,
 )
 
@@ -30,6 +31,8 @@ router = APIRouter(
 )
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+_DEFAULT_REVISION_PAGE_LIMIT = 25
+_MAX_REVISION_PAGE_LIMIT = 100
 
 
 def _skill_audit_extra(skill: Skill) -> dict[str, object]:
@@ -120,22 +123,56 @@ async def get_skill(
 
 @router.get(
     "/{space_id}/skills/{skill_id}/revisions/",
-    response_model=PaginatedResponse[SkillRevisionPublic],
+    response_model=CursorPaginatedResponse[SkillRevisionSummaryPublic],
+    description="List immutable Skill revision summaries using a stable cursor.",
     responses=responses.get_responses([403, 404]),
 )
 async def list_skill_revisions(
     space_id: UUID,
     skill_id: UUID,
     container: _ContainerWithUser,
-) -> PaginatedResponse[SkillRevisionPublic]:
-    skill = await container.skill_service().get_skill(skill_id=skill_id)
-    if skill.space_id != space_id:
-        raise NotFoundException()
-    revisions = await container.skill_service().list_revisions(skill_id=skill_id)
-    assembler = container.skill_assembler()
-    return PaginatedResponse(
-        items=[assembler.revision_to_public(revision) for revision in revisions]
+    limit: Annotated[
+        int,
+        Query(ge=1, le=_MAX_REVISION_PAGE_LIMIT),
+    ] = _DEFAULT_REVISION_PAGE_LIMIT,
+    cursor: Annotated[str | None, Query(pattern=r"^[1-9]\d*$")] = None,
+) -> CursorPaginatedResponse[SkillRevisionSummaryPublic]:
+    page = await container.skill_service().list_revision_summaries(
+        space_id=space_id,
+        skill_id=skill_id,
+        limit=limit,
+        cursor=cursor,
     )
+    assembler = container.skill_assembler()
+    return CursorPaginatedResponse(
+        items=[
+            assembler.revision_summary_to_public(revision) for revision in page.items
+        ],
+        limit=page.limit,
+        next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
+        previous_cursor=None,
+        total_count=page.total_count,
+    )
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/revisions/{revision_id}/",
+    response_model=SkillRevisionPublic,
+    description="Get one immutable Skill revision for review.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_skill_revision(
+    space_id: UUID,
+    skill_id: UUID,
+    revision_id: UUID,
+    container: _ContainerWithUser,
+) -> SkillRevisionPublic:
+    revision = await container.skill_service().get_revision(
+        space_id=space_id,
+        skill_id=skill_id,
+        revision_id=revision_id,
+    )
+    return container.skill_assembler().revision_to_public(revision)
 
 
 @router.post(
