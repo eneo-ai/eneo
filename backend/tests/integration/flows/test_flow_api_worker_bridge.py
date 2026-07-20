@@ -83,7 +83,10 @@ async def test_public_flow_run_crosses_real_broker_and_worker(
         timeout_seconds=30,
     )
     assert observed_statuses[-1] == "completed"
-    assert completed_run["output_payload_json"] == {"text": submitted_text}
+    assert completed_run["result"] == {
+        "kind": "inline_text",
+        "text": submitted_text,
+    }
     assert completed_run["dispatch_attempt_count"] == 1
     assert completed_run["dispatch_last_attempt_at"] is not None
     assert completed_run["dispatched_at"] is not None
@@ -117,7 +120,10 @@ async def test_public_flow_run_crosses_real_broker_and_worker(
     assert evidence_response.status_code == 200, evidence_response.text
     evidence = evidence_response.json()
     assert evidence["run"]["status"] == "completed"
-    assert evidence["run"]["output_payload_json"] == {"text": submitted_text}
+    assert evidence["run"]["result"] == {
+        "kind": "inline_text",
+        "text": submitted_text,
+    }
     assert len(evidence["step_results"]) == 1
     assert evidence["step_results"][0]["output_payload_json"] == {
         "text": submitted_text
@@ -229,7 +235,10 @@ async def test_broker_accepted_delivery_loss_recovers_through_public_redispatch(
         timeout_seconds=30,
     )
     assert observed_statuses[-1] == "completed"
-    assert completed_run["output_payload_json"] == {"text": submitted_text}
+    assert completed_run["result"] == {
+        "kind": "inline_text",
+        "text": submitted_text,
+    }
     assert completed_run["dispatch_attempt_count"] == 2
     assert completed_run["dispatch_next_attempt_at"] is None
 

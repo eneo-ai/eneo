@@ -119,6 +119,19 @@ class FlowAssembler:
             runtime_paths=runtime_paths,
         )
 
+    @staticmethod
+    def to_run_result_public(
+        *,
+        run: FlowRun,
+        final_output: FlowFinalOutputContractPublic | None,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+    ) -> FlowRunResultPublic | None:
+        return _project_run_result(
+            run=run,
+            final_output=final_output,
+            result_files=result_files,
+        )
+
     def to_run_public(
         self,
         run: FlowRun,
@@ -137,7 +150,7 @@ class FlowAssembler:
                 "input_payload_json": read_semantic_flow_input_payload(
                     run.input_payload_json
                 ),
-                "result": _project_run_result(
+                "result": self.to_run_result_public(
                     run=run,
                     final_output=final_output,
                     result_files=result_files,

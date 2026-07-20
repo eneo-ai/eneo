@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Final, Literal
+from typing import Annotated, Final, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
@@ -11,6 +11,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
@@ -25,6 +26,8 @@ from eneo.flows.api.flow_service_principal_actor_read_model import (
 from eneo.flows.api.flow_trace_audit import log_flow_trace_audit_or_raise
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_redaction import redact_payload
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.server.dependencies.container import get_container
@@ -143,6 +146,26 @@ async def get_flow_run_evidence(
         tenant_id=user.tenant_id,
     )
     payload = await presenter.present_evidence(evidence.to_dict())
+    projected_result = (
+        FlowAssembler.to_run_result_public(
+            run=run.model_copy(
+                update={"output_payload_json": evidence.run.get("output_payload_json")}
+            ),
+            final_output=evidence.final_output,
+            result_files=[
+                FlowRunStepResultFile.model_validate(item)
+                for item in evidence.result_files
+            ],
+        )
+        if evidence.final_output is not None
+        else None
+    )
+    run_payload = cast(dict[str, object], payload["run"])
+    run_payload["result"] = (
+        redact_payload(projected_result.model_dump(mode="json"))
+        if projected_result is not None
+        else None
+    )
     return FlowRunEvidenceResponse.model_validate(payload)
 
 

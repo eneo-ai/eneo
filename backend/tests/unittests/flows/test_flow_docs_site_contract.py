@@ -3474,9 +3474,17 @@ def test_flow_api_guide_documents_closed_final_result_without_raw_run_payload() 
         "#### What redispatch does",
         maxsplit=1,
     )[0]
+    evidence_view = guide.split("#### Evidence view", maxsplit=1)[1].split(
+        "#### Evidence export",
+        maxsplit=1,
+    )[0]
 
     assert '"result": null' in run_example
     assert '"output_payload_json"' not in run_example
+    assert "`FlowRunPublic.result`" in evidence_view
+    assert '`definition_integrity.status = "verified"`' in evidence_view
+    assert '`definition_integrity.status = "invalid"`' in evidence_view
+    assert "`run.result` is `null`" in evidence_view
     for result_kind in (
         "inline_text",
         "file_backed_text",

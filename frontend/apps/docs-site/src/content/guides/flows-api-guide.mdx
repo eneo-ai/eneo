@@ -1040,13 +1040,19 @@ Use this when you want the rich evidence payload for one run, including:
 - step attempts
 - the debug export payload
 
+When `definition_integrity.status = "verified"`, the evidence run uses the same
+redacted, typed `FlowRunPublic.result` projection as the canonical run endpoint.
+A completed run therefore exposes the same closed result kind here.
+
 Functional endpoints reject a published snapshot whose current checksum differs
 from its recorded checksum. Evidence also marks a checksum-matching snapshot invalid
 when canonical published-definition parsing fails. Evidence access is intentionally
 different: an authorized caller still receives the original stored snapshot for
 forensic inspection, with `definition_integrity.status = "invalid"`. Do not treat
-that snapshot as executable or retry an operation pinned to its version. Ask a Flow
-editor to publish a valid version and start a new run; keep the old run for evidence.
+that snapshot as executable or retry an operation pinned to its version. Even when
+the stored run status is `completed`, `run.result` is `null` because no trustworthy
+final-output contract can be projected. Ask a Flow editor to publish a valid version
+and start a new run; keep the old run for evidence.
 In redacted evidence, `current_checksum` still describes the original stored snapshot,
 not the redacted projection.
 

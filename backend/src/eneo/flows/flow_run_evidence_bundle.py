@@ -15,6 +15,8 @@ from eneo.flows.domain.flow import (
     FlowVersion,
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
+from eneo.flows.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_evidence import build_debug_export
 from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenance,
@@ -27,7 +29,9 @@ from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.published_definition import (
     PublishedDefinitionIntegrity,
+    PublishedDefinitionIntegrityStatus,
     inspect_published_definition_integrity,
+    parse_verified_published_definition,
 )
 from eneo.json_types import JsonObject, JsonValue
 
@@ -56,6 +60,7 @@ class EvidenceBundle:
     run: FlowRun
     version: FlowVersion
     definition_integrity: PublishedDefinitionIntegrity
+    final_output: FlowFinalOutputContractPublic | None
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     result_files: Sequence[FlowRunStepResultFile]
@@ -124,6 +129,7 @@ class EvidenceBundle:
 class RedactedEvidenceBundle:
     run: dict[str, Any]
     definition_integrity: PublishedDefinitionIntegrity
+    final_output: FlowFinalOutputContractPublic | None
     definition_snapshot: dict[str, Any]
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
@@ -193,10 +199,19 @@ def build_evidence_bundle(
         expected_checksum=version.definition_checksum,
         flow_version=version.version,
     )
+    final_output = None
+    if definition_integrity.status is PublishedDefinitionIntegrityStatus.VERIFIED:
+        definition = parse_verified_published_definition(
+            version.definition_json,
+            expected_checksum=version.definition_checksum,
+            flow_version=version.version,
+        )
+        final_output = build_final_output_contract(definition.runtime_steps())
     return EvidenceBundle(
         run=run,
         version=version,
         definition_integrity=definition_integrity,
+        final_output=final_output,
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
@@ -320,6 +335,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     return RedactedEvidenceBundle(
         run=cast(dict[str, Any], run_result.value),
         definition_integrity=bundle.definition_integrity,
+        final_output=bundle.final_output,
         definition_snapshot=cast(dict[str, Any], definition_result.value),
         step_results=step_result_section.records,
         step_attempts=step_attempt_section.records,

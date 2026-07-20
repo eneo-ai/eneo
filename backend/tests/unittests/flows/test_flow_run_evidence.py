@@ -180,6 +180,7 @@ def test_evidence_integrity_uses_raw_snapshot_before_redaction() -> None:
         "current_checksum": published_definition_checksum(definition_json),
     }
 
+    assert bundle.final_output is None
     assert raw_payload["definition_snapshot"] == definition_json
     assert redacted_payload["definition_snapshot"]["metadata_json"] == {
         "api_key": "[REDACTED]"
@@ -207,13 +208,15 @@ def test_evidence_marks_matching_checksum_malformed_snapshot_invalid() -> None:
         }
     )
 
-    evidence = build_evidence_bundle(
+    bundle = build_evidence_bundle(
         run=run,
         version=malformed_version,
         step_results=[],
         step_attempts=[],
-    ).to_dict()
+    )
+    evidence = bundle.to_dict()
 
+    assert bundle.final_output is None
     assert evidence["definition_snapshot"] == malformed_definition
     assert evidence["definition_integrity"] == {
         "status": "invalid",
@@ -249,13 +252,15 @@ def test_evidence_marks_matching_checksum_invalid_runtime_step_invalid() -> None
         }
     )
 
-    evidence = build_evidence_bundle(
+    bundle = build_evidence_bundle(
         run=run,
         version=invalid_version,
         step_results=[],
         step_attempts=[],
-    ).to_dict()
+    )
+    evidence = bundle.to_dict()
 
+    assert bundle.final_output is None
     assert evidence["definition_snapshot"] == invalid_definition
     assert evidence["definition_integrity"] == {
         "status": "invalid",
@@ -444,6 +449,37 @@ def _result_file_for_run(
         file_type=FileType.DOCUMENT,
         availability=availability,
     )
+
+
+def test_verified_final_output_metadata_is_not_serialized_in_evidence_exports() -> None:
+    run, version = _evidence_run_and_version()
+    raw_bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+    )
+    redacted_bundle = redact_evidence_bundle(raw_bundle)
+
+    assert raw_bundle.final_output is not None
+    assert raw_bundle.final_output.output_type is FlowOutputType.TEXT
+    assert redacted_bundle.final_output == raw_bundle.final_output
+    for bundle in (raw_bundle, redacted_bundle):
+        payload_with_metadata = json.dumps(
+            bundle.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        payload_without_metadata = json.dumps(
+            replace(bundle, final_output=None).to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+        assert "final_output" not in bundle.to_dict()
+        assert payload_with_metadata == payload_without_metadata
 
 
 def _input_file_metadata(
