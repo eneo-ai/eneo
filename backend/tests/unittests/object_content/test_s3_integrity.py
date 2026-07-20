@@ -1,17 +1,20 @@
+import asyncio
 import base64
 import re
 from hashlib import sha256
 from io import BytesIO
+from threading import Lock
 from typing import TYPE_CHECKING, BinaryIO, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-from botocore.exceptions import FlexibleChecksumError, ReadTimeoutError
+from botocore.exceptions import ClientError, FlexibleChecksumError, ReadTimeoutError
 from botocore.response import StreamingBody
 
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import CapturedContent
+from eneo.object_content.content import ByteRange, CapturedContent
 from eneo.object_content.s3_object_store import (
+    ObjectStoreBindingError,
     ObjectStoreIntegrityError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
@@ -133,8 +136,10 @@ class _MultipartUploadClient:
 class _DownloadClient:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
+        self.requests: list[dict[str, object]] = []
 
-    def get_object(self, **_request: object) -> dict[str, object]:
+    def get_object(self, **request: object) -> dict[str, object]:
+        self.requests.append(request)
         return {
             "Body": StreamingBody(BytesIO(self._payload), len(self._payload)),
             "ContentLength": len(self._payload),
@@ -186,6 +191,55 @@ class _ChecksumFailureClient:
             "Body": self.body,
             "ContentLength": 8,
             "ContentType": "application/octet-stream",
+        }
+
+
+class _BindingClient:
+    def __init__(self, *, contains_durable_bytes: bool = False) -> None:
+        self._payload: bytes | None = None
+        self._lock = Lock()
+        self._contains_durable_bytes = contains_durable_bytes
+        self.put_calls = 0
+
+    def put_object(self, **request: object) -> dict[str, str]:
+        assert request["IfNoneMatch"] == "*"
+        payload = cast(bytes, request["Body"])
+        with self._lock:
+            self.put_calls += 1
+            if self._payload is not None:
+                raise ClientError(
+                    {
+                        "Error": {
+                            "Code": "PreconditionFailed",
+                            "Message": "already exists",
+                        }
+                    },
+                    "PutObject",
+                )
+            self._payload = payload
+        return {"ChecksumSHA256": cast(str, request["ChecksumSHA256"])}
+
+    def get_object(self, **_request: object) -> dict[str, object]:
+        with self._lock:
+            payload = self._payload
+        if payload is None:
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
+                "GetObject",
+            )
+        return {
+            "Body": StreamingBody(BytesIO(payload), len(payload)),
+            "ContentLength": len(payload),
+            "ContentType": "application/vnd.eneo.object-content-binding",
+        }
+
+    def list_objects_v2(self, **_request: object) -> dict[str, object]:
+        return {
+            "Contents": (
+                [{"Key": new_object_key(_settings()), "Size": 1}]
+                if self._contains_durable_bytes
+                else []
+            )
         }
 
 
@@ -304,6 +358,91 @@ async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
     assert digest == sha256(payload).digest()
     # Before GET, before each of three reads, and before the terminal read.
     assert checkpoints == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "byte_range",
+    [
+        None,
+        ByteRange(start=2, end=5, total=10),
+    ],
+    ids=("full", "range"),
+)
+async def test_verified_read_rejects_replacement_before_yielding_full_or_range(
+    byte_range: ByteRange | None,
+) -> None:
+    original = b"abcdefghij"
+    replacement = b"0123456789"
+    client = _DownloadClient(replacement)
+    store = S3ObjectStore(
+        _settings(),
+        client=cast("S3Client", client),
+    )
+    emitted = bytearray()
+
+    with pytest.raises(ObjectStoreIntegrityError, match="canonical SHA-256"):
+        async with store.open_verified_read(
+            new_object_key(_settings()),
+            expected_sha256=sha256(original).digest(),
+            expected_size_bytes=len(original),
+            expected_media_type="application/octet-stream",
+            byte_range=byte_range,
+        ) as opened:
+            async for chunk in opened.chunks:
+                emitted.extend(chunk)
+
+    assert emitted == b""
+    assert all("Range" not in request for request in client.requests)
+
+
+@pytest.mark.asyncio
+async def test_binding_create_is_atomic_and_idempotent_across_replicas() -> None:
+    client = _BindingClient()
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+    binding_id = uuid4()
+
+    await asyncio.gather(
+        store.ensure_binding(binding_id, allow_create=True),
+        store.ensure_binding(binding_id, allow_create=True),
+    )
+    await store.ensure_binding(binding_id, allow_create=False)
+
+    assert client.put_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_binding_never_overwrites_a_foreign_database_identity() -> None:
+    client = _BindingClient()
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+    first_binding = uuid4()
+
+    await store.ensure_binding(first_binding, allow_create=True)
+
+    with pytest.raises(ObjectStoreBindingError, match="another database"):
+        await store.ensure_binding(uuid4(), allow_create=True)
+
+
+@pytest.mark.asyncio
+async def test_confirmed_binding_is_not_recreated_when_marker_is_missing() -> None:
+    client = _BindingClient()
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+
+    with pytest.raises(ObjectStoreBindingError, match="missing"):
+        await store.ensure_binding(uuid4(), allow_create=False)
+
+    assert client.put_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unpaired_nonempty_namespace_is_never_adopted() -> None:
+    client = _BindingClient(contains_durable_bytes=True)
+    store = S3ObjectStore(_settings(), client=cast("S3Client", client))
+
+    with pytest.raises(ObjectStoreBindingError, match="already contains"):
+        await store.ensure_binding(uuid4(), allow_create=True)
+
+    assert client.put_calls == 0
 
 
 @pytest.mark.asyncio

@@ -184,7 +184,12 @@ class ObjectContentRuntime:
                     code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
                 )
             try:
-                await service.check_ready()
+                await self.validate_configuration()
+            except ObjectContentConfigurationError:
+                return ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
+                )
             except ObjectContentUnavailableError:
                 return ObjectContentReadiness(
                     ready=False,
@@ -202,6 +207,7 @@ class ObjectContentRuntime:
                 "Durable object content is not initialized"
             )
         if self._state is ObjectContentRuntimeState.ENABLED:
+            await self.service.check_ready()
             return
 
         try:
@@ -229,6 +235,7 @@ class ObjectContentRuntime:
         if self._state is ObjectContentRuntimeState.DISABLED:
             await self.validate_configuration()
             return ReconciliationResult.empty()
+        await self.validate_configuration()
         return await self.reconciler.run_once()
 
     async def health_facts(self) -> ObjectContentHealthFacts:

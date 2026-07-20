@@ -5,6 +5,7 @@ from secrets import token_hex
 from time import monotonic
 from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import DatabaseSessionManager, sessionmanager
@@ -15,6 +16,7 @@ from eneo.object_content.content import (
     ContentFailureCode,
     ContentIntent,
     ContentReadGrant,
+    ObjectContentConfigurationError,
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
     content_request_fingerprint,
@@ -25,8 +27,12 @@ from eneo.object_content.content_repository import (
     ReadableContent,
     UploadLease,
 )
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
+)
 from eneo.object_content.s3_object_store import (
     ObjectRead,
+    ObjectStoreBindingError,
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
@@ -67,6 +73,47 @@ class ObjectContentService:
             raise ObjectContentUnavailableError(
                 "Durable object content is temporarily unavailable"
             ) from error
+        try:
+            async with self._database.session() as session, session.begin():
+                binding = await ObjectContentReconciliationRepository(
+                    session
+                ).get_or_initialize_store_binding(self._settings.deployment_id)
+        except ObjectContentConfigurationError:
+            raise
+        except (OSError, SQLAlchemyError) as error:
+            raise ObjectContentUnavailableError(
+                "Unable to verify the object-content database binding"
+            ) from error
+
+        try:
+            await self._store.ensure_binding(
+                binding.binding_id,
+                allow_create=binding.allow_create,
+            )
+        except ObjectStoreBindingError as error:
+            raise ObjectContentConfigurationError(
+                "Object-content storage does not match PostgreSQL"
+            ) from error
+        except ObjectStoreUnavailableError as error:
+            raise ObjectContentUnavailableError(
+                "Durable object content is temporarily unavailable"
+            ) from error
+
+        if not binding.confirmed:
+            try:
+                async with self._database.session() as session, session.begin():
+                    await ObjectContentReconciliationRepository(
+                        session
+                    ).confirm_store_binding(
+                        deployment_id=binding.deployment_id,
+                        binding_id=binding.binding_id,
+                    )
+            except ObjectContentConfigurationError:
+                raise
+            except (OSError, SQLAlchemyError) as error:
+                raise ObjectContentUnavailableError(
+                    "Unable to confirm the object-content database binding"
+                ) from error
 
     async def prepare_in_transaction(
         self,
@@ -198,8 +245,9 @@ class ObjectContentService:
         )
 
         try:
-            async with self._store.open_read(
+            async with self._store.open_verified_read(
                 content.object_key,
+                expected_sha256=content.sha256,
                 expected_size_bytes=content.size_bytes,
                 expected_media_type=content.media_type,
                 byte_range=byte_range,

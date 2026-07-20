@@ -3,6 +3,7 @@ import base64
 from collections.abc import AsyncIterator
 from hashlib import sha256
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 import pytest
 from botocore.config import Config
@@ -12,6 +13,7 @@ from botocore.session import get_session
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import ByteRange, capture_content
 from eneo.object_content.s3_object_store import (
+    ObjectStoreBindingError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
@@ -35,14 +37,12 @@ async def _read_all(
     key: str,
     *,
     size_bytes: int,
-    byte_range: ByteRange | None = None,
 ) -> bytes:
     received = bytearray()
     async with store.open_read(
         key,
         expected_size_bytes=size_bytes,
         expected_media_type="application/octet-stream",
-        byte_range=byte_range,
     ) as opened:
         async for chunk in opened.chunks:
             received.extend(chunk)
@@ -68,12 +68,66 @@ def _raw_client(
             aws_secret_access_key=(
                 secret_access_key or settings.secret_access_key.get_secret_value()
             ),
-            verify=True,
+            verify=(
+                str(settings.ca_bundle) if settings.ca_bundle is not None else True
+            ),
             config=Config(
                 signature_version="s3v4",
                 s3={"addressing_style": settings.addressing_style},
             ),
         ),
+    )
+
+
+async def _read_raw_range(
+    real_store: RealObjectStore,
+    key: str,
+    *,
+    byte_range: ByteRange,
+) -> bytes:
+    client = _raw_client(real_store)
+    try:
+        result = await asyncio.to_thread(
+            client.get_object,
+            Bucket=real_store.settings.bucket,
+            Key=key,
+            Range=byte_range.request_header,
+        )
+        body = result["Body"]
+        try:
+            payload = await asyncio.to_thread(
+                body.read,
+                byte_range.content_length + 1,
+            )
+        finally:
+            await asyncio.to_thread(body.close)
+    finally:
+        client.close()
+
+    assert result["ContentLength"] == byte_range.content_length
+    assert result["ContentRange"] == byte_range.response_header
+    assert result["ContentType"] == "application/octet-stream"
+    assert len(payload) == byte_range.content_length
+    return payload
+
+
+async def _clear_deployment_namespace(
+    real_store: RealObjectStore,
+    client: "S3Client",
+) -> None:
+    continuation_token: str | None = None
+    while True:
+        page = await real_store.store.list_object_page(
+            continuation_token=continuation_token
+        )
+        for item in page.objects:
+            await real_store.store.delete_and_confirm(item.key)
+        continuation_token = page.next_token
+        if continuation_token is None:
+            break
+    client.delete_object(
+        Bucket=real_store.settings.bucket,
+        Key=f"v1/.eneo-bindings/{real_store.settings.deployment_id.hex}",
     )
 
 
@@ -106,10 +160,9 @@ async def test_real_store_single_multipart_range_list_and_delete(
 
     byte_range = ByteRange.parse("bytes=113-1087", size_bytes=len(single_payload))
     assert (
-        await _read_all(
-            store,
+        await _read_raw_range(
+            real_object_store,
             single_key,
-            size_bytes=len(single_payload),
             byte_range=byte_range,
         )
         == single_payload[113:1088]
@@ -303,6 +356,36 @@ async def test_store_process_restart_preserves_bytes_and_readiness_recovers(
 
 
 @pytest.mark.asyncio
+async def test_real_store_binding_create_is_atomic_and_never_overwrites(
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
+    client = _raw_client(real_object_store)
+    binding_id = uuid4()
+    try:
+        await _clear_deployment_namespace(real_object_store, client)
+
+        await asyncio.gather(
+            real_object_store.store.ensure_binding(binding_id, allow_create=True),
+            real_object_store.store.ensure_binding(binding_id, allow_create=True),
+        )
+        await real_object_store.store.ensure_binding(
+            binding_id,
+            allow_create=False,
+        )
+
+        with pytest.raises(ObjectStoreBindingError, match="another database"):
+            await real_object_store.store.ensure_binding(
+                uuid4(),
+                allow_create=True,
+            )
+    finally:
+        client.delete_object(Bucket=settings.bucket, Key=marker_key)
+        client.close()
+
+
+@pytest.mark.asyncio
 async def test_real_store_tls_requires_and_accepts_custom_ca(
     real_tls_object_store: RealObjectStore,
 ) -> None:
@@ -338,10 +421,9 @@ async def test_real_store_tls_requires_and_accepts_custom_ca(
 
     byte_range = ByteRange.parse("bytes=8-15", size_bytes=len(payload))
     assert (
-        await _read_all(
-            trusted,
+        await _read_raw_range(
+            real_tls_object_store,
             key,
-            size_bytes=len(payload),
             byte_range=byte_range,
         )
         == payload[8:16]

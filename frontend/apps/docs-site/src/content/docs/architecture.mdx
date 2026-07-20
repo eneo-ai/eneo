@@ -206,6 +206,19 @@ process/network crash interleavings. Canonical full-byte SHA-256 is computed by
 Eneo while streaming; ETag, CRC, and multipart composite checksums are never the
 canonical digest.
 
+Reads are trusted only after Eneo recomputes that canonical digest. Full and
+single-range responses therefore perform one bounded-memory full read into a
+temporary spool before emitting bytes; a range is sliced from the verified
+spool. This is linear in object size and may use temporary disk beyond the
+configured memory threshold, avoiding both unverified partial responses and an
+unbounded memory allocation.
+
+PostgreSQL and the byte plane also share one durable deployment binding.
+Startup, readiness, and every reconciliation run verify the private bucket
+marker before any lifecycle or orphan mutation. A reachable empty or foreign
+bucket returns `configuration_required`; Eneo neither adopts it nor marks live
+rows missing.
+
 The platform foundation does not itself cut existing File, InfoBlob, Icon, or
 Flow producers over to the new owner. Those migrations are separate vertical
 slices so each producer can copy and verify bytes before deleting its previous

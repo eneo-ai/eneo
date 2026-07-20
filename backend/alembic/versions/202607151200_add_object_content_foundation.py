@@ -336,6 +336,21 @@ def _create_tables() -> None:
             nullable=True,
         ),
         sa.Column(
+            "store_deployment_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "store_binding_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "store_binding_confirmed_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
@@ -351,6 +366,14 @@ def _create_tables() -> None:
         sa.CheckConstraint(
             "object_completed_cycles >= 0",
             name="ck_object_content_reconciliation_state_cycles",
+        ),
+        sa.CheckConstraint(
+            "(store_deployment_id IS NULL) = (store_binding_id IS NULL)",
+            name="ck_object_content_reconciliation_state_binding_pair",
+        ),
+        sa.CheckConstraint(
+            "store_binding_confirmed_at IS NULL OR store_binding_id IS NOT NULL",
+            name="ck_object_content_reconciliation_state_binding_confirmation",
         ),
         sa.PrimaryKeyConstraint("id"),
     )

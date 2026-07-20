@@ -32,6 +32,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
+    ObjectContentConfigurationError,
 )
 from eneo.object_content.s3_object_store import (
     MultipartUpload,
@@ -49,6 +50,14 @@ class ReconciliationWork:
     media_type: str
     attempt_count: int
     multipart_upload_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class StoreBinding:
+    deployment_id: UUID
+    binding_id: UUID
+    confirmed: bool
+    allow_create: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -898,6 +907,58 @@ class ObjectContentReconciliationRepository:
             oldest_orphan_created_at=orphan_row[1],
             last_object_cycle_completed_at=last_cycle,
         )
+
+    async def get_or_initialize_store_binding(
+        self,
+        deployment_id: UUID,
+    ) -> StoreBinding:
+        state = await self._state_for_update()
+        has_content = bool(
+            await self._session.scalar(
+                select(exists().where(ObjectContents.id.is_not(None)))
+            )
+        )
+        if state.store_binding_id is None:
+            if has_content:
+                raise ObjectContentConfigurationError(
+                    "Object-content storage binding is missing for existing records"
+                )
+            state.store_deployment_id = deployment_id
+            state.store_binding_id = uuid4()
+            await self._session.flush()
+        elif state.store_deployment_id != deployment_id:
+            raise ObjectContentConfigurationError(
+                "Object-content deployment identity does not match PostgreSQL"
+            )
+
+        binding_id = state.store_binding_id
+        stored_deployment_id = state.store_deployment_id
+        if stored_deployment_id is None:
+            raise RuntimeError("Object-content storage binding is incomplete")
+        return StoreBinding(
+            deployment_id=stored_deployment_id,
+            binding_id=binding_id,
+            confirmed=state.store_binding_confirmed_at is not None,
+            allow_create=(state.store_binding_confirmed_at is None and not has_content),
+        )
+
+    async def confirm_store_binding(
+        self,
+        *,
+        deployment_id: UUID,
+        binding_id: UUID,
+    ) -> None:
+        state = await self._state_for_update()
+        if (
+            state.store_deployment_id != deployment_id
+            or state.store_binding_id != binding_id
+        ):
+            raise ObjectContentConfigurationError(
+                "Object-content storage binding changed during verification"
+            )
+        if state.store_binding_confirmed_at is None:
+            state.store_binding_confirmed_at = await self._database_now()
+            await self._session.flush()
 
     async def _state_for_update(self) -> ObjectContentReconciliationState:
         state = (

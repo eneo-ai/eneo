@@ -205,6 +205,7 @@ async def real_object_store(
     unused_tcp_port_factory: Callable[[], int],
 ) -> AsyncGenerator[RealObjectStore, None]:
     bucket = "eneo-object-content-test"
+    unpaired_bucket = "eneo-object-content-unpaired-test"
     access_key = "object-content-test-key"
     secret_key = "object-content-test-secret"
     identity = {
@@ -218,6 +219,11 @@ async def real_object_store(
                     f"Write:{bucket}",
                     f"Write:{bucket}/*",
                     f"List:{bucket}",
+                    f"Read:{unpaired_bucket}",
+                    f"Read:{unpaired_bucket}/*",
+                    f"Write:{unpaired_bucket}",
+                    f"Write:{unpaired_bucket}/*",
+                    f"List:{unpaired_bucket}",
                 ],
             }
         ]
@@ -236,7 +242,8 @@ async def real_object_store(
                 mode="ro",
             )
             .with_command(
-                "mini -dir=/data -bucket=eneo-object-content-test "
+                "mini -dir=/data "
+                "-bucket=eneo-object-content-test,eneo-object-content-unpaired-test "
                 "-s3.config=/etc/seaweedfs/s3.json -s3.iam=false "
                 "-webdav=false -admin.ui=false -master.telemetry=false"
             )
@@ -275,6 +282,25 @@ async def real_object_store(
                 )
             finally:
                 await store.close()
+
+
+@pytest.fixture(scope="session")
+async def real_unpaired_object_store(
+    real_object_store: RealObjectStore,
+) -> AsyncGenerator[RealObjectStore, None]:
+    settings = real_object_store.settings.model_copy(
+        update={"bucket": "eneo-object-content-unpaired-test"}
+    )
+    store = S3ObjectStore(settings)
+    await store.check_ready()
+    try:
+        yield RealObjectStore(
+            settings=settings,
+            store=store,
+            container=real_object_store.container,
+        )
+    finally:
+        await store.close()
 
 
 @pytest.fixture(scope="session")

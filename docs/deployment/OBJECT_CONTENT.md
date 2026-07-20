@@ -41,6 +41,10 @@ must pass the same tested subset:
 - object deletion with observable not-found convergence;
 - SHA-256 part/composite semantics for multipart where requested.
 
+Native range support is an endpoint conformance gate. Eneo's application read
+path still full-GETs and verifies the canonical digest before slicing a range
+from its local spool.
+
 Eneo computes the canonical full-byte SHA-256 incrementally over its own upload
 stream. S3 ETags, multipart composite checksums, CRCs, and user metadata never
 replace that digest. A bypassing upload, migration, restore, or ambiguous
@@ -211,6 +215,7 @@ Object content has four explicit runtime outcomes:
 | Any blank, partial, or invalid settings | Startup fails | Clear configuration validation error |
 | Complete valid settings; PostgreSQL and bucket available | Starts enabled | Healthy `ready` |
 | Complete valid settings; PostgreSQL or bucket unavailable | Stays alive | Unhealthy readiness and typed 503; no fallback |
+| Reachable bucket not paired with this PostgreSQL database | Startup fails | `configuration_required`; reconciliation does not mutate rows or objects |
 
 Disabled with active PostgreSQL content is an invalid fifth state: startup,
 readiness, and the scheduled safety check fail closed with
@@ -222,6 +227,15 @@ the guard. Process liveness itself does not depend on the object store.
 Readiness uses a separate short-timeout S3 client when enabled. Health output
 includes only a status and stable code, never endpoint, bucket, key,
 credentials, or provider details.
+
+The first enabled startup creates one random database identity in PostgreSQL
+and atomically places its private marker in the configured bucket. Later
+startups, readiness probes, and every reconciliation run require that exact
+pair. A missing or different marker is never adopted or overwritten after
+confirmation. This prevents a reachable empty or foreign bucket from being
+treated as this deployment's byte plane. The marker is an internal safety
+invariant, not an administrator or tenant setting, and must be included in
+bucket backups.
 
 Uploads and deletes record durable PostgreSQL intent before remote work.
 Bounded leases, idempotency, retries, multipart abort records, tombstones, and
@@ -242,8 +256,11 @@ and errors, pending/failed/delete-pending counts, reconciliation lag, active
 multipart uploads, and orphan-candidate age. Reconciliation concurrency is
 bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
-spools: memory use stops at the configured threshold, while the remainder uses
-temporary disk until each upload finishes.
+upload and verified-read spools: memory use stops at the configured threshold,
+while the remainder uses temporary disk until each upload or verified response
+finishes. A range read verifies and spools the full object before serving the
+requested interval, so size temporary disk for the largest permitted objects
+multiplied by measured peak read concurrency.
 
 For the bundled single-node reference, durable capacity is the
 `eneo_object_content_data` volume. Change `SEAWEEDFS_VOLUME_SIZE_LIMIT_MB` and
@@ -294,7 +311,10 @@ docker run --rm \
 Restore into an isolated environment first. Keep reconciliation and all writers
 stopped, restore both halves from the same backup ID, preserve
 `OBJECT_CONTENT_DEPLOYMENT_ID`, verify checksums, then start backend and worker.
-Run readiness and a representative full/range read before reopening traffic.
+Readiness also verifies the restored database/bucket marker pair. A missing or
+mismatched marker means the halves are not the same recovery point; do not
+create a replacement marker. Run a representative full/range read before
+reopening traffic.
 
 If PostgreSQL is newer than the object snapshot, rows can refer to missing
 bytes; reads fail closed and reconciliation records the missing-object failure.

@@ -393,6 +393,14 @@ process the same setting set. Before the first active row, any mismatch appears
 in their capability/readiness projections; after a row exists, a disabled
 process fails the safety guard.
 
+On the first enabled startup, Eneo creates one random PostgreSQL identity and
+atomically pairs it with a private marker in the configured bucket. Startup,
+readiness, and every reconciliation run require the same pair before mutating
+content state. A reachable empty or foreign bucket reports
+`configuration_required`; Eneo never silently adopts or overwrites it. The
+marker is internal and must be preserved with the bucket backup—it is not an
+administrator or tenant setting.
+
 The reference deployment starts an Eneo-built SeaweedFS 4.39 image. Eneo pins
 and reviews upstream source, builds minimal non-root amd64/arm64 images, blocks
 license and HIGH/CRITICAL vulnerability policy failures, publishes CycloneDX
@@ -464,6 +472,12 @@ The settings in `env_backend.env` control transport timeouts, bounded spool and
 multipart sizes, leases, retries, and reconciliation concurrency. They do not
 define business upload limits; administrators retain ownership of user-facing
 limits. Object keys and storage topology remain tenant-neutral.
+
+Full and single-range reads recompute the PostgreSQL-owned SHA-256 before
+emitting response bytes. Memory use is bounded by the configured spool
+threshold; larger objects use temporary disk, and each verified read is linear
+in full object size. Capacity planning must include the resulting concurrent
+temporary-disk demand.
 
 Capacity planning must cover PostgreSQL and the byte plane. Monitor bucket
 bytes/object count, durable free space, request latency/errors, pending and

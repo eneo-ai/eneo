@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from secrets import token_hex
+from tempfile import SpooledTemporaryFile
 from time import monotonic
 from typing import TYPE_CHECKING, BinaryIO, Final, Mapping, cast
+from uuid import UUID
 
 from botocore.config import Config
 from botocore.exceptions import (
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
     )
 
 _SHA256_BYTES: Final = 32
+_BINDING_MEDIA_TYPE: Final = "application/vnd.eneo.object-content-binding"
+_BINDING_PREAMBLE: Final = b"eneo-object-content-binding-v1\n"
 
 
 class ObjectStoreError(RuntimeError):
@@ -49,6 +53,10 @@ class ObjectStoreNotFoundError(ObjectStoreError):
 
 
 class ObjectStoreIntegrityError(ObjectStoreError):
+    pass
+
+
+class ObjectStoreBindingError(ObjectStoreError):
     pass
 
 
@@ -258,6 +266,55 @@ class S3ObjectStore:
             raise ObjectStoreUnavailableError(
                 "Object content storage is not ready"
             ) from error
+
+    async def ensure_binding(
+        self,
+        binding_id: UUID,
+        *,
+        allow_create: bool,
+    ) -> None:
+        """Verify this database's immutable marker or create it once."""
+        expected = _BINDING_PREAMBLE + binding_id.bytes
+        observed = await self._read_binding()
+        if observed is not None:
+            if observed != expected:
+                raise ObjectStoreBindingError(
+                    "Object content storage is paired with another database"
+                )
+            return
+        if not allow_create:
+            raise ObjectStoreBindingError(
+                "The confirmed object-content storage binding is missing"
+            )
+
+        await self._require_empty_content_namespace()
+        checksum = base64.b64encode(sha256(expected).digest()).decode()
+        try:
+            await asyncio.to_thread(
+                self._readiness_client.put_object,
+                Bucket=self._settings.bucket,
+                Key=self._binding_key,
+                Body=expected,
+                ContentLength=len(expected),
+                ContentType=_BINDING_MEDIA_TYPE,
+                ChecksumSHA256=checksum,
+                IfNoneMatch="*",
+            )
+        except ClientError as error:
+            if _client_error_code(error) not in {"412", "PreconditionFailed"}:
+                raise ObjectStoreUnavailableError(
+                    "Object content storage binding failed"
+                ) from error
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError(
+                "Object content storage binding failed"
+            ) from error
+
+        observed = await self._read_binding()
+        if observed != expected:
+            raise ObjectStoreBindingError(
+                "Object content storage is paired with another database"
+            )
 
     async def upload(
         self,
@@ -499,24 +556,15 @@ class S3ObjectStore:
         *,
         expected_size_bytes: int,
         expected_media_type: str,
-        byte_range: ByteRange | None = None,
     ) -> AsyncGenerator[ObjectRead, None]:
         self._require_owned_key(key)
         try:
-            if byte_range is not None:
-                result = await asyncio.to_thread(
-                    self._client.get_object,
-                    Bucket=self._settings.bucket,
-                    Key=key,
-                    Range=byte_range.request_header,
-                )
-            else:
-                result = await asyncio.to_thread(
-                    self._client.get_object,
-                    Bucket=self._settings.bucket,
-                    Key=key,
-                    ChecksumMode="ENABLED",
-                )
+            result = await asyncio.to_thread(
+                self._client.get_object,
+                Bucket=self._settings.bucket,
+                Key=key,
+                ChecksumMode="ENABLED",
+            )
         except ClientError as error:
             if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
                 raise ObjectStoreNotFoundError(
@@ -526,11 +574,7 @@ class S3ObjectStore:
         except BotoCoreError as error:
             raise ObjectStoreUnavailableError("Object read failed") from error
 
-        expected_length = (
-            expected_size_bytes if byte_range is None else byte_range.content_length
-        )
-        content_range = result.get("ContentRange")
-        if result.get("ContentLength") != expected_length:
+        if result.get("ContentLength") != expected_size_bytes:
             result["Body"].close()
             raise ObjectStoreIntegrityError("Object read length does not match intent")
         if result.get("ContentType") != expected_media_type:
@@ -538,23 +582,80 @@ class S3ObjectStore:
             raise ObjectStoreIntegrityError(
                 "Object read media type does not match intent"
             )
-        if byte_range is not None and content_range != byte_range.response_header:
-            result["Body"].close()
-            raise ObjectStoreIntegrityError(
-                "Object store returned the wrong byte range"
-            )
 
         body = result["Body"]
-        chunks = self._stream_body(body, expected_length=expected_length)
+        chunks = self._stream_body(body, expected_length=expected_size_bytes)
         try:
             yield ObjectRead(
                 chunks=chunks,
-                content_length=expected_length,
+                content_length=expected_size_bytes,
                 media_type=expected_media_type,
-                content_range=content_range,
+                content_range=None,
             )
         finally:
             await chunks.aclose()
+
+    @asynccontextmanager
+    async def open_verified_read(
+        self,
+        key: str,
+        *,
+        expected_sha256: bytes,
+        expected_size_bytes: int,
+        expected_media_type: str,
+        byte_range: ByteRange | None = None,
+    ) -> AsyncGenerator[ObjectRead, None]:
+        """Verify canonical bytes before exposing a full or ranged response."""
+        if len(expected_sha256) != _SHA256_BYTES:
+            raise ObjectStoreIntegrityError("Canonical SHA-256 has an invalid length")
+        if byte_range is not None and byte_range.total != expected_size_bytes:
+            raise ObjectStoreIntegrityError(
+                "Requested byte range does not match the canonical object size"
+            )
+
+        spool = SpooledTemporaryFile(
+            max_size=self._settings.spool_memory_bytes,
+            mode="w+b",
+        )
+        digest = sha256()
+        try:
+            async with self.open_read(
+                key,
+                expected_size_bytes=expected_size_bytes,
+                expected_media_type=expected_media_type,
+            ) as remote:
+                async for chunk in remote.chunks:
+                    digest.update(chunk)
+                    written = await asyncio.to_thread(spool.write, chunk)
+                    if written != len(chunk):
+                        raise ObjectStoreIntegrityError(
+                            "Verified object spool accepted a partial write"
+                        )
+
+            if digest.digest() != expected_sha256:
+                raise ObjectStoreIntegrityError(
+                    "Object bytes do not match the canonical SHA-256"
+                )
+
+            start = 0 if byte_range is None else byte_range.start
+            content_length = (
+                expected_size_bytes if byte_range is None else byte_range.content_length
+            )
+            await asyncio.to_thread(spool.seek, start)
+            chunks = self._stream_file(spool, expected_length=content_length)
+            try:
+                yield ObjectRead(
+                    chunks=chunks,
+                    content_length=content_length,
+                    media_type=expected_media_type,
+                    content_range=(
+                        None if byte_range is None else byte_range.response_header
+                    ),
+                )
+            finally:
+                await chunks.aclose()
+        finally:
+            await asyncio.to_thread(spool.close)
 
     async def recompute_sha256(
         self,
@@ -609,6 +710,87 @@ class S3ObjectStore:
             raise ObjectStoreUnavailableError("Object stream interrupted") from error
         finally:
             await asyncio.to_thread(body.close)
+
+    async def _stream_file(
+        self,
+        source: SpooledTemporaryFile[bytes],
+        *,
+        expected_length: int,
+    ) -> AsyncGenerator[bytes, None]:
+        transferred = 0
+        while transferred < expected_length:
+            chunk = await asyncio.to_thread(
+                source.read,
+                min(self._settings.io_chunk_bytes, expected_length - transferred),
+            )
+            if not chunk:
+                raise ObjectStoreIntegrityError(
+                    "Verified object spool ended before its length"
+                )
+            transferred += len(chunk)
+            yield chunk
+
+    @property
+    def _binding_key(self) -> str:
+        return f"v1/.eneo-bindings/{self._settings.deployment_id.hex}"
+
+    async def _read_binding(self) -> bytes | None:
+        try:
+            result = await asyncio.to_thread(
+                self._readiness_client.get_object,
+                Bucket=self._settings.bucket,
+                Key=self._binding_key,
+            )
+        except ClientError as error:
+            if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise ObjectStoreUnavailableError(
+                "Object content storage binding read failed"
+            ) from error
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError(
+                "Object content storage binding read failed"
+            ) from error
+
+        body = result["Body"]
+        expected_length = len(_BINDING_PREAMBLE) + 16
+        try:
+            if (
+                result.get("ContentLength") != expected_length
+                or result.get("ContentType") != _BINDING_MEDIA_TYPE
+            ):
+                raise ObjectStoreBindingError(
+                    "Object content storage has an invalid binding marker"
+                )
+            observed = await asyncio.to_thread(body.read, expected_length + 1)
+            if len(observed) != expected_length:
+                raise ObjectStoreBindingError(
+                    "Object content storage has an invalid binding marker"
+                )
+            return observed
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError(
+                "Object content storage binding read failed"
+            ) from error
+        finally:
+            await asyncio.to_thread(body.close)
+
+    async def _require_empty_content_namespace(self) -> None:
+        try:
+            result = await asyncio.to_thread(
+                self._readiness_client.list_objects_v2,
+                Bucket=self._settings.bucket,
+                Prefix=self._settings.object_key_prefix,
+                MaxKeys=1,
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise ObjectStoreUnavailableError(
+                "Object content storage inventory failed"
+            ) from error
+        if result.get("Contents"):
+            raise ObjectStoreBindingError(
+                "Unpaired object content storage already contains durable bytes"
+            )
 
     async def delete_and_confirm(self, key: str) -> None:
         self._require_owned_key(key)
