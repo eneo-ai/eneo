@@ -97,11 +97,12 @@ def has_required_runtime_source_identity_fields(
     required = item_schema.get("required")
     if not isinstance(properties, Mapping) or not isinstance(required, list):
         return False
+    typed_properties = cast(Mapping[str, Any], properties)
     for field_name in RUNTIME_SOURCE_IDENTITY_FIELDS:
-        field_schema = properties.get(field_name)
+        field_schema = typed_properties.get(field_name)
         if (
             not isinstance(field_schema, Mapping)
-            or field_schema.get("type") != "string"
+            or cast(Mapping[str, Any], field_schema).get("type") != "string"
             or field_name not in required
         ):
             return False
