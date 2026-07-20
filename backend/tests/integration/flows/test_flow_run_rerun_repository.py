@@ -387,19 +387,6 @@ async def _mark_run_completed(
     tenant_id: UUID,
 ) -> None:
     now = datetime.now(timezone.utc)
-    await session.execute(
-        sa.update(FlowRuns)
-        .where(FlowRuns.id == flow_run_id)
-        .where(FlowRuns.tenant_id == tenant_id)
-        .values(
-            status=FlowRunStatus.COMPLETED.value,
-            revision=1,
-            output_payload_json={"answer": "complete"},
-            started_at=now,
-            finished_at=now,
-            cancelled_at=now,
-        )
-    )
     for step in flow.steps:
         step_id = _require_uuid(step.id)
         attempt = await run_repo.create_or_get_attempt_started(
@@ -453,6 +440,19 @@ async def _mark_run_completed(
                 finished_at=now,
             )
         )
+    await session.execute(
+        sa.update(FlowRuns)
+        .where(FlowRuns.id == flow_run_id)
+        .where(FlowRuns.tenant_id == tenant_id)
+        .values(
+            status=FlowRunStatus.COMPLETED.value,
+            revision=1,
+            output_payload_json={"answer": "complete"},
+            started_at=now,
+            finished_at=now,
+            cancelled_at=now,
+        )
+    )
 
 
 async def _accept_rerun(
@@ -704,6 +704,11 @@ async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_a
         )
         assert first_attempt is not None
         first_attempt_id = first_attempt.id
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.RUNNING.value)
+        )
         second_attempt = await run_repo.create_or_get_attempt_started(
             run_id=scenario.flow_run_id,
             flow_id=scenario.flow_id,
@@ -742,6 +747,11 @@ async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_a
         )
         assert failed_third_attempt is not None
         third_attempt_id = third_attempt.id
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.COMPLETED.value)
+        )
         # Crossed timestamps prove attempt number, not wall-clock time, defines latest.
         first_started_at = datetime(2026, 1, 1, 10, tzinfo=timezone.utc)
         second_started_at = datetime(2026, 1, 1, 9, tzinfo=timezone.utc)
@@ -1237,6 +1247,11 @@ async def test_copy_step_input_files_from_predecessor_attempt_preserves_order(
             ]
         )
         await session.flush()
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.RUNNING.value)
+        )
         target_attempt = await run_repo.create_or_get_attempt_started(
             run_id=scenario.flow_run_id,
             flow_id=scenario.flow_id,
@@ -1245,6 +1260,11 @@ async def test_copy_step_input_files_from_predecessor_attempt_preserves_order(
             step_order=1,
             attempt_no=2,
             celery_task_id="copy-step-input-files",
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.COMPLETED.value)
         )
 
         for _ in range(2):
@@ -1791,6 +1811,11 @@ async def test_accept_rerun_projects_file_inputs_at_next_root_attempt(
             admin_user=admin_user,
         )
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.RUNNING.value)
+        )
         second_attempt = await run_repo.create_or_get_attempt_started(
             run_id=scenario.flow_run_id,
             flow_id=scenario.flow_id,
@@ -1808,6 +1833,11 @@ async def test_accept_rerun_projects_file_inputs_at_next_root_attempt(
             status=FlowStepAttemptStatus.COMPLETED,
         )
         assert finished_second_attempt is not None
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.COMPLETED.value)
+        )
 
         accepted = await _accept_rerun(
             session=session,

@@ -32,6 +32,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (
@@ -1825,6 +1826,132 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_claim_step_result_serializes_against_terminalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows claim-terminalization race space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow claim-terminalization race assistant",
+            model.id,
+            space_id=space.id,
+        )
+        flow = await FlowRepository(session=session, factory=FlowFactory()).create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await FlowRunRepository(session=session, factory=FlowFactory()).create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "claim-terminalization-race"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        step_id = flow.steps[0].id
+        tenant_id = admin_user.tenant_id
+
+    competing_query_started = asyncio.Event()
+
+    async def _claim_after_terminalization_started() -> FlowStepResult | None:
+        async with sessionmanager.session() as session, session.begin():
+            sa.event.listen(
+                session.sync_session,
+                "do_orm_execute",
+                lambda _state: competing_query_started.set(),
+                once=True,
+            )
+            return await FlowRunRepository(
+                session=session, factory=FlowFactory()
+            ).claim_step_result(
+                run_id=run_id,
+                step_id=step_id,
+                tenant_id=tenant_id,
+            )
+
+    async with sessionmanager.session() as terminal_session:
+        async with terminal_session.begin():
+            terminal_repo = FlowRunRepository(
+                session=terminal_session, factory=FlowFactory()
+            )
+            terminalized = await FlowRunTerminalizer(
+                terminal_repo,
+                FlowRunRerunRepository(
+                    session=terminal_session,
+                    factory=terminal_repo.factory,
+                ),
+                terminal_repo.audit_outbox_repo,
+                FlowRunReviewCheckpointRepository(
+                    session=terminal_session,
+                    factory=terminal_repo.factory,
+                    audit_outbox_repo=terminal_repo.audit_outbox_repo,
+                ),
+            ).terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.EXECUTOR_FAILED,
+                    code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                    message="Terminalization won the race.",
+                ),
+            )
+            assert terminalized.did_transition is True
+
+            claim_task = asyncio.create_task(_claim_after_terminalization_started())
+            await asyncio.wait_for(competing_query_started.wait(), timeout=5)
+            blocked_before_terminal_commit = not claim_task.done()
+
+        claimed = await asyncio.wait_for(claim_task, timeout=5)
+
+    assert blocked_before_terminal_commit is True
+    assert claimed is None
+    async with sessionmanager.session() as session, session.begin():
+        result_status = await session.scalar(
+            sa.select(FlowStepResults.status)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.step_id == step_id)
+        )
+        assert result_status == FlowStepResultStatus.FAILED.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_mark_running_if_claimable_is_single_winner(
     db_container,
     completion_model_factory,
@@ -2512,6 +2639,150 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
             .where(FlowStepAttempts.attempt_no == 1)
         )
         assert row_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_attempt_start_serializes_against_terminalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows attempt-terminalization race space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow attempt-terminalization race assistant",
+            model.id,
+            space_id=space.id,
+        )
+        flow = await FlowRepository(session=session, factory=FlowFactory()).create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await FlowRunRepository(session=session, factory=FlowFactory()).create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "attempt-terminalization-race"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        run_id = run.id
+        flow_id = flow.id
+        step_id = flow.steps[0].id
+        tenant_id = admin_user.tenant_id
+
+    competing_query_started = asyncio.Event()
+
+    async def _start_attempt_after_terminalization_started() -> (
+        FlowRunPersistenceInvariantError | None
+    ):
+        async with sessionmanager.session() as session, session.begin():
+            sa.event.listen(
+                session.sync_session,
+                "do_orm_execute",
+                lambda _state: competing_query_started.set(),
+                once=True,
+            )
+            try:
+                await FlowRunRepository(
+                    session=session, factory=FlowFactory()
+                ).create_or_get_attempt_started(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    step_id=step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    celery_task_id="terminal-race-task",
+                )
+            except FlowRunPersistenceInvariantError as exc:
+                return exc
+            return None
+
+    async with sessionmanager.session() as terminal_session:
+        async with terminal_session.begin():
+            terminal_repo = FlowRunRepository(
+                session=terminal_session, factory=FlowFactory()
+            )
+            terminalized = await FlowRunTerminalizer(
+                terminal_repo,
+                FlowRunRerunRepository(
+                    session=terminal_session,
+                    factory=terminal_repo.factory,
+                ),
+                terminal_repo.audit_outbox_repo,
+                FlowRunReviewCheckpointRepository(
+                    session=terminal_session,
+                    factory=terminal_repo.factory,
+                    audit_outbox_repo=terminal_repo.audit_outbox_repo,
+                ),
+            ).terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.EXECUTOR_FAILED,
+                    code=FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+                    message="Terminalization won the race.",
+                ),
+            )
+            assert terminalized.did_transition is True
+
+            attempt_task = asyncio.create_task(
+                _start_attempt_after_terminalization_started()
+            )
+            await asyncio.wait_for(competing_query_started.wait(), timeout=5)
+            blocked_before_terminal_commit = not attempt_task.done()
+
+        invariant_error = await asyncio.wait_for(attempt_task, timeout=5)
+
+    assert blocked_before_terminal_commit is True
+    assert invariant_error is not None
+    assert invariant_error.operation == "create_flow_step_attempt"
+    assert invariant_error.run_id == run_id
+    assert invariant_error.tenant_id == tenant_id
+    assert invariant_error.flow_id == flow_id
+    async with sessionmanager.session() as session, session.begin():
+        started_attempts = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.status == FlowStepAttemptStatus.STARTED.value)
+        )
+        assert started_attempts == 0
 
 
 @pytest.mark.asyncio

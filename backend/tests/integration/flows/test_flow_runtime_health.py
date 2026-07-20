@@ -309,11 +309,6 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
                 - timedelta(seconds=policy.stale_running_unhealthy_after_seconds + 5),
             )
         )
-        await session.execute(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == awaiting_review.id)
-            .values(status=FlowRunStatus.AWAITING_REVIEW.value)
-        )
         await run_repo.create_or_get_attempt_started(
             run_id=awaiting_review.id,
             flow_id=flow.id,
@@ -322,6 +317,11 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             step_order=1,
             attempt_no=1,
             celery_task_id="runtime-health-review",
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == awaiting_review.id)
+            .values(status=FlowRunStatus.AWAITING_REVIEW.value)
         )
         await session.execute(
             sa.insert(FlowRunReviewCheckpoints).values(

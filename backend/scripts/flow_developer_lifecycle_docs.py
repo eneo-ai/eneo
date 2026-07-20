@@ -86,7 +86,7 @@ SOURCE_MODULES: tuple[SourceModule, ...] = (
     SourceModule(
         label="Run repository",
         path="backend/src/eneo/flows/infrastructure/flow_run_repo.py",
-        owns="dispatch compare-and-set, queued-to-running claim, active step-result closure, and open-attempt closure",
+        owns="dispatch compare-and-set, queued-to-running claim, parent-first step mutation locks, active step-result closure, and open-attempt closure",
     ),
     SourceModule(
         label="Runtime task",
@@ -490,6 +490,7 @@ def _render_step_failure_and_upload_binding() -> str:
             "- Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.",
             "- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.",
             "- When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.",
+            "- `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.",
             "- Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.",
             "",
             "### Runtime upload binding",
@@ -578,6 +579,7 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
             ),
             owner_notes=(
                 "`backend/src/eneo/flows/runtime/executor.py` owns the step loop and failure handling.",
+                "`backend/src/eneo/flows/infrastructure/flow_run_repo.py` serializes step claims and attempt starts against terminalization by locking and revalidating the parent run before child mutation.",
                 "`backend/src/eneo/flows/runtime/step_execution_runtime.py` owns handler dispatch.",
                 "`backend/src/eneo/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.",
             ),

@@ -220,6 +220,14 @@ The run lifecycle is database-first:
    run from persisted result state. See
    `backend/src/eneo/flows/runtime/executor.py:881`.
 
+`FlowRunRepository` locks the matching `flow_runs` parent before claiming a
+step result or opening a step attempt, then rechecks that the run is still
+`queued` or `running` after any lock wait. This parent-before-child order keeps
+terminalization and child mutation serialized: a child writer that loses the
+race cannot recreate active work after the run becomes terminal. See
+`backend/src/eneo/flows/infrastructure/flow_run_repo.py:1119` and
+`backend/src/eneo/flows/infrastructure/flow_run_repo.py:1182`.
+
 ## Large Runtime Input And Context-Window Policy
 
 Large-input handling is a runtime execution concern, not a static file-count

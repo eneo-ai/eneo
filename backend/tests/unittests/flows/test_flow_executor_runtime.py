@@ -39,6 +39,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
+from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -1346,8 +1347,10 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
 
 
 @pytest.mark.asyncio
-async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user):
-    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+async def test_terminal_run_attempt_start_rejection_uses_failure_path_without_provider_call(
+    user,
+):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
     step_id = uuid4()
@@ -1359,12 +1362,27 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         step_id=step_id,
         assistant_id=assistant_id,
     )
+    assistant = _default_snapshot_assistant(assistant_id)
+    assistant.get_response = AsyncMock()
+    executor.space_repo.get_space_by_assistant = AsyncMock(
+        return_value=SimpleNamespace(
+            id=uuid4(),
+            default_assistant=None,
+            assistants=[assistant],
+            get_assistant=lambda *, assistant_id: assistant,
+        )
+    )
 
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
-        side_effect=RuntimeError("db write failed")
+        side_effect=FlowRunPersistenceInvariantError(
+            operation="create_flow_step_attempt",
+            run_id=queued_run.id,
+            tenant_id=user.tenant_id,
+            flow_id=queued_run.flow_id,
+        )
     )
     flow_run_repo.finish_attempt = AsyncMock()
     flow_version_repo.get = AsyncMock(
@@ -1407,12 +1425,14 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
     saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == "Flow step 1 execution failed."
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+    terminalization = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    assert terminalization["target_status"] == FlowRunStatus.FAILED
     assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
-            "target_status"
-        ]
-        == FlowRunStatus.FAILED
+        terminalization["error"].code
+        == FlowApiErrorCode.STEP_ATTEMPT_START_FAILED.value
     )
+    assistant.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio

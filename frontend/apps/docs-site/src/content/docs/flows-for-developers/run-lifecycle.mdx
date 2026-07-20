@@ -130,6 +130,7 @@ stateDiagram-v2
 - Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.
 - Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.
 - When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.
+- `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.
 - Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.
 
 ### Runtime upload binding
@@ -237,6 +238,7 @@ sequenceDiagram
 </div>
 
 - `backend/src/eneo/flows/runtime/executor.py` owns the step loop and failure handling.
+- `backend/src/eneo/flows/infrastructure/flow_run_repo.py` serializes step claims and attempt starts against terminalization by locking and revalidating the parent run before child mutation.
 - `backend/src/eneo/flows/runtime/step_execution_runtime.py` owns handler dispatch.
 - `backend/src/eneo/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.
 
@@ -306,30 +308,30 @@ sequenceDiagram
 
 ## Source guards
 
-| Source                                                                     | Guarded lifecycle role                                                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `backend/src/eneo/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states. |
-| `backend/src/eneo/flows/api/flow_run_execution_router.py`                  | Run API adapter: HTTP request parsing, authorization, response assembly, and dispatch scheduling.                              |
-| `backend/src/eneo/flows/application/flow_run_service.py`                   | Run service: run creation, input normalization, and relational runtime-file binding.                                           |
-| `backend/src/eneo/flows/application/flow_dispatch.py`                      | Dispatch coordinator: due-attempt claim orchestration, broker send, and durable acceptance or failure recording.               |
-| `backend/src/eneo/flows/application/flow_run_recovery_policy.py`           | Dispatch recovery policy: bounded dispatch attempts, retry delays, and stale-running thresholds.                               |
-| `backend/src/eneo/flows/infrastructure/flow_run_repo.py`                   | Run repository: dispatch compare-and-set, queued-to-running claim, active step-result closure, and open-attempt closure.       |
-| `backend/src/eneo/flows/runtime/tasks.py`                                  | Runtime task: worker entrypoint, actor resolution, tracing, executor construction, and stale-run task orchestration.           |
-| `backend/src/eneo/flows/runtime/flow_runtime_health.py`                    | Runtime health: dispatch backlog and stale-running health classification without lifecycle writes.                             |
-| `backend/src/eneo/flows/runtime/executor.py`                               | Executor: step claim, step execution, review pause, rerun attempt linking, and finalization handoff.                           |
-| `backend/src/eneo/flows/application/flow_run_terminalization.py`           | Terminalizer: terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure.          |
-| `backend/src/eneo/flows/runtime/run_outcome.py`                            | Run outcome: final run outcome selection from current step results.                                                            |
-| `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` | Review checkpoint repository: review checkpoint persistence, state transitions, and run await/resume transitions.              |
-| `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` | Review checkpoint service: review API use cases and domain-error to API-error translation.                                     |
-| `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py`  | Review expiry reconciler: expired review checkpoint reconciliation and run cancellation handoff.                               |
-| `backend/src/eneo/flows/application/flow_run_rerun_service.py`             | Rerun service: rerun request normalization, validation, fingerprinting, and command creation.                                  |
-| `backend/src/eneo/flows/flow_run_rerun_graph.py`                           | Rerun graph: downstream invalidation graph construction.                                                                       |
-| `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py`             | Rerun repository: rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued.                |
-| `backend/src/eneo/flows/flow_run_step_inputs.py`                           | Step input validation: runtime step input normalization, upload access validation, and binding locks.                          |
-| `backend/src/eneo/flows/flow_runtime_file_service.py`                      | Runtime file service: runtime upload validation and reusable upload registration.                                              |
-| `backend/src/eneo/flows/flow_runtime_upload_repo.py`                       | Runtime upload repository: runtime upload owner, tenant, flow, and step binding checks.                                        |
-| `backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py`   | Step input file rows: relational run step-input file row construction and insertion.                                           |
-| `backend/tests/unittests/flows/test_flow_docs_site_contract.py`            | Committed lifecycle page parity, enum coverage, and source-reference drift guard.                                              |
+| Source                                                                     | Guarded lifecycle role                                                                                                                                     |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/src/eneo/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states.                             |
+| `backend/src/eneo/flows/api/flow_run_execution_router.py`                  | Run API adapter: HTTP request parsing, authorization, response assembly, and dispatch scheduling.                                                          |
+| `backend/src/eneo/flows/application/flow_run_service.py`                   | Run service: run creation, input normalization, and relational runtime-file binding.                                                                       |
+| `backend/src/eneo/flows/application/flow_dispatch.py`                      | Dispatch coordinator: due-attempt claim orchestration, broker send, and durable acceptance or failure recording.                                           |
+| `backend/src/eneo/flows/application/flow_run_recovery_policy.py`           | Dispatch recovery policy: bounded dispatch attempts, retry delays, and stale-running thresholds.                                                           |
+| `backend/src/eneo/flows/infrastructure/flow_run_repo.py`                   | Run repository: dispatch compare-and-set, queued-to-running claim, parent-first step mutation locks, active step-result closure, and open-attempt closure. |
+| `backend/src/eneo/flows/runtime/tasks.py`                                  | Runtime task: worker entrypoint, actor resolution, tracing, executor construction, and stale-run task orchestration.                                       |
+| `backend/src/eneo/flows/runtime/flow_runtime_health.py`                    | Runtime health: dispatch backlog and stale-running health classification without lifecycle writes.                                                         |
+| `backend/src/eneo/flows/runtime/executor.py`                               | Executor: step claim, step execution, review pause, rerun attempt linking, and finalization handoff.                                                       |
+| `backend/src/eneo/flows/application/flow_run_terminalization.py`           | Terminalizer: terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure.                                      |
+| `backend/src/eneo/flows/runtime/run_outcome.py`                            | Run outcome: final run outcome selection from current step results.                                                                                        |
+| `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` | Review checkpoint repository: review checkpoint persistence, state transitions, and run await/resume transitions.                                          |
+| `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` | Review checkpoint service: review API use cases and domain-error to API-error translation.                                                                 |
+| `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py`  | Review expiry reconciler: expired review checkpoint reconciliation and run cancellation handoff.                                                           |
+| `backend/src/eneo/flows/application/flow_run_rerun_service.py`             | Rerun service: rerun request normalization, validation, fingerprinting, and command creation.                                                              |
+| `backend/src/eneo/flows/flow_run_rerun_graph.py`                           | Rerun graph: downstream invalidation graph construction.                                                                                                   |
+| `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py`             | Rerun repository: rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued.                                            |
+| `backend/src/eneo/flows/flow_run_step_inputs.py`                           | Step input validation: runtime step input normalization, upload access validation, and binding locks.                                                      |
+| `backend/src/eneo/flows/flow_runtime_file_service.py`                      | Runtime file service: runtime upload validation and reusable upload registration.                                                                          |
+| `backend/src/eneo/flows/flow_runtime_upload_repo.py`                       | Runtime upload repository: runtime upload owner, tenant, flow, and step binding checks.                                                                    |
+| `backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py`   | Step input file rows: relational run step-input file row construction and insertion.                                                                       |
+| `backend/tests/unittests/flows/test_flow_docs_site_contract.py`            | Committed lifecycle page parity, enum coverage, and source-reference drift guard.                                                                          |
 
 ## Related
 

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from eneo.flows import FlowFactory
-from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
@@ -148,7 +148,7 @@ async def test_create_or_get_attempt_started_raises_persistence_invariant_when_i
     None
 ):
     session = AsyncMock()
-    session.scalar.side_effect = [None, None]
+    session.scalar.side_effect = [FlowRunStatus.RUNNING.value, None, None]
     repo = FlowRunRepository(session=session, factory=FlowFactory())
     run_id = uuid4()
     tenant_id = uuid4()
@@ -169,6 +169,7 @@ async def test_create_or_get_attempt_started_raises_persistence_invariant_when_i
     assert exc_info.value.run_id == run_id
     assert exc_info.value.tenant_id == tenant_id
     assert exc_info.value.flow_id == flow_id
+    assert session.scalar.await_count == 3
 
 
 @pytest.mark.asyncio

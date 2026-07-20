@@ -1116,6 +1116,15 @@ class FlowRunRepository:
         step_id: UUID,
         tenant_id: UUID,
     ) -> FlowStepResult | None:
+        run_status = await self.session.scalar(
+            sa.select(FlowRuns.status)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_status not in self._ACTIVE_STATUSES:
+            return None
+
         now_utc = datetime.now(timezone.utc)
         row = await self.session.scalar(
             sa.update(FlowStepResults)
@@ -1170,6 +1179,21 @@ class FlowRunRepository:
         rerun_operation_id: UUID | None = None,
         predecessor_attempt_id: UUID | None = None,
     ) -> FlowStepAttempt:
+        run_status = await self.session.scalar(
+            sa.select(FlowRuns.status)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_status not in self._ACTIVE_STATUSES:
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_step_attempt",
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+
         started_at = datetime.now(timezone.utc)
         insert_stmt = (
             pg_insert(FlowStepAttempts)

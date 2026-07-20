@@ -82,7 +82,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
         worker=flow_broker_worker_seam,
         timeout_seconds=30,
     )
-    assert evidence["run"]["output_payload_json"] is None
+    assert evidence["run"]["result"] is None
 
     await flow_broker_worker_seam.wait_for_worker_child_exit(timeout_seconds=30)
     redelivery_result = await flow_broker_worker_seam.wait_for_task_result(
@@ -101,7 +101,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
     assert after_redelivery_response.status_code == 200, after_redelivery_response.text
     after_redelivery = after_redelivery_response.json()
     assert after_redelivery["run"]["status"] == "running"
-    assert after_redelivery["run"]["output_payload_json"] is None
+    assert after_redelivery["run"]["result"] is None
     assert len(after_redelivery["step_results"]) == 1
     assert after_redelivery["step_results"][0]["status"] == "running"
     assert len(after_redelivery["step_attempts"]) == 1
@@ -144,7 +144,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
         expected_status="failed",
         timeout_seconds=30,
     )
-    assert failed_run["output_payload_json"] is None
+    assert failed_run["result"] is None
     assert failed_run["error"]["code"] == "flow_worker_stalled"
 
     second_recovery = await flow_broker_worker_seam.send_task_and_wait(
@@ -160,7 +160,7 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
     assert final_evidence_response.status_code == 200, final_evidence_response.text
     final_evidence = final_evidence_response.json()
     assert final_evidence["run"]["status"] == "failed"
-    assert final_evidence["run"]["output_payload_json"] is None
+    assert final_evidence["run"]["result"] is None
     assert len(final_evidence["step_results"]) == 1
     assert final_evidence["step_results"][0]["status"] == "failed"
     assert final_evidence["step_results"][0]["output_payload_json"] is None
