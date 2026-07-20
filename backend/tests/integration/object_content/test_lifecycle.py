@@ -250,6 +250,175 @@ async def test_active_hold_retains_content_and_release_schedules_delete(
 
 
 @pytest.mark.asyncio
+async def test_retained_content_and_active_hold_reject_hard_delete(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    owned = await _available_content(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        hold_id = await ObjectContentRepository(session).apply_hold(
+            tenant_id=owned.tenant_id,
+            content_id=owned.content_id,
+            kind="legal",
+            reason="hard deletion must not bypass retention",
+            actor_user_id=owned.user_id,
+            expires_at=None,
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == owned.file_id
+            )
+        )
+
+    with pytest.raises(DBAPIError, match="cannot be hard-deleted"):
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                delete(ObjectContentHolds).where(ObjectContentHolds.id == hold_id)
+            )
+
+    with pytest.raises(DBAPIError, match="purge horizon"):
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                delete(ObjectContents).where(ObjectContents.id == owned.content_id)
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, owned.content_id)
+        hold = await session.get(ObjectContentHolds, hold_id)
+        assert content is not None
+        assert content.state == ContentState.RETAINED.value
+        assert hold is not None
+        assert hold.released_at is None
+
+
+@pytest.mark.asyncio
+async def test_elapsed_tombstone_purge_cascades_released_hold(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    owned = await _available_content(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentRepository(session)
+        hold_id = await repository.apply_hold(
+            tenant_id=owned.tenant_id,
+            content_id=owned.content_id,
+            kind="recovery",
+            reason="retain audit history until controlled tombstone purge",
+            actor_user_id=owned.user_id,
+            expires_at=None,
+        )
+        await repository.release_hold(
+            tenant_id=owned.tenant_id,
+            hold_id=hold_id,
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == owned.file_id
+            )
+        )
+        await session.execute(
+            text(
+                "UPDATE object_contents "
+                "SET state = 'tombstoned', "
+                "remote_deleted_at = now(), "
+                "tombstone_purge_after = now() - interval '1 second' "
+                "WHERE id = :content_id"
+            ),
+            {"content_id": owned.content_id},
+        )
+
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(ObjectContents).where(ObjectContents.id == owned.content_id)
+        )
+
+    async with object_content_database.session() as session, session.begin():
+        assert await session.get(ObjectContents, owned.content_id) is None
+        assert await session.get(ObjectContentHolds, hold_id) is None
+
+
+@pytest.mark.parametrize("purge_horizon", ["missing", "future"])
+@pytest.mark.asyncio
+async def test_tombstone_purge_requires_approved_elapsed_horizon(
+    object_content_database: DatabaseSessionManager,
+    purge_horizon: str,
+) -> None:
+    owned = await _available_content(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == owned.file_id
+            )
+        )
+        content = await session.get(ObjectContents, owned.content_id)
+        assert content is not None
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        content.state = ContentState.TOMBSTONED.value
+        content.remote_deleted_at = now
+        content.tombstone_purge_after = (
+            None if purge_horizon == "missing" else now + timedelta(days=1)
+        )
+
+    with pytest.raises(DBAPIError, match="purge horizon"):
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                delete(ObjectContents).where(ObjectContents.id == owned.content_id)
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        assert await session.get(ObjectContents, owned.content_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_deleting_hold_actor_preserves_hold_and_content_state(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    owned = await _available_content(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        actor = Users(
+            username="object-content-hold-actor",
+            email=f"hold-actor-{uuid4().hex}@example.test",
+            email_verified=True,
+            is_active=True,
+            state="active",
+            used_tokens=0,
+            tenant_id=owned.tenant_id,
+            is_system_user=False,
+        )
+        session.add(actor)
+        await session.flush()
+        actor_user_id = actor.id
+        hold_id = await ObjectContentRepository(session).apply_hold(
+            tenant_id=owned.tenant_id,
+            content_id=owned.content_id,
+            kind="legal",
+            reason="the hold survives actor account erasure",
+            actor_user_id=actor_user_id,
+            expires_at=None,
+        )
+
+    with pytest.raises(DBAPIError, match="hold identity is immutable"):
+        async with object_content_database.session() as session, session.begin():
+            hold = await session.get(ObjectContentHolds, hold_id)
+            assert hold is not None
+            hold.actor_user_id = None
+            await session.flush()
+
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(delete(Users).where(Users.id == actor_user_id))
+
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, owned.content_id)
+        hold = await session.get(ObjectContentHolds, hold_id)
+        assert await session.get(Users, actor_user_id) is None
+        assert content is not None
+        assert content.state == ContentState.AVAILABLE.value
+        assert hold is not None
+        assert hold.reason == "the hold survives actor account erasure"
+        assert hold.actor_user_id is None
+        assert hold.released_at is None
+
+
+@pytest.mark.asyncio
 async def test_hold_policy_is_immutable_until_explicit_release(
     object_content_database: DatabaseSessionManager,
 ) -> None:

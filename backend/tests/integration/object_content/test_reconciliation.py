@@ -11,11 +11,13 @@ import pytest
 from botocore.config import Config
 from botocore.session import get_session
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import DBAPIError
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
+    ObjectContentHolds,
     ObjectContentMultipartCandidates,
     ObjectContentOrphanCandidates,
     ObjectContents,
@@ -260,6 +262,60 @@ async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones
         assert complete_row.tombstone_purge_after is None
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(complete.object_key)
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_preserves_bytes_behind_an_active_hold(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    reconciler = ObjectContentReconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    try:
+        await reconciler.run_once()
+
+        async with object_content_database.session() as session, session.begin():
+            content = await session.get(ObjectContents, pending.content_id)
+            actor_user_id = (await session.scalars(select(Users.id))).one()
+            assert content is not None
+            assert content.state == ContentState.AVAILABLE.value
+            hold_id = await ObjectContentRepository(session).apply_hold(
+                tenant_id=content.tenant_id,
+                content_id=content.id,
+                kind="legal",
+                reason="reconciliation must preserve held remote bytes",
+                actor_user_id=actor_user_id,
+                expires_at=None,
+            )
+            await session.execute(
+                delete(FileContentReferences).where(
+                    FileContentReferences.file_id == pending.file_id
+                )
+            )
+
+        with pytest.raises(DBAPIError, match="cannot be hard-deleted"):
+            async with object_content_database.session() as session, session.begin():
+                await session.execute(
+                    delete(ObjectContentHolds).where(ObjectContentHolds.id == hold_id)
+                )
+
+        result = await reconciler.run_once()
+        assert result.content_processed == 0
+        async with object_content_database.session() as session, session.begin():
+            content = await session.get(ObjectContents, pending.content_id)
+            assert content is not None
+            assert content.state == ContentState.RETAINED.value
+        await real_object_store.store.head(pending.object_key)
+    finally:
+        await real_object_store.store.delete_and_confirm(pending.object_key)
 
 
 @pytest.mark.asyncio

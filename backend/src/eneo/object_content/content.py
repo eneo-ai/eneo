@@ -79,6 +79,21 @@ class InvalidContentRangeError(ValueError):
     code = "object_content_range_invalid"
 
 
+# Durable content sizes use PostgreSQL BIGINT, whose decimal width is 19 digits.
+_MAX_BYTE_RANGE_DIGITS = 19
+
+
+def _parse_byte_range_integer(value: str) -> int:
+    normalized = value.lstrip("0") or "0"
+    if (
+        not value.isascii()
+        or not value.isdigit()
+        or len(normalized) > _MAX_BYTE_RANGE_DIGITS
+    ):
+        raise InvalidContentRangeError("The byte range is malformed")
+    return int(normalized)
+
+
 @dataclass(frozen=True, slots=True)
 class ByteRange:
     start: int
@@ -96,23 +111,25 @@ class ByteRange:
 
         start_text, end_text = range_spec.split("-", maxsplit=1)
         if not start_text:
-            if not end_text.isdigit() or int(end_text) <= 0:
+            suffix_length = _parse_byte_range_integer(end_text)
+            if suffix_length <= 0:
                 raise InvalidContentRangeError("The suffix length must be positive")
-            suffix_length = min(int(end_text), size_bytes)
+            suffix_length = min(suffix_length, size_bytes)
             return cls(
                 start=size_bytes - suffix_length,
                 end=size_bytes - 1,
                 total=size_bytes,
             )
 
-        if not start_text.isdigit() or (end_text and not end_text.isdigit()):
-            raise InvalidContentRangeError("The byte range is malformed")
-
-        start = int(start_text)
+        start = _parse_byte_range_integer(start_text)
         if start >= size_bytes:
             raise InvalidContentRangeError("The byte range starts after the content")
 
-        end = size_bytes - 1 if not end_text else min(int(end_text), size_bytes - 1)
+        end = (
+            size_bytes - 1
+            if not end_text
+            else min(_parse_byte_range_integer(end_text), size_bytes - 1)
+        )
         if end < start:
             raise InvalidContentRangeError("The byte range ends before it starts")
         return cls(start=start, end=end, total=size_bytes)

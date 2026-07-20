@@ -187,13 +187,16 @@ async def object_content_database(
 ) -> AsyncGenerator[DatabaseSessionManager, None]:
     """Reset only the object-content control plane between integration tests."""
     async with _object_content_database.session() as session, session.begin():
-        await session.execute(text("DELETE FROM file_content_references"))
-        await session.execute(text("DELETE FROM info_blob_content_references"))
-        await session.execute(text("DELETE FROM icon_content_references"))
-        await session.execute(text("DELETE FROM object_content_orphan_candidates"))
-        await session.execute(text("DELETE FROM object_content_multipart_candidates"))
-        await session.execute(text("DELETE FROM object_contents"))
-        await session.execute(text("DELETE FROM object_content_reconciliation_state"))
+        await session.execute(
+            text(
+                "TRUNCATE TABLE "
+                "object_contents, "
+                "object_content_orphan_candidates, "
+                "object_content_multipart_candidates, "
+                "object_content_reconciliation_state "
+                "CASCADE"
+            )
+        )
         await session.execute(
             text("INSERT INTO object_content_reconciliation_state DEFAULT VALUES")
         )

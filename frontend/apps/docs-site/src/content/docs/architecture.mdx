@@ -206,6 +206,12 @@ process/network crash interleavings. Canonical full-byte SHA-256 is computed by
 Eneo while streaming; ETag, CRC, and multipart composite checksums are never the
 canonical digest.
 
+Retention is enforced at the database boundary as well as in the reconciler.
+Active holds and retained content reject hard deletion. A tombstone can be
+purged only when its database-owned purge horizon is present and has elapsed;
+no horizon means retain it. Deleting the account that created a hold removes
+only that attribution—the hold and content lifecycle remain unchanged.
+
 Reads are trusted only after Eneo recomputes that canonical digest. Full and
 single-range responses therefore perform one bounded-memory full read into a
 temporary spool before emitting bytes; a range is sliced from the verified

@@ -247,6 +247,14 @@ two-sided reconciliation converge after a process or network failure. Delete
 intent is irreversible. A final reference cannot delete content while a hold or
 minimum-retention boundary blocks it.
 
+Hard deletion is also fenced in PostgreSQL. Active holds cannot be removed with
+a direct row delete, and retained content cannot bypass the lifecycle. A
+`tombstoned` row is purgeable only after the database-owned
+`tombstone_purge_after` horizon is present and has elapsed. A missing horizon
+means “retain the tombstone”; it is never interpreted as immediate permission
+to purge. User account erasure clears hold attribution through its foreign key
+without releasing the hold or changing content state.
+
 Object-content reconciliation is a queue-neutral async task. The current worker
 registers and schedules it with ARQ; the lifecycle implementation does not
 import ARQ. Replacing ARQ with another worker implementation therefore changes

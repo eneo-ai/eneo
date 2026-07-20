@@ -619,6 +619,21 @@ def _create_indexes() -> None:
 
 def _create_trigger_functions() -> None:
     op.execute("""
+        CREATE FUNCTION object_content_guard_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF OLD.state <> 'tombstoned'
+                OR OLD.tombstone_purge_after IS NULL
+                OR OLD.tombstone_purge_after > now() THEN
+                RAISE EXCEPTION
+                    'object content cannot be hard-deleted before its purge horizon';
+            END IF;
+            RETURN OLD;
+        END;
+        $$
+    """)
+
+    op.execute("""
         CREATE FUNCTION object_content_guard_update() RETURNS trigger
         LANGUAGE plpgsql AS $$
         BEGIN
@@ -864,6 +879,21 @@ def _create_trigger_functions() -> None:
     """)
 
     op.execute("""
+        CREATE FUNCTION object_content_hold_guard_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM object_contents WHERE id = OLD.content_id
+            ) THEN
+                RAISE EXCEPTION
+                    'an object content hold cannot be hard-deleted';
+            END IF;
+            RETURN OLD;
+        END;
+        $$
+    """)
+
+    op.execute("""
         CREATE FUNCTION object_content_hold_fence() RETURNS trigger
         LANGUAGE plpgsql AS $$
         DECLARE
@@ -897,7 +927,6 @@ def _create_trigger_functions() -> None:
                 NEW.content_id,
                 NEW.kind,
                 NEW.reason,
-                NEW.actor_user_id,
                 NEW.expires_at,
                 NEW.created_at
             ) IS DISTINCT FROM (
@@ -905,10 +934,18 @@ def _create_trigger_functions() -> None:
                 OLD.content_id,
                 OLD.kind,
                 OLD.reason,
-                OLD.actor_user_id,
                 OLD.expires_at,
                 OLD.created_at
             ) THEN
+                RAISE EXCEPTION 'object content hold identity is immutable';
+            END IF;
+            IF NEW.actor_user_id IS DISTINCT FROM OLD.actor_user_id
+                AND NOT (
+                    OLD.actor_user_id IS NOT NULL
+                    AND NEW.actor_user_id IS NULL
+                    -- FK-driven SET NULL is nested; direct hold updates are depth 1.
+                    AND pg_trigger_depth() > 1
+                ) THEN
                 RAISE EXCEPTION 'object content hold identity is immutable';
             END IF;
 
@@ -971,6 +1008,11 @@ def _create_trigger_functions() -> None:
 
 def _create_triggers() -> None:
     op.execute("""
+        CREATE TRIGGER object_contents_10_guard_delete
+        BEFORE DELETE ON object_contents
+        FOR EACH ROW EXECUTE FUNCTION object_content_guard_delete()
+    """)
+    op.execute("""
         CREATE TRIGGER object_contents_10_guard_update
         BEFORE UPDATE ON object_contents
         FOR EACH ROW EXECUTE FUNCTION object_content_guard_update()
@@ -991,6 +1033,11 @@ def _create_triggers() -> None:
             FOR EACH ROW EXECUTE FUNCTION object_content_reference_fence()
         """)
     op.execute("""
+        CREATE TRIGGER object_content_holds_delete_fence
+        BEFORE DELETE ON object_content_holds
+        FOR EACH ROW EXECUTE FUNCTION object_content_hold_guard_delete()
+    """)
+    op.execute("""
         CREATE TRIGGER object_content_holds_fence
         BEFORE INSERT OR UPDATE ON object_content_holds
         FOR EACH ROW EXECUTE FUNCTION object_content_hold_fence()
@@ -1008,6 +1055,10 @@ def downgrade() -> None:
     op.execute(
         "DROP TRIGGER IF EXISTS object_content_holds_fence ON object_content_holds"
     )
+    op.execute(
+        "DROP TRIGGER IF EXISTS object_content_holds_delete_fence "
+        "ON object_content_holds"
+    )
     for table in (
         "file_content_references",
         "info_blob_content_references",
@@ -1020,10 +1071,15 @@ def downgrade() -> None:
     op.execute(
         "DROP TRIGGER IF EXISTS object_contents_10_guard_update ON object_contents"
     )
+    op.execute(
+        "DROP TRIGGER IF EXISTS object_contents_10_guard_delete ON object_contents"
+    )
     op.execute("DROP FUNCTION IF EXISTS object_content_audit_transition()")
     op.execute("DROP FUNCTION IF EXISTS object_content_hold_fence()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_hold_guard_delete()")
     op.execute("DROP FUNCTION IF EXISTS object_content_reference_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_guard_update()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_guard_delete()")
 
     op.drop_table("object_content_multipart_candidates")
     op.drop_table("object_content_reconciliation_state")

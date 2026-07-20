@@ -473,6 +473,13 @@ multipart sizes, leases, retries, and reconciliation concurrency. They do not
 define business upload limits; administrators retain ownership of user-facing
 limits. Object keys and storage topology remain tenant-neutral.
 
+PostgreSQL rejects direct deletion of active holds and retained content.
+Tombstone cleanup is also fail-closed: a row is purgeable only after its
+database-owned purge horizon is present and has elapsed. Do not treat a null
+horizon as an immediate-delete default. Account erasure may clear the user
+attribution on a hold, but it does not release that hold or advance content
+deletion.
+
 Full and single-range reads recompute the PostgreSQL-owned SHA-256 before
 emitting response bytes. Memory use is bounded by the configured spool
 threshold; larger objects use temporary disk, and each verified read is linear

@@ -25,6 +25,7 @@ def test_byte_range_accepts_one_satisfiable_range(
         "bytes=10-11",
         "bytes=5-4",
         "bytes=-0",
+        "bytes=١-٢",
     ],
 )
 def test_byte_range_rejects_invalid_or_unsatisfiable_ranges(header: str) -> None:
