@@ -65,14 +65,13 @@ class SkillService:
             )
         return await self.repo.list_for_space(space_id=space_id)
 
-    async def get_skill(self, *, skill_id: UUID, require_body: bool = True) -> Skill:
+    async def get_skill(self, *, skill_id: UUID) -> Skill:
         skill = await self.repo.get(skill_id=skill_id)
         if skill is None:
             raise NotFoundException()
         space = await self._space(skill.space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        allowed = actor.can_edit_skills() if require_body else actor.can_read_skills()
-        if not allowed:
+        if not actor.can_read_skills():
             raise UnauthorizedException("You do not have permission to read this Skill")
         return skill
 

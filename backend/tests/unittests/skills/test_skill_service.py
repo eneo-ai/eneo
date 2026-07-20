@@ -84,6 +84,48 @@ def _space(*, personal=False, organization=False, default_assistant=False):
     )
 
 
+async def test_reader_can_open_skill_detail_and_revision_history():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    revisions = [SimpleNamespace(id=uuid4())]
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    repo.list_revisions.return_value = revisions
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=True),
+        can_edit_skills=MagicMock(return_value=False),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    assert await service.get_skill(skill_id=skill.id) is skill
+    assert await service.list_revisions(skill_id=skill.id) == revisions
+
+    actor.can_read_skills.assert_called()
+    actor.can_edit_skills.assert_not_called()
+
+
+async def test_reader_cannot_create_skill_revision():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=True),
+        can_edit_skills=MagicMock(return_value=False),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    with pytest.raises(UnauthorizedException, match="revise this Skill"):
+        await service.create_revision(
+            skill_id=skill.id,
+            display_name="Payroll",
+            description="Payroll guidance",
+            instructions="Use the approved payroll guidance.",
+        )
+
+    repo.create_revision.assert_not_awaited()
+
+
 async def test_same_space_skill_can_be_reused_by_multiple_parents():
     space = _space()
     binding = _binding()
