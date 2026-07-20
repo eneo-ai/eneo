@@ -334,7 +334,9 @@ jobs:
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' lint
 
       - name: Run package tests
-        run: FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
+        run: |
+          FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
+          FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright

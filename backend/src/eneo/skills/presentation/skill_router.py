@@ -26,6 +26,7 @@ from eneo.skills.presentation.skill_models import (
     SkillPublic,
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
+    SkillRevisionRestorePublic,
     SkillRevisionSummaryPublic,
     SkillSparse,
 )
@@ -270,6 +271,69 @@ async def create_skill_revision(
             ),
         )
     return container.skill_assembler().revision_to_public(revision)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/",
+    response_model=SkillRevisionRestorePublic,
+    description=(
+        "Copy an immutable historical revision into the next revision. Existing "
+        "revision-pinned bindings are unchanged."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+async def restore_skill_revision(
+    space_id: UUID,
+    skill_id: UUID,
+    source_revision_id: UUID,
+    container: _ContainerWithUser,
+) -> SkillRevisionRestorePublic:
+    outcome = await container.skill_service().restore_revision(
+        space_id=space_id,
+        skill_id=skill_id,
+        source_revision_id=source_revision_id,
+    )
+    source = outcome.source_revision
+    change = outcome.change
+    revision = change.revision
+    if change.created:
+        skill = outcome.skill
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.SKILL_REVISION_RESTORED,
+            entity_type=EntityType.SKILL,
+            entity_id=skill.id,
+            description=(
+                f"Restored revision {source.revision_number} of Skill "
+                f"'{revision.display_name}' as revision {revision.revision_number}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=skill,
+                changes={
+                    "current_revision": {
+                        "old": change.previous_revision_number,
+                        "new": revision.revision_number,
+                    }
+                },
+                extra={
+                    "slug": skill.slug,
+                    "source_revision_id": str(source.id),
+                    "source_revision_number": source.revision_number,
+                    "restored_revision_id": str(revision.id),
+                    "content_digest": revision.content_digest,
+                    "instruction_length": len(revision.instructions),
+                },
+            ),
+        )
+    return SkillRevisionRestorePublic(
+        revision=container.skill_assembler().revision_to_public(revision),
+        created=change.created,
+        restored_from_revision_id=source.id,
+        restored_from_revision_number=source.revision_number,
+    )
 
 
 @router.patch(

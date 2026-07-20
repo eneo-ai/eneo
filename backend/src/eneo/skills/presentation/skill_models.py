@@ -48,6 +48,13 @@ class SkillRevisionSummaryPublic(BaseModel):
     created_at: datetime
 
 
+class SkillRevisionRestorePublic(BaseModel):
+    revision: SkillRevisionPublic
+    created: bool
+    restored_from_revision_id: UUID
+    restored_from_revision_number: int
+
+
 class SkillSparse(BaseModel):
     id: UUID
     space_id: UUID

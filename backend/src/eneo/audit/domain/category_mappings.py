@@ -65,6 +65,7 @@ CATEGORY_MAPPINGS = {
     ActionType.APP_RUN_DELETED.value: "user_actions",
     ActionType.SKILL_CREATED.value: "user_actions",
     ActionType.SKILL_REVISION_CREATED.value: "user_actions",
+    ActionType.SKILL_REVISION_RESTORED.value: "user_actions",
     ActionType.SKILL_STATUS_CHANGED.value: "user_actions",
     ActionType.SKILL_DELETED.value: "user_actions",
     ActionType.COLLECTION_CREATED.value: "user_actions",

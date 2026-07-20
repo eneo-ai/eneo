@@ -11,6 +11,7 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
   import { Info } from "lucide-svelte";
+  import { tick } from "svelte";
 
   const EDIT_SKILL_PERMISSION: ResourcePermission = "edit";
 
@@ -19,6 +20,7 @@
   let statusError = $state<string | null>(null);
   let statusSaving = $state(false);
   let formDirty = $state(false);
+  let restoreAnnouncement = $state("");
 
   const spaceRouteId = $derived(
     data.currentSpace.personal
@@ -40,6 +42,41 @@
     await invalidate("space:skills");
   }
 
+  async function loadMoreRevisions(cursor: string) {
+    return data.eneo.skills.listRevisionSummaries({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id,
+      cursor
+    });
+  }
+
+  async function getRevision(revisionId: string) {
+    return data.eneo.skills.getRevision({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id,
+      revisionId
+    });
+  }
+
+  async function restoreRevision(sourceRevisionId: string) {
+    return data.eneo.skills.restoreRevision({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id,
+      sourceRevisionId
+    });
+  }
+
+  async function refreshAfterRestore() {
+    await invalidate("space:skills");
+    formDirty = false;
+  }
+
+  async function announceRestore(message: string) {
+    restoreAnnouncement = "";
+    await tick();
+    restoreAnnouncement = message;
+  }
+
   async function setActive(isActive: boolean) {
     statusSaving = true;
     statusError = null;
@@ -56,22 +93,6 @@
     } finally {
       statusSaving = false;
     }
-  }
-
-  async function loadOlderRevisions(cursor: string) {
-    return await data.eneo.skills.listRevisionSummaries({
-      spaceId: data.currentSpace.id,
-      skillId: data.skill.id,
-      cursor
-    });
-  }
-
-  async function viewRevision(revisionId: string) {
-    return await data.eneo.skills.getRevision({
-      spaceId: data.currentSpace.id,
-      skillId: data.skill.id,
-      revisionId
-    });
   }
 
   beforeNavigate((navigation) => {
@@ -147,19 +168,21 @@
             <Alert.Title>{m.skills_library_revision_notice_title()}</Alert.Title>
             <Alert.Description>{m.skills_library_revision_notice_description()}</Alert.Description>
           </Alert.Root>
-          <SkillForm
-            mode="revision"
-            initialValue={{
-              display_name: data.skill.current_revision.display_name,
-              description: data.skill.current_revision.description,
-              instructions: data.skill.current_revision.instructions
-            }}
-            submitLabel={m.save()}
-            submittingLabel={m.saving()}
-            onSubmit={createRevision}
-            showDiscardAction
-            onDirtyChange={(dirty) => (formDirty = dirty)}
-          />
+          {#key data.skill.current_revision_id}
+            <SkillForm
+              mode="revision"
+              initialValue={{
+                display_name: data.skill.current_revision.display_name,
+                description: data.skill.current_revision.description,
+                instructions: data.skill.current_revision.instructions
+              }}
+              submitLabel={m.save()}
+              submittingLabel={m.saving()}
+              onSubmit={createRevision}
+              showDiscardAction
+              onDirtyChange={(dirty) => (formDirty = dirty)}
+            />
+          {/key}
         {:else}
           <Card.Root>
             <Card.Content>
@@ -195,12 +218,18 @@
         <p class="text-muted-foreground mb-4 text-sm">
           {m.skills_library_history_description()}
         </p>
+        <p class="sr-only" aria-live="polite">{restoreAnnouncement}</p>
         {#key data.skill.current_revision_id}
           <SkillRevisionHistory
             currentRevision={data.skill.current_revision}
             initialPage={data.revisionPage}
-            onLoadMore={loadOlderRevisions}
-            onView={viewRevision}
+            canRestore={canEdit}
+            hasUnsavedChanges={formDirty}
+            onLoadMore={loadMoreRevisions}
+            onView={getRevision}
+            onRestore={restoreRevision}
+            onAnnounce={announceRestore}
+            onRestored={refreshAfterRestore}
           />
         {/key}
       </section>

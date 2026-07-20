@@ -5780,6 +5780,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Skill Revision
+     * @description Copy an immutable historical revision into the next revision. Existing revision-pinned bindings are unchanged.
+     */
+    post: operations["restore_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__source_revision_id__restore__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/{skill_id}/active/": {
     parameters: {
       query?: never;
@@ -7461,6 +7481,7 @@ export interface components {
       | "app_run_deleted"
       | "skill_created"
       | "skill_revision_created"
+      | "skill_revision_restored"
       | "skill_status_changed"
       | "skill_deleted"
       | "session_started"
@@ -15681,6 +15702,19 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /** SkillRevisionRestorePublic */
+    SkillRevisionRestorePublic: {
+      revision: components["schemas"]["SkillRevisionPublic"];
+      /** Created */
+      created: boolean;
+      /**
+       * Restored From Revision Id
+       * Format: uuid
+       */
+      restored_from_revision_id: string;
+      /** Restored From Revision Number */
+      restored_from_revision_number: number;
     };
     /** SkillRevisionSummaryPublic */
     SkillRevisionSummaryPublic: {
@@ -38339,6 +38373,57 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_skill_revision_api_v1_spaces__space_id__skills__skill_id__revisions__source_revision_id__restore__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        skill_id: string;
+        source_revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionRestorePublic"];
         };
       };
       /** @description Forbidden */

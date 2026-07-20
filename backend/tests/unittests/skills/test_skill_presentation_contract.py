@@ -8,6 +8,7 @@ import pytest
 from fastapi import Response
 from fastapi.routing import APIRoute
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.main.exceptions import NotFoundException
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
@@ -18,6 +19,7 @@ from eneo.skills.domain.skill import (
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionPage,
+    SkillRevisionRestore,
     SkillRevisionSummary,
     SkillStatusChange,
 )
@@ -393,6 +395,93 @@ async def test_revision_created_audit_uses_locked_mutation_outcome():
     audit_service.log_async.assert_awaited_once()
     changes = audit_service.log_async.await_args.kwargs["metadata"]["changes"]
     assert changes["current_revision"] == {"old": 1, "new": 2}
+
+
+async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies():
+    skill = _skill(revision_number=4)
+    source = replace(
+        skill.current_revision,
+        id=uuid4(),
+        revision_number=2,
+        display_name="Earlier approved guidance",
+        instructions="Historical instructions must not enter the audit log.",
+        content_digest="2" * 64,
+    )
+    restored = replace(
+        source,
+        id=uuid4(),
+        revision_number=5,
+        created_by_user_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+    )
+    outcome = SkillRevisionRestore(
+        skill=skill,
+        source_revision=source,
+        change=SkillRevisionChange(
+            revision=restored,
+            created=True,
+            previous_revision_number=4,
+        ),
+    )
+    service = SimpleNamespace(restore_revision=AsyncMock(return_value=outcome))
+    assembler = SimpleNamespace(
+        revision_to_public=MagicMock(
+            return_value=skill_models.SkillRevisionPublic(**restored.__dict__)
+        )
+    )
+    container, audit_service = _router_container(service=service, assembler=assembler)
+
+    response = await skill_router.restore_skill_revision(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        source_revision_id=source.id,
+        container=container,
+    )
+
+    assert response.created is True
+    assert response.restored_from_revision_number == 2
+    assert response.revision.revision_number == 5
+    audit_service.log_async.assert_awaited_once()
+    audit_call = audit_service.log_async.await_args.kwargs
+    assert audit_call["action"] is ActionType.SKILL_REVISION_RESTORED
+    assert audit_call["metadata"]["changes"]["current_revision"] == {
+        "old": 4,
+        "new": 5,
+    }
+    assert audit_call["metadata"]["extra"]["source_revision_number"] == 2
+    assert "Historical instructions" not in str(audit_call["metadata"])
+
+
+async def test_restore_noop_does_not_emit_a_restored_audit_event():
+    skill = _skill(revision_number=4)
+    outcome = SkillRevisionRestore(
+        skill=skill,
+        source_revision=skill.current_revision,
+        change=SkillRevisionChange(
+            revision=skill.current_revision,
+            created=False,
+            previous_revision_number=4,
+        ),
+    )
+    service = SimpleNamespace(restore_revision=AsyncMock(return_value=outcome))
+    assembler = SimpleNamespace(
+        revision_to_public=MagicMock(
+            return_value=skill_models.SkillRevisionPublic(
+                **skill.current_revision.__dict__
+            )
+        )
+    )
+    container, audit_service = _router_container(service=service, assembler=assembler)
+
+    response = await skill_router.restore_skill_revision(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        source_revision_id=skill.current_revision.id,
+        container=container,
+    )
+
+    assert response.created is False
+    audit_service.log_async.assert_not_awaited()
 
 
 async def test_unchanged_status_result_does_not_emit_status_audit():

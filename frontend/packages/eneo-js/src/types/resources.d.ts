@@ -9,6 +9,7 @@ export type SkillCatalogPage = components["schemas"]["CursorPaginatedResponse_Sk
 export type SkillPublic = components["schemas"]["SkillPublic"];
 export type SkillRevisionPublic = components["schemas"]["SkillRevisionPublic"];
 export type SkillRevisionSummaryPublic = components["schemas"]["SkillRevisionSummaryPublic"];
+export type SkillRevisionRestorePublic = components["schemas"]["SkillRevisionRestorePublic"];
 export type SkillRevisionSummaryPage =
   components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
 export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];

@@ -123,3 +123,43 @@ test("one exact revision is loaded from the scoped member route", async () => {
     }
   ]);
 });
+
+test("restore copies a selected revision through its scoped action route", async () => {
+  const outcome = {
+    revision: { id: "revision-4", revision_number: 4 },
+    created: true,
+    restored_from_revision_id: "revision-2",
+    restored_from_revision_number: 2
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return outcome;
+    }
+  });
+
+  const result = await skills.restoreRevision({
+    spaceId: "space-1",
+    skillId: "skill-1",
+    sourceRevisionId: "revision-2"
+  });
+
+  assert.equal(result, outcome);
+  assert.deepEqual(calls, [
+    {
+      endpoint:
+        "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/",
+      request: {
+        method: "post",
+        params: {
+          path: {
+            space_id: "space-1",
+            skill_id: "skill-1",
+            source_revision_id: "revision-2"
+          }
+        }
+      }
+    }
+  ]);
+});

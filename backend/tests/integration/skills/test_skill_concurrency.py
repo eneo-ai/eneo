@@ -688,6 +688,65 @@ async def test_concurrent_same_content_revision_has_one_created_outcome(
     assert cross_skill_revision is None
 
 
+async def test_restore_appends_history_without_repointing_existing_bindings(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+):
+    resources = skill_concurrency_resources
+
+    async with db_container() as container:
+        service = container.skill_service()
+        second = await service.create_revision(
+            skill_id=resources.first_skill_id,
+            display_name="Second revision",
+            description="Second revision description",
+            instructions="Second revision instructions",
+        )
+        await service.create_revision(
+            skill_id=resources.first_skill_id,
+            display_name="Third revision",
+            description="Third revision description",
+            instructions="Third revision instructions",
+        )
+        await service.replace_app_bindings(
+            space_id=resources.space_id,
+            app_id=resources.app_id,
+            references=[resources.first_reference],
+        )
+
+        restored = await service.restore_revision(
+            space_id=resources.space_id,
+            skill_id=resources.first_skill_id,
+            source_revision_id=second.revision.id,
+        )
+        first_page = await service.list_revision_summaries(
+            space_id=resources.space_id,
+            skill_id=resources.first_skill_id,
+            limit=2,
+            cursor=None,
+        )
+        second_page = await service.list_revision_summaries(
+            space_id=resources.space_id,
+            skill_id=resources.first_skill_id,
+            limit=2,
+            cursor=first_page.next_cursor,
+        )
+        bindings = await container.skill_repo().list_app_bindings(
+            app_id=resources.app_id
+        )
+
+    assert restored.change.created is True
+    assert restored.change.revision.revision_number == 4
+    assert restored.change.revision.instructions == second.revision.instructions
+    assert [revision.revision_number for revision in first_page.items] == [4, 3]
+    assert first_page.next_cursor == 3
+    assert [revision.revision_number for revision in second_page.items] == [2, 1]
+    assert second_page.next_cursor is None
+    assert [binding.skill_revision_id for binding in bindings] == [
+        resources.first_revision_id
+    ]
+
+
 async def test_concurrent_identical_status_change_has_one_changed_outcome(
     skill_concurrency_resources: SkillConcurrencyResources,
     db_container,

@@ -245,6 +245,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_skill_revision_created,
     description: m.audit_action_skill_revision_created_description
   },
+  skill_revision_restored: {
+    name: m.audit_action_skill_revision_restored,
+    description: m.audit_action_skill_revision_restored_description
+  },
   skill_status_changed: {
     name: m.audit_action_skill_status_changed,
     description: m.audit_action_skill_status_changed_description

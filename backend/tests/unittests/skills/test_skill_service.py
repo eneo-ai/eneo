@@ -17,6 +17,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillCatalogEntry,
     SkillRevision,
+    SkillRevisionChange,
     SkillRevisionSummary,
 )
 
@@ -369,6 +370,104 @@ async def test_reader_cannot_create_skill_revision():
             display_name="Payroll",
             description="Payroll guidance",
             instructions="Use the approved payroll guidance.",
+        )
+
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_editor_restores_exact_historical_content_as_a_new_revision():
+    space = _space()
+    skill_id = uuid4()
+    source = _revision(skill_id=skill_id, revision_number=2)
+    restored = _revision(skill_id=skill_id, revision_number=5)
+    skill = SimpleNamespace(id=skill_id, space_id=space.id)
+    change = SkillRevisionChange(
+        revision=restored,
+        created=True,
+        previous_revision_number=4,
+    )
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    repo.get_revision.return_value = source
+    repo.create_revision.return_value = change
+    service = _service(space=space, repo=repo)
+
+    outcome = await service.restore_revision(
+        space_id=space.id,
+        skill_id=skill.id,
+        source_revision_id=source.id,
+    )
+
+    assert outcome.skill is skill
+    assert outcome.source_revision is source
+    assert outcome.change is change
+    repo.get_revision.assert_awaited_once_with(
+        skill_id=skill.id,
+        revision_id=source.id,
+    )
+    repo.create_revision.assert_awaited_once_with(
+        skill_id=skill.id,
+        display_name=source.display_name,
+        description=source.description,
+        instructions=source.instructions,
+        content_digest=source.content_digest,
+        created_by_user_id=service.user.id,
+    )
+
+
+async def test_restore_rejects_a_different_space_before_reading_the_source():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.restore_revision(
+            space_id=uuid4(),
+            skill_id=skill.id,
+            source_revision_id=uuid4(),
+        )
+
+    repo.get_revision.assert_not_awaited()
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_reader_cannot_restore_a_skill_revision():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    actor = MagicMock(
+        can_read_skills=MagicMock(return_value=True),
+        can_edit_skills=MagicMock(return_value=False),
+    )
+    service = _service(space=space, actor=actor, repo=repo)
+
+    with pytest.raises(UnauthorizedException, match="restore this Skill"):
+        await service.restore_revision(
+            space_id=space.id,
+            skill_id=skill.id,
+            source_revision_id=uuid4(),
+        )
+
+    repo.get_revision.assert_not_awaited()
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_missing_or_cross_skill_restore_source_is_not_found():
+    space = _space()
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    repo.get_revision.return_value = None
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.restore_revision(
+            space_id=space.id,
+            skill_id=skill.id,
+            source_revision_id=uuid4(),
         )
 
     repo.create_revision.assert_not_awaited()
