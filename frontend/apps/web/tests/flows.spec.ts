@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { backendFetch, expectOk, MOCK_REPLY, uniqueName } from "./helpers";
 
 type BackendFetchOptions = Parameters<typeof backendFetch>[3];
@@ -15,9 +15,24 @@ type CreatedAssistant = {
   id: string;
 };
 
-type CreatedRun = {
-  id: string;
+type FlowStepSetup = {
+  step_order: number;
+  user_description: string;
+  input_source: "flow_input" | "previous_step";
+  input_type: "text";
+  output_mode: "pass_through" | "render_verbatim";
+  output_type: "text" | "pdf";
+  review_policy?: { mode: "view" };
 };
+
+const RUN_FLOW_LABEL = /^(Run flow|Kör flöde)$/;
+const RUN_INPUT_LABEL = /^(Input|Indata)$/;
+const NEXT_LABEL = /^(Next|Nästa)$/;
+const START_RUN_LABEL = /^(Start run|Starta körning)$/;
+const REVIEW_CHECKPOINT_LABEL = /^(Review checkpoint|Granskningspunkt)$/;
+const APPROVE_LABEL = /^(Approve|Godkänn)$/;
+const RESUME_LABEL = /^(Resume|Fortsätt)$/;
+const DOWNLOAD_PDF_LABEL = /^(Download|Ladda ner) .*\.pdf$/;
 
 function expectApiRecord(value: unknown, context: string): asserts value is ApiRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -56,11 +71,6 @@ function parseAssistant(value: unknown, context: string): CreatedAssistant {
   return { id: requiredString(value, "id", context) };
 }
 
-function parseRun(value: unknown, context: string): CreatedRun {
-  expectApiRecord(value, context);
-  return { id: requiredString(value, "id", context) };
-}
-
 async function apiJson(
   page: Page,
   request: APIRequestContext,
@@ -73,18 +83,13 @@ async function apiJson(
   return response.json();
 }
 
-test("a published Flow can be listed, opened, and show a worker-backed run result", async ({
-  page,
-  request
-}) => {
-  test.setTimeout(120_000);
-
-  const flowName = uniqueName("E2E Flow smoke");
-  const stepName = "Mock completion";
-  const runInput = uniqueName("worker-backed flow input");
-
-  await page.goto("/");
-
+async function createPublishedFlow(
+  page: Page,
+  request: APIRequestContext,
+  name: string,
+  description: string,
+  steps: FlowStepSetup[]
+): Promise<CreatedFlow> {
   const personalSpace = await apiJson(
     page,
     request,
@@ -102,12 +107,7 @@ test("a published Flow can be listed, opened, and show a worker-backed run resul
       "/api/v1/flows/",
       {
         method: "POST",
-        data: {
-          space_id: spaceId,
-          name: flowName,
-          description: "Deterministic browser smoke Flow",
-          steps: []
-        }
+        data: { space_id: spaceId, name, description, steps: [] }
       },
       "creating draft flow"
     ),
@@ -135,20 +135,10 @@ test("a published Flow can be listed, opened, and show a worker-backed run resul
     {
       method: "PATCH",
       data: {
-        steps: [
-          {
-            assistant_id: assistant.id,
-            step_order: 1,
-            user_description: stepName,
-            input_source: "flow_input",
-            input_type: "text",
-            output_mode: "pass_through",
-            output_type: "text"
-          }
-        ]
+        steps: steps.map((step) => ({ ...step, assistant_id: assistant.id }))
       }
     },
-    "adding flow step"
+    "adding flow steps"
   );
 
   const publishedFlow = parseFlow(
@@ -164,44 +154,126 @@ test("a published Flow can be listed, opened, and show a worker-backed run resul
   if (publishedFlow.publishedVersion === null) {
     throw new Error("published flow should include a published version");
   }
+  return publishedFlow;
+}
 
-  const run = parseRun(
-    await apiJson(
-      page,
-      request,
-      `/api/v1/flows/${publishedFlow.id}/runs/`,
+async function startRunFromWizard(page: Page, flow: CreatedFlow, input: string) {
+  await page.goto("/spaces/personal/flows");
+  await page.getByRole("link", { name: flow.name, exact: true }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/spaces/personal/flows/${flow.id}`));
+  await page.getByRole("button", { name: RUN_FLOW_LABEL }).click();
+
+  const dialog = page.getByRole("dialog", { name: RUN_FLOW_LABEL });
+  await dialog.getByRole("textbox", { name: RUN_INPUT_LABEL }).fill(input);
+  await dialog.getByRole("button", { name: NEXT_LABEL }).click();
+  await dialog.getByRole("button", { name: START_RUN_LABEL }).click();
+
+  const historyPanel = page.locator("#panel-history");
+  await expect(historyPanel).toBeVisible();
+  const runTable = historyPanel.getByRole("table");
+  const evidenceToggle = runTable.getByTestId(/^flow-run-evidence-toggle-/);
+  await expect(evidenceToggle).toBeVisible();
+  return { runTable, evidenceToggle };
+}
+
+async function expandedRunPanel(page: Page, evidenceToggle: Locator): Promise<Locator> {
+  if ((await evidenceToggle.getAttribute("aria-expanded")) !== "true") {
+    await evidenceToggle.click();
+  }
+  await expect(evidenceToggle).toHaveAttribute("aria-expanded", "true");
+
+  const panelId = await evidenceToggle.getAttribute("aria-controls");
+  if (!panelId) throw new Error("run evidence toggle should control a visible panel");
+  const panel = page.getByRole("table").locator(`#${panelId}`);
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+test("the run wizard produces and downloads a PDF artifact", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await page.goto("/");
+
+  const flow = await createPublishedFlow(
+    page,
+    request,
+    uniqueName("E2E PDF Flow"),
+    "Deterministic browser PDF artifact Flow",
+    [
       {
-        method: "POST",
-        data: {
-          expected_flow_version: publishedFlow.publishedVersion,
-          input_payload_json: { text: runInput }
-        }
+        step_order: 1,
+        user_description: "Create deterministic content",
+        input_source: "flow_input",
+        input_type: "text",
+        output_mode: "pass_through",
+        output_type: "text"
       },
-      "creating flow run"
-    ),
-    "flow run"
+      {
+        step_order: 2,
+        user_description: "Render deterministic PDF",
+        input_source: "previous_step",
+        input_type: "text",
+        output_mode: "render_verbatim",
+        output_type: "pdf"
+      }
+    ]
   );
 
-  await page.goto("/spaces/personal/flows");
-  const flowLink = page.getByRole("link", { name: flowName, exact: true });
-  await expect(flowLink).toBeVisible();
-  await flowLink.click();
+  const { runTable, evidenceToggle } = await startRunFromWizard(
+    page,
+    flow,
+    uniqueName("PDF run input")
+  );
 
-  await expect(page).toHaveURL(new RegExp(`/spaces/personal/flows/${publishedFlow.id}`));
-  await expect(page.getByRole("heading", { name: flowName, exact: true })).toBeVisible();
-
-  await page.locator("#flow-detail-tab-history").click();
-  await expect(page.locator("#panel-history")).toBeVisible();
-
-  const evidenceButton = page.getByTestId(`flow-run-evidence-toggle-${run.id}`);
-  await expect(evidenceButton).toBeVisible({ timeout: 30_000 });
-  if ((await evidenceButton.getAttribute("aria-expanded")) !== "true") {
-    await evidenceButton.click();
-  }
-  await expect(evidenceButton).toHaveAttribute("aria-expanded", "true");
-
-  // Desktop and mobile evidence containers currently share this id; scope to the
-  // desktop table rendered for the E2E viewport.
-  const evidencePanel = page.getByRole("table").locator(`#flow-run-evidence-${run.id}`);
+  const evidencePanel = await expandedRunPanel(page, evidenceToggle);
   await expect(evidencePanel).toContainText(MOCK_REPLY, { timeout: 60_000 });
+
+  const downloadButton = runTable.getByRole("button", { name: DOWNLOAD_PDF_LABEL });
+  await expect(downloadButton).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await downloadButton.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("step_2_output.pdf");
+  expect(await download.failure()).toBeNull();
+});
+
+test("a visible review checkpoint can be approved and resumed", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await page.goto("/");
+
+  const flow = await createPublishedFlow(
+    page,
+    request,
+    uniqueName("E2E Review Flow"),
+    "Deterministic browser review checkpoint Flow",
+    [
+      {
+        step_order: 1,
+        user_description: "Create content for visible review",
+        input_source: "flow_input",
+        input_type: "text",
+        output_mode: "pass_through",
+        output_type: "text",
+        review_policy: { mode: "view" }
+      }
+    ]
+  );
+
+  const { runTable, evidenceToggle } = await startRunFromWizard(
+    page,
+    flow,
+    uniqueName("review run input")
+  );
+  const reviewPanel = await expandedRunPanel(page, evidenceToggle);
+  await expect(reviewPanel.getByRole("heading", { name: REVIEW_CHECKPOINT_LABEL })).toBeVisible({
+    timeout: 60_000
+  });
+
+  await reviewPanel.getByRole("button", { name: APPROVE_LABEL }).click();
+  const resumeButton = reviewPanel.getByRole("button", { name: RESUME_LABEL });
+  await expect(resumeButton).toBeEnabled();
+  await resumeButton.click();
+
+  const terminalPanel = await expandedRunPanel(page, evidenceToggle);
+  await expect(terminalPanel).toContainText(MOCK_REPLY, { timeout: 60_000 });
 });
