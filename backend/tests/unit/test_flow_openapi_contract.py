@@ -1725,6 +1725,21 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     )
 
 
+def test_openapi_signed_url_request_bounds_expiry(openapi_spec: dict) -> None:
+    expires_in = openapi_spec["components"]["schemas"]["SignedURLRequest"][
+        "properties"
+    ]["expires_in"]
+
+    assert type(expires_in["exclusiveMinimum"]) in (int, float)
+    assert expires_in == {
+        "default": 3600,
+        "exclusiveMinimum": 0,
+        "maximum": 86400,
+        "title": "Expires In",
+        "type": "integer",
+    }
+
+
 def test_openapi_runtime_paths_example_matches_operation_paths(
     openapi_spec: dict,
 ) -> None:

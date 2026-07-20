@@ -3153,8 +3153,11 @@ def test_flow_api_guide_pins_canonical_file_and_signed_url_examples() -> None:
     )
 
     guide = _read(FLOW_API_GUIDE)
-    assert "`expires_in` defaults to `3600` seconds" in guide
-    assert "does not enforce a minimum or maximum" in guide
+    assert (
+        "`expires_in` defaults to `3600` seconds when omitted and must be an integer\n"
+        "from `1` through `86400` seconds, inclusive." in guide
+    )
+    assert "does not enforce a minimum or maximum" not in guide
 
 
 def test_flow_api_guide_pins_canonical_review_checkpoint_examples() -> None:

@@ -1010,9 +1010,8 @@ Request body:
 }
 ```
 
-`expires_in` defaults to `3600` seconds when omitted. The current request model
-does not enforce a minimum or maximum; choose short lifetimes that match your
-product's security policy.
+`expires_in` defaults to `3600` seconds when omitted and must be an integer
+from `1` through `86400` seconds, inclusive.
 
 Typical response shape:
 

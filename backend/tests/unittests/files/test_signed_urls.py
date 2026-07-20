@@ -1,9 +1,29 @@
 import time
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from eneo.authentication.signed_urls import verify_signed_token
 from eneo.files.file_models import ContentDisposition, SignedURLRequest
 from eneo.files.signed_urls import build_signed_download_response
+
+
+@pytest.mark.parametrize("expires_in", [0, -1, 86401])
+def test_signed_url_request_rejects_expiry_outside_supported_range(
+    expires_in: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        SignedURLRequest(expires_in=expires_in)
+
+
+@pytest.mark.parametrize("expires_in", [3660, 86400])
+def test_signed_url_request_accepts_supported_expiry(expires_in: int) -> None:
+    assert SignedURLRequest(expires_in=expires_in).expires_in == expires_in
+
+
+def test_signed_url_request_defaults_expiry_to_one_hour() -> None:
+    assert SignedURLRequest().expires_in == 3600
 
 
 def test_build_signed_download_response_preserves_tenant_bound_token() -> None:

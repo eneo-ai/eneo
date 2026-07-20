@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.config import JsonDict
 
 from eneo.authentication.principal_types import PrincipalType
@@ -118,7 +118,7 @@ class SignedURLRequest(BaseModel):
         }
     )
 
-    expires_in: int = 3600  # Default expiration time in seconds (1 hour)
+    expires_in: int = Field(default=3600, gt=0, le=86400)
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
 
 
