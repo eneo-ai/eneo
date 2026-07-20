@@ -316,8 +316,10 @@ jobs:
         include:
           - platform: linux/amd64
             slug: linux-amd64
+            curl_image: docker.io/curlimages/curl@sha256:5a91ea0c9c3ee27b4abe657b68cf6bf0676afa13b236b3bda34283cb3924d4f6
           - platform: linux/arm64
             slug: linux-arm64
+            curl_image: docker.io/curlimages/curl@sha256:b949ec80877077def1544f0727d3e3101dd687fe20a5bf74997e557f7e3ac961
 
     steps:
       - name: Checkout repository
@@ -395,6 +397,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+      - name: Smoke test the reference deployment bootstrap
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.SEAWEEDFS_IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+          CURL_IMAGE: ${{ matrix.curl_image }}
+        run: docker/seaweedfs/smoke-reference-deployment.sh "$IMAGE_REF" "$PLATFORM"
 
       - name: Download Syft
         id: syft
@@ -537,9 +546,12 @@ jobs:
             ' seaweedfs-evidence/MANIFEST.json >/dev/null
 
           {
-            printf 'manifest %s@%s\n' "$IMAGE" "$manifest_digest"
-            printf 'linux/amd64 %s@%s\n' "$IMAGE" "$amd64_digest"
-            printf 'linux/arm64 %s@%s\n' "$IMAGE" "$arm64_digest"
+            printf 'seaweedfs manifest %s %s@%s\n' \
+              "$image_ref" "$IMAGE" "$manifest_digest"
+            printf 'seaweedfs linux/amd64 %s %s@%s\n' \
+              "$image_ref" "$IMAGE" "$amd64_digest"
+            printf 'seaweedfs linux/arm64 %s %s@%s\n' \
+              "$image_ref" "$IMAGE" "$arm64_digest"
           } >seaweedfs-evidence/IMAGE-DIGESTS.txt
           (
             cd seaweedfs-evidence

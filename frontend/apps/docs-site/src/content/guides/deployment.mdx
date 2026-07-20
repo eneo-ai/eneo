@@ -134,8 +134,9 @@ Edit `docker-compose.yml`:
 
 Edit `.env`:
 
-- pin `ENEO_SEAWEEDFS_IMAGE` to the exact attested manifest digest from the
-  release's `IMAGE-DIGESTS.txt`;
+- pin `ENEO_SEAWEEDFS_IMAGE` to the digest reference in the single
+  `seaweedfs manifest` row of the release's `IMAGE-DIGESTS.txt`, not an
+  architecture-specific SBOM row;
 - generate independent high-entropy `OBJECT_CONTENT_ACCESS_KEY_ID` and
   `OBJECT_CONTENT_SECRET_ACCESS_KEY` values;
 - generate `OBJECT_CONTENT_DEPLOYMENT_ID` once with `uuidgen` and preserve it

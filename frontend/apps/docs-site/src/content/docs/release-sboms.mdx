@@ -171,7 +171,7 @@ Each release publishes these files:
 | `eneo-seaweedfs-<release-tag>-linux-amd64.{cyclonedx,spdx}.json` | Eneo SeaweedFS amd64 image SBOMs |
 | `eneo-seaweedfs-<release-tag>-linux-arm64.{cyclonedx,spdx}.json` | Eneo SeaweedFS arm64 image SBOMs |
 | `eneo-seaweedfs-<release-tag>-linux-{amd64,arm64}.table.txt` | SeaweedFS package lists for human review |
-| `IMAGE-DIGESTS.txt` | Exact image tags and digests that were scanned |
+| `IMAGE-DIGESTS.txt` | Platform-labeled image digests scanned, plus the deployable SeaweedFS manifest reference |
 | `SBOM-SHA256SUMS.txt` | SHA-256 checksums for the SBOM bundle |
 
 Use the `.table.txt` files when you want to inspect a package list quickly. Use
@@ -212,7 +212,8 @@ validated during the workflow by checking that the Python distributions found
 in that runtime environment appear in the generated CycloneDX file.
 
 The SBOMs are generated from immutable image digest references, not only from
-tags. `IMAGE-DIGESTS.txt` records the digest references used during the scan.
+tags. `IMAGE-DIGESTS.txt` labels every scanned digest by platform and includes
+one `seaweedfs manifest` row for the deployable multi-platform image.
 
 ## Which file should you use?
 
@@ -251,9 +252,12 @@ gh attestation verify oci://ghcr.io/eneo-ai/eneo-backend:2.0.0 \
   --repo eneo-ai/eneo
 ```
 
-For the bundled object store, copy the exact manifest and platform digests from
-`IMAGE-DIGESTS.txt`. Verify provenance and the platform SPDX SBOM through the
-OCI registry, constraining the signer workflow:
+For the bundled object store, set `ENEO_SEAWEEDFS_IMAGE` to the digest reference
+in the single `seaweedfs manifest` row in `IMAGE-DIGESTS.txt`. The
+`seaweedfs linux/amd64` and `seaweedfs linux/arm64` rows identify the images
+scanned for their platform SBOMs; do not use those platform-only references in
+a multi-architecture deployment. Verify provenance and the platform SPDX SBOM
+through the OCI registry, constraining the signer workflow:
 
 ```bash
 gh attestation verify \

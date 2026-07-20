@@ -159,7 +159,9 @@ purged content longer than approved.
 The reference Compose installation enables the bundled service, so copy
 `.env.template`, set mode `0600`, and fill every blank. Pin
 `ENEO_SEAWEEDFS_IMAGE` to the exact manifest digest recorded in the Eneo
-release's `IMAGE-DIGESTS.txt`; there is deliberately no mutable-tag default.
+release's `IMAGE-DIGESTS.txt`. Copy the digest reference from its single
+`seaweedfs manifest` row, not either architecture-specific SBOM row. There is
+deliberately no mutable-tag default.
 
 A custom deployment that has not adopted an object-backed feature may omit all
 `OBJECT_CONTENT_*` settings. Backend and worker then start with the capability

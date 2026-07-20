@@ -173,7 +173,9 @@ jobs:
             digest_ref="$image@$digest"
             asset_prefix="eneo-${component}-${RELEASE_TAG}-${platform_os}-${platform_arch}"
 
-            printf '%s %s %s\n' "$component" "$image_ref" "$digest_ref" >> "$out_dir/IMAGE-DIGESTS.txt"
+            printf '%s %s %s %s\n' \
+              "$component" "$platform" "$image_ref" "$digest_ref" \
+              >> "$out_dir/IMAGE-DIGESTS.txt"
 
             if [[ "$component" == "backend" ]]; then
               backend_digest_ref="$digest_ref"
@@ -347,6 +349,25 @@ jobs:
           generate_component_sbom \
             "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
             "linux/arm64" "linux" "arm64"
+
+          seaweedfs_image_ref="$SEAWEEDFS_IMAGE:$seaweedfs_tag"
+          seaweedfs_manifest_digest="$(docker buildx imagetools inspect \
+            "$seaweedfs_image_ref" --format '{{json .Manifest}}' | jq -r '.digest')"
+          [[ "$seaweedfs_manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'seaweedfs manifest %s %s@%s\n' \
+            "$seaweedfs_image_ref" "$SEAWEEDFS_IMAGE" "$seaweedfs_manifest_digest" \
+            >> "$out_dir/IMAGE-DIGESTS.txt"
+
+          for seaweedfs_target in manifest linux/amd64 linux/arm64; do
+            row_count="$(awk -v target="$seaweedfs_target" '
+              $1 == "seaweedfs" && $2 == target { count += 1 }
+              END { print count + 0 }
+            ' "$out_dir/IMAGE-DIGESTS.txt")"
+            if [[ "$row_count" -ne 1 ]]; then
+              echo "::error::Expected exactly one SeaweedFS $seaweedfs_target digest row, found $row_count." >&2
+              exit 1
+            fi
+          done
           generate_frontend_source_sbom
 
           (
@@ -357,12 +378,12 @@ jobs:
           {
             echo "## Release SBOMs"
             echo ""
-            echo "Generated SBOMs for \`$RELEASE_TAG\` from \`$PLATFORM\` image digests."
+            echo "Generated SBOMs for \`$RELEASE_TAG\` from immutable image digests."
             echo ""
-            echo "| Component | Image tag | Image digest |"
-            echo "| --- | --- | --- |"
-            while read -r component image_ref digest_ref; do
-              echo "| $component | \`$image_ref\` | \`$digest_ref\` |"
+            echo "| Component | Target | Image tag | Image digest |"
+            echo "| --- | --- | --- | --- |"
+            while read -r component target image_ref digest_ref; do
+              echo "| $component | $target | \`$image_ref\` | \`$digest_ref\` |"
             done < "$out_dir/IMAGE-DIGESTS.txt"
             echo ""
             echo "Generated a backend Python runtime SBOM from \`/app/.venv\` in the backend image."
@@ -380,6 +401,13 @@ jobs:
           image_ref="${SEAWEEDFS_IMAGE}:${SEAWEEDFS_VERSION}-${source_sha}"
           manifest_digest="$(docker buildx imagetools inspect "$image_ref" \
             --format '{{json .Manifest}}' | jq -r '.digest')"
+          recorded_manifest_ref="$(awk '
+            $1 == "seaweedfs" && $2 == "manifest" { print $4 }
+          ' release-sbom/IMAGE-DIGESTS.txt)"
+          if [[ "$recorded_manifest_ref" != "${SEAWEEDFS_IMAGE}@${manifest_digest}" ]]; then
+            echo "::error::Recorded SeaweedFS manifest does not match the published image." >&2
+            exit 1
+          fi
           signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/build_and_push_images.yml"
           common_flags=(
             --repo "$GITHUB_REPOSITORY"
@@ -394,8 +422,8 @@ jobs:
             "oci://${SEAWEEDFS_IMAGE}@${manifest_digest}" \
             "${common_flags[@]}" \
             --predicate-type https://slsa.dev/provenance/v1
-          while read -r component _ digest_ref; do
-            if [[ "$component" == "seaweedfs" ]]; then
+          while read -r component target _ digest_ref; do
+            if [[ "$component" == "seaweedfs" && "$target" == linux/* ]]; then
               gh attestation verify "oci://$digest_ref" \
                 "${common_flags[@]}" \
                 --predicate-type https://slsa.dev/provenance/v1

@@ -69,16 +69,18 @@ The repository uses GitHub security features and CI to prevent regressions:
   bundled build output. Release SBOM assets are attested through GitHub artifact
   attestations, and the pushed backend, frontend, and SeaweedFS images include
   provenance attestations in GHCR.
-  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` records the
-  exact image digests scanned.
+  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
+  exact image digests scanned by platform and records the bundled store's
+  multi-platform manifest reference for deployment.
 - The bundled object store is an Eneo-built artifact, not an upstream-signed
   SeaweedFS image. The trusted publication job is restricted to protected
   push/manual runs and uses the GitHub OIDC workflow identity—no PAT, registry
   password, or signing key. It pins the SeaweedFS 4.39 source commit/archive,
   Dockerfile frontend, compiler image, runtime image, tools, and every Action by
   immutable digest or full commit SHA. It publishes only after both Linux
-  platform candidates pass source/license policy, a reachable Go vulnerability
-  scan, and a Grype gate that includes unfixed HIGH/CRITICAL findings.
+  platform candidates pass source/license policy, the exact reference Compose
+  bootstrap and persistence smoke, a reachable Go vulnerability scan, and a
+  Grype gate that includes unfixed HIGH/CRITICAL findings.
 - SeaweedFS source-license classifier gaps are resolved only by exact
   module/version/license-file hashes in `docker/seaweedfs/verify-supply-chain.sh`.
   Any dependency, version, license content, or unknown-package drift fails the
