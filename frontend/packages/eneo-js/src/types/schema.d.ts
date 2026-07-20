@@ -5854,6 +5854,195 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/catalogue/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Catalogue
+     * @description List approved Skills in the current tenant's catalogue.
+     */
+    get: operations["list_catalogue_api_v1_skills_catalogue__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/catalogue/{skill_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Catalogue Skill
+     * @description Open the exact approved revision of a catalogue Skill.
+     */
+    get: operations["get_catalogue_skill_api_v1_skills_catalogue__skill_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Organization Skills
+     * @description List organisation Skill drafts and publication status.
+     */
+    get: operations["list_organization_skills_api_v1_skills_organization__get"];
+    put?: never;
+    /**
+     * Create Organization Skill
+     * @description Create an organisation Skill draft.
+     */
+    post: operations["create_organization_skill_api_v1_skills_organization__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Organization Skill */
+    get: operations["get_organization_skill_api_v1_skills_organization__skill_id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Organization Skill
+     * @description Delete an eligible organisation Skill draft.
+     */
+    delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Organization Skill Revisions
+     * @description List immutable revisions of an organisation Skill.
+     */
+    get: operations["list_organization_skill_revisions_api_v1_skills_organization__skill_id__revisions__get"];
+    put?: never;
+    /**
+     * Create Organization Skill Revision
+     * @description Create the next immutable organisation Skill revision.
+     */
+    post: operations["create_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/{revision_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Organization Skill Revision
+     * @description Open one immutable organisation Skill revision.
+     */
+    get: operations["get_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__revision_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Organization Skill Revision
+     * @description Restore historical content as the next immutable revision.
+     */
+    post: operations["restore_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__source_revision_id__restore__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish Organization Skill
+     * @description Publish the exact organisation Skill revision just reviewed.
+     */
+    post: operations["publish_organization_skill_api_v1_skills_organization__skill_id__publish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/{skill_id}/unpublish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Unpublish Organization Skill
+     * @description Remove an organisation Skill from new catalogue use.
+     */
+    post: operations["unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -7483,6 +7672,8 @@ export interface components {
       | "skill_revision_created"
       | "skill_revision_restored"
       | "skill_status_changed"
+      | "skill_published"
+      | "skill_unpublished"
       | "skill_deleted"
       | "session_started"
       | "session_ended"
@@ -13269,6 +13460,124 @@ export interface components {
       /** Nonce */
       nonce?: string | null;
     };
+    /** OrganizationSkillPublic */
+    OrganizationSkillPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Published Revision Number */
+      published_revision_number: number | null;
+      /** First Published At */
+      first_published_at: string | null;
+      publication_state: components["schemas"]["SkillPublicationState"];
+      current_revision: components["schemas"]["SkillRevisionPublic"];
+    };
+    /** OrganizationSkillSummaryPagePublic */
+    OrganizationSkillSummaryPagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["OrganizationSkillSummaryPublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** OrganizationSkillSummaryPublic */
+    OrganizationSkillSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Slug */
+      slug: string;
+      /** Is Active */
+      is_active: boolean;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
+      /** Current Revision Number */
+      current_revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Published Revision Number */
+      published_revision_number: number | null;
+      /** First Published At */
+      first_published_at: string | null;
+      publication_state: components["schemas"]["SkillPublicationState"];
+    };
     /**
      * Outcome
      * @description Indicate success or failure of audited action
@@ -14659,6 +14968,80 @@ export interface components {
        */
       email: string;
     };
+    /** PublishedSkillPublic */
+    PublishedSkillPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Slug */
+      slug: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * First Published At
+       * Format: date-time
+       */
+      first_published_at: string;
+      revision: components["schemas"]["SkillRevisionPublic"];
+    };
+    /** PublishedSkillSummaryPagePublic */
+    PublishedSkillSummaryPagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PublishedSkillSummaryPublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PublishedSkillSummaryPublic */
+    PublishedSkillSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Slug */
+      slug: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * First Published At
+       * Format: date-time
+       */
+      first_published_at: string;
+    };
     /** QuestionMetadata */
     QuestionMetadata: {
       /**
@@ -15661,6 +16044,19 @@ export interface components {
        */
       updated_at: string;
       current_revision: components["schemas"]["SkillRevisionPublic"];
+    };
+    /**
+     * SkillPublicationState
+     * @enum {string}
+     */
+    SkillPublicationState: "draft" | "published" | "update_pending" | "unpublished";
+    /** SkillPublishRequest */
+    SkillPublishRequest: {
+      /**
+       * Expected Revision Id
+       * Format: uuid
+       */
+      expected_revision_id: string;
     };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
@@ -38609,6 +39005,629 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SkillBindingSummary"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_catalogue_api_v1_skills_catalogue__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        search?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedSkillSummaryPagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_catalogue_skill_api_v1_skills_catalogue__skill_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublishedSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_organization_skills_api_v1_skills_organization__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        search?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillSummaryPagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_organization_skill_api_v1_skills_organization__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_api_v1_skills_organization__skill_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_organization_skill_api_v1_skills_organization__skill_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_organization_skill_revisions_api_v1_skills_organization__skill_id__revisions__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__revision_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+        revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__source_revision_id__restore__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+        source_revision_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionRestorePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  publish_organization_skill_api_v1_skills_organization__skill_id__publish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillPublishRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationSkillPublic"];
         };
       };
       /** @description Forbidden */

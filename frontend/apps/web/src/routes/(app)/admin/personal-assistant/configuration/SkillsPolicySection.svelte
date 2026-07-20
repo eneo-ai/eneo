@@ -1,33 +1,30 @@
 <script lang="ts">
-  import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
+  import type { SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
   import { BookOpenCheck, Info } from "lucide-svelte";
+  import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
-  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
-  import type { ListSkills, SkillCatalogPage } from "$lib/features/skills/skillCatalog";
+  import type { SkillBindingCandidate } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
   import PolicySection from "./PolicySection.svelte";
 
   type Props = {
     skillBindings: SkillBindingReferenceInput[];
-    initialSkillPage: SkillCatalogPage;
+    availableSkills: SkillBindingCandidate[];
     bindingSummaries: SkillBindingSummary[];
     summary: string;
     canUseSkills: boolean;
-    canCreateSkills: boolean;
-    onListSkills: ListSkills;
-    onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
+    onSearchSkills: (query: string) => Promise<SkillBindingCandidate[]>;
   };
 
   let {
     skillBindings = $bindable(),
-    initialSkillPage,
+    availableSkills,
     bindingSummaries,
     summary,
     canUseSkills,
-    canCreateSkills,
-    onListSkills,
-    onCreateSkill
+    onSearchSkills
   }: Props = $props();
 </script>
 
@@ -48,13 +45,20 @@
     <Alert.Description>{m.governance_skills_scope_description()}</Alert.Description>
   </Alert.Root>
 
+  <div class="flex flex-col items-start gap-2">
+    <p class="text-muted-foreground text-sm">
+      {m.governance_manage_skills_description()}
+    </p>
+    <Button href={resolve("/spaces/organization/skills")} variant="outline">
+      {m.governance_manage_skills_action()}
+    </Button>
+  </div>
+
   <SkillBindingsEditor
     bind:bindings={skillBindings}
-    {initialSkillPage}
+    {availableSkills}
     {bindingSummaries}
     canEditBindings={canUseSkills}
-    {canCreateSkills}
-    {onListSkills}
-    {onCreateSkill}
+    {onSearchSkills}
   />
 </PolicySection>

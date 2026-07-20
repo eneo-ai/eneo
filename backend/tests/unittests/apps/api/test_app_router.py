@@ -129,6 +129,7 @@ def _binding(*, position: int) -> ResolvedSkillBinding:
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
         current_revision_number=position + 1,

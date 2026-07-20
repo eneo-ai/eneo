@@ -8,6 +8,8 @@ const READ_SKILL_PERMISSION: ResourcePermission = "read";
 describe("Assistant edit loader", () => {
   test("loads Skill bindings for a reader of a non-default Assistant", async () => {
     const bindings = [{ skill_id: "skill-1" }];
+    const skills = emptySkillCatalogPage();
+    const listSkills = vi.fn().mockResolvedValue(skills);
     const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
     const event = {
       depends: vi.fn(),
@@ -15,6 +17,7 @@ describe("Assistant edit loader", () => {
       parent: vi.fn().mockResolvedValue({
         currentSpace: {
           id: "space-1",
+          organization: false,
           default_assistant: { id: "default-assistant" },
           skill_permissions: [READ_SKILL_PERMISSION]
         },
@@ -27,7 +30,7 @@ describe("Assistant edit loader", () => {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
           skills: {
-            list: vi.fn().mockResolvedValue(emptySkillCatalogPage()),
+            list: listSkills,
             listAssistantBindings
           }
         }
@@ -41,6 +44,11 @@ describe("Assistant edit loader", () => {
       assistantId: "assistant-1"
     });
     expect(result.skillBindings).toEqual(bindings);
+    expect(result.skills).toEqual(skills);
+    expect(listSkills).toHaveBeenCalledWith({
+      spaceId: "space-1",
+      limit: SKILL_CATALOG_PAGE_SIZE
+    });
   });
 
   test("keeps direct Skills disabled for the personal default Assistant", async () => {
@@ -82,6 +90,7 @@ describe("Assistant edit loader", () => {
     const skills = { ...emptySkillCatalogPage(), items: [{ id: "skill-1" }], total_count: 1 };
     const bindings = [{ skill_id: "skill-1" }];
     const list = vi.fn().mockResolvedValue(skills);
+    const listCatalogue = vi.fn().mockResolvedValue({ items: [] });
     const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
     const event = {
       depends: vi.fn(),
@@ -101,7 +110,11 @@ describe("Assistant edit loader", () => {
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
-          skills: { list, listAssistantBindings }
+          skills: {
+            list,
+            catalogue: { list: listCatalogue },
+            listAssistantBindings
+          }
         }
       })
     };

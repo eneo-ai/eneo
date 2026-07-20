@@ -70,13 +70,11 @@
       />
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}
-        initialSkillPage={draft.skillCatalog}
+        availableSkills={draft.availableSkills}
         bindingSummaries={draft.skillBindingSummaries}
         summary={draft.skillsSummary}
         canUseSkills={draft.canUseSkills}
-        canCreateSkills={draft.canCreateSkills}
-        onListSkills={draft.listSkills}
-        onCreateSkill={draft.createSkill}
+        onSearchSkills={draft.searchSkills}
       />
     </div>
   </Settings.Page>

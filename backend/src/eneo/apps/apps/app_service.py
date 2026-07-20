@@ -113,6 +113,7 @@ class AppService:
         base_instructions = app.get_prompt_text()
         if skill_provenance is not None:
             return await self.skill_service.compose_for_execution_snapshot(
+                tenant_id=app.tenant_id,
                 space_id=app.space_id,
                 provenance=skill_provenance,
                 base_instructions=base_instructions,

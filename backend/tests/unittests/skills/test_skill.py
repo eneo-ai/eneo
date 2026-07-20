@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -14,7 +15,14 @@ from eneo.skills import (
     validate_skill_slug,
 )
 from eneo.skills.application.skill_service import SkillService
-from eneo.skills.domain.skill import SkillBindingReference, SkillExecutionReference
+from eneo.skills.domain.skill import (
+    NormalizedSkillContent,
+    Skill,
+    SkillBindingReference,
+    SkillExecutionReference,
+    SkillPublicationState,
+    SkillRevision,
+)
 
 
 def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
@@ -22,6 +30,7 @@ def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug=name.lower(),
         revision_number=1,
         current_revision_number=1,
@@ -53,6 +62,40 @@ def _reference(
     )
 
 
+def _skill(
+    *,
+    current_revision_number: int = 1,
+    published_revision_number: int | None = None,
+    first_published_at: datetime | None = None,
+) -> Skill:
+    skill_id = uuid4()
+    now = datetime.now(timezone.utc)
+    revision = SkillRevision(
+        id=uuid4(),
+        skill_id=skill_id,
+        revision_number=current_revision_number,
+        display_name="Payroll",
+        description="Answers payroll questions",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        created_by_user_id=uuid4(),
+        created_at=now,
+    )
+    return Skill(
+        id=skill_id,
+        space_id=uuid4(),
+        slug="payroll",
+        is_active=True,
+        current_revision_number=current_revision_number,
+        published_revision_number=published_revision_number,
+        first_published_at=first_published_at,
+        created_by_user_id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        current_revision=revision,
+    )
+
+
 @pytest.mark.parametrize(
     "slug",
     ["payroll", "payroll-questions", "skill-2", "2fa-guidance"],
@@ -79,6 +122,23 @@ def test_normalize_skill_content_preserves_markdown_and_normalizes_newlines():
         "Payroll",
         "Answers payroll questions",
         "# Rules\n\nUse the handbook.",
+    )
+
+
+def test_normalized_skill_content_keeps_validation_and_digest_together():
+    content = NormalizedSkillContent.create(
+        display_name=" Payroll ",
+        description=" Approved payroll guidance ",
+        instructions=" First step\r\nSecond step ",
+    )
+
+    assert content.display_name == "Payroll"
+    assert content.description == "Approved payroll guidance"
+    assert content.instructions == "First step\nSecond step"
+    assert content.content_digest == create_content_digest(
+        display_name=content.display_name,
+        description=content.description,
+        instructions=content.instructions,
     )
 
 
@@ -117,6 +177,37 @@ def test_content_digest_is_stable_and_covers_all_revision_content():
         description="Answers payroll questions",
         instructions="Use the current handbook.",
     )
+
+
+@pytest.mark.parametrize(
+    ("skill", "expected"),
+    [
+        (_skill(), SkillPublicationState.DRAFT),
+        (
+            _skill(
+                published_revision_number=1,
+                first_published_at=datetime.now(timezone.utc),
+            ),
+            SkillPublicationState.PUBLISHED,
+        ),
+        (
+            _skill(
+                current_revision_number=2,
+                published_revision_number=1,
+                first_published_at=datetime.now(timezone.utc),
+            ),
+            SkillPublicationState.UPDATE_PENDING,
+        ),
+        (
+            _skill(first_published_at=datetime.now(timezone.utc)),
+            SkillPublicationState.UNPUBLISHED,
+        ),
+    ],
+)
+def test_publication_state_is_derived_from_exact_revision_pointer(
+    skill: Skill, expected: SkillPublicationState
+):
+    assert skill.publication_state is expected
 
 
 def test_zero_skills_returns_base_prompt_byte_for_byte():
@@ -159,6 +250,7 @@ def test_composition_rejects_duplicate_skill_identity():
         skill_id=binding.skill_id,
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=binding.skill_space_id,
         slug="payroll",
         revision_number=2,
         current_revision_number=2,
@@ -177,6 +269,7 @@ async def test_execution_snapshot_with_no_skills_preserves_base_without_repo_rea
     repo = AsyncMock()
 
     composition = await _service(repo).compose_for_execution_snapshot(
+        tenant_id=uuid4(),
         space_id=uuid4(),
         provenance=(),
         base_instructions="  Base instructions\n",
@@ -184,17 +277,19 @@ async def test_execution_snapshot_with_no_skills_preserves_base_without_repo_rea
 
     assert composition.prompt == "  Base instructions\n"
     assert composition.provenance == ()
-    repo.resolve_references.assert_not_awaited()
+    repo.resolve_references_for_execution_snapshot.assert_not_awaited()
 
 
 async def test_execution_snapshot_uses_persisted_order_and_allows_inactive_skill():
     payroll = replace(_binding(position=0, name="Payroll"), is_active=False)
     absence = _binding(position=1, name="Absence")
     repo = AsyncMock()
-    repo.resolve_references.return_value = [payroll, absence]
+    repo.resolve_references_for_execution_snapshot.return_value = [payroll, absence]
+    tenant_id = uuid4()
     space_id = uuid4()
 
     composition = await _service(repo).compose_for_execution_snapshot(
+        tenant_id=tenant_id,
         space_id=space_id,
         provenance=(
             _reference(absence, position=20),
@@ -203,8 +298,9 @@ async def test_execution_snapshot_uses_persisted_order_and_allows_inactive_skill
         base_instructions="Base",
     )
 
-    repo.resolve_references.assert_awaited_once_with(
-        space_id=space_id,
+    repo.resolve_references_for_execution_snapshot.assert_awaited_once_with(
+        tenant_id=tenant_id,
+        parent_space_id=space_id,
         references=[
             SkillBindingReference(
                 skill_id=payroll.skill_id,
@@ -229,10 +325,11 @@ async def test_execution_snapshot_rejects_changed_revision_metadata(field: str):
     replacement = 2 if field == "revision_number" else "b" * 64
     reference = replace(reference, **{field: replacement})
     repo = AsyncMock()
-    repo.resolve_references.return_value = [binding]
+    repo.resolve_references_for_execution_snapshot.return_value = [binding]
 
     with pytest.raises(BadRequestException, match="metadata no longer matches"):
         await _service(repo).compose_for_execution_snapshot(
+            tenant_id=uuid4(),
             space_id=uuid4(),
             provenance=(reference,),
             base_instructions="Base",
@@ -242,10 +339,11 @@ async def test_execution_snapshot_rejects_changed_revision_metadata(field: str):
 async def test_execution_snapshot_rejects_missing_revision():
     binding = _binding(position=0)
     repo = AsyncMock()
-    repo.resolve_references.return_value = []
+    repo.resolve_references_for_execution_snapshot.return_value = []
 
     with pytest.raises(BadRequestException, match="no longer available"):
         await _service(repo).compose_for_execution_snapshot(
+            tenant_id=uuid4(),
             space_id=uuid4(),
             provenance=(_reference(binding),),
             base_instructions="Base",
@@ -270,8 +368,9 @@ async def test_execution_snapshot_rejects_invalid_persisted_order(invalid: str):
 
     with pytest.raises(BadRequestException):
         await _service(repo).compose_for_execution_snapshot(
+            tenant_id=uuid4(),
             space_id=uuid4(),
             provenance=provenance,
             base_instructions="Base",
         )
-    repo.resolve_references.assert_not_awaited()
+    repo.resolve_references_for_execution_snapshot.assert_not_awaited()

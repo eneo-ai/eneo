@@ -1,0 +1,142 @@
+import type { OrganizationSkillSummaryPublic } from "@eneo/eneo-js";
+import { page } from "@vitest/browser/context";
+import { render } from "vitest-browser-svelte";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { m } from "$lib/paraglide/messages";
+
+const invalidate = vi.hoisted(() => vi.fn(async () => {}));
+
+vi.mock("$app/navigation", () => ({
+  afterNavigate: vi.fn(),
+  beforeNavigate: vi.fn(),
+  disableScrollHandling: vi.fn(),
+  goto: vi.fn(),
+  invalidate,
+  invalidateAll: vi.fn(),
+  onNavigate: vi.fn(),
+  preloadCode: vi.fn(),
+  preloadData: vi.fn(),
+  pushState: vi.fn(),
+  refreshAll: vi.fn(),
+  replaceState: vi.fn()
+}));
+
+import OrganizationSkillsPage from "./+page.svelte";
+
+function skill(
+  id: string,
+  publicationState: OrganizationSkillSummaryPublic["publication_state"]
+): OrganizationSkillSummaryPublic {
+  const revisionNumber = publicationState === "draft" ? 1 : 2;
+  return {
+    id,
+    space_id: "organization-space",
+    slug: id,
+    is_active: publicationState === "published" || publicationState === "update_pending",
+    current_revision_id: `${id}-revision-${revisionNumber}`,
+    current_revision_number: revisionNumber,
+    display_name: `${id} Skill`,
+    description: `${id} description`,
+    content_digest: id.repeat(64).slice(0, 64),
+    created_by_user_id: "user-1",
+    created_at: "2026-07-20T08:00:00Z",
+    updated_at: "2026-07-20T09:00:00Z",
+    published_revision_number: publicationState === "draft" ? null : 1,
+    first_published_at: publicationState === "draft" ? null : "2026-07-19T08:00:00Z",
+    publication_state: publicationState
+  };
+}
+
+describe("organisation Skill catalogue page", () => {
+  beforeEach(() => {
+    invalidate.mockClear();
+  });
+
+  test("deletes drafts and unpublished Skills, then removes the deleted row", async () => {
+    const draft = skill("draft", "draft");
+    const unpublished = skill("unpublished", "unpublished");
+    const published = skill("published", "published");
+    const updatePending = skill("update-pending", "update_pending");
+    const deleteSkill = vi.fn(async () => {});
+
+    render(OrganizationSkillsPage, {
+      data: {
+        mode: "manage",
+        search: "",
+        canManage: true,
+        canPublish: true,
+        page: {
+          items: [draft, unpublished, published, updatePending],
+          count: 4,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: deleteSkill,
+              list: vi.fn()
+            },
+            catalogue: {
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_library_delete_aria({ name: draft.display_name })
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_library_delete_aria({ name: unpublished.display_name })
+        })
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_library_delete_aria({ name: published.display_name })
+        })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_library_delete_aria({ name: updatePending.display_name })
+        })
+      )
+      .not.toBeInTheDocument();
+
+    await page
+      .getByRole("button", {
+        name: m.skills_library_delete_aria({ name: unpublished.display_name })
+      })
+      .click();
+    await expect
+      .element(
+        page.getByText(
+          m.organization_skills_delete_description({
+            name: unpublished.display_name
+          })
+        )
+      )
+      .toBeVisible();
+    await page.getByRole("button", { name: m.delete(), exact: true }).click();
+
+    await vi.waitFor(() =>
+      expect(deleteSkill).toHaveBeenCalledWith({
+        skillId: unpublished.id
+      })
+    );
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+    await expect.element(page.getByText(unpublished.display_name)).not.toBeInTheDocument();
+    await expect.element(page.getByText(draft.display_name)).toBeVisible();
+  });
+});

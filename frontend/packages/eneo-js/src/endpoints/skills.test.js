@@ -169,3 +169,100 @@ test("restore copies a selected revision through its scoped action route", async
     }
   ]);
 });
+test("organisation publication sends the reviewed revision", async () => {
+  const calls = [];
+  const response = { id: "skill-1", publication_state: "published" };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.publish({
+    skillId: "skill-1",
+    expected_revision_id: "revision-3"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/publish/",
+      request: {
+        method: "post",
+        params: { path: { skill_id: "skill-1" } },
+        requestBody: {
+          "application/json": { expected_revision_id: "revision-3" }
+        }
+      }
+    }
+  ]);
+});
+
+test("organisation revision summaries use the shared cursor contract", async () => {
+  const page = {
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null,
+    previous_cursor: null,
+    total_count: 0
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.organization.listRevisionSummaries({
+    skillId: "skill-1",
+    limit: 25,
+    cursor: "3"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/revisions/",
+      request: {
+        method: "get",
+        params: {
+          path: { skill_id: "skill-1" },
+          query: { limit: 25, cursor: "3" }
+        }
+      }
+    }
+  ]);
+});
+
+test("catalogue reads use the tenant-scoped projection", async () => {
+  const calls = [];
+  const page = { items: [], limit: 25, next_cursor: null };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.catalogue.list({
+    limit: 25,
+    cursor: "payroll",
+    search: "benefits"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/catalogue/",
+      request: {
+        method: "get",
+        params: {
+          query: { limit: 25, cursor: "payroll", search: "benefits" }
+        }
+      }
+    }
+  ]);
+});

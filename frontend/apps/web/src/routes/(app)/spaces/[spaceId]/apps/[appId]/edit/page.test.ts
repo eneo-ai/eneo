@@ -16,6 +16,7 @@ describe("App edit loader", () => {
       parent: vi.fn().mockResolvedValue({
         currentSpace: {
           id: "space-1",
+          organization: false,
           skill_permissions: [READ_SKILL_PERMISSION]
         },
         eneo: {

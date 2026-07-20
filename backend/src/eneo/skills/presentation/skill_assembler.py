@@ -1,12 +1,19 @@
 from eneo.skills.domain.skill import (
+    PublishedSkill,
+    PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
+    SkillSummary,
 )
 from eneo.skills.presentation.skill_models import (
+    OrganizationSkillPublic,
+    OrganizationSkillSummaryPublic,
+    PublishedSkillPublic,
+    PublishedSkillSummaryPublic,
     SkillBindingReferenceInput,
     SkillBindingSummary,
     SkillPublic,
@@ -110,6 +117,60 @@ class SkillAssembler:
         return SkillPublic(
             **cls.to_sparse(skill).model_dump(),
             current_revision=cls.revision_to_public(skill.current_revision),
+        )
+
+    @staticmethod
+    def organization_summary_to_public(
+        skill: SkillSummary,
+    ) -> OrganizationSkillSummaryPublic:
+        return OrganizationSkillSummaryPublic(
+            id=skill.id,
+            space_id=skill.space_id,
+            slug=skill.slug,
+            is_active=skill.is_active,
+            current_revision_id=skill.current_revision_id,
+            current_revision_number=skill.current_revision_number,
+            display_name=skill.display_name,
+            description=skill.description,
+            content_digest=skill.content_digest,
+            created_by_user_id=skill.created_by_user_id,
+            created_at=skill.created_at,
+            updated_at=skill.updated_at,
+            published_revision_number=skill.published_revision_number,
+            first_published_at=skill.first_published_at,
+            publication_state=skill.publication_state,
+        )
+
+    @classmethod
+    def organization_to_public(cls, skill: Skill) -> OrganizationSkillPublic:
+        return OrganizationSkillPublic(
+            **cls.to_sparse(skill).model_dump(),
+            published_revision_number=skill.published_revision_number,
+            first_published_at=skill.first_published_at,
+            publication_state=skill.publication_state,
+            current_revision=cls.revision_to_public(skill.current_revision),
+        )
+
+    @staticmethod
+    def published_summary_to_public(
+        skill: PublishedSkillSummary,
+    ) -> PublishedSkillSummaryPublic:
+        return PublishedSkillSummaryPublic(
+            id=skill.id,
+            slug=skill.slug,
+            revision_id=skill.revision_id,
+            revision_number=skill.revision_number,
+            display_name=skill.display_name,
+            description=skill.description,
+            content_digest=skill.content_digest,
+            first_published_at=skill.first_published_at,
+        )
+
+    @classmethod
+    def published_to_public(cls, skill: PublishedSkill) -> PublishedSkillPublic:
+        return PublishedSkillPublic(
+            **cls.published_summary_to_public(skill.summary).model_dump(),
+            revision=cls.revision_to_public(skill.revision),
         )
 
     @staticmethod

@@ -4,6 +4,7 @@ import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/sk
 
 export const load = async (event) => {
   event.depends("space:skills");
+  event.depends("organization:skills");
   const { eneo, currentSpace } = await event.parent();
   const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
   const supportsDirectSkills =

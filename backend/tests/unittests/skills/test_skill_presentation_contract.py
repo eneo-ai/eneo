@@ -38,6 +38,7 @@ def _binding(*, position: int) -> ResolvedSkillBinding:
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
         current_revision_number=position + 1,
@@ -326,6 +327,7 @@ async def test_revision_noop_result_does_not_emit_created_audit():
         get_skill=AsyncMock(return_value=skill),
         create_revision=AsyncMock(
             return_value=SkillRevisionChange(
+                skill=skill,
                 revision=skill.current_revision,
                 created=False,
                 previous_revision_number=skill.current_revision_number,
@@ -365,6 +367,7 @@ async def test_revision_created_audit_uses_locked_mutation_outcome():
         current_revision=replace(after.current_revision, skill_id=before.id),
     )
     change = SkillRevisionChange(
+        skill=after,
         revision=after.current_revision,
         created=True,
         previous_revision_number=1,
@@ -415,9 +418,9 @@ async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies
         created_at=datetime.now(timezone.utc),
     )
     outcome = SkillRevisionRestore(
-        skill=skill,
         source_revision=source,
         change=SkillRevisionChange(
+            skill=replace(skill, current_revision=restored, current_revision_number=5),
             revision=restored,
             created=True,
             previous_revision_number=4,
@@ -465,9 +468,9 @@ async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies
 async def test_restore_noop_does_not_emit_a_restored_audit_event():
     skill = _skill(revision_number=4)
     outcome = SkillRevisionRestore(
-        skill=skill,
         source_revision=skill.current_revision,
         change=SkillRevisionChange(
+            skill=skill,
             revision=skill.current_revision,
             created=False,
             previous_revision_number=4,

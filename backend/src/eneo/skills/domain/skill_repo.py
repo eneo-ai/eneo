@@ -2,14 +2,18 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.skills.domain.skill import (
+    PublishedSkill,
+    PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
     SkillCatalogEntry,
+    SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
     SkillStatusChange,
+    SkillSummary,
 )
 
 
@@ -24,6 +28,7 @@ class SkillRepo(Protocol):
         instructions: str,
         content_digest: str,
         created_by_user_id: UUID,
+        is_active: bool = True,
     ) -> Skill: ...
 
     async def get(self, *, skill_id: UUID) -> Skill | None: ...
@@ -43,6 +48,38 @@ class SkillRepo(Protocol):
         space_id: UUID,
         query: str | None,
     ) -> int: ...
+
+    async def list_organization_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+        after_slug: str | None,
+        search: str | None = None,
+    ) -> list[SkillSummary]: ...
+
+    async def get_organization_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> Skill | None: ...
+
+    async def list_published_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+        after_slug: str | None,
+        search: str | None = None,
+    ) -> list[PublishedSkillSummary]: ...
+
+    async def get_published_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> PublishedSkill | None: ...
 
     async def get_revision(
         self, *, skill_id: UUID, revision_id: UUID
@@ -74,19 +111,57 @@ class SkillRepo(Protocol):
         self, *, skill_id: UUID, is_active: bool
     ) -> SkillStatusChange | None: ...
 
+    async def publish_organization(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_revision_id: UUID,
+    ) -> SkillPublicationChange | None: ...
+
+    async def unpublish_organization(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> SkillPublicationChange | None: ...
+
     async def delete(self, *, skill_id: UUID) -> Skill | None: ...
 
-    async def resolve_references(
+    async def delete_organization(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> Skill | None: ...
+
+    async def resolve_references_for_execution_snapshot(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_space_id: UUID,
+        references: list[SkillBindingReference],
+    ) -> list[ResolvedSkillBinding]: ...
+
+    async def resolve_bound_references_for_binding_update(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_space_id: UUID,
+        references: list[SkillBindingReference],
+    ) -> list[ResolvedSkillBinding]: ...
+
+    async def resolve_local_references_for_binding_update(
         self,
         *,
         space_id: UUID,
         references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]: ...
 
-    async def resolve_references_for_binding_update(
+    async def resolve_published_references_for_binding_update(
         self,
         *,
-        space_id: UUID,
+        tenant_id: UUID,
         references: list[SkillBindingReference],
     ) -> list[ResolvedSkillBinding]: ...
 
@@ -106,6 +181,7 @@ class SkillRepo(Protocol):
         self,
         *,
         assistant_id: UUID,
+        tenant_id: UUID,
         space_id: UUID,
         bindings: list[ResolvedSkillBinding],
     ) -> None: ...
@@ -122,6 +198,7 @@ class SkillRepo(Protocol):
         self,
         *,
         app_id: UUID,
+        tenant_id: UUID,
         space_id: UUID,
         bindings: list[ResolvedSkillBinding],
     ) -> None: ...

@@ -806,6 +806,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug="payroll",
         revision_number=4,
         current_revision_number=4,

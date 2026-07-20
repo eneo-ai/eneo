@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from eneo.main.exceptions import BadRequestException
@@ -38,6 +39,18 @@ def validate_skill_slug(slug: str) -> str:
             "hyphens between segments"
         )
     return normalized
+
+
+def parse_skill_revision_cursor(cursor: str | None) -> int | None:
+    if cursor is None:
+        return None
+    try:
+        revision_number = int(cursor)
+    except ValueError as error:
+        raise BadRequestException("Invalid Skill revision cursor") from error
+    if revision_number < 1:
+        raise BadRequestException("Invalid Skill revision cursor")
+    return revision_number
 
 
 def normalize_skill_content(
@@ -83,6 +96,36 @@ def create_content_digest(
 
 
 @dataclass(frozen=True)
+class NormalizedSkillContent:
+    display_name: str
+    description: str
+    instructions: str
+    content_digest: str
+
+    @classmethod
+    def create(
+        cls, *, display_name: str, description: str, instructions: str
+    ) -> "NormalizedSkillContent":
+        normalized_name, normalized_description, normalized_instructions = (
+            normalize_skill_content(
+                display_name=display_name,
+                description=description,
+                instructions=instructions,
+            )
+        )
+        return cls(
+            display_name=normalized_name,
+            description=normalized_description,
+            instructions=normalized_instructions,
+            content_digest=create_content_digest(
+                display_name=normalized_name,
+                description=normalized_description,
+                instructions=normalized_instructions,
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class SkillRevision:
     id: UUID
     skill_id: UUID
@@ -105,18 +148,19 @@ class SkillRevisionSummary:
 
 
 @dataclass(frozen=True)
+class SkillRevisionChange:
+    skill: Skill
+    revision: SkillRevision
+    created: bool
+    previous_revision_number: int
+
+
+@dataclass(frozen=True)
 class SkillRevisionPage:
     items: tuple[SkillRevisionSummary, ...]
     limit: int
     next_cursor: int | None
     total_count: int
-
-
-@dataclass(frozen=True)
-class SkillRevisionChange:
-    revision: SkillRevision
-    created: bool
-    previous_revision_number: int
 
 
 @dataclass(frozen=True)
@@ -130,6 +174,98 @@ class Skill:
     created_at: datetime
     updated_at: datetime
     current_revision: SkillRevision
+    published_revision_number: int | None = None
+    first_published_at: datetime | None = None
+
+    @property
+    def publication_state(self) -> "SkillPublicationState":
+        return derive_skill_publication_state(
+            current_revision_number=self.current_revision_number,
+            published_revision_number=self.published_revision_number,
+            first_published_at=self.first_published_at,
+        )
+
+
+class SkillPublicationState(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    UPDATE_PENDING = "update_pending"
+    UNPUBLISHED = "unpublished"
+
+
+def derive_skill_publication_state(
+    *,
+    current_revision_number: int,
+    published_revision_number: int | None,
+    first_published_at: datetime | None,
+) -> SkillPublicationState:
+    if published_revision_number is None:
+        return (
+            SkillPublicationState.UNPUBLISHED
+            if first_published_at is not None
+            else SkillPublicationState.DRAFT
+        )
+    if published_revision_number == current_revision_number:
+        return SkillPublicationState.PUBLISHED
+    return SkillPublicationState.UPDATE_PENDING
+
+
+@dataclass(frozen=True)
+class SkillSummary:
+    id: UUID
+    space_id: UUID
+    slug: str
+    is_active: bool
+    current_revision_id: UUID
+    current_revision_number: int
+    display_name: str
+    description: str
+    content_digest: str
+    created_by_user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    published_revision_number: int | None = None
+    first_published_at: datetime | None = None
+
+    @property
+    def publication_state(self) -> SkillPublicationState:
+        return derive_skill_publication_state(
+            current_revision_number=self.current_revision_number,
+            published_revision_number=self.published_revision_number,
+            first_published_at=self.first_published_at,
+        )
+
+
+@dataclass(frozen=True)
+class PublishedSkillSummary:
+    id: UUID
+    slug: str
+    revision_id: UUID
+    revision_number: int
+    display_name: str
+    description: str
+    content_digest: str
+    first_published_at: datetime
+
+
+@dataclass(frozen=True)
+class PublishedSkill:
+    summary: PublishedSkillSummary
+    revision: SkillRevision
+
+
+@dataclass(frozen=True)
+class SkillSummaryPage:
+    items: tuple[SkillSummary, ...]
+    limit: int
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class PublishedSkillSummaryPage:
+    items: tuple[PublishedSkillSummary, ...]
+    limit: int
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -160,7 +296,6 @@ class SkillCatalogPage:
 
 @dataclass(frozen=True)
 class SkillRevisionRestore:
-    skill: Skill
     source_revision: SkillRevision
     change: SkillRevisionChange
 
@@ -170,6 +305,13 @@ class SkillStatusChange:
     skill: Skill
     changed: bool
     previous_is_active: bool
+
+
+@dataclass(frozen=True)
+class SkillPublicationChange:
+    skill: Skill
+    changed: bool
+    previous_published_revision_number: int | None
 
 
 class SkillHasBindingsError(Exception):
@@ -184,6 +326,18 @@ class SkillRevisionConflictError(Exception):
     pass
 
 
+class SkillSlugConflictError(Exception):
+    pass
+
+
+class PublishedSkillDeactivationError(Exception):
+    pass
+
+
+class PublishedSkillDeletionError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class SkillBindingReference:
     skill_id: UUID
@@ -195,6 +349,7 @@ class ResolvedSkillBinding:
     skill_id: UUID
     skill_revision_id: UUID
     current_revision_id: UUID
+    skill_space_id: UUID
     slug: str
     revision_number: int
     current_revision_number: int

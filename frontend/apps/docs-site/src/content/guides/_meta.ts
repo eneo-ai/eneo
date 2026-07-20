@@ -5,6 +5,7 @@ const meta: MetaRecord = {
   authentication: "Authentication & OIDC",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
+  skills: "Skills",
   "ai-providers": "AI Provider Configuration",
   "mcp-servers": "MCP Servers",
   deployment: "Deployment",

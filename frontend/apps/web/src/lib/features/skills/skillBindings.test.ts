@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import {
   appendSkillBinding,
   getAvailableSkills,
+  getSkillCandidateRevisionNumber,
   getSkillBindingRows,
   mergeSkillCatalog,
   moveSkillBinding,
@@ -158,5 +159,27 @@ describe("Skill binding draft state", () => {
     expect(getAvailableSkills(catalog, removeSkillBinding(bindings, created.id))).toEqual([
       created
     ]);
+  });
+
+  test("binds the exact approved revision from an organisation catalogue candidate", () => {
+    const published = {
+      id: "approved",
+      slug: "approved",
+      revision_id: "approved-revision-4",
+      revision_number: 4,
+      display_name: "Approved Skill",
+      description: "Approved content only",
+      content_digest: "digest-approved-4",
+      first_published_at: "2026-07-20T12:00:00Z"
+    };
+
+    expect(appendSkillBinding([], published)).toEqual([
+      {
+        skill_id: published.id,
+        skill_revision_id: published.revision_id
+      }
+    ]);
+    expect(getSkillCandidateRevisionNumber(published)).toBe(4);
+    expect(getAvailableSkills([published], [])).toEqual([published]);
   });
 });

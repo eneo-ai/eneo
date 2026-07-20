@@ -321,6 +321,9 @@ from eneo.sessions.sessions_repo import SessionRepository
 from eneo.settings.encryption_service import EncryptionService
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings_repo import SettingsRepository
+from eneo.skills.application.organization_skill_service import (
+    OrganizationSkillService,
+)
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.infrastructure.skill_repo_impl import SkillRepoImpl
 from eneo.skills.presentation.skill_assembler import SkillAssembler
@@ -985,6 +988,12 @@ class Container(containers.DeclarativeContainer):
         repo=skill_repo,
         space_service=space_service,
         actor_manager=actor_manager,
+    )
+    organization_skill_service = providers.Factory(
+        OrganizationSkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,

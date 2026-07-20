@@ -29,7 +29,6 @@ describe("PolicyDraft", () => {
     });
 
     expect(draft.canUseSkills).toBe(true);
-    expect(draft.canCreateSkills).toBe(false);
   });
 
   it("does not submit hidden MCP grants when only the prompt changes", async () => {
@@ -58,7 +57,7 @@ describe("PolicyDraft", () => {
       },
       organizationSpace: {
         id: "organization-space",
-        skill_permissions: ["read", "create", "edit"]
+        skill_permissions: ["read"]
       },
       skills: emptySkillCatalogPage()
     });
@@ -118,7 +117,7 @@ describe("PolicyDraft", () => {
       promptLibrary: { items: [] },
       organizationSpace: {
         id: "organization-space",
-        skill_permissions: ["read", "create", "edit"]
+        skill_permissions: ["read"]
       },
       skills: emptySkillCatalogPage()
     });
@@ -140,5 +139,48 @@ describe("PolicyDraft", () => {
         ]
       }
     });
+  });
+
+  it("searches only the approved organisation catalogue", async () => {
+    const approved = {
+      id: "skill-1",
+      slug: "leave",
+      revision_id: "revision-2",
+      revision_number: 2,
+      display_name: "Leave",
+      description: "Approved leave guidance",
+      content_digest: "digest-2",
+      first_published_at: "2026-07-20T12:00:00Z"
+    };
+    const list = vi.fn(async () => ({
+      items: [approved],
+      limit: 100,
+      next_cursor: null
+    }));
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: {
+        governancePolicy: { update: vi.fn(async () => {}) },
+        skills: { catalogue: { list } }
+      } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      organizationSpace: {
+        id: "organization-space",
+        skill_permissions: ["read"]
+      },
+      skills: []
+    });
+
+    await expect(draft.searchSkills("leave")).resolves.toEqual([approved]);
+    expect(list).toHaveBeenCalledWith({ limit: 100, search: "leave" });
   });
 });

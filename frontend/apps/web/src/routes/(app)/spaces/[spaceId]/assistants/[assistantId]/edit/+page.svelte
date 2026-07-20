@@ -415,7 +415,8 @@
               initialSkillPage={data.skills}
               bindingSummaries={data.skillBindings}
               canEditBindings={data.assistant.permissions?.includes("edit") ?? false}
-              canCreateSkills={$currentSpace.hasPermission("create", "skill")}
+              canCreateSkills={$currentSpace.organization !== true &&
+                $currentSpace.hasPermission("create", "skill")}
               onListSkills={(params) =>
                 data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
               onCreateSkill={createSkill}

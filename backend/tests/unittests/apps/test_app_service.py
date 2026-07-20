@@ -330,6 +330,7 @@ async def test_run_app_uses_queued_skill_snapshot_instead_of_current_bindings(
     )
 
     service.skill_service.compose_for_execution_snapshot.assert_awaited_once_with(
+        tenant_id=app.tenant_id,
         space_id=app.space_id,
         provenance=(reference,),
         base_instructions="Stored base",

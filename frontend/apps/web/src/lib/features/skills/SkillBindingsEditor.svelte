@@ -1,10 +1,5 @@
 <script lang="ts">
-  import type {
-    SkillBindingReferenceInput,
-    SkillBindingSummary,
-    SkillPublic,
-    SkillSparse
-  } from "@eneo/eneo-js";
+  import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
   import { ArrowDown, ArrowUp, ChevronsUpDown, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
@@ -21,11 +16,13 @@
   import {
     appendSkillBinding,
     getAvailableSkills,
+    getSkillCandidateRevisionNumber,
     getSkillBindingRows,
     mergeSkillCatalog,
     moveSkillBinding,
     removeSkillBinding,
     upgradeSkillBinding,
+    type SkillBindingCandidate,
     type SkillBindingRow,
     type SkillFormValue
   } from "./skillBindings";
@@ -37,7 +34,7 @@
     canEditBindings: boolean;
     canCreateSkills: boolean;
     onListSkills: ListSkills;
-    onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
+    onCreateSkill?: (value: SkillFormValue) => Promise<SkillPublic>;
   };
 
   let {
@@ -91,7 +88,7 @@
     void tick().then(() => document.getElementById(id)?.focus());
   }
 
-  function addExisting(skill: SkillSparse) {
+  function addExisting(skill: SkillBindingCandidate) {
     if (!canEditBindings) return;
     bindings = appendSkillBinding(bindings, skill);
     addExistingOpen = false;
@@ -100,6 +97,7 @@
   }
 
   async function createSkill(value: SkillFormValue) {
+    if (!onCreateSkill) return;
     const created = await onCreateSkill(value);
     createdSkills = [...createdSkills.filter((skill) => skill.id !== created.id), created];
     bindings = appendSkillBinding(bindings, created);
@@ -325,7 +323,7 @@
                     </div>
                     <span class="text-muted-foreground shrink-0 text-xs">
                       {m.skills_revision_label({
-                        revision: String(skill.current_revision_number)
+                        revision: String(getSkillCandidateRevisionNumber(skill))
                       })}
                     </span>
                   </Command.Item>
@@ -356,43 +354,45 @@
       </Popover.Content>
     </Popover.Root>
 
-    <Dialog.Root bind:open={createOpen} onOpenChange={setCreateOpen}>
-      <Dialog.Trigger>
-        {#snippet child({ props })}
-          <Button
-            {...props}
-            id={createTriggerId}
-            type="button"
-            variant="outline"
-            disabled={!canEditBindings || !canCreateSkills}
-          >
-            <Plus data-icon="inline-start" aria-hidden="true" />
-            {m.skills_create_new()}
-          </Button>
-        {/snippet}
-      </Dialog.Trigger>
-      <Dialog.Content
-        class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
-        closeLabel={m.close()}
-      >
-        <Dialog.Header>
-          <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
-          <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
-        </Dialog.Header>
+    {#if canCreateSkills && onCreateSkill}
+      <Dialog.Root bind:open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              id={createTriggerId}
+              type="button"
+              variant="outline"
+              disabled={!canEditBindings || !canCreateSkills}
+            >
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              {m.skills_create_new()}
+            </Button>
+          {/snippet}
+        </Dialog.Trigger>
+        <Dialog.Content
+          class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          closeLabel={m.close()}
+        >
+          <Dialog.Header>
+            <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
+            <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
+          </Dialog.Header>
 
-        <Alert.Root>
-          <Info aria-hidden="true" />
-          <Alert.Title>{m.skills_create_immediate_title()}</Alert.Title>
-          <Alert.Description>{m.skills_create_immediate_description()}</Alert.Description>
-        </Alert.Root>
+          <Alert.Root>
+            <Info aria-hidden="true" />
+            <Alert.Title>{m.skills_create_immediate_title()}</Alert.Title>
+            <Alert.Description>{m.skills_create_immediate_description()}</Alert.Description>
+          </Alert.Root>
 
-        <SkillForm
-          mode="create"
-          onSubmit={createSkill}
-          onDirtyChange={(dirty) => (createFormDirty = dirty)}
-        />
-      </Dialog.Content>
-    </Dialog.Root>
+          <SkillForm
+            mode="create"
+            onSubmit={createSkill}
+            onDirtyChange={(dirty) => (createFormDirty = dirty)}
+          />
+        </Dialog.Content>
+      </Dialog.Root>
+    {/if}
   </div>
 
   <p class="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>

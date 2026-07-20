@@ -604,6 +604,7 @@ async def test_queued_app_run_snapshot_blocks_concurrent_skill_deletion(
     async with db_container() as container:
         skill = await container.skill_repo().get(skill_id=resources.first_skill_id)
         composition = await container.skill_service().compose_for_execution_snapshot(
+            tenant_id=resources.tenant_id,
             space_id=resources.space_id,
             provenance=provenance,
             base_instructions="App instructions",
