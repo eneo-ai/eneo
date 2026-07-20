@@ -56,6 +56,7 @@ def test_missing_required_field_emits_machine_readable_error_contract() -> None:
         normalize_and_validate_flow_run_payload(metadata=metadata, payload={})
 
     assert exc_info.value.code == "flow_input_required_field_missing"
+    assert type(exc_info.value.code) is str
     assert exc_info.value.context == {
         "field_name": "case_id",
         "field_type": "text",

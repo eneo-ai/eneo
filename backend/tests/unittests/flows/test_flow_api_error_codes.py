@@ -60,6 +60,7 @@ FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
 }
 PUBLIC_FLOW_ERROR_EMITTER_PATHS = (
     FLOW_SOURCE_ROOT / "flow_access_policy.py",
+    FLOW_SOURCE_ROOT / "flow_run_input_payload.py",
     FLOW_SOURCE_ROOT / "flow_run_step_inputs.py",
     FLOW_SOURCE_ROOT / "flow_run_payload_validation.py",
     FLOW_SOURCE_ROOT / "flow_runtime_file_service.py",

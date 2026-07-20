@@ -4,6 +4,7 @@ import math
 from datetime import date
 from typing import Any, cast
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import FlowMetadata
 from eneo.main.exceptions import BadRequestException
 
@@ -11,7 +12,7 @@ from eneo.main.exceptions import BadRequestException
 def _flow_payload_error(
     *,
     message: str,
-    code: str,
+    code: FlowApiErrorCode,
     field_name: str | None = None,
     field_type: str | None = None,
 ) -> BadRequestException:
@@ -20,7 +21,7 @@ def _flow_payload_error(
         context["field_name"] = field_name
     if field_type is not None:
         context["field_type"] = field_type
-    return BadRequestException(message, code=code, context=context or None)
+    return BadRequestException(message, code=code.value, context=context or None)
 
 
 def normalize_and_validate_flow_run_payload(
@@ -48,7 +49,7 @@ def normalize_and_validate_flow_run_payload(
             if required:
                 raise _flow_payload_error(
                     message=f"Missing required input field '{key}'.",
-                    code="flow_input_required_field_missing",
+                    code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING,
                     field_name=key,
                     field_type=field_type,
                 )
@@ -59,7 +60,7 @@ def normalize_and_validate_flow_run_payload(
             if required:
                 raise _flow_payload_error(
                     message=f"Missing required input field '{key}'.",
-                    code="flow_input_required_field_missing",
+                    code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING,
                     field_name=key,
                     field_type=field_type,
                 )
@@ -116,14 +117,14 @@ def coerce_text_field(*, field_name: str, value: Any, required: bool) -> str:
     else:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be a string.",
-            code="flow_input_type_mismatch",
+            code=FlowApiErrorCode.INPUT_TYPE_MISMATCH,
             field_name=field_name,
             field_type="text",
         )
     if required and text_value.strip() == "":
         raise _flow_payload_error(
             message=f"Field '{field_name}' cannot be empty.",
-            code="flow_input_required_field_empty",
+            code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
             field_name=field_name,
             field_type="text",
         )
@@ -141,7 +142,7 @@ def coerce_number_field(
             if required:
                 raise _flow_payload_error(
                     message=f"Field '{field_name}' cannot be empty.",
-                    code="flow_input_required_field_empty",
+                    code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
                     field_name=field_name,
                     field_type="number",
                 )
@@ -155,14 +156,14 @@ def coerce_number_field(
         except ValueError as exc:
             raise _flow_payload_error(
                 message=f"Field '{field_name}' must be a valid number.",
-                code="flow_input_invalid_number",
+                code=FlowApiErrorCode.INPUT_INVALID_NUMBER,
                 field_name=field_name,
                 field_type="number",
             ) from exc
     else:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be a valid number.",
-            code="flow_input_invalid_number",
+            code=FlowApiErrorCode.INPUT_INVALID_NUMBER,
             field_name=field_name,
             field_type="number",
         )
@@ -170,7 +171,7 @@ def coerce_number_field(
     if isinstance(number_value, float) and not math.isfinite(number_value):
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be a finite number.",
-            code="flow_input_invalid_number",
+            code=FlowApiErrorCode.INPUT_INVALID_NUMBER,
             field_name=field_name,
             field_type="number",
         )
@@ -186,7 +187,7 @@ def coerce_date_field(*, field_name: str, value: Any, required: bool) -> str | N
             if required:
                 raise _flow_payload_error(
                     message=f"Field '{field_name}' cannot be empty.",
-                    code="flow_input_required_field_empty",
+                    code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
                     field_name=field_name,
                     field_type="date",
                 )
@@ -196,7 +197,7 @@ def coerce_date_field(*, field_name: str, value: Any, required: bool) -> str | N
         except ValueError as exc:
             raise _flow_payload_error(
                 message=f"Field '{field_name}' must be a valid ISO date (YYYY-MM-DD).",
-                code="flow_input_invalid_date",
+                code=FlowApiErrorCode.INPUT_INVALID_DATE,
                 field_name=field_name,
                 field_type="date",
             ) from exc
@@ -204,7 +205,7 @@ def coerce_date_field(*, field_name: str, value: Any, required: bool) -> str | N
     else:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be a valid ISO date (YYYY-MM-DD).",
-            code="flow_input_invalid_date",
+            code=FlowApiErrorCode.INPUT_INVALID_DATE,
             field_name=field_name,
             field_type="date",
         )
@@ -221,7 +222,7 @@ def coerce_select_field(
     if not isinstance(value, str):
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be a string.",
-            code="flow_input_type_mismatch",
+            code=FlowApiErrorCode.INPUT_TYPE_MISMATCH,
             field_name=field_name,
             field_type="select",
         )
@@ -230,7 +231,7 @@ def coerce_select_field(
         if required:
             raise _flow_payload_error(
                 message=f"Field '{field_name}' cannot be empty.",
-                code="flow_input_required_field_empty",
+                code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
                 field_name=field_name,
                 field_type="select",
             )
@@ -238,7 +239,7 @@ def coerce_select_field(
     if options and selected not in options:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be one of the configured options.",
-            code="flow_input_invalid_option",
+            code=FlowApiErrorCode.INPUT_INVALID_OPTION,
             field_name=field_name,
             field_type="select",
         )
@@ -260,7 +261,7 @@ def coerce_multiselect_field(
             if not isinstance(item, str):
                 raise _flow_payload_error(
                     message=f"Field '{field_name}' must contain only string options.",
-                    code="flow_input_invalid_multiselect_value",
+                    code=FlowApiErrorCode.INPUT_INVALID_MULTISELECT_VALUE,
                     field_name=field_name,
                     field_type="multiselect",
                 )
@@ -272,7 +273,7 @@ def coerce_multiselect_field(
     else:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must be an array of strings.",
-            code="flow_input_invalid_multiselect_type",
+            code=FlowApiErrorCode.INPUT_INVALID_MULTISELECT_TYPE,
             field_name=field_name,
             field_type="multiselect",
         )
@@ -280,7 +281,7 @@ def coerce_multiselect_field(
     if required and len(raw_values) == 0:
         raise _flow_payload_error(
             message=f"Field '{field_name}' must contain at least one value.",
-            code="flow_input_required_field_empty",
+            code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
             field_name=field_name,
             field_type="multiselect",
         )
@@ -289,7 +290,7 @@ def coerce_multiselect_field(
         if invalid:
             raise _flow_payload_error(
                 message=f"Field '{field_name}' contains invalid option values.",
-                code="flow_input_invalid_option",
+                code=FlowApiErrorCode.INPUT_INVALID_OPTION,
                 field_name=field_name,
                 field_type="multiselect",
             )
