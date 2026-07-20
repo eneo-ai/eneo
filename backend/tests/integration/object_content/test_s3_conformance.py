@@ -367,19 +367,13 @@ async def test_real_store_binding_create_is_atomic_and_never_overwrites(
         await _clear_deployment_namespace(real_object_store, client)
 
         await asyncio.gather(
-            real_object_store.store.ensure_binding(binding_id, allow_create=True),
-            real_object_store.store.ensure_binding(binding_id, allow_create=True),
+            real_object_store.store.create_binding(binding_id),
+            real_object_store.store.create_binding(binding_id),
         )
-        await real_object_store.store.ensure_binding(
-            binding_id,
-            allow_create=False,
-        )
+        assert await real_object_store.store.verify_binding(binding_id)
 
         with pytest.raises(ObjectStoreBindingError, match="another database"):
-            await real_object_store.store.ensure_binding(
-                uuid4(),
-                allow_create=True,
-            )
+            await real_object_store.store.create_binding(uuid4())
     finally:
         client.delete_object(Bucket=settings.bucket, Key=marker_key)
         client.close()

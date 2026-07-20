@@ -204,6 +204,14 @@ Transport, bounded-memory, multipart, and reconciliation tuning lives in
 `env_backend.env`. These are operator settings, not product policy. Eneo does
 not impose a hidden object-content file-size cap; user-facing upload limits are
 business settings owned by the application/admin configuration.
+`OBJECT_CONTENT_BINDING_CLAIM_SECONDS` bounds first-start coordination and must
+cover the configured readiness request window; increase it only when a measured
+endpoint requires longer readiness timeouts. This is liveness tuning that avoids
+premature claim takeover and retry; the durable creation-intent state, not the
+timeout value, prevents a second store from being paired. Rejected configuration
+diagnostics name the invalid field and reason without rendering the supplied
+value, so a mistaken credential-bearing endpoint is not copied into startup
+logs.
 
 ## Runtime and health
 
@@ -232,20 +240,36 @@ protects PostgreSQL and the object store from probe bursts; an outage or
 recovery may therefore take up to one second to appear. `/api/livez` remains
 dependency-free and uncached.
 
-The first enabled startup creates one random database identity in PostgreSQL
-and atomically places its private marker in the configured bucket. Later
-startups, readiness probes, and every reconciliation run require that exact
-pair. A missing or different marker is never adopted or overwritten after
-confirmation. This prevents a reachable empty or foreign bucket from being
-treated as this deployment's byte plane. The marker is an internal safety
-invariant, not an administrator or tenant setting, and must be included in
-bucket backups.
+The first enabled startup creates one random database identity in PostgreSQL.
+PostgreSQL grants one process a bounded bootstrap claim; other API or worker
+processes remain unready while that claim is active. The claim owner first
+checks for an existing marker, durably records marker-creation intent, creates
+the marker with a conditional non-overwriting write, and only then confirms the
+pair in PostgreSQL. Later startups, readiness probes, and every reconciliation
+run require that exact pair. A missing or different marker is never adopted or
+overwritten after confirmation. This prevents two concurrently misconfigured
+processes from pairing one database with different stores.
+
+An expired claim is reclaimable. A process that crashed before marker creation
+was recorded can be retried; a process that wrote the marker before crashing is
+recovered by verifying that marker. If PostgreSQL records that creation began
+but the configured store has no marker, the outcome is ambiguous and readiness
+fails with `configuration_required`. Do not create a marker in another bucket.
+Keep writers and reconciliation stopped, inspect every previously configured
+store and the paired backup record, then recover the matching pair. The marker
+is an internal safety invariant, not an administrator or tenant setting, and
+must be included in bucket backups.
 
 Uploads and deletes record durable PostgreSQL intent before remote work.
 Bounded leases, idempotency, retries, multipart abort records, tombstones, and
 two-sided reconciliation converge after a process or network failure. Delete
 intent is irreversible. A final reference cannot delete content while a hold or
 minimum-retention boundary blocks it.
+
+A newly prepared `pending` record must commit with its first concrete File,
+InfoBlob, or Icon reference in the same transaction. A deferred PostgreSQL
+constraint rejects an ownerless pending commit, so an idempotency key cannot be
+stranded in a state that no later transaction may attach.
 
 Hard deletion is also fenced in PostgreSQL. Active holds cannot be removed with
 a direct row delete, and retained content cannot bypass the lifecycle. A

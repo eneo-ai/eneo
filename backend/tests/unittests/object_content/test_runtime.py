@@ -74,6 +74,14 @@ class _ReadinessDatabase(DatabaseSessionManager):
         result = MagicMock()
         result.one_or_none.return_value = self.binding_state
         session.scalars = AsyncMock(return_value=result)
+        snapshot = MagicMock()
+        snapshot.one_or_none.side_effect = lambda: (
+            self.binding_state.store_deployment_id,
+            self.binding_state.store_binding_id,
+            self.binding_state.store_binding_confirmed_at,
+            self.binding_state.store_binding_create_started_at,
+        )
+        session.execute = AsyncMock(return_value=snapshot)
 
         async def scalar(statement: object) -> object:
             if "now()" in str(statement).lower():
@@ -94,7 +102,7 @@ class _ReadinessStore:
         self._ready = list(ready or [True])
         self.closed = False
         self.check_ready_count = 0
-        self.binding_create_flags: list[bool] = []
+        self.binding_created = False
 
     async def check_ready(self) -> None:
         self.check_ready_count += 1
@@ -102,15 +110,11 @@ class _ReadinessStore:
         if not ready:
             raise ObjectStoreUnavailableError("test object-store outage")
 
-    async def ensure_binding(
-        self,
-        _binding_id: UUID,
-        *,
-        allow_create: bool,
-    ) -> None:
-        if not self.binding_create_flags:
-            assert allow_create
-        self.binding_create_flags.append(allow_create)
+    async def verify_binding(self, _binding_id: UUID) -> bool:
+        return self.binding_created
+
+    async def create_binding(self, _binding_id: UUID) -> None:
+        self.binding_created = True
 
     async def close(self) -> None:
         self.closed = True

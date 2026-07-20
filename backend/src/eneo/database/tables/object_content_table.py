@@ -377,6 +377,19 @@ class ObjectContentReconciliationState(BaseCrossReference):
             "store_binding_confirmed_at IS NULL OR store_binding_id IS NOT NULL",
             name="ck_object_content_reconciliation_state_binding_confirmation",
         ),
+        CheckConstraint(
+            "(store_binding_claim_id IS NULL) = (store_binding_claim_until IS NULL)",
+            name="ck_object_content_reconciliation_state_binding_claim_pair",
+        ),
+        CheckConstraint(
+            "store_binding_claim_id IS NULL OR "
+            "(store_binding_id IS NOT NULL AND store_binding_confirmed_at IS NULL)",
+            name="ck_object_content_reconciliation_state_binding_claim_state",
+        ),
+        CheckConstraint(
+            "store_binding_create_started_at IS NULL OR store_binding_id IS NOT NULL",
+            name="ck_object_content_reconciliation_state_binding_create_state",
+        ),
     )
 
     id: Mapped[int] = mapped_column(
@@ -412,6 +425,13 @@ class ObjectContentReconciliationState(BaseCrossReference):
     store_deployment_id: Mapped[Optional[UUID]]
     store_binding_id: Mapped[Optional[UUID]]
     store_binding_confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    store_binding_claim_id: Mapped[Optional[UUID]]
+    store_binding_claim_until: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    store_binding_create_started_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
 

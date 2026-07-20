@@ -351,6 +351,21 @@ def _create_tables() -> None:
             nullable=True,
         ),
         sa.Column(
+            "store_binding_claim_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "store_binding_claim_until",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "store_binding_create_started_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
@@ -374,6 +389,19 @@ def _create_tables() -> None:
         sa.CheckConstraint(
             "store_binding_confirmed_at IS NULL OR store_binding_id IS NOT NULL",
             name="ck_object_content_reconciliation_state_binding_confirmation",
+        ),
+        sa.CheckConstraint(
+            "(store_binding_claim_id IS NULL) = (store_binding_claim_until IS NULL)",
+            name="ck_object_content_reconciliation_state_binding_claim_pair",
+        ),
+        sa.CheckConstraint(
+            "store_binding_claim_id IS NULL OR "
+            "(store_binding_id IS NOT NULL AND store_binding_confirmed_at IS NULL)",
+            name="ck_object_content_reconciliation_state_binding_claim_state",
+        ),
+        sa.CheckConstraint(
+            "store_binding_create_started_at IS NULL OR store_binding_id IS NOT NULL",
+            name="ck_object_content_reconciliation_state_binding_create_state",
         ),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -629,6 +657,36 @@ def _create_trigger_functions() -> None:
                     'object content cannot be hard-deleted before its purge horizon';
             END IF;
             RETURN OLD;
+        END;
+        $$
+    """)
+
+    op.execute("""
+        CREATE FUNCTION object_content_pending_owner_fence() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM object_contents content
+                WHERE content.id = NEW.id
+                  AND content.state = 'pending'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM file_content_references
+                      WHERE content_id = content.id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM info_blob_content_references
+                      WHERE content_id = content.id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM icon_content_references
+                      WHERE content_id = content.id
+                  )
+            ) THEN
+                RAISE EXCEPTION 'pending content requires an initial owner'
+                    USING ERRCODE = '23514';
+            END IF;
+            RETURN NEW;
         END;
         $$
     """)
@@ -1022,6 +1080,12 @@ def _create_triggers() -> None:
         AFTER INSERT OR UPDATE ON object_contents
         FOR EACH ROW EXECUTE FUNCTION object_content_audit_transition()
     """)
+    op.execute("""
+        CREATE CONSTRAINT TRIGGER object_contents_pending_owner_fence
+        AFTER INSERT ON object_contents
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW EXECUTE FUNCTION object_content_pending_owner_fence()
+    """)
     for table in (
         "file_content_references",
         "info_blob_content_references",
@@ -1069,12 +1133,16 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS object_contents_90_audit_transition ON object_contents"
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS object_contents_pending_owner_fence ON object_contents"
+    )
+    op.execute(
         "DROP TRIGGER IF EXISTS object_contents_10_guard_update ON object_contents"
     )
     op.execute(
         "DROP TRIGGER IF EXISTS object_contents_10_guard_delete ON object_contents"
     )
     op.execute("DROP FUNCTION IF EXISTS object_content_audit_transition()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_pending_owner_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_hold_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_hold_guard_delete()")
     op.execute("DROP FUNCTION IF EXISTS object_content_reference_fence()")

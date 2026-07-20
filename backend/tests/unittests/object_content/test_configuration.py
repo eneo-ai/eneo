@@ -57,6 +57,51 @@ def test_object_content_configuration_accepts_private_reference_endpoint() -> No
     assert "test-secret" not in repr(settings)
 
 
+def test_rejected_endpoint_credentials_are_not_rendered_by_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep both sentinels short enough that Pydantic cannot hide them through
+    # its generic middle-of-value truncation.
+    sentinel_username = "s3usr"
+    sentinel_password = "p4ss"
+
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv(
+        "OBJECT_CONTENT_ENDPOINT_URL",
+        f"https://{sentinel_username}:{sentinel_password}@objects.example.test",
+    )
+    monkeypatch.setenv("OBJECT_CONTENT_REGION", "local")
+    monkeypatch.setenv("OBJECT_CONTENT_BUCKET", "eneo-content")
+    monkeypatch.setenv("OBJECT_CONTENT_ACCESS_KEY_ID", "test-access")
+    monkeypatch.setenv("OBJECT_CONTENT_SECRET_ACCESS_KEY", "test-secret")
+    monkeypatch.setenv(
+        "OBJECT_CONTENT_DEPLOYMENT_ID",
+        "a2d539af-fef0-42aa-a7f8-14376947be2c",
+    )
+
+    with pytest.raises(ValidationError) as captured:
+        load_object_content_settings()
+
+    rendered = str(captured.value)
+    assert sentinel_username not in rendered
+    assert sentinel_password not in rendered
+
+
+def test_binding_claim_covers_the_readiness_request_window() -> None:
+    with pytest.raises(ValidationError, match="binding_claim_seconds"):
+        ObjectContentSettings(
+            _env_file=None,
+            endpoint_url="https://objects.example.test",
+            region="local",
+            bucket="eneo-content",
+            access_key_id="test-access",
+            secret_access_key="test-secret",
+            deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
+            readiness_timeout_seconds=10,
+            binding_claim_seconds=24,
+        )
+
+
 @pytest.mark.parametrize(
     "endpoint_url",
     ("http://object-content:8333", "HTTP://object-content:8333"),

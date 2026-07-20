@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
@@ -17,12 +18,18 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
+    FileContentReferences,
     ObjectContentReconciliationState,
     ObjectContents,
 )
 from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.object_content.content import (
+    CapturedContent,
+    ContentAccessClass,
+    ContentIntent,
     ContentState,
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
@@ -99,7 +106,7 @@ async def test_disabled_runtime_rejects_active_postgres_content(
                 tenant_id=tenant_id,
                 created_by_user_id=None,
                 object_key="v1/disabled-safety-test",
-                state="pending",
+                state="failed",
                 access_class="private_resource",
                 sha256=b"\0" * 32,
                 size_bytes=0,
@@ -107,6 +114,7 @@ async def test_disabled_runtime_rejects_active_postgres_content(
                 verified_media_type="application/octet-stream",
                 idempotency_key="disabled-safety-test",
                 request_fingerprint=b"\0" * 32,
+                failure_code="upload_rejected",
             )
         )
 
@@ -286,24 +294,111 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_processes_establish_one_database_store_binding(
+async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
 ) -> None:
     settings = real_object_store.settings
     marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
-    client = _raw_client(real_object_store)
+    first_client = _raw_client(real_object_store)
+    second_client = _raw_client(real_unpaired_object_store)
     first = ObjectContentRuntime(object_content_database)
     second = ObjectContentRuntime(object_content_database)
+    uploaded_key: str | None = None
     try:
-        await _clear_deployment_namespace(real_object_store, client)
+        await _clear_deployment_namespace(real_object_store, first_client)
+        await _clear_deployment_namespace(
+            real_unpaired_object_store,
+            second_client,
+        )
         first.start(settings=settings, store=S3ObjectStore(settings))
-        second.start(settings=settings, store=S3ObjectStore(settings))
+        second.start(
+            settings=real_unpaired_object_store.settings,
+            store=S3ObjectStore(real_unpaired_object_store.settings),
+        )
 
-        await asyncio.gather(
+        results = await asyncio.gather(
             first.validate_configuration(),
             second.validate_configuration(),
+            return_exceptions=True,
         )
+        winners = [index for index, result in enumerate(results) if result is None]
+        assert len(winners) == 1
+        loser_error = results[1 - winners[0]]
+        assert isinstance(loser_error, ObjectContentUnavailableError)
+
+        marker_counts = (
+            first_client.list_objects_v2(
+                Bucket=settings.bucket,
+                Prefix=marker_key,
+            ).get("KeyCount", 0),
+            second_client.list_objects_v2(
+                Bucket=real_unpaired_object_store.settings.bucket,
+                Prefix=marker_key,
+            ).get("KeyCount", 0),
+        )
+        assert marker_counts in {(1, 0), (0, 1)}
+
+        winner = (first, second)[winners[0]]
+        loser = (first, second)[1 - winners[0]]
+        with pytest.raises(ObjectContentConfigurationError):
+            await loser.validate_configuration()
+
+        payload = b"bootstrap-winner-content"
+        digest = sha256(payload).digest()
+        captured = CapturedContent(
+            file=BytesIO(payload),
+            sha256=digest,
+            size_bytes=len(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            part_sha256=(digest,),
+        )
+        async with object_content_database.session() as session, session.begin():
+            tenant_id = (await session.scalars(select(Tenants.id))).one()
+            user_id = (await session.scalars(select(Users.id))).one()
+            owner = Files(
+                name="bootstrap-winner.bin",
+                text=None,
+                blob=None,
+                checksum=sha256(payload).hexdigest(),
+                size=len(payload),
+                mimetype="application/octet-stream",
+                file_type="binary",
+                transcription=None,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                parent_file_id=None,
+            )
+            session.add(owner)
+            await session.flush()
+            prepared = await winner.service.prepare_in_transaction(
+                session,
+                intent=ContentIntent(
+                    tenant_id=tenant_id,
+                    created_by_user_id=user_id,
+                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                    idempotency_key=uuid4().hex,
+                    producer_receipt=f"file:{owner.id}:original:0",
+                ),
+                content=captured,
+            )
+            session.add(
+                FileContentReferences(
+                    file_id=owner.id,
+                    content_id=prepared.id,
+                    variant="original",
+                    ordinal=0,
+                )
+            )
+            uploaded_key = prepared.object_key
+
+        await winner.service.store_and_verify(
+            content_id=prepared.id,
+            content=captured,
+        )
+        await winner.reconcile_once()
 
         async with object_content_database.session() as session, session.begin():
             state = await session.get(ObjectContentReconciliationState, 1)
@@ -311,11 +406,21 @@ async def test_concurrent_processes_establish_one_database_store_binding(
             assert state.store_deployment_id == settings.deployment_id
             assert state.store_binding_id is not None
             assert state.store_binding_confirmed_at is not None
+            content = await session.get(ObjectContents, prepared.id)
+            assert content is not None
+            assert content.state == ContentState.AVAILABLE.value
+            assert content.failure_code is None
     finally:
         await first.stop()
         await second.stop()
-        client.delete_object(Bucket=settings.bucket, Key=marker_key)
-        client.close()
+        for client, bucket in (
+            (first_client, settings.bucket),
+            (second_client, real_unpaired_object_store.settings.bucket),
+        ):
+            if uploaded_key is not None:
+                client.delete_object(Bucket=bucket, Key=uploaded_key)
+            client.delete_object(Bucket=bucket, Key=marker_key)
+            client.close()
 
 
 @pytest.mark.asyncio
@@ -336,15 +441,35 @@ async def test_binding_establishment_recovers_both_crash_windows(
     try:
         await _clear_deployment_namespace(real_object_store, client)
         async with object_content_database.session() as session, session.begin():
+            claim_id = uuid4()
             binding = await ObjectContentReconciliationRepository(
                 session
-            ).get_or_initialize_store_binding(settings.deployment_id)
+            ).get_or_initialize_store_binding(
+                settings.deployment_id,
+                claim_id=claim_id,
+                claim_seconds=settings.binding_claim_seconds,
+            )
         assert not binding.confirmed
+        assert binding.claim_id == claim_id
 
         if marker_written_before_restart:
-            await real_object_store.store.ensure_binding(
-                binding.binding_id,
-                allow_create=True,
+            async with object_content_database.session() as session, session.begin():
+                await ObjectContentReconciliationRepository(
+                    session
+                ).mark_store_binding_creation_started(
+                    deployment_id=binding.deployment_id,
+                    binding_id=binding.binding_id,
+                    claim_id=claim_id,
+                )
+            await real_object_store.store.create_binding(binding.binding_id)
+
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE object_content_reconciliation_state "
+                    "SET store_binding_claim_until = now() - interval '1 second' "
+                    "WHERE id = 1"
+                )
             )
 
         runtime.start(settings=settings, store=S3ObjectStore(settings))
@@ -359,3 +484,118 @@ async def test_binding_establishment_recovers_both_crash_windows(
         await runtime.stop()
         client.delete_object(Bucket=settings.bucket, Key=marker_key)
         client.close()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_binding_creation_never_creates_a_marker_in_another_store(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    real_unpaired_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
+    first_client = _raw_client(real_object_store)
+    second_client = _raw_client(real_unpaired_object_store)
+    runtime = ObjectContentRuntime(object_content_database)
+    try:
+        await _clear_deployment_namespace(real_object_store, first_client)
+        await _clear_deployment_namespace(
+            real_unpaired_object_store,
+            second_client,
+        )
+        claim_id = uuid4()
+        async with object_content_database.session() as session, session.begin():
+            binding = await ObjectContentReconciliationRepository(
+                session
+            ).get_or_initialize_store_binding(
+                settings.deployment_id,
+                claim_id=claim_id,
+                claim_seconds=settings.binding_claim_seconds,
+            )
+        async with object_content_database.session() as session, session.begin():
+            await ObjectContentReconciliationRepository(
+                session
+            ).mark_store_binding_creation_started(
+                deployment_id=binding.deployment_id,
+                binding_id=binding.binding_id,
+                claim_id=claim_id,
+            )
+            await session.execute(
+                text(
+                    "UPDATE object_content_reconciliation_state "
+                    "SET store_binding_claim_until = now() - interval '1 second' "
+                    "WHERE id = 1"
+                )
+            )
+
+        runtime.start(
+            settings=real_unpaired_object_store.settings,
+            store=S3ObjectStore(real_unpaired_object_store.settings),
+        )
+        with pytest.raises(ObjectContentConfigurationError, match="ambiguous"):
+            await runtime.validate_configuration()
+
+        assert (
+            first_client.list_objects_v2(
+                Bucket=settings.bucket,
+                Prefix=marker_key,
+            ).get("KeyCount", 0)
+            == 0
+        )
+        assert (
+            second_client.list_objects_v2(
+                Bucket=real_unpaired_object_store.settings.bucket,
+                Prefix=marker_key,
+            ).get("KeyCount", 0)
+            == 0
+        )
+    finally:
+        await runtime.stop()
+        first_client.delete_object(Bucket=settings.bucket, Key=marker_key)
+        second_client.delete_object(
+            Bucket=real_unpaired_object_store.settings.bucket,
+            Key=marker_key,
+        )
+        first_client.close()
+        second_client.close()
+
+
+@pytest.mark.asyncio
+async def test_confirmed_binding_read_does_not_wait_for_bootstrap_lock(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    deployment_id = uuid4()
+    binding_id = uuid4()
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            text(
+                "UPDATE object_content_reconciliation_state "
+                "SET store_deployment_id = :deployment_id, "
+                "store_binding_id = :binding_id, "
+                "store_binding_confirmed_at = now() "
+                "WHERE id = 1"
+            ),
+            {"deployment_id": deployment_id, "binding_id": binding_id},
+        )
+
+    async with object_content_database.session() as locked_session:
+        async with locked_session.begin():
+            await locked_session.execute(
+                text(
+                    "SELECT id FROM object_content_reconciliation_state "
+                    "WHERE id = 1 FOR UPDATE"
+                )
+            )
+            async with object_content_database.session() as read_session:
+                async with read_session.begin():
+                    await read_session.execute(text("SET LOCAL lock_timeout = '100ms'"))
+                    binding = await ObjectContentReconciliationRepository(
+                        read_session
+                    ).get_or_initialize_store_binding(
+                        deployment_id,
+                        claim_id=uuid4(),
+                        claim_seconds=30,
+                    )
+
+    assert binding.confirmed
+    assert binding.binding_id == binding_id

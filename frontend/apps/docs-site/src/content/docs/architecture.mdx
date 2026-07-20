@@ -225,6 +225,14 @@ marker before any lifecycle or orphan mutation. A reachable empty or foreign
 bucket returns `configuration_required`; Eneo neither adopts it nor marks live
 rows missing.
 
+First-start pairing is serialized by a bounded PostgreSQL claim. Only its owner
+may conditionally create the non-overwriting marker; competing API or worker
+processes stay unready and then verify the confirmed pair. Crash recovery reuses
+an existing marker, while a recorded-but-missing marker fails closed as an
+ambiguous outcome instead of creating a second byte plane. PostgreSQL also uses
+a deferred commit-time fence so every new `pending` record has its first
+concrete File, InfoBlob, or Icon reference in the creation transaction.
+
 Reconciliation accepts an inventory cycle only when every page has a complete,
 advancing cursor. An invalid page fails the run before PostgreSQL records a
 completed cycle. A complete cycle marks absent available content failed; held

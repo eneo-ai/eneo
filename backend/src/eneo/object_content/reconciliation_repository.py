@@ -59,7 +59,8 @@ class StoreBinding:
     deployment_id: UUID
     binding_id: UUID
     confirmed: bool
-    allow_create: bool
+    claim_id: UUID | None
+    creation_started: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -1024,7 +1025,40 @@ class ObjectContentReconciliationRepository:
     async def get_or_initialize_store_binding(
         self,
         deployment_id: UUID,
+        *,
+        claim_id: UUID,
+        claim_seconds: int,
     ) -> StoreBinding:
+        if claim_seconds < 1:
+            raise ValueError("Store-binding claim duration must be positive")
+        snapshot = (
+            await self._session.execute(
+                select(
+                    ObjectContentReconciliationState.store_deployment_id,
+                    ObjectContentReconciliationState.store_binding_id,
+                    ObjectContentReconciliationState.store_binding_confirmed_at,
+                    ObjectContentReconciliationState.store_binding_create_started_at,
+                ).where(ObjectContentReconciliationState.id == 1)
+            )
+        ).one_or_none()
+        if snapshot is None:
+            raise RuntimeError("Object-content reconciliation state is missing")
+        stored_deployment_id, binding_id, confirmed_at, create_started_at = snapshot
+        if confirmed_at is not None:
+            if stored_deployment_id != deployment_id:
+                raise ObjectContentConfigurationError(
+                    "Object-content deployment identity does not match PostgreSQL"
+                )
+            if binding_id is None:
+                raise RuntimeError("Object-content storage binding is incomplete")
+            return StoreBinding(
+                deployment_id=stored_deployment_id,
+                binding_id=binding_id,
+                confirmed=True,
+                claim_id=None,
+                creation_started=create_started_at is not None,
+            )
+
         state = await self._state_for_update()
         has_content = bool(
             await self._session.scalar(
@@ -1048,18 +1082,67 @@ class ObjectContentReconciliationRepository:
         stored_deployment_id = state.store_deployment_id
         if stored_deployment_id is None:
             raise RuntimeError("Object-content storage binding is incomplete")
+        confirmed = state.store_binding_confirmed_at is not None
+        owns_claim = False
+        if not confirmed:
+            now = await self._database_now()
+            claim_expired = (
+                state.store_binding_claim_until is None
+                or state.store_binding_claim_until <= now
+            )
+            if state.store_binding_claim_id is None or claim_expired:
+                state.store_binding_claim_id = claim_id
+                state.store_binding_claim_until = now + timedelta(seconds=claim_seconds)
+                owns_claim = True
+                await self._session.flush()
+            elif state.store_binding_claim_id == claim_id:
+                owns_claim = True
         return StoreBinding(
             deployment_id=stored_deployment_id,
             binding_id=binding_id,
-            confirmed=state.store_binding_confirmed_at is not None,
-            allow_create=(state.store_binding_confirmed_at is None and not has_content),
+            confirmed=confirmed,
+            claim_id=claim_id if owns_claim else None,
+            creation_started=state.store_binding_create_started_at is not None,
         )
+
+    async def mark_store_binding_creation_started(
+        self,
+        *,
+        deployment_id: UUID,
+        binding_id: UUID,
+        claim_id: UUID,
+    ) -> None:
+        state = await self._state_for_update()
+        if (
+            state.store_deployment_id != deployment_id
+            or state.store_binding_id != binding_id
+            or state.store_binding_confirmed_at is not None
+        ):
+            raise ObjectContentConfigurationError(
+                "Object-content storage binding changed before marker creation"
+            )
+        now = await self._database_now()
+        if (
+            state.store_binding_claim_id != claim_id
+            or state.store_binding_claim_until is None
+            or state.store_binding_claim_until <= now
+        ):
+            raise ObjectContentBusyError(
+                "Object-content storage binding claim is no longer owned"
+            )
+        if state.store_binding_create_started_at is not None:
+            raise ObjectContentConfigurationError(
+                "Object-content marker creation has an ambiguous prior outcome"
+            )
+        state.store_binding_create_started_at = now
+        await self._session.flush()
 
     async def confirm_store_binding(
         self,
         *,
         deployment_id: UUID,
         binding_id: UUID,
+        claim_id: UUID,
     ) -> None:
         state = await self._state_for_update()
         if (
@@ -1070,7 +1153,13 @@ class ObjectContentReconciliationRepository:
                 "Object-content storage binding changed during verification"
             )
         if state.store_binding_confirmed_at is None:
+            if state.store_binding_claim_id != claim_id:
+                raise ObjectContentBusyError(
+                    "Object-content storage binding claim changed during verification"
+                )
             state.store_binding_confirmed_at = await self._database_now()
+            state.store_binding_claim_id = None
+            state.store_binding_claim_until = None
             await self._session.flush()
 
     async def _state_for_update(self) -> ObjectContentReconciliationState:

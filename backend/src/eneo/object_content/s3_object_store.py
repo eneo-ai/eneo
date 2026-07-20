@@ -276,27 +276,25 @@ class S3ObjectStore:
                 "Object content storage is not ready"
             ) from error
 
-    async def ensure_binding(
-        self,
-        binding_id: UUID,
-        *,
-        allow_create: bool,
-    ) -> None:
-        """Verify this database's immutable marker or create it once."""
+    async def verify_binding(self, binding_id: UUID) -> bool:
+        """Return whether this store has this database's immutable marker."""
         expected = _BINDING_PREAMBLE + binding_id.bytes
         observed = await self._read_binding()
-        if observed is not None:
-            if observed != expected:
-                raise ObjectStoreBindingError(
-                    "Object content storage is paired with another database"
-                )
-            return
-        if not allow_create:
+        if observed is None:
+            return False
+        if observed != expected:
             raise ObjectStoreBindingError(
-                "The confirmed object-content storage binding is missing"
+                "Object content storage is paired with another database"
             )
+        return True
+
+    async def create_binding(self, binding_id: UUID) -> None:
+        """Create this database's marker without replacing any existing marker."""
+        if await self.verify_binding(binding_id):
+            return
 
         await self._require_empty_content_namespace()
+        expected = _BINDING_PREAMBLE + binding_id.bytes
         checksum = base64.b64encode(sha256(expected).digest()).decode()
         try:
             await asyncio.to_thread(
@@ -319,10 +317,9 @@ class S3ObjectStore:
                 "Object content storage binding failed"
             ) from error
 
-        observed = await self._read_binding()
-        if observed != expected:
+        if not await self.verify_binding(binding_id):
             raise ObjectStoreBindingError(
-                "Object content storage is paired with another database"
+                "Object content storage binding marker was not persisted"
             )
 
     async def upload(

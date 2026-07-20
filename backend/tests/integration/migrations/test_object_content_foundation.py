@@ -134,6 +134,9 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
             "store_deployment_id",
             "store_binding_id",
             "store_binding_confirmed_at",
+            "store_binding_claim_id",
+            "store_binding_claim_until",
+            "store_binding_create_started_at",
         } <= reconciliation_columns
         reconciliation_checks = {
             str(constraint["name"])
@@ -144,6 +147,9 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
         assert {
             "ck_object_content_reconciliation_state_binding_pair",
             "ck_object_content_reconciliation_state_binding_confirmation",
+            "ck_object_content_reconciliation_state_binding_claim_pair",
+            "ck_object_content_reconciliation_state_binding_claim_state",
+            "ck_object_content_reconciliation_state_binding_create_state",
         } <= reconciliation_checks
     finally:
         engine.dispose()

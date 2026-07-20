@@ -9,8 +9,12 @@ from sqlalchemy.exc import DBAPIError
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.icons_table import Icons
+from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
+    IconContentReferences,
+    InfoBlobContentReferences,
     ObjectContents,
 )
 from eneo.database.tables.tenant_table import Tenants
@@ -49,7 +53,11 @@ def _file(*, tenant_id: UUID, user_id: UUID, name: str) -> Files:
 
 
 def _pending_content(
-    *, tenant_id: UUID, user_id: UUID, idempotency_key: str
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    idempotency_key: str,
+    access_class: str = "private_resource",
 ) -> ObjectContents:
     digest = sha256(idempotency_key.encode()).digest()
     return ObjectContents(
@@ -57,7 +65,7 @@ def _pending_content(
         created_by_user_id=user_id,
         object_key=f"v1/a2d539affef042aaa7f814376947be2c/{idempotency_key}",
         state="pending",
-        access_class="private_resource",
+        access_class=access_class,
         sha256=digest,
         size_bytes=1,
         declared_media_type="text/plain",
@@ -80,7 +88,7 @@ def _captured_content(payload: bytes = b"x") -> CapturedContent:
 
 
 @pytest.mark.asyncio
-async def test_pending_content_only_accepts_its_first_reference_in_creation_transaction(
+async def test_pending_content_accepts_its_first_reference_in_creation_transaction(
     object_content_database: DatabaseSessionManager,
 ) -> None:
     async with object_content_database.session() as session, session.begin():
@@ -112,25 +120,87 @@ async def test_pending_content_only_accepts_its_first_reference_in_creation_tran
         await session.refresh(initial_content)
         assert initial_content.reference_count == 1
 
-        later_file = _file(tenant_id=tenant_id, user_id=user_id, name="later.txt")
-        later_content = _pending_content(
+
+@pytest.mark.asyncio
+async def test_info_blob_pending_content_accepts_its_first_reference_at_creation(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+
+    async with object_content_database.session() as session, session.begin():
+        owner = InfoBlobs(
+            text="",
+            title="owned extracted text",
+            url=None,
+            size=0,
+            content_hash=None,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            group_id=None,
+            website_id=None,
+            embedding_model_id=None,
+            integration_knowledge_id=None,
+            sharepoint_item_id=None,
+        )
+        content = _pending_content(
             tenant_id=tenant_id,
             user_id=user_id,
-            idempotency_key="later-content",
+            idempotency_key="info-blob-owned-content",
         )
-        session.add_all([later_file, later_content])
+        session.add_all([owner, content])
         await session.flush()
-        later_file_id = later_file.id
-        later_content_id = later_content.id
+        session.add(
+            InfoBlobContentReferences(
+                info_blob_id=owner.id,
+                content_id=content.id,
+                variant="extracted_text",
+            )
+        )
 
-    with pytest.raises(DBAPIError, match="pending content may only receive"):
+
+@pytest.mark.asyncio
+async def test_icon_pending_content_accepts_its_first_reference_at_creation(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+
+    async with object_content_database.session() as session, session.begin():
+        owner = Icons(
+            blob=b"x",
+            mimetype="image/png",
+            size=1,
+            tenant_id=tenant_id,
+        )
+        content = _pending_content(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            idempotency_key="icon-owned-content",
+            access_class="public_immutable",
+        )
+        session.add_all([owner, content])
+        await session.flush()
+        session.add(
+            IconContentReferences(
+                icon_id=owner.id,
+                content_id=content.id,
+                variant="primary",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_ownerless_pending_content_cannot_commit(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _owner_ids(object_content_database)
+
+    with pytest.raises(DBAPIError, match="pending content requires an initial owner"):
         async with object_content_database.session() as session, session.begin():
             session.add(
-                FileContentReferences(
-                    file_id=later_file_id,
-                    content_id=later_content_id,
-                    variant="original",
-                    ordinal=0,
+                _pending_content(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    idempotency_key="ownerless-content",
                 )
             )
             await session.flush()

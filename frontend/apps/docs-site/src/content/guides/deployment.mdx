@@ -394,12 +394,23 @@ in their capability/readiness projections; after a row exists, a disabled
 process fails the safety guard.
 
 On the first enabled startup, Eneo creates one random PostgreSQL identity and
-atomically pairs it with a private marker in the configured bucket. Startup,
-readiness, and every reconciliation run require the same pair before mutating
-content state. A reachable empty or foreign bucket reports
-`configuration_required`; Eneo never silently adopts or overwrites it. The
-marker is internal and must be preserved with the bucket backup—it is not an
-administrator or tenant setting.
+grants one process a bounded bootstrap claim. Only that process may
+conditionally create the private, non-overwriting bucket marker; competing API
+or worker processes remain unready and later verify the confirmed pair.
+Startup, readiness, and every reconciliation run require the same pair before
+mutating content state. A reachable empty or foreign bucket reports
+`configuration_required`; Eneo never silently adopts or overwrites it.
+
+The claim expires after `OBJECT_CONTENT_BINDING_CLAIM_SECONDS` (default `30`),
+which must cover the configured readiness request window. Recovery verifies a
+marker written before a crash. The timeout controls liveness and retry timing;
+durable creation intent supplies the safety guarantee. If PostgreSQL says marker
+creation began but the configured store has no marker, Eneo fails closed rather
+than create one in a possibly different store; stop writers and reconciliation
+and recover the matching PostgreSQL/object backup pair. The marker is internal
+and must be preserved with the bucket backup—it is not an administrator or
+tenant setting. Invalid configuration diagnostics omit supplied values,
+including a rejected credential-bearing endpoint URL.
 
 The reference deployment starts an Eneo-built SeaweedFS 4.39 image. Eneo pins
 and reviews upstream source, builds minimal non-root amd64/arm64 images, blocks
@@ -479,6 +490,11 @@ database-owned purge horizon is present and has elapsed. Do not treat a null
 horizon as an immediate-delete default. Account erasure may clear the user
 attribution on a hold, but it does not release that hold or advance content
 deletion.
+
+PostgreSQL also rejects a new `pending` content row that reaches commit without
+its first concrete File, InfoBlob, or Icon reference. Producers must create that
+reference in the same transaction as the content intent; later attachment of an
+ownerless pending row is never a recovery path.
 
 Object inventory pages must return complete, advancing cursors. Eneo rejects an
 invalid page without completing the scan or marking unseen rows missing. A

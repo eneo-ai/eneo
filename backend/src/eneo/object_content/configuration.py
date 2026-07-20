@@ -21,6 +21,7 @@ class ObjectContentSettings(BaseSettings):
         env_prefix="OBJECT_CONTENT_",
         env_file=None,
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
     endpoint_url: str
@@ -38,6 +39,7 @@ class ObjectContentSettings(BaseSettings):
     sdk_max_attempts: int = Field(default=3, ge=1)
     readiness_timeout_seconds: float = Field(default=2.0, gt=0)
     readiness_max_attempts: int = Field(default=1, ge=1)
+    binding_claim_seconds: int = Field(default=30, ge=1)
     io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
     spool_memory_bytes: int = Field(default=8 * _MEBIBYTE, ge=1)
     multipart_part_bytes: int = Field(
@@ -130,6 +132,10 @@ class ObjectContentSettings(BaseSettings):
             raise ValueError(
                 "reconciliation_lease_seconds must cover the configured SDK retry window"
             )
+        if self.binding_claim_seconds < self.readiness_request_budget_seconds:
+            raise ValueError(
+                "binding_claim_seconds must cover the configured readiness request window"
+            )
         return self
 
     @property
@@ -140,6 +146,11 @@ class ObjectContentSettings(BaseSettings):
             * (self.connect_timeout_seconds + self.read_timeout_seconds)
             + 5
         )
+
+    @property
+    def readiness_request_budget_seconds(self) -> float:
+        """Bound one binding probe or mutation, including scheduling margin."""
+        return self.readiness_max_attempts * (2 * self.readiness_timeout_seconds) + 5
 
     @property
     def maximum_multipart_bytes(self) -> int:
