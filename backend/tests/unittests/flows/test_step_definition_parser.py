@@ -25,6 +25,106 @@ def _definition(*steps: dict[str, object]) -> dict[str, object]:
     return {"steps": list(steps)}
 
 
+def _per_source_step(
+    *,
+    item_properties: dict[str, object],
+    required: list[str],
+) -> dict[str, object]:
+    return _step_snapshot(
+        input_type="document",
+        output_type="json",
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+            }
+        },
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": item_properties,
+                        "required": required,
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def test_parse_runtime_steps_accepts_strict_per_source_identity_contract() -> None:
+    parsed = parse_runtime_steps(
+        _definition(
+            _per_source_step(
+                item_properties={
+                    "source_label": {"type": "string"},
+                    "source_file_id": {"type": "string"},
+                },
+                required=["source_label", "source_file_id"],
+            )
+        )
+    )
+
+    assert parsed[0].output_type == "json"
+
+
+@pytest.mark.parametrize(
+    ("item_properties", "required"),
+    [
+        pytest.param(
+            {"source_file_id": {"type": "string"}},
+            ["source_label", "source_file_id"],
+            id="missing-declaration",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "string"},
+            },
+            ["source_label"],
+            id="omitted-from-required",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "integer"},
+            },
+            ["source_label", "source_file_id"],
+            id="wrong-type",
+        ),
+    ],
+)
+def test_parse_runtime_steps_rejects_invalid_per_source_identity_contract(
+    item_properties: dict[str, object],
+    required: list[str],
+) -> None:
+    step = _per_source_step(
+        item_properties=item_properties,
+        required=required,
+    )
+    step["user_description"] = "Extract source facts"
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_runtime_steps(_definition(step))
+
+    assert str(exc_info.value) == (
+        "Step 1 (Extract source facts): Per-source steps require output_contract "
+        "documents[] items to declare source_label and source_file_id as required "
+        "string properties."
+    )
+    assert exc_info.value.context == {
+        "step_order": 1,
+        "step_description": "Extract source facts",
+    }
+
+
 def test_parse_runtime_steps_rejects_invalid_output_mode():
     with pytest.raises(BadRequestException, match="Unsupported output mode"):
         parse_runtime_steps(_definition(_step_snapshot(output_mode="invalid_mode")))

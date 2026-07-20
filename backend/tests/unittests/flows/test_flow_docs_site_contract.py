@@ -106,6 +106,7 @@ from eneo.flows.runtime.flow_runtime_trace import (
     FLOW_STEP_EXECUTE_SPAN_NAME,
     FLOW_STEP_SPAN_ATTRIBUTE_KEYS,
 )
+from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES
 from tests.unit.api_key_test_utils import flatten_routes
 
@@ -140,6 +141,7 @@ FLOW_CONSUMER_DELETED_FLAT_HREFS = (
     "/guides/flows-faq",
 )
 FLOW_OVERVIEW = DOCS_SITE_CONTENT_ROOT / "docs" / "flows.mdx"
+AI_BUILDER_DOC = DOCS_SITE_CONTENT_ROOT / "docs" / "ai-builder.mdx"
 API_KEY_MANAGEMENT = DOCS_SITE_CONTENT_ROOT / "docs" / "api-key-management.mdx"
 FLOW_DEVELOPER_DOCS_DIR = DOCS_SITE_CONTENT_ROOT / "docs" / "flows-for-developers"
 FLOW_DEVELOPER_DOCS_DATA_SCHEMA = FLOW_DEVELOPER_DOCS_DIR / "data-schema.mdx"
@@ -611,6 +613,19 @@ def _heading_section(page: str, heading: str) -> str:
     if next_heading is None:
         return section
     return section[: next_heading.start()]
+
+
+def test_ai_builder_docs_define_per_source_identity_contract() -> None:
+    contract_section = _heading_section(
+        _read(AI_BUILDER_DOC),
+        "## Inputs, outputs, and contracts",
+    )
+
+    for field_name in RUNTIME_SOURCE_IDENTITY_FIELDS:
+        assert f"`{field_name}`" in contract_section
+    assert "required JSON Schema `string` properties" in contract_section
+    assert "runtime writes both fields from uploaded file metadata" in contract_section
+    assert "not model output" in contract_section
 
 
 def _flow_developer_meta_titles() -> dict[str, str]:

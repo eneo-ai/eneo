@@ -145,6 +145,8 @@ AI Builder can propose the same core capabilities used by manually authored Flow
 
 Prefer explicit form fields when a value will vary per run. Prefer JSON output fields when a downstream step or integration needs stable machine-readable data.
 
+For per-source document readers, every `documents[]` item schema must declare `source_label` and `source_file_id` as required JSON Schema `string` properties. The runtime writes both fields from uploaded file metadata; they are not model output and are removed from model-facing guidance.
+
 For Builder-generated intermediate JSON, field names are stable machine keys and default to canonical English terms. Localized language belongs in descriptions, instructions, and final report text. If a user explicitly requests a public final JSON schema with localized field names, that terminal output contract can use those names, but the Builder should not emit parallel keys such as `summary` and `sammanfattning` for the same source fact.
 
 ## Underlag till steget

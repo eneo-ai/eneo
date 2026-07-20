@@ -30,6 +30,7 @@ from eneo.flows.output_modes import (
 )
 from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime_input import build_runtime_input_config
+from eneo.flows.source_identity import has_required_runtime_source_identity_fields
 from eneo.flows.step_chain_rules import find_first_step_chain_violation
 from eneo.flows.step_item_map import build_step_item_map_config
 from eneo.main.exceptions import BadRequestException
@@ -546,6 +547,17 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             if text_document_pass_through_error is not None:
                 raise BadRequestException(text_document_pass_through_error)
             runtime_input = build_runtime_input_config(input_fields.input_config)
+            if runtime_input.execution_mode == "per_source" and not (
+                has_required_runtime_source_identity_fields(
+                    output_fields.output_contract,
+                    "documents",
+                )
+            ):
+                raise BadRequestException(
+                    "Per-source steps require output_contract documents[] items to "
+                    "declare source_label and source_file_id as required string "
+                    "properties."
+                )
             if (
                 output_fields.output_mode == "transcribe_only"
                 and runtime_input.enabled

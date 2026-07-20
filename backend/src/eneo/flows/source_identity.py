@@ -86,6 +86,28 @@ def runtime_source_identity_fields_for_array_items(
     )
 
 
+def has_required_runtime_source_identity_fields(
+    contract: dict[str, Any] | None,
+    array_key: str,
+) -> bool:
+    item_schema = _array_item_object_schema(contract, array_key)
+    if item_schema is None:
+        return False
+    properties = item_schema.get("properties")
+    required = item_schema.get("required")
+    if not isinstance(properties, Mapping) or not isinstance(required, list):
+        return False
+    for field_name in RUNTIME_SOURCE_IDENTITY_FIELDS:
+        field_schema = properties.get(field_name)
+        if (
+            not isinstance(field_schema, Mapping)
+            or field_schema.get("type") != "string"
+            or field_name not in required
+        ):
+            return False
+    return True
+
+
 def _array_item_object_schema(
     contract: dict[str, Any] | None,
     array_key: str,

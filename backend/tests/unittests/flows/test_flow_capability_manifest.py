@@ -58,8 +58,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_seven() -> None:
-    assert FCM_VERSION == 7
+def test_fcm_version_is_eight() -> None:
+    assert FCM_VERSION == 8
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -1009,7 +1009,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V7: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1308,9 +1308,11 @@ _FCM_SURFACE_FINGERPRINT_V7: tuple[object, ...] = (
                 ),
                 (
                     "runtime_sets_source_identity",
-                    "The runtime, not the model, sets `source_label` and "
-                    "`source_file_id` from uploaded file metadata before assembling "
-                    "the final documents[] payload.",
+                    "Every documents[] item schema declares `source_label` and "
+                    "`source_file_id` as required strings; `parse_runtime_steps` "
+                    "rejects invalid per-source contracts before provider work. "
+                    "The runtime, not the model, writes their values from uploaded "
+                    "file metadata.",
                 ),
             ),
             ("input_config.runtime_input.execution_mode",),
@@ -1356,11 +1358,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V7, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V8, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V7}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V8}\n\n"
         f"Actual:   {actual}"
     )
 

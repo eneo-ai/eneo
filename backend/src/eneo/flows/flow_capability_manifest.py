@@ -38,7 +38,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 7
+FCM_VERSION: int = 8
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -483,9 +483,11 @@ def _seed_per_source_reader_execution_capability() -> FlowCapability:
             InvariantSpec(
                 id="runtime_sets_source_identity",
                 description=(
-                    "The runtime, not the model, sets `source_label` and "
-                    "`source_file_id` from uploaded file metadata before "
-                    "assembling the final documents[] payload."
+                    "Every documents[] item schema declares `source_label` and "
+                    "`source_file_id` as required strings; `parse_runtime_steps` "
+                    "rejects invalid per-source contracts before provider work. "
+                    "The runtime, not the model, writes their values from uploaded "
+                    "file metadata."
                 ),
             ),
             InvariantSpec(
