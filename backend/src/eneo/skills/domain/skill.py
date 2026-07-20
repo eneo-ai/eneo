@@ -312,6 +312,7 @@ class SkillPublicationChange:
     skill: Skill
     changed: bool
     previous_published_revision_number: int | None
+    previous_is_active: bool
 
 
 class SkillHasBindingsError(Exception):

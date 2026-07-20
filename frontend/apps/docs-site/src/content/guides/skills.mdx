@@ -156,11 +156,12 @@ installation.
 
 The authoring and approval roles are deliberately separate:
 
-| Permission                 | What it allows                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Use Skills                 | Browse approved organisation Skills and attach available Skills to resources the person may edit        |
-| Manage Skills + Use Skills | Create, revise, compare, and restore organisation Skills; manage Skills in accessible Spaces            |
-| Tenant admin               | Publish, unpublish, republish, delete drafts or unpublished Skills, and choose Skills for Personal Chat |
+| Permission                | What it allows                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| Use Skills                | Browse approved organisation Skills and attach available Skills to resources the person may edit |
+| Manage + Use Skills       | Create, revise, compare, and restore organisation Skills; manage Skills in accessible Spaces     |
+| Tenant admin              | Publish, unpublish, republish, and delete eligible organisation Skills                           |
+| Tenant admin + Use Skills | Choose approved organisation Skills for Personal Chat                                            |
 
 Runtime use does not depend on the author's current role. Removing an authoring
 permission does not break an Assistant or App that already has an exact,
@@ -168,10 +169,10 @@ permitted Skill attachment.
 
 ## Personal Chat
 
-Tenant admins manage organisation-wide Personal Chat behavior in the existing
-Personal Chat administration page. They can select ordered, published
-organisation Skill versions that supplement the base or enforced Personal Chat
-instructions.
+Tenant admins who also have **Use Skills** manage organisation-wide Personal
+Chat behavior in the existing Personal Chat administration page. They can
+select ordered, published organisation Skill versions that supplement the base
+or enforced Personal Chat instructions.
 
 This keeps one owner for Personal Chat policy. The Skill catalogue owns Skill
 content and publication; the Personal Chat settings own which approved Skills

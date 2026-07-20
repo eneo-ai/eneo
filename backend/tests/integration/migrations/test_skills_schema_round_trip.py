@@ -1233,3 +1233,112 @@ def test_binding_scope_downgrade_fails_without_losing_cross_space_bindings(
     command.downgrade(config, "202607151400")
     assert _current_revision(connection) == "202607151400"
     command.upgrade(config, SKILLS_HEAD_REVISION)
+
+
+def test_binding_scope_upgrade_keeps_legacy_binding_writes_compatible(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, "202607151400")
+
+    tenant_id = _insert_tenant(connection, "rolling")
+    user_id = _insert_user(connection, tenant_id, "rolling")
+    space_id = _insert_space(connection, tenant_id, "rolling")
+    assistant_id = _insert_assistant(
+        connection,
+        user_id=user_id,
+        space_id=space_id,
+    )
+    app_id = _insert_app(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=space_id,
+    )
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=space_id,
+        created_by_user_id=user_id,
+        label="rolling",
+    )
+
+    def insert_legacy_bindings() -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO assistant_skill_bindings (
+                    assistant_id, space_id, skill_id, skill_revision_id, position
+                )
+                VALUES (%s, %s, %s, %s, 0)
+                """,
+                (assistant_id, space_id, skill_id, revision_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO app_skill_bindings (
+                    app_id, space_id, skill_id, skill_revision_id, position
+                )
+                VALUES (%s, %s, %s, %s, 0)
+                """,
+                (app_id, space_id, skill_id, revision_id),
+            )
+
+    insert_legacy_bindings()
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM assistant_skill_bindings
+            WHERE assistant_id = %s
+            """,
+            (assistant_id,),
+        )
+        upgraded_assistant_scope = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM app_skill_bindings
+            WHERE app_id = %s
+            """,
+            (app_id,),
+        )
+        upgraded_app_scope = cursor.fetchone()
+        cursor.execute(
+            "DELETE FROM assistant_skill_bindings WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+        cursor.execute(
+            "DELETE FROM app_skill_bindings WHERE app_id = %s",
+            (app_id,),
+        )
+
+    assert upgraded_assistant_scope == (tenant_id, space_id)
+    assert upgraded_app_scope == (tenant_id, space_id)
+
+    insert_legacy_bindings()
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM assistant_skill_bindings
+            WHERE assistant_id = %s
+            """,
+            (assistant_id,),
+        )
+        rolling_assistant_scope = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM app_skill_bindings
+            WHERE app_id = %s
+            """,
+            (app_id,),
+        )
+        rolling_app_scope = cursor.fetchone()
+
+    assert rolling_assistant_scope == (tenant_id, space_id)
+    assert rolling_app_scope == (tenant_id, space_id)

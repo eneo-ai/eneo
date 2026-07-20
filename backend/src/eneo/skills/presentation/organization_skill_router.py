@@ -336,7 +336,7 @@ async def publish_organization_skill(
                         "new": skill.published_revision_number,
                     },
                     "is_active": {
-                        "old": change.previous_published_revision_number is not None,
+                        "old": change.previous_is_active,
                         "new": skill.is_active,
                     },
                 },
@@ -375,7 +375,10 @@ async def unpublish_organization_skill(
                         "old": change.previous_published_revision_number,
                         "new": None,
                     },
-                    "is_active": {"old": True, "new": skill.is_active},
+                    "is_active": {
+                        "old": change.previous_is_active,
+                        "new": skill.is_active,
+                    },
                 },
                 extra=skill_audit_extra(skill),
             ),

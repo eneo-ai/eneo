@@ -587,8 +587,8 @@ revision and audit evidence.
 Use Skills users may browse published summaries, open a full approved preview,
 and install that exact revision into a Space they may edit. Manage Skills users
 who also have Use Skills may author and revise organisation drafts. Tenant
-administrators alone publish, unpublish, republish, select Personal Chat Skills,
-and delete eligible organisation drafts.
+administrators publish, unpublish, republish, and delete eligible organisation
+drafts. They must also have Use Skills to select Personal Chat Skills.
 
 Organisation draft authoring is a tenant-capability exception scoped only to
 Skill actions. It does not synthesize organisation-Space membership or an Editor
@@ -1651,10 +1651,10 @@ are not hidden work inside another delivery.
 - Queue snapshot creation and deletion serialize on referenced Skills. A queued
   or running App run blocks deletion; after the Job becomes complete or failed,
   retained provenance remains readable and deletion may proceed.
-- Tenant administrators apply organizational-Space Skills to personal chat only
-  through Governance Policy. Enforced prompts and governance Skills compose
-  together; direct personal-default bindings are rejected and corrupt state fails
-  closed.
+- Tenant administrators who also have Use Skills apply organizational-Space
+  Skills to personal chat only through Governance Policy. Enforced prompts and
+  governance Skills compose together; direct personal-default bindings are
+  rejected and corrupt state fails closed.
 - Inactive Skills reject new bindings but do not silently change existing pinned
   parents. Bound deletion and Assistant Space transfer return conflict.
 - Group Chat and existing Assistants/Apps without Skills remain unchanged.
@@ -1671,8 +1671,8 @@ are not hidden work inside another delivery.
   not leak through catalogue, search, counts, or errors.
 - Manage Skills plus Use Skills permits organisation draft authoring without
   granting organisation-Space membership or access to any non-Skill resource.
-  Tenant admin alone publishes, unpublishes, governs Personal Chat, and deletes
-  eligible never-published drafts.
+  Tenant admin alone publishes, unpublishes, and deletes eligible
+  never-published drafts; governing Personal Chat also requires Use Skills.
 - Restoring history creates the next immutable revision and changes no parent
   pin or publication pointer.
 - Builders may attach only the current exact published revision to same-tenant

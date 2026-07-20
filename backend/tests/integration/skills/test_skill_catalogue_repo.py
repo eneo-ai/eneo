@@ -452,7 +452,9 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
         )
 
         assert published is not None and published.changed is True
+        assert published.previous_is_active is True
         assert repeated is not None and repeated.changed is False
+        assert repeated.previous_is_active is True
         assert repeated.skill.first_published_at == published.skill.first_published_at
 
         with pytest.raises(PublishedSkillDeletionError):
@@ -466,6 +468,7 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
             skill_id=skill.id,
         )
         assert unpublished is not None
+        assert unpublished.previous_is_active is True
         assert unpublished.skill.publication_state is SkillPublicationState.UNPUBLISHED
         assert unpublished.skill.is_active is False
         assert (
@@ -482,5 +485,6 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
             expected_revision_id=revised.revision.id,
         )
         assert republished is not None
+        assert republished.previous_is_active is False
         assert republished.skill.publication_state is SkillPublicationState.PUBLISHED
         assert republished.skill.is_active is True

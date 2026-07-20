@@ -181,6 +181,7 @@ async def test_publish_audit_records_revision_identity_without_instruction_body(
                 skill=skill,
                 changed=True,
                 previous_published_revision_number=None,
+                previous_is_active=True,
             )
         )
     )
@@ -210,6 +211,10 @@ async def test_publish_audit_records_revision_identity_without_instruction_body(
     audit_service.log_async.assert_awaited_once()
     audit = audit_service.log_async.await_args.kwargs
     assert audit["action"] is ActionType.SKILL_PUBLISHED
+    assert audit["metadata"]["changes"]["is_active"] == {
+        "old": True,
+        "new": True,
+    }
     assert audit["metadata"]["extra"]["content_digest"] == "a" * 64
     assert "instructions" not in str(audit["metadata"])
 

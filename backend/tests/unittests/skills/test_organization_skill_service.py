@@ -382,6 +382,7 @@ async def test_admin_publish_uses_the_exact_reviewed_revision():
         skill=SimpleNamespace(),
         changed=True,
         previous_published_revision_number=None,
+        previous_is_active=True,
     )
     repo = AsyncMock()
     repo.publish_organization.return_value = outcome
@@ -429,6 +430,7 @@ async def test_admin_can_unpublish_without_changing_revision_history():
         skill=SimpleNamespace(),
         changed=True,
         previous_published_revision_number=2,
+        previous_is_active=True,
     )
     repo = AsyncMock()
     repo.unpublish_organization.return_value = outcome

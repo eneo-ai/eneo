@@ -693,6 +693,7 @@ class SkillRepoImpl:
             raise SkillRevisionConflictError
 
         previous = skill_row.published_revision_number
+        previous_is_active = skill_row.is_active
         changed = previous != skill_row.current_revision_number
         if changed:
             await self.session.execute(
@@ -715,6 +716,7 @@ class SkillRepoImpl:
             skill=skill,
             changed=changed,
             previous_published_revision_number=previous,
+            previous_is_active=previous_is_active,
         )
 
     async def unpublish_organization(
@@ -730,6 +732,7 @@ class SkillRepoImpl:
         if skill_row is None:
             return None
         previous = skill_row.published_revision_number
+        previous_is_active = skill_row.is_active
         changed = previous is not None
         if changed:
             await self.session.execute(
@@ -748,6 +751,7 @@ class SkillRepoImpl:
             skill=skill,
             changed=changed,
             previous_published_revision_number=previous,
+            previous_is_active=previous_is_active,
         )
 
     async def delete(self, *, skill_id: UUID) -> Skill | None:
