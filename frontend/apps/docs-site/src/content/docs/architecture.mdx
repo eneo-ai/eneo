@@ -179,7 +179,7 @@ LIMIT 5;
 
 ### Durable Object Content
 
-Durable file data is split across two canonical owners:
+Durable file data has two canonical owners:
 
 | PostgreSQL control plane | Private S3-compatible byte plane |
 | --- | --- |
@@ -188,70 +188,19 @@ Durable file data is split across two canonical owners:
 | Concrete authorization references, holds, and retention | Full extracted text or transcription when it is not a bounded searchable fact |
 | Audit and bounded reconciliation/query facts | No authorization, tenant routing, or lifecycle decisions |
 
-PostgreSQL retains bounded text/search facts that must be queried or indexed.
-Large or complete variants live only in object storage. Object keys are opaque
-and deployment-scoped; filenames and tenant identifiers are not encoded into
-them. Ordinary APIs never expose endpoint, bucket, key, or provider details.
+PostgreSQL records durable intent before remote work. Eneo verifies the
+PostgreSQL-owned SHA-256 before returning full or range responses, and a bounded
+reconciler resolves process and network failures. A durable binding prevents a
+database from silently adopting the wrong bucket.
 
 The application uses one vendor-neutral S3-compatible contract. The reference
-deployment bundles an Eneo-built and attested SeaweedFS image. Self-hosted or
-European-operated compatible endpoints, including externally operated MinIO,
-use the same configuration and conformance tests—there is no provider plugin,
-product-code branch, or Amazon service dependency.
+deployment bundles an Eneo-built and attested SeaweedFS image; external
+endpoints such as MinIO use the same path.
 
-Uploads, deletes, and reconciliation follow the finite lifecycle `pending` →
-`available`/`failed` → `retained` or `delete_pending` → `tombstoned`. PostgreSQL
-records durable intent before remote work, and a bounded reconciler resolves
-process/network crash interleavings. Canonical full-byte SHA-256 is computed by
-Eneo while streaming; ETag, CRC, and multipart composite checksums are never the
-canonical digest.
-
-Retention is enforced at the database boundary as well as in the reconciler.
-Active holds and retained content reject hard deletion. A tombstone can be
-purged only when its database-owned purge horizon is present and has elapsed;
-no horizon means retain it. Deleting the account that created a hold removes
-only that attribution—the hold and content lifecycle remain unchanged.
-
-Reads are trusted only after Eneo recomputes that canonical digest. Full and
-single-range responses therefore perform one bounded-memory full read into a
-temporary spool before emitting bytes; a range is sliced from the verified
-spool. This is linear in object size and may use temporary disk beyond the
-configured memory threshold, avoiding both unverified partial responses and an
-unbounded memory allocation.
-
-PostgreSQL and the byte plane also share one durable deployment binding.
-Startup, readiness, and every reconciliation run verify the private bucket
-marker before any lifecycle or orphan mutation. A reachable empty or foreign
-bucket returns `configuration_required`; Eneo neither adopts it nor marks live
-rows missing.
-
-First-start pairing is serialized by a bounded PostgreSQL claim. Only its owner
-may conditionally create the non-overwriting marker; competing API or worker
-processes stay unready and then verify the confirmed pair. Crash recovery reuses
-an existing marker, while a recorded-but-missing marker fails closed as an
-ambiguous outcome instead of creating a second byte plane. PostgreSQL also uses
-a deferred commit-time fence so every new `pending` record has its first
-concrete File, InfoBlob, or Icon reference in the creation transaction.
-
-Reconciliation accepts an inventory cycle only when every page has a complete,
-advancing cursor. An invalid page fails the run before PostgreSQL records a
-completed cycle. A complete cycle marks absent available content failed; held
-or otherwise retained content stays retained while health reports the missing
-bytes. A truncated multipart page must provide an advancing next-key and
-next-upload-ID marker pair.
-
-The platform foundation does not itself cut existing File, InfoBlob, Icon, or
-Flow producers over to the new owner. Those migrations are separate vertical
-slices so each producer can copy and verify bytes before deleting its previous
-authority.
-
-Until a producer adopts the foundation, a deployment may omit every
-`OBJECT_CONTENT_*` setting and run with an explicit disabled capability. A
-partial configuration fails startup. Disabled is healthy only while PostgreSQL
-contains no non-tombstoned object-content rows; otherwise startup and readiness
-fail closed so reconciliation or deletion cannot be silently suspended. Once a
-record exists, the S3-compatible byte plane remains mandatory. This deployment
-capability is intentionally not a tenant or administrator toggle.
+Read [Object Content Architecture](/docs/object-content-architecture) for the
+complete lifecycle, integrity, reconciliation, binding, and image publication
+design. The [Object Content Storage guide](/guides/object-content-storage)
+covers deployment and operations.
 
 ---
 

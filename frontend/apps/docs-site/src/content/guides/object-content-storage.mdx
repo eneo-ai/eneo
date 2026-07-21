@@ -1,0 +1,274 @@
+# Object Content Storage
+
+Set up the private S3-compatible storage that Eneo uses for original files and
+derived content. The reference Docker Compose deployment includes SeaweedFS,
+but you can connect Eneo to another compatible endpoint, including MinIO.
+
+import { Callout, Steps } from "nextra/components";
+
+<Callout type="warning">
+  PostgreSQL and object storage form one recovery unit. Back up and restore them
+  together. A database-only or bucket-only backup is incomplete.
+</Callout>
+
+## What this storage is for
+
+PostgreSQL stores content identity, permissions, lifecycle state, retention,
+size, media type, and the canonical SHA-256 digest. The object store holds the
+bytes. Eneo never uses the bucket as an authorization source and does not expose
+bucket names or object keys through ordinary APIs.
+
+Choose one deployment model:
+
+| Model                           | Best fit                                                                                                     | You operate                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Bundled SeaweedFS               | Single-node and evaluation deployments that use the reference Compose stack                                  | The `object-content` service and its durable volume                  |
+| External S3-compatible endpoint | Deployments that need an existing storage platform, multi-node availability, or organization-managed backups | The endpoint, bucket, identity, TLS, capacity, and recovery controls |
+
+Eneo uses one S3-compatible contract for both models. It does not select an
+Amazon service implicitly, and MinIO does not require a provider-specific Eneo
+integration.
+
+## Use the bundled SeaweedFS service
+
+The reference stack keeps SeaweedFS on the private `object_content_net`. Only
+the backend and worker can reach it; Traefik and the frontend cannot.
+
+<Steps>
+
+### Copy the deployment configuration
+
+Follow the [deployment guide](/guides/deployment) to copy the Compose and
+environment templates. The reference stack enables object content, so fill in
+the object-content values in `.env` before running Compose.
+
+### Pin the release image
+
+Download `IMAGE-DIGESTS.txt` from the Eneo GitHub Release you plan to run. Copy
+the digest reference from the single `seaweedfs manifest` row:
+
+```dotenv
+ENEO_SEAWEEDFS_IMAGE=ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>
+```
+
+Use the manifest digest, not the `linux/amd64` or `linux/arm64` platform row.
+The manifest selects the correct image for the host architecture.
+
+Verify Eneo's build provenance before deployment:
+
+```bash
+gh attestation verify \
+  "oci://ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>" \
+  --repo eneo-ai/eneo \
+  --predicate-type https://slsa.dev/provenance/v1
+```
+
+See [Release SBOMs](/docs/release-sboms) for platform SBOM verification and the
+full release asset inventory.
+
+### Generate credentials and the deployment ID
+
+Generate separate high-entropy credentials and one UUID:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 48
+uuidgen
+```
+
+Store the results in the protected deployment `.env`:
+
+```dotenv
+OBJECT_CONTENT_ACCESS_KEY_ID=<generated access key>
+OBJECT_CONTENT_SECRET_ACCESS_KEY=<generated secret key>
+OBJECT_CONTENT_DEPLOYMENT_ID=<generated UUID>
+OBJECT_CONTENT_ENDPOINT_URL=http://object-content:8333
+OBJECT_CONTENT_REGION=local
+OBJECT_CONTENT_BUCKET=eneo-object-content
+OBJECT_CONTENT_ALLOW_INSECURE_HTTP=true
+```
+
+Keep the UUID unchanged through upgrades and restores. It scopes opaque object
+keys and binds this PostgreSQL database to its byte store. Changing it does not
+migrate existing content.
+
+### Start and verify the stack
+
+```bash
+docker compose config --quiet
+docker compose up -d
+docker compose ps
+curl --fail https://eneo.example.eu/api/readyz
+```
+
+Readiness should report object content as ready. If it reports
+`configuration_required`, stop writers and check the endpoint, bucket,
+deployment ID, and restored backup pair before retrying. Do not create a new
+bucket marker by hand.
+
+</Steps>
+
+`OBJECT_CONTENT_ALLOW_INSECURE_HTTP=true` is appropriate only for this private
+Compose network. Do not publish port 8333 through the reverse proxy.
+
+## Use MinIO or another compatible endpoint
+
+Operate the external service according to its current security, licensing,
+availability, and backup guidance. Eneo needs one private bucket and one
+non-admin application identity. The endpoint must support SigV4 plus the S3
+operations Eneo uses: paginated object and multipart listing, single and
+multipart writes, `HEAD`, streaming reads, one byte range, abort, and deletion.
+
+### MinIO example
+
+Create a dedicated bucket:
+
+```bash
+mc mb eneo-minio/eneo-object-content
+```
+
+Save this least-privilege policy as `eneo-object-content-policy.json`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:ListBucketMultipartUploads"],
+      "Resource": ["arn:aws:s3:::eneo-object-content"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": ["arn:aws:s3:::eneo-object-content/*"]
+    }
+  ]
+}
+```
+
+MinIO uses `arn:aws:s3` strings as local IAM-compatible policy syntax. These
+identifiers do not connect MinIO or Eneo to AWS. If you change the bucket name,
+change both policy resources.
+
+Create a service identity through your MinIO console, identity provider, or
+secret-safe automation. Then attach the policy without putting the secret key
+on the command line:
+
+```bash
+mc admin policy create eneo-minio eneo-object-content \
+  ./eneo-object-content-policy.json
+mc admin policy attach eneo-minio eneo-object-content \
+  --user '<service-identity>'
+```
+
+Configure Eneo with the S3 API endpoint and application credentials:
+
+```dotenv
+OBJECT_CONTENT_ENDPOINT_URL=https://minio.storage.example.eu:9000
+OBJECT_CONTENT_REGION=<MinIO signing scope>
+OBJECT_CONTENT_BUCKET=eneo-object-content
+OBJECT_CONTENT_ACCESS_KEY_ID=<application access key>
+OBJECT_CONTENT_SECRET_ACCESS_KEY=<application secret key>
+OBJECT_CONTENT_DEPLOYMENT_ID=<stable deployment UUID>
+OBJECT_CONTENT_ALLOW_INSECURE_HTTP=false
+```
+
+Keep `OBJECT_CONTENT_ADDRESSING_STYLE=path` in `env_backend.env` unless the
+endpoint has wildcard DNS and TLS for virtual-host bucket names. For a private
+CA, mount the certificate read-only into both backend and worker and set
+`OBJECT_CONTENT_CA_BUNDLE` to its in-container path.
+
+Compose still validates `ENEO_SEAWEEDFS_IMAGE`, so keep the verified release
+digest in `.env`. Start Eneo with the bundled service scaled to zero:
+
+```bash
+docker compose up -d --scale object-content=0
+curl --fail https://eneo.example.eu/api/readyz
+```
+
+Before production traffic, test the exact endpoint version and configuration in
+staging. Cover single and multipart upload, ordered part listing, full and range
+read, deletion visibility, and a paired restore.
+
+## Production checklist
+
+- Keep the endpoint private. Expose neither its S3 API nor administrative UI
+  through Eneo's public reverse proxy.
+- Give Eneo one bucket-scoped application identity, not administrator
+  credentials.
+- Alert on bucket bytes, object count, free capacity, request errors and
+  latency, failed or pending content, delete backlog, reconciliation lag, and
+  old multipart uploads.
+- Size temporary storage for concurrent uploads and reads. Eneo verifies a full
+  object before returning a full or range response; larger objects spill from
+  bounded memory to temporary disk.
+- Back up PostgreSQL and the bucket under one recovery ID while writers and
+  reconciliation are stopped. Preserve `OBJECT_CONTENT_DEPLOYMENT_ID` and the
+  internal bucket marker.
+- Test restores in isolation before reopening traffic.
+
+## Configuration behavior
+
+| Configuration                                                                        | Result                                                                       |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| All `OBJECT_CONTENT_*` application settings absent and no active object-content rows | Eneo starts with the capability disabled                                     |
+| Any value blank, partial, or invalid                                                 | Startup fails with a configuration error                                     |
+| Complete configuration and matching database/bucket pair                             | Readiness reports ready                                                      |
+| Complete configuration but an unavailable endpoint                                   | The process stays live; readiness fails and dependent operations return 503  |
+| Reachable bucket that does not match PostgreSQL                                      | Readiness reports `configuration_required`; Eneo does not adopt or mutate it |
+
+Once Eneo stores an active object-content record, the byte plane remains
+required. There is no filesystem or PostgreSQL byte fallback.
+
+## Troubleshooting and FAQ
+
+### Why does Eneo bundle SeaweedFS?
+
+It gives the reference Compose deployment a small private S3-compatible service
+with a reproducible Eneo build for `linux/amd64` and `linux/arm64`. It is a
+single-node reference store, not a requirement or the default answer for
+multi-node availability.
+
+### Is MinIO supported?
+
+Yes, as an external S3-compatible endpoint. Eneo does not bundle or administer
+MinIO. Validate your exact MinIO build and configuration against the operations
+listed above.
+
+### Does Eneo require AWS S3?
+
+No. Eneo always uses the endpoint you configure. SigV4 and IAM-style policy
+names describe protocol syntax; they do not select an AWS service.
+
+### Why does readiness say `configuration_required`?
+
+The configured bucket and PostgreSQL database do not present the same durable
+binding, or active rows exist while object storage is disabled. Restore the
+matching pair and the original deployment ID. Do not replace the marker.
+
+### Can I rotate credentials?
+
+Yes. Update backend and worker together, and update the bundled store or
+external service identity in the same maintenance window. Verify readiness
+before resuming writes. Credential rotation must not change the deployment ID,
+bucket, or existing object keys.
+
+### Can I back up only PostgreSQL?
+
+No. PostgreSQL contains identities and lifecycle state; the bucket contains the
+bytes. Restore both from the same recovery point.
+
+## Learn how it works
+
+- [Object content architecture](/docs/object-content-architecture) explains
+  lifecycle, integrity, reconciliation, binding, and failure behavior.
+- [Release SBOMs](/docs/release-sboms) explains image digests, SBOM assets, and
+  attestation verification.
+- [Deployment](/guides/deployment) covers the complete Eneo service stack.
