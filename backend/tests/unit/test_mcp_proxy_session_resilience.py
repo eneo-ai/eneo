@@ -118,35 +118,61 @@ class _InMemoryMcpStateRepo:
             raise RuntimeError("persistence unavailable")
         return self.values.get((chat_session_id, mcp_server_id))
 
-    async def upsert(
+    async def claim(
         self,
         chat_session_id: UUID,
         mcp_server_id: UUID,
-        mcp_session_id: str,
-    ) -> bool:
+        candidate_mcp_session_id: str,
+        expected_mcp_session_id: str | None,
+    ) -> str | None:
         if self.fail_writes:
             raise RuntimeError("persistence unavailable")
-        self.values[(chat_session_id, mcp_server_id)] = mcp_session_id
-        return True
+        key = (chat_session_id, mcp_server_id)
+        current = self.values.get(key)
+        if expected_mcp_session_id is None and current is None:
+            self.values[key] = candidate_mcp_session_id
+        elif current == expected_mcp_session_id:
+            self.values[key] = candidate_mcp_session_id
+        return self.values.get(key)
 
 
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}
+        self.batch_observation_count = 0
 
-    async def add_if_absent(self, tool: MCPServerTool) -> MCPServerTool | None:
-        existing = next(
-            (
-                saved
-                for saved in self.tools.values()
-                if saved.mcp_server_id == tool.mcp_server_id and saved.name == tool.name
-            ),
-            None,
-        )
-        if existing is not None:
-            return None
-        self.tools[tool.id] = tool
-        return tool
+    async def stage_observed(
+        self, observed_tools: list[MCPServerTool]
+    ) -> list[MCPServerTool]:
+        self.batch_observation_count += 1
+        staged: list[MCPServerTool] = []
+        for observed in observed_tools:
+            existing = next(
+                (
+                    saved
+                    for saved in self.tools.values()
+                    if saved.mcp_server_id == observed.mcp_server_id
+                    and saved.name == observed.name
+                ),
+                None,
+            )
+            if existing is None:
+                self.tools[observed.id] = observed
+                staged.append(observed)
+                continue
+            if existing.requires_approval:
+                continue
+            if (
+                existing.description == observed.pending_description
+                and existing.input_schema == observed.pending_input_schema
+            ):
+                continue
+            existing.pending_description = observed.pending_description
+            existing.pending_input_schema = observed.pending_input_schema
+            existing.requires_approval = True
+            existing.removed_from_remote = False
+            staged.append(existing)
+        return staged
 
     async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
         return [
@@ -162,10 +188,13 @@ class _InMemoryToolRepo:
 
 
 class _StatefulMCPClient:
+    instances: list[_StatefulMCPClient] = []
     protocol_sessions: dict[str, set[str]] = {}
     terminated_session_ids: list[str] = []
     next_session_number = 1
     fail_list_tools = False
+    fail_termination = False
+    initial_probe_barrier: asyncio.Barrier | None = None
 
     def __init__(
         self,
@@ -182,13 +211,17 @@ class _StatefulMCPClient:
         self.supports_tools_list_changed = False
         self.connect_task: asyncio.Task[object] | None = None
         self.disconnect_task: asyncio.Task[object] | None = None
+        type(self).instances.append(self)
 
     @classmethod
     def reset(cls) -> None:
+        cls.instances = []
         cls.protocol_sessions = {}
         cls.terminated_session_ids = []
         cls.next_session_number = 1
         cls.fail_list_tools = False
+        cls.fail_termination = False
+        cls.initial_probe_barrier = None
 
     async def __aenter__(self) -> "_StatefulMCPClient":
         await self.connect()
@@ -218,6 +251,11 @@ class _StatefulMCPClient:
         assert self.assigned_mcp_session_id is not None
         if self.fail_list_tools:
             raise MCPClientError("discovery unavailable")
+        if (
+            self.resume_mcp_session_id is None
+            and self.initial_probe_barrier is not None
+        ):
+            await self.initial_probe_barrier.wait()
         return [
             {"name": name}
             for name in sorted(self.protocol_sessions[self.assigned_mcp_session_id])
@@ -233,6 +271,8 @@ class _StatefulMCPClient:
 
     async def terminate_protocol_session(self, mcp_session_id: str) -> None:
         self.terminated_session_ids.append(mcp_session_id)
+        if self.fail_termination:
+            raise MCPClientError("termination unavailable")
         self.protocol_sessions.pop(mcp_session_id, None)
 
 
@@ -419,7 +459,7 @@ async def test_user_only_tool_is_staged_then_requires_admin_approval_before_expo
     )
     server_repo = AsyncMock()
     server_repo.one.return_value = server
-    service = MCPServerService(server_repo, tool_repo, admin)
+    service = MCPServerService(server_repo, tool_repo, admin, AsyncMock())
     approved = await service.approve_tool_changes(server.id, [staged.id])
     assert [tool.name for tool in approved] == ["ordinary_only"]
 
@@ -435,6 +475,154 @@ async def test_user_only_tool_is_staged_then_requires_admin_approval_before_expo
         "identity-server__ordinary_only",
         "identity-server__shared",
     }
+
+
+@pytest.mark.asyncio
+async def test_user_only_definition_drift_is_queued_without_exposure_or_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    changed_schema = {
+        "type": "object",
+        "properties": {"location": {"type": "string"}},
+        "required": ["location"],
+    }
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [
+                {
+                    "name": "ordinary_only",
+                    "description": "Changed user-only contract",
+                    "input_schema": changed_schema,
+                }
+            ]
+        },
+    )
+    server = _make_identity_scoped_server()
+    approved = next(tool for tool in server.tools if tool.name == "ordinary_only")
+    original_schema = approved.input_schema
+    tool_repo = _InMemoryToolRepo(server.tools)
+
+    first_observation = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+    await first_observation.prepare_tools_for_context()
+
+    [definition] = first_observation.get_tools_for_llm()
+    assert definition["function"]["description"] == "Approved ordinary_only"
+    assert definition["function"]["parameters"] == original_schema
+    assert approved.pending_description == "Changed user-only contract"
+    assert approved.pending_input_schema == changed_schema
+    assert approved.requires_approval is True
+
+    _FakeMCPClient.live_tools_by_user["ordinary"] = [
+        {
+            "name": "ordinary_only",
+            "description": "A later unreviewed contract",
+            "input_schema": {"type": "object", "properties": {"other": {}}},
+        }
+    ]
+    second_observation = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+    await second_observation.prepare_tools_for_context()
+
+    assert approved.pending_description == "Changed user-only contract"
+    assert approved.pending_input_schema == changed_schema
+
+
+@pytest.mark.asyncio
+async def test_oversized_identity_catalog_fails_closed_without_database_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [{"name": f"tool_{index}"} for index in range(257)]
+        },
+    )
+    server = _make_identity_scoped_server()
+    tool_repo = _InMemoryToolRepo(server.tools)
+    original_tool_ids = set(tool_repo.tools)
+    proxy = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert set(tool_repo.tools) == original_tool_ids
+    assert tool_repo.batch_observation_count == 0
+
+
+@pytest.mark.asyncio
+async def test_oversized_identity_definition_fails_closed_without_database_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [
+                {
+                    "name": "oversized",
+                    "description": "x" * 2048,
+                    "input_schema": {"type": "object"},
+                }
+            ]
+        },
+    )
+    server = _make_identity_scoped_server()
+    server.tool_definition_max_bytes = 1024
+    tool_repo = _InMemoryToolRepo(server.tools)
+    original_tool_ids = set(tool_repo.tools)
+    proxy = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert set(tool_repo.tools) == original_tool_ids
+    assert tool_repo.batch_observation_count == 0
+
+
+@pytest.mark.asyncio
+async def test_oversized_identity_catalog_bytes_fail_closed_without_database_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [
+                {"name": "first", "description": "x" * 700},
+                {"name": "second", "description": "y" * 700},
+            ]
+        },
+    )
+    server = _make_identity_scoped_server()
+    server.tool_catalog_max_bytes = 1024
+    server.tool_definition_max_bytes = 4096
+    tool_repo = _InMemoryToolRepo(server.tools)
+    original_tool_ids = set(tool_repo.tools)
+    proxy = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert set(tool_repo.tools) == original_tool_ids
+    assert tool_repo.batch_observation_count == 0
 
 
 @pytest.mark.asyncio
@@ -538,6 +726,40 @@ async def test_identity_discovery_and_tool_calls_resume_one_protocol_session(
 
 
 @pytest.mark.asyncio
+async def test_concurrent_first_turn_probes_keep_one_durable_protocol_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    _StatefulMCPClient.initial_probe_barrier = asyncio.Barrier(2)
+    server = _make_identity_scoped_server()
+    chat_session_id = uuid4()
+    db_session = cast("AsyncSession", object())
+    proxies = [
+        MCPProxySession(
+            [server],
+            chat_session_id=chat_session_id,
+            db_session=db_session,
+            identity_headers={"X-Eneo-User-Id": "user"},
+        )
+        for _ in range(2)
+    ]
+
+    await asyncio.wait_for(
+        asyncio.gather(*(proxy.prepare_tools_for_context() for proxy in proxies)),
+        timeout=0.5,
+    )
+
+    [durable_id] = _InMemoryMcpStateRepo.values.values()
+    assert set(_StatefulMCPClient.protocol_sessions) == {durable_id}
+    assert len(_StatefulMCPClient.terminated_session_ids) == 1
+    assert _StatefulMCPClient.terminated_session_ids[0] != durable_id
+    assert all(
+        proxy.get_allowed_tool_names() == {"identity-server__shared"}
+        for proxy in proxies
+    )
+
+
+@pytest.mark.asyncio
 async def test_identity_discovery_terminates_session_when_it_cannot_be_persisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -556,6 +778,52 @@ async def test_identity_discovery_terminates_session_when_it_cannot_be_persisted
     assert proxy.get_tools_for_llm() == []
     assert _StatefulMCPClient.protocol_sessions == {}
     assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_call_fails_closed_when_session_cannot_be_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    _InMemoryMcpStateRepo.fail_writes = True
+    server = _make_identity_scoped_server()
+    proxy = MCPProxySession(
+        [server],
+        chat_session_id=uuid4(),
+        db_session=cast("AsyncSession", object()),
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+
+    [result] = await proxy.call_tools_parallel([("identity-server__shared", {})])
+
+    assert result["is_error"] is True
+    assert proxy._clients == {}
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+    assert _StatefulMCPClient.instances[0].disconnect_task is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_call_disconnects_when_unclaimed_session_termination_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    _InMemoryMcpStateRepo.fail_writes = True
+    _StatefulMCPClient.fail_termination = True
+    server = _make_identity_scoped_server()
+    proxy = MCPProxySession(
+        [server],
+        chat_session_id=uuid4(),
+        db_session=cast("AsyncSession", object()),
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+
+    [result] = await proxy.call_tools_parallel([("identity-server__shared", {})])
+
+    assert result["is_error"] is True
+    assert proxy._clients == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+    assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
 @pytest.mark.asyncio

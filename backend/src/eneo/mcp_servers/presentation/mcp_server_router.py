@@ -288,6 +288,9 @@ async def create_mcp_server(
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         forward_identity=data.forward_identity,
+        tool_catalog_max_count=data.tool_catalog_max_count,
+        tool_catalog_max_bytes=data.tool_catalog_max_bytes,
+        tool_definition_max_bytes=data.tool_definition_max_bytes,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url)
@@ -363,6 +366,9 @@ async def update_mcp_server(
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
         forward_identity=data.forward_identity,
+        tool_catalog_max_count=data.tool_catalog_max_count,
+        tool_catalog_max_bytes=data.tool_catalog_max_bytes,
+        tool_definition_max_bytes=data.tool_definition_max_bytes,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url)
@@ -407,6 +413,30 @@ async def update_mcp_server(
         changes["forward_identity"] = {
             "old": old_server.forward_identity,
             "new": data.forward_identity,
+        }
+    if (
+        data.tool_catalog_max_count is not None
+        and data.tool_catalog_max_count != old_server.tool_catalog_max_count
+    ):
+        changes["tool_catalog_max_count"] = {
+            "old": old_server.tool_catalog_max_count,
+            "new": data.tool_catalog_max_count,
+        }
+    if (
+        data.tool_catalog_max_bytes is not None
+        and data.tool_catalog_max_bytes != old_server.tool_catalog_max_bytes
+    ):
+        changes["tool_catalog_max_bytes"] = {
+            "old": old_server.tool_catalog_max_bytes,
+            "new": data.tool_catalog_max_bytes,
+        }
+    if (
+        data.tool_definition_max_bytes is not None
+        and data.tool_definition_max_bytes != old_server.tool_definition_max_bytes
+    ):
+        changes["tool_definition_max_bytes"] = {
+            "old": old_server.tool_definition_max_bytes,
+            "new": data.tool_definition_max_bytes,
         }
     if data.http_auth_config_schema is not None:
         changes["credentials_updated"] = True

@@ -46,6 +46,7 @@ MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit,
    - **Description** — What the server does
    - **Authentication** — Choose between `Public` (no auth) or `Bearer Token`
    - **Forward user identity** — Send the acting user's Eneo identity to this server
+   - **Tool catalog limits** — Set the largest catalog and tool definition Eneo will accept
    - **Documentation URL** — Link to the server's documentation
    - **Security Classification** — Restrict which spaces can use this server
 4. Click **Add MCP Server**
@@ -84,6 +85,29 @@ calls, and protocol-session termination.
   protected network path. The MCP server must accept them only from the trusted
   Eneo backend and must authorize every request.
 </Callout>
+
+### Tool catalog limits
+
+Open **Tool catalog limits** in the server form to set two safeguards for that
+server:
+
+| Setting | Default | Allowed range |
+|---|---:|---:|
+| Maximum tools | 256 | 1–4,096 |
+| Maximum catalog size | 16 MiB | 1–64 MiB |
+| Maximum size per tool | 64 KiB | 1–1,024 KiB |
+
+The sizes include tool names, descriptions, and input schemas as serialized
+JSON. The total-size limit prevents a large collection of individually valid
+tools from becoming one oversized database write. Choose values that cover the
+server's expected catalog without accepting unbounded data. These limits
+protect chat latency and database growth; they do not decide how many approved
+tools an assistant should receive.
+
+Eneo validates the complete live catalog before saving or exposing anything.
+If either limit is exceeded, that server contributes no tools to the current
+request and Eneo writes no partial catalog. Increase a limit only after checking
+that the larger catalog is intentional.
 
 ---
 
@@ -246,6 +270,7 @@ servers should also enforce a reasonable idle timeout.
 | Live schema differs from approved schema | Continue using the approved schema until review |
 | User cannot see an approved tool | Omit it from this request |
 | Identity-scoped discovery fails or times out | Omit that server's tools from this request |
+| Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
 | New protocol session cannot be persisted | Terminate it and omit that discovery result |
 | Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
 

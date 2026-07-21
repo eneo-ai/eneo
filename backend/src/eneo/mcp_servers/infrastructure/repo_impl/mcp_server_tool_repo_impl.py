@@ -87,17 +87,46 @@ class MCPServerToolRepoImpl(
         return self.mapper.to_entities(records)
 
     @override
-    async def add_if_absent(self, obj: MCPServerTool) -> MCPServerTool | None:
-        """Atomically stage a new server/name without changing an existing row."""
+    async def stage_observed(self, objs: list[MCPServerTool]) -> list[MCPServerTool]:
+        """Stage one bounded live catalog in a single database statement.
+
+        Existing pending reviews win over later observations. An approved row
+        is updated only when its active description or schema differs from the
+        live definition; active fields remain untouched until approval.
+        """
+        if not objs:
+            return []
+
+        db_dicts = [self.mapper.to_db_dict(obj) for obj in objs]
+        excluded = insert(self._db_model).excluded
         stmt = (
             insert(self._db_model)
-            .values(self.mapper.to_db_dict(obj))
-            .on_conflict_do_nothing(index_elements=["mcp_server_id", "name"])
+            .values(db_dicts)
+            .on_conflict_do_update(
+                index_elements=["mcp_server_id", "name"],
+                set_={
+                    "pending_description": excluded.pending_description,
+                    "pending_input_schema": excluded.pending_input_schema,
+                    "requires_approval": True,
+                    "removed_from_remote": False,
+                },
+                where=sa.and_(
+                    self._db_model.requires_approval.is_(False),
+                    sa.or_(
+                        self._db_model.description.is_distinct_from(
+                            excluded.pending_description
+                        ),
+                        self._db_model.input_schema.is_distinct_from(
+                            excluded.pending_input_schema
+                        ),
+                    ),
+                ),
+            )
             .returning(self._db_model)
         )
-        record = await self.session.scalar(stmt)
+        result = await self.session.scalars(stmt)
         await self.session.flush()
-        return self.mapper.to_entity(record) if record is not None else None
+        return self.mapper.to_entities(result.all())
 
     @override
     async def upsert_by_server_and_name(self, obj: MCPServerTool) -> MCPServerTool:

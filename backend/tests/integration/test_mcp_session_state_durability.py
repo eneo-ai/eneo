@@ -55,7 +55,13 @@ async def test_protocol_session_state_survives_outer_request_rollback(
             sa.select(MCPServers.id).where(MCPServers.id == server_id)
         )
         repo = ChatSessionMcpStateRepo(outer_session)
-        await repo.upsert(chat_session_id, server_id, "protocol-committed")
+        winner = await repo.claim(
+            chat_session_id,
+            server_id,
+            candidate_mcp_session_id="protocol-committed",
+            expected_mcp_session_id=None,
+        )
+        assert winner == "protocol-committed"
         await outer_session.rollback()
     finally:
         await outer_session.close()
@@ -109,12 +115,17 @@ async def test_protocol_session_state_rejects_uncommitted_chat_without_blocking(
         await outer_session.flush()
 
         repo = ChatSessionMcpStateRepo(outer_session)
-        persisted = await asyncio.wait_for(
-            repo.upsert(chat_session.id, server_id, "protocol-not-durable"),
+        winner = await asyncio.wait_for(
+            repo.claim(
+                chat_session.id,
+                server_id,
+                candidate_mcp_session_id="protocol-not-durable",
+                expected_mcp_session_id=None,
+            ),
             timeout=0.5,
         )
 
-        assert persisted is False
+        assert winner is None
         await outer_session.rollback()
     finally:
         await outer_session.close()
@@ -178,11 +189,16 @@ async def test_new_chat_and_protocol_state_survive_outer_request_rollback(
         )
 
         repo = ChatSessionMcpStateRepo(outer_session)
-        persisted = await asyncio.wait_for(
-            repo.upsert(chat_session.id, server_id, "protocol-first-turn"),
+        winner = await asyncio.wait_for(
+            repo.claim(
+                chat_session.id,
+                server_id,
+                candidate_mcp_session_id="protocol-first-turn",
+                expected_mcp_session_id=None,
+            ),
             timeout=0.5,
         )
-        assert persisted is True
+        assert winner == "protocol-first-turn"
         await outer_session.rollback()
     finally:
         await outer_session.close()
@@ -233,22 +249,24 @@ async def test_concurrent_runtime_discovery_stages_one_pending_tool(
         await seed_session.flush()
         server_id = server.id
 
-    async def stage(description: str) -> MCPServerTool | None:
+    async def stage(description: str) -> list[MCPServerTool]:
         async with sessionmanager.session() as session, session.begin():
             repo = MCPServerToolRepoImpl(session, MCPServerToolMapper())
-            return await repo.add_if_absent(
-                MCPServerTool.pending_discovery(
-                    mcp_server_id=server_id,
-                    name="ordinary_only",
-                    title="Ordinary only",
-                    description=description,
-                    input_schema={"type": "object", "properties": {}},
-                )
+            return await repo.stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="ordinary_only",
+                        title="Ordinary only",
+                        description=description,
+                        input_schema={"type": "object", "properties": {}},
+                    )
+                ]
             )
 
     try:
         staged = await asyncio.gather(stage("first"), stage("second"))
-        assert sum(tool is not None for tool in staged) == 1
+        assert sum(bool(batch) for batch in staged) == 1
 
         async with sessionmanager.session() as verify_session, verify_session.begin():
             repo = MCPServerToolRepoImpl(verify_session, MCPServerToolMapper())
@@ -262,3 +280,205 @@ async def test_concurrent_runtime_discovery_stages_one_pending_tool(
             await cleanup_session.execute(
                 sa.delete(MCPServers).where(MCPServers.id == server_id)
             )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_staging_queues_approved_drift_once(
+    setup_database: None,
+    admin_user,
+) -> None:
+    original_schema = {"type": "object", "properties": {}}
+    changed_schema = {
+        "type": "object",
+        "properties": {"location": {"type": "string"}},
+    }
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"tool-drift-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+        repo = MCPServerToolRepoImpl(seed_session, MCPServerToolMapper())
+        await repo.upsert_by_server_and_name(
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name="ordinary_only",
+                description="Approved contract",
+                input_schema=original_schema,
+            )
+        )
+
+    try:
+        async with sessionmanager.session() as stage_session, stage_session.begin():
+            repo = MCPServerToolRepoImpl(stage_session, MCPServerToolMapper())
+            staged = await repo.stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="ordinary_only",
+                        title=None,
+                        description="Changed contract",
+                        input_schema=changed_schema,
+                    )
+                ]
+            )
+            assert len(staged) == 1
+
+        async with sessionmanager.session() as later_session, later_session.begin():
+            repo = MCPServerToolRepoImpl(later_session, MCPServerToolMapper())
+            await repo.stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="ordinary_only",
+                        title=None,
+                        description="Later unreviewed contract",
+                        input_schema={"type": "object", "required": ["other"]},
+                    )
+                ]
+            )
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            [tool] = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert tool.description == "Approved contract"
+        assert tool.input_schema == original_schema
+        assert tool.pending_description == "Changed contract"
+        assert tool.pending_input_schema == changed_schema
+        assert tool.requires_approval is True
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_protocol_session_claims_return_one_winner(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"session-claim-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+        )
+        chat_session = Sessions(
+            user_id=admin_user.id,
+            name="Concurrent MCP session claim",
+        )
+        seed_session.add_all([server, chat_session])
+        await seed_session.flush()
+        server_id = server.id
+        chat_session_id = chat_session.id
+
+    async def claim(candidate: str) -> str | None:
+        async with sessionmanager.session() as session:
+            return await ChatSessionMcpStateRepo(session).claim(
+                chat_session_id,
+                server_id,
+                candidate_mcp_session_id=candidate,
+                expected_mcp_session_id=None,
+            )
+
+    try:
+        winners = await asyncio.gather(claim("protocol-a"), claim("protocol-b"))
+        assert len(set(winners)) == 1
+        assert winners[0] in {"protocol-a", "protocol-b"}
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(Sessions).where(Sessions.id == chat_session_id)
+            )
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_server_session_invalidation_joins_the_callers_transaction(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"session-invalidation-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        chat_session = Sessions(
+            user_id=admin_user.id,
+            name="MCP identity-mode invalidation",
+        )
+        seed_session.add_all([server, chat_session])
+        await seed_session.flush()
+        server_id = server.id
+        chat_session_id = chat_session.id
+
+    async with sessionmanager.session() as claim_session:
+        winner = await ChatSessionMcpStateRepo(claim_session).claim(
+            chat_session_id,
+            server_id,
+            candidate_mcp_session_id="protocol-before-toggle",
+            expected_mcp_session_id=None,
+        )
+        assert winner == "protocol-before-toggle"
+
+    async with sessionmanager.session() as rollback_session:
+        async with rollback_session.begin():
+            repo = ChatSessionMcpStateRepo(rollback_session)
+            await repo.delete_for_server(server_id)
+            assert await repo.get(chat_session_id, server_id) is None
+            await rollback_session.rollback()
+
+    async with sessionmanager.session() as verify_session:
+        assert (
+            await ChatSessionMcpStateRepo(verify_session).get(
+                chat_session_id, server_id
+            )
+            == "protocol-before-toggle"
+        )
+
+    async with sessionmanager.session() as delete_session:
+        async with delete_session.begin():
+            await ChatSessionMcpStateRepo(delete_session).delete_for_server(server_id)
+
+    async with sessionmanager.session() as stale_session:
+        stale_winner = await ChatSessionMcpStateRepo(stale_session).claim(
+            chat_session_id,
+            server_id,
+            candidate_mcp_session_id="protocol-stale-after-toggle",
+            expected_mcp_session_id="protocol-before-toggle",
+        )
+        assert stale_winner is None
+
+    async with sessionmanager.session() as final_session:
+        assert (
+            await ChatSessionMcpStateRepo(final_session).get(chat_session_id, server_id)
+            is None
+        )
+
+    async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+        await cleanup_session.execute(
+            sa.delete(Sessions).where(Sessions.id == chat_session_id)
+        )
+        await cleanup_session.execute(
+            sa.delete(MCPServers).where(MCPServers.id == server_id)
+        )

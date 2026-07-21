@@ -7,7 +7,13 @@ from sqlalchemy.exc import IntegrityError
 
 from eneo.main.exceptions import NameCollisionException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+    MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+    MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    MCPServer,
+    MCPServerTool,
+)
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -21,6 +27,9 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
+    )
+    from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+        ChatSessionMcpStateRepo,
     )
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
@@ -91,12 +100,14 @@ class MCPServerService:
         mcp_server_repo: "MCPServerRepository",
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
+        mcp_state_repo: "ChatSessionMcpStateRepo",
         encryption_service: "EncryptionService | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
+        self.mcp_state_repo = mcp_state_repo
         self.encryption_service = encryption_service
 
     # Keys in http_auth_config_schema that contain secrets
@@ -166,6 +177,9 @@ class MCPServerService:
         description: str | None = None,
         http_auth_config_schema: dict[str, Any] | None = None,
         forward_identity: bool = False,
+        tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+        tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+        tool_definition_max_bytes: int = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -190,6 +204,9 @@ class MCPServerService:
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
+            tool_catalog_max_count=tool_catalog_max_count,
+            tool_catalog_max_bytes=tool_catalog_max_bytes,
+            tool_definition_max_bytes=tool_definition_max_bytes,
             tags=tags,
             icon_url=icon_url,
             documentation_url=documentation_url,
@@ -250,6 +267,9 @@ class MCPServerService:
         description: str | None = None,
         http_auth_config_schema: dict[str, Any] | None = None,
         forward_identity: bool | None = None,
+        tool_catalog_max_count: int | None = None,
+        tool_catalog_max_bytes: int | None = None,
+        tool_definition_max_bytes: int | None = None,
         tags: list[str] | None = None,
         icon_url: str | None = None,
         documentation_url: str | None = None,
@@ -287,6 +307,12 @@ class MCPServerService:
             mcp_server.description = description
         if forward_identity is not None:
             mcp_server.forward_identity = forward_identity
+        if tool_catalog_max_count is not None:
+            mcp_server.tool_catalog_max_count = tool_catalog_max_count
+        if tool_catalog_max_bytes is not None:
+            mcp_server.tool_catalog_max_bytes = tool_catalog_max_bytes
+        if tool_definition_max_bytes is not None:
+            mcp_server.tool_definition_max_bytes = tool_definition_max_bytes
         if tags is not None:
             mcp_server.tags = tags
         if icon_url is not None:
@@ -330,6 +356,8 @@ class MCPServerService:
 
         try:
             mcp_server = await self.repo.update(mcp_server)
+            if identity_mode_changed:
+                await self.mcp_state_repo.delete_for_server(mcp_server.id)
         except IntegrityError as e:
             raise NameCollisionException(
                 "An MCP server with this name already exists."

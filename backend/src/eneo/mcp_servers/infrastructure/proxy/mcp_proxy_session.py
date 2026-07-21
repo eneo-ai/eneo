@@ -22,6 +22,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    validate_tool_catalog,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
     ChatSessionMcpStateRepo,
@@ -312,23 +313,24 @@ class MCPProxySession:
                 raise
             return None
 
-    async def _persist_protocol_session_id(
+    async def _claim_protocol_session_id(
         self,
         server: MCPServer,
         assigned_id: str | None,
         resume_id: str | None,
-    ) -> bool:
-        if assigned_id is None or assigned_id == resume_id:
-            return True
+    ) -> str | None:
+        if assigned_id is None:
+            return assigned_id
         if self._mcp_state_repo is None or self.chat_session_id is None:
-            return False
+            return None
 
         try:
             async with self._mcp_state_lock:
-                persisted = await self._mcp_state_repo.upsert(
+                winner = await self._mcp_state_repo.claim(
                     chat_session_id=self.chat_session_id,
                     mcp_server_id=server.id,
-                    mcp_session_id=assigned_id,
+                    candidate_mcp_session_id=assigned_id,
+                    expected_mcp_session_id=resume_id,
                 )
         except Exception as exc:
             logger.warning(
@@ -336,87 +338,122 @@ class MCPProxySession:
                 server.name,
                 exc,
             )
-            return False
-        return persisted
+            return None
+        return winner
 
     async def _discover_identity_scoped_tools(
         self, server: MCPServer, resume_id: str | None
     ) -> list[dict[str, Any]]:
         auth_credentials = self.auth_credentials_map.get(server.id, {})
-        client = MCPClient(
-            server,
-            auth_credentials,
-            resume_mcp_session_id=resume_id,
-            identity_headers=self.identity_headers,
-        )
-        session_is_durable = False
+        next_resume_id = resume_id
 
-        try:
-            async with client:
-                assigned_id = client.assigned_mcp_session_id
-                session_is_durable = assigned_id is None or assigned_id == resume_id
-                live_tools = await client.list_tools()
-                if not session_is_durable:
-                    session_is_durable = await self._persist_protocol_session_id(
-                        server, assigned_id, resume_id
-                    )
-                if not session_is_durable:
-                    return []
-                return live_tools
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
-                server.name,
-                exc,
+        # A concurrent first turn can win the durable-session claim after this
+        # probe connected. Retry once against that winner; never keep or expose
+        # work from a session that lost the compare-and-set.
+        for attempt in range(2):
+            client = MCPClient(
+                server,
+                auth_credentials,
+                resume_mcp_session_id=next_resume_id,
+                identity_headers=self.identity_headers,
             )
-            return []
-        finally:
-            assigned_id = client.assigned_mcp_session_id
-            if assigned_id and not session_is_durable:
-                try:
-                    await client.terminate_protocol_session(assigned_id)
-                except Exception as exc:
-                    logger.warning(
-                        "[MCPProxy] Failed to terminate unpersisted protocol "
-                        "session for '%s': %s",
-                        server.name,
-                        exc,
+            session_is_durable = False
+            candidate_terminated = False
+            try:
+                async with client:
+                    assigned_id = client.assigned_mcp_session_id
+                    session_is_durable = (
+                        assigned_id is None or assigned_id == next_resume_id
                     )
+                    live_tools = await client.list_tools()
+                    if assigned_id is None:
+                        return live_tools
 
-    async def _stage_unknown_live_tools(
+                    session_is_durable = False
+                    winner = await self._claim_protocol_session_id(
+                        server, assigned_id, next_resume_id
+                    )
+                    if winner is None:
+                        return []
+                    if winner == assigned_id:
+                        session_is_durable = True
+                        return live_tools
+
+                    await client.terminate_protocol_session(assigned_id)
+                    candidate_terminated = True
+                    if attempt == 0:
+                        next_resume_id = winner
+                        continue
+                    return []
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
+                    server.name,
+                    exc,
+                )
+                return []
+            finally:
+                assigned_id = client.assigned_mcp_session_id
+                if assigned_id and not session_is_durable and not candidate_terminated:
+                    try:
+                        await client.terminate_protocol_session(assigned_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "[MCPProxy] Failed to terminate unpersisted protocol "
+                            "session for '%s': %s",
+                            server.name,
+                            exc,
+                        )
+        return []
+
+    async def _stage_live_tool_catalog(
         self, server: MCPServer, live_tools: list[dict[str, Any]]
-    ) -> None:
-        """Queue user-visible unknown definitions for admin review.
+    ) -> bool:
+        """Validate and atomically queue new or changed live definitions.
 
         Runtime discovery remains fail-closed: staging does not add the new
         entity to ``server.tools``, so this request still intersects against
         the pre-approved in-memory catalog.
         """
-        if self._mcp_server_tool_repo is None:
-            return
+        try:
+            validate_tool_catalog(
+                live_tools,
+                max_count=server.tool_catalog_max_count,
+                max_catalog_bytes=server.tool_catalog_max_bytes,
+                max_definition_bytes=server.tool_definition_max_bytes,
+            )
+        except MCPClientError as exc:
+            logger.warning(
+                "[MCPProxy] Rejected unsafe live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
 
-        known_names = {tool.name for tool in (server.tools or [])}
-        for live_tool in live_tools:
-            name = live_tool["name"]
-            if name in known_names:
-                continue
-            pending = MCPServerTool.pending_discovery(
+        if self._mcp_server_tool_repo is None or not live_tools:
+            return True
+
+        observations = [
+            MCPServerTool.pending_discovery(
                 mcp_server_id=server.id,
-                name=name,
+                name=live_tool["name"],
                 title=live_tool.get("title"),
                 description=live_tool.get("description"),
                 input_schema=live_tool.get("input_schema"),
             )
-            staged = await self._mcp_server_tool_repo.add_if_absent(pending)
-            known_names.add(name)
-            if staged is not None:
-                logger.info(
-                    "[MCPProxy] Staged user-observed tool '%s/%s' for admin approval",
-                    server.name,
-                    name,
-                )
+            for live_tool in live_tools
+        ]
+        staged = await self._mcp_server_tool_repo.stage_observed(observations)
+        if staged:
+            logger.info(
+                "[MCPProxy] Staged %d user-observed definition(s) from '%s' "
+                "for admin approval",
+                len(staged),
+                server.name,
+            )
+        return True
 
     async def prepare_tools_for_context(self) -> None:
         """Resolve identity-scoped tool catalogs before model exposure.
@@ -483,8 +520,8 @@ class MCPProxySession:
                 live_tools: list[dict[str, Any]] = []
             else:
                 live_tools = task.result()
-            await self._stage_unknown_live_tools(server, live_tools)
-            self._rebuild_server_tools(server, live_tools)
+            catalog_is_safe = await self._stage_live_tool_catalog(server, live_tools)
+            self._rebuild_server_tools(server, live_tools if catalog_is_safe else [])
 
     async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
         """Re-list tools for servers whose advertised set may have changed.
@@ -718,37 +755,62 @@ class MCPProxySession:
             # callers without a chat context (testing).
             resume_id = await self._load_protocol_session_id(server)
 
-            # Create new connection with timing
             auth_creds = self.auth_credentials_map.get(server_id, {})
-            client = MCPClient(
-                server,
-                auth_creds,
-                resume_mcp_session_id=resume_id,
-                on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
-                    sid
-                ),
-                identity_headers=self.identity_headers,
+            for attempt in range(2):
+                client = MCPClient(
+                    server,
+                    auth_creds,
+                    resume_mcp_session_id=resume_id,
+                    on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
+                        sid
+                    ),
+                    identity_headers=self.identity_headers,
+                )
+
+                logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
+                start_time = time.perf_counter()
+                await client.connect()
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                assigned_id = client.assigned_mcp_session_id
+                if assigned_id is None:
+                    self._clients[server_id] = client
+                    logger.debug(
+                        f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
+                    )
+                    return client
+
+                winner = await self._claim_protocol_session_id(
+                    server, assigned_id, resume_id
+                )
+                if winner != assigned_id:
+                    try:
+                        await client.terminate_protocol_session(assigned_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "[MCPProxy] Failed to terminate unclaimed protocol "
+                            "session for '%s': %s",
+                            server.name,
+                            exc,
+                        )
+                    finally:
+                        await client.disconnect()
+                    if winner is not None and attempt == 0:
+                        resume_id = winner
+                        continue
+                    raise MCPClientError(
+                        f"Could not persist a stable MCP session for '{server.name}'"
+                    )
+
+                self._clients[server_id] = client
+                logger.debug(
+                    f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
+                )
+                return client
+
+            raise MCPClientError(
+                f"Could not establish an MCP session for '{server.name}'"
             )
-
-            logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
-            start_time = time.perf_counter()
-            await client.connect()
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-
-            self._clients[server_id] = client
-            logger.debug(
-                f"[MCPProxy] Connected to '{server.name}' in {elapsed_ms:.0f}ms"
-            )
-
-            # Persist the post-initialize session id so the next user turn
-            # resumes the same logical session. Failure here is non-fatal:
-            # the client is still usable for this turn, we just lose
-            # continuity. Skip the upsert when the value matches what we
-            # already had stored (no schema work for the steady state).
-            assigned_id = client.assigned_mcp_session_id
-            await self._persist_protocol_session_id(server, assigned_id, resume_id)
-
-            return client
 
     async def call_tool(
         self,

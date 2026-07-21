@@ -56,31 +56,71 @@ class ChatSessionMcpStateRepo:
             rows = (await self.session.execute(stmt)).all()
         return [(server_id, session_id) for server_id, session_id in rows]
 
-    async def upsert(
+    async def claim(
         self,
         chat_session_id: UUID,
         mcp_server_id: UUID,
-        mcp_session_id: str,
-    ) -> bool:
-        """Commit protocol state only for a committed chat session.
+        candidate_mcp_session_id: str,
+        expected_mcp_session_id: str | None,
+    ) -> str | None:
+        """Commit one protocol-session claimant and return the winning ID.
 
         A new chat can still belong to the caller's uncommitted request
         transaction. Selecting the parent row in this independent transaction
         makes that case a no-op instead of waiting on, or violating, the
-        foreign key. The caller then terminates the unpersisted remote session.
+        foreign key. A compare-and-set on ``expected_mcp_session_id`` prevents
+        concurrent first turns from both considering their remote ID durable.
         """
-        values = sa.select(
-            Sessions.id,
-            sa.literal(mcp_server_id),
-            sa.literal(mcp_session_id),
-        ).where(Sessions.id == chat_session_id)
-        stmt = pg_insert(ChatSessionMcpState).from_select(
-            ["chat_session_id", "mcp_server_id", "mcp_session_id"],
-            values,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["chat_session_id", "mcp_server_id"],
-            set_={"mcp_session_id": stmt.excluded.mcp_session_id},
-        ).returning(ChatSessionMcpState.chat_session_id)
         async with sessionmanager.session() as session, session.begin():
-            return await session.scalar(stmt) is not None
+            if expected_mcp_session_id is None:
+                values = sa.select(
+                    Sessions.id,
+                    sa.literal(mcp_server_id),
+                    sa.literal(candidate_mcp_session_id),
+                ).where(Sessions.id == chat_session_id)
+                stmt = (
+                    pg_insert(ChatSessionMcpState)
+                    .from_select(
+                        ["chat_session_id", "mcp_server_id", "mcp_session_id"],
+                        values,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["chat_session_id", "mcp_server_id"]
+                    )
+                    .returning(ChatSessionMcpState.mcp_session_id)
+                )
+                winner = await session.scalar(stmt)
+                if winner is not None:
+                    return winner
+                return await session.scalar(
+                    sa.select(ChatSessionMcpState.mcp_session_id).where(
+                        ChatSessionMcpState.chat_session_id == chat_session_id,
+                        ChatSessionMcpState.mcp_server_id == mcp_server_id,
+                    )
+                )
+
+            stmt = (
+                sa.update(ChatSessionMcpState)
+                .where(
+                    ChatSessionMcpState.chat_session_id == chat_session_id,
+                    ChatSessionMcpState.mcp_server_id == mcp_server_id,
+                    ChatSessionMcpState.mcp_session_id == expected_mcp_session_id,
+                )
+                .values(mcp_session_id=candidate_mcp_session_id)
+                .returning(ChatSessionMcpState.mcp_session_id)
+            )
+            winner = await session.scalar(stmt)
+            if winner is not None:
+                return winner
+            # A missing or changed expected row is an invalidated generation.
+            # Never recreate it: an identity-mode toggle owns deletion as the
+            # durable boundary between old and new header policy.
+            return None
+
+    async def delete_for_server(self, mcp_server_id: UUID) -> None:
+        """Invalidate saved protocol sessions in the caller's transaction."""
+        stmt = sa.delete(ChatSessionMcpState).where(
+            ChatSessionMcpState.mcp_server_id == mcp_server_id
+        )
+        async with self._tx():
+            await self.session.execute(stmt)

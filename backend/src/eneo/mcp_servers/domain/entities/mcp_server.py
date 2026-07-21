@@ -10,6 +10,17 @@ if TYPE_CHECKING:
     )
 
 
+# Administrators can tune normal operating limits per MCP server. The wider
+# envelope is an application safety invariant: even a mistaken configuration
+# must not make an untrusted tools/list response unbounded.
+MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT = 256
+MCP_TOOL_CATALOG_HARD_MAX_COUNT = 4096
+MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+MCP_TOOL_CATALOG_HARD_MAX_BYTES = 64 * 1024 * 1024
+MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES = 64 * 1024
+MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
+
+
 class MCPServerTool(Entity):
     """Domain entity for MCP server tool."""
 
@@ -78,6 +89,9 @@ class MCPServer(Entity):
         http_auth_config_schema: Optional[dict[str, Any]] = None,
         is_enabled: bool = True,
         forward_identity: bool = False,
+        tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+        tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+        tool_definition_max_bytes: int = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
         env_vars: Optional[dict[str, Any]] = None,
         tags: Optional[list[str]] = None,
         icon_url: Optional[str] = None,
@@ -97,6 +111,9 @@ class MCPServer(Entity):
         self.http_auth_config_schema = http_auth_config_schema
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
+        self.tool_catalog_max_count = tool_catalog_max_count
+        self.tool_catalog_max_bytes = tool_catalog_max_bytes
+        self.tool_definition_max_bytes = tool_definition_max_bytes
         self.env_vars = env_vars
         self.tags = tags
         self.icon_url = icon_url

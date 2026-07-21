@@ -47,8 +47,10 @@ class MCPServerToolRepository(ABC):
         ...
 
     @abstractmethod
-    async def add_if_absent(self, obj: "MCPServerTool") -> "MCPServerTool | None":
-        """Insert a tool unless the server/name pair already exists."""
+    async def stage_observed(
+        self, objs: list["MCPServerTool"]
+    ) -> list["MCPServerTool"]:
+        """Atomically stage new definitions and approved-definition drift."""
         ...
 
     @abstractmethod

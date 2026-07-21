@@ -159,6 +159,7 @@ class TestManagementPathsCarryIdentity:
             mcp_server_repo=AsyncMock(),
             mcp_server_tool_repo=AsyncMock(),
             user=user,
+            mcp_state_repo=AsyncMock(),
         )
         return service
 

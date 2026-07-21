@@ -9,6 +9,7 @@ Tests cover:
 - P6: Tool ownership validation in space updates
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -20,6 +21,13 @@ from eneo.main.exceptions import (
     MCPAuthenticationError,
     NotFoundException,
     UnauthorizedException,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+    MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+    MCP_TOOL_CATALOG_HARD_MAX_BYTES,
+    MCP_TOOL_CATALOG_HARD_MAX_COUNT,
+    MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -75,6 +83,100 @@ class TestMCPClientListToolsErrorPropagation:
             await client.list_tools()
 
         assert "Not connected" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_tools_rejects_catalog_over_configured_limit(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = 2
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name=f"tool_{index}",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                )
+                for index in range(3)
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="exceeds the configured maximum of 2"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_list_tools_rejects_oversized_definition(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = 128
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="oversized",
+                    title=None,
+                    description="x" * 128,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                )
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="definition exceeds"):
+            await client.list_tools()
+
+
+class TestMCPToolCatalogPolicyValidation:
+    def test_create_uses_safe_catalog_defaults(self):
+        dto = MCPServerCreate(name="test", http_url="http://localhost:8080")
+
+        assert dto.tool_catalog_max_count == MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        assert dto.tool_catalog_max_bytes == MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        assert dto.tool_definition_max_bytes == MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+
+    def test_admin_can_raise_catalog_limit_within_safety_envelope(self):
+        dto = MCPServerCreate(
+            name="large-catalog",
+            http_url="http://localhost:8080",
+            tool_catalog_max_count=512,
+            tool_catalog_max_bytes=32 * 1024 * 1024,
+            tool_definition_max_bytes=128 * 1024,
+        )
+
+        assert dto.tool_catalog_max_count == 512
+        assert dto.tool_catalog_max_bytes == 32 * 1024 * 1024
+        assert dto.tool_definition_max_bytes == 128 * 1024
+
+    def test_create_rejects_unbounded_catalog_limit(self):
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="unsafe",
+                http_url="http://localhost:8080",
+                tool_catalog_max_count=MCP_TOOL_CATALOG_HARD_MAX_COUNT + 1,
+            )
+
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="unsafe-total-size",
+                http_url="http://localhost:8080",
+                tool_catalog_max_bytes=MCP_TOOL_CATALOG_HARD_MAX_BYTES + 1,
+            )
+
+    def test_definition_limit_uses_whole_kibibytes(self):
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="ambiguous-size",
+                http_url="http://localhost:8080",
+                tool_definition_max_bytes=1500,
+            )
 
 
 # =============================================================================
@@ -401,7 +503,7 @@ class TestMCPServerServiceTenantOwnership:
         mock_user = MagicMock()
         mock_user.tenant_id = user_tenant_id
 
-        service = MCPServerService(mock_repo, mock_tool_repo, mock_user)
+        service = MCPServerService(mock_repo, mock_tool_repo, mock_user, AsyncMock())
 
         with pytest.raises(UnauthorizedException) as exc_info:
             await service.get_tools_with_tenant_settings(uuid4())
@@ -421,7 +523,7 @@ class TestMCPServerServiceTenantOwnership:
         mock_user = MagicMock()
         mock_user.tenant_id = uuid4()
 
-        service = MCPServerService(mock_repo, mock_tool_repo, mock_user)
+        service = MCPServerService(mock_repo, mock_tool_repo, mock_user, AsyncMock())
 
         with pytest.raises(NotFoundException):
             await service.get_tools_with_tenant_settings(uuid4())

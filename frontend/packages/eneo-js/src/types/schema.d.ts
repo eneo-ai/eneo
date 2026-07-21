@@ -11999,6 +11999,21 @@ export interface components {
        * @default false
        */
       forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -12042,6 +12057,21 @@ export interface components {
        * @default false
        */
       forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12112,6 +12142,21 @@ export interface components {
        * @default false
        */
       forward_identity?: boolean;
+      /**
+       * Tool Catalog Max Count
+       * @default 256
+       */
+      tool_catalog_max_count?: number;
+      /**
+       * Tool Catalog Max Bytes
+       * @default 16777216
+       */
+      tool_catalog_max_bytes?: number;
+      /**
+       * Tool Definition Max Bytes
+       * @default 65536
+       */
+      tool_definition_max_bytes?: number;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -12261,6 +12306,12 @@ export interface components {
       } | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
+      /** Tool Catalog Max Count */
+      tool_catalog_max_count?: number | null;
+      /** Tool Catalog Max Bytes */
+      tool_catalog_max_bytes?: number | null;
+      /** Tool Definition Max Bytes */
+      tool_definition_max_bytes?: number | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */

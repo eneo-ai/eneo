@@ -1,6 +1,7 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
 import asyncio
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -46,6 +47,61 @@ MCPStreams = tuple[
 
 class _SessionIdTransport(Protocol):
     session_id: str | None
+
+
+def validate_tool_catalog(
+    tools: list[dict[str, Any]],
+    *,
+    max_count: int,
+    max_catalog_bytes: int,
+    max_definition_bytes: int,
+) -> None:
+    """Reject an unsafe MCP tool catalog as one indivisible response.
+
+    Consumers must not partially stage or expose a catalog that exceeds either
+    ceiling. Validation is repeated at the proxy seam so alternative clients
+    and tests cannot bypass the same invariant.
+    """
+    if len(tools) > max_count:
+        raise MCPClientError(
+            "MCP tool catalog exceeds the configured maximum of "
+            f"{max_count} definitions"
+        )
+
+    seen_names: set[str] = set()
+    catalog_size = 0
+    for tool in tools:
+        name = tool.get("name")
+        if not isinstance(name, str) or not name:
+            raise MCPClientError("MCP tool catalog contains an invalid tool name")
+        if name in seen_names:
+            raise MCPClientError(f"MCP tool catalog contains duplicate name '{name}'")
+        seen_names.add(name)
+
+        try:
+            definition_size = len(
+                json.dumps(
+                    tool,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError) as exc:
+            raise MCPClientError(
+                f"MCP tool '{name}' definition is not valid JSON"
+            ) from exc
+        if definition_size > max_definition_bytes:
+            raise MCPClientError(
+                f"MCP tool '{name}' definition exceeds "
+                f"the configured maximum of {max_definition_bytes} bytes"
+            )
+        catalog_size += definition_size
+        if catalog_size > max_catalog_bytes:
+            raise MCPClientError(
+                "MCP tool catalog exceeds the configured maximum of "
+                f"{max_catalog_bytes} serialized bytes"
+            )
 
 
 @asynccontextmanager
@@ -542,6 +598,11 @@ class MCPClient:
                 self.session.list_tools(),
                 timeout=self.list_tools_timeout,
             )
+            if len(response.tools) > self.mcp_server.tool_catalog_max_count:
+                raise MCPClientError(
+                    "MCP tool catalog exceeds the configured maximum of "
+                    f"{self.mcp_server.tool_catalog_max_count} definitions"
+                )
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
@@ -558,6 +619,12 @@ class MCPClient:
                     }
                 )
 
+            validate_tool_catalog(
+                tools,
+                max_count=self.mcp_server.tool_catalog_max_count,
+                max_catalog_bytes=self.mcp_server.tool_catalog_max_bytes,
+                max_definition_bytes=self.mcp_server.tool_definition_max_bytes,
+            )
             logger.debug(f"Listed {len(tools)} tools from {self.mcp_server.name}")
             return tools
 
