@@ -280,6 +280,8 @@ class CompletionService:
                 db_session=self.session,
                 identity_headers=identity_headers,
             )
+            if model.supports_tool_calling:
+                await mcp_proxy.prepare_tools_for_context()
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )

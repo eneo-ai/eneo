@@ -258,7 +258,7 @@ class MCPServerService:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
         Validates connection before saving when connection-affecting fields
-        (http_url, http_auth_type, http_auth_config_schema) change.
+        (URL, authentication, credentials, identity forwarding) change.
         Returns MCPServerUpdateResult with connection info when validation occurs.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
@@ -268,6 +268,10 @@ class MCPServerService:
             http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
+        identity_mode_changed = (
+            forward_identity is not None
+            and forward_identity != mcp_server.forward_identity
+        )
 
         # Apply changes to domain object
         if name is not None:
@@ -293,14 +297,19 @@ class MCPServerService:
             mcp_server.security_classification = security_classification
 
         # Validate connection before saving when connection config changes
-        if url_changed or auth_type_changed or credentials_changed:
+        if (
+            url_changed
+            or auth_type_changed
+            or credentials_changed
+            or identity_mode_changed
+        ):
             if mcp_server.http_auth_type == "none":
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
                 test_credentials = http_auth_config_schema
             else:
-                # URL or auth type changed but credentials unchanged — decrypt existing
+                # Connection mode changed with existing credentials — decrypt them
                 test_credentials = self._decrypt_auth_config(
                     mcp_server.http_auth_config_schema
                 )

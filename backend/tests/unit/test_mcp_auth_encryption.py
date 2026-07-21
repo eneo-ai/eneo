@@ -444,7 +444,7 @@ class TestProxyFactoryDecryption:
 
 class TestUpdateConnectionValidation:
     """Test that update_mcp_server validates connection before saving when
-    connection-affecting fields (http_url, http_auth_type, credentials) change."""
+    connection-affecting fields (URL, auth, credentials, identity mode) change."""
 
     @pytest.fixture
     def _setup(self):
@@ -557,6 +557,57 @@ class TestUpdateConnectionValidation:
 
         # Should save without validation
         assert result.connection is None
+        mock_repo.update.assert_called_once()
+        service._test_connection_and_discover_tools.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_mode", "requested_mode"), [(False, True), (True, False)]
+    )
+    async def test_rejects_identity_mode_change_when_connection_fails(
+        self, _setup, existing_mode, requested_mode
+    ):
+        """Both identity-mode transitions are validated before persistence."""
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = existing_mode
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Identity mode rejected"),
+            )
+        )
+
+        result = await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=requested_mode,
+        )
+
+        assert result.connection is not None
+        assert result.connection.success is False
+        validated_server = service._test_connection_and_discover_tools.call_args.args[0]
+        assert validated_server.forward_identity is requested_mode
+        mock_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_identity_mode_does_not_trigger_validation(self, _setup):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+
+        service, mock_repo, existing, _ = _setup
+        existing.forward_identity = True
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=True,
+        )
+
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
 

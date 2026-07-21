@@ -279,6 +279,41 @@ class MCPProxySession:
 
         return before != after
 
+    async def prepare_tools_for_context(self) -> None:
+        """Resolve identity-scoped tool catalogs before model exposure.
+
+        The database catalog remains the administrator-approved allowlist. A
+        server that receives the acting user's identity may return a narrower
+        ``tools/list`` response for that user, so its LLM-facing catalog must
+        be the intersection of the two. Global catalogs keep the existing lazy
+        connection path.
+
+        Discovery failures fail closed for the affected server: none of its
+        administrator-discovered definitions are exposed in this request.
+        """
+        for server in self.mcp_servers:
+            if not server.forward_identity:
+                continue
+
+            try:
+                auth_credentials = self.auth_credentials_map.get(server.id, {})
+                async with MCPClient(
+                    server,
+                    auth_credentials,
+                    identity_headers=self.identity_headers,
+                ) as client:
+                    live_tools = await client.list_tools()
+            except Exception as exc:
+                logger.warning(
+                    "[MCPProxy] Failed identity-scoped tool discovery for '%s': %s",
+                    server.name,
+                    exc,
+                )
+                self._rebuild_server_tools(server, [])
+                continue
+
+            self._rebuild_server_tools(server, live_tools)
+
     async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
         """Re-list tools for servers whose advertised set may have changed.
 
