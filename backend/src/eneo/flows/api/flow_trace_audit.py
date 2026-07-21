@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol
+from typing import NoReturn, Protocol
 from uuid import UUID
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -32,7 +32,7 @@ async def log_flow_trace_audit_or_raise(
 ) -> None:
     try:
         actor_kwargs = audit_actor_kwargs(user)
-        await container.audit_service().log_async(
+        audit_log = await container.audit_service().log(
             tenant_id=user.tenant_id,
             actor_id=actor_kwargs["actor_id"],
             actor_type=actor_kwargs["actor_type"],
@@ -43,18 +43,52 @@ async def log_flow_trace_audit_or_raise(
             description=description,
             metadata=AuditMetadata.standard(actor=user, target=run, extra=extra or {}),
         )
+        if audit_log is None:
+            raise_flow_trace_audit_unavailable(
+                user=user,
+                run=run,
+                action=action,
+                cause=None,
+            )
+    except AuditLoggingUnavailableException:
+        raise
     except Exception as exc:
+        raise_flow_trace_audit_unavailable(
+            user=user,
+            run=run,
+            action=action,
+            cause=exc,
+        )
+
+
+def raise_flow_trace_audit_unavailable(
+    *,
+    user: FlowTraceAuditActor,
+    run: FlowRun,
+    action: ActionType,
+    cause: BaseException | None,
+) -> NoReturn:
+    log_context = {
+        "action": action.value,
+        "run_id": str(run.id),
+        "flow_id": str(run.flow_id),
+        "tenant_id": str(user.tenant_id),
+    }
+    if cause is None:
+        logger.error(
+            "Required Flow trace audit was disabled; denying trace access",
+            extra=log_context,
+        )
+    else:
         logger.exception(
             "Flow trace audit logging failed; denying trace access",
-            extra={
-                "action": action.value,
-                "run_id": str(run.id),
-                "flow_id": str(run.flow_id),
-                "tenant_id": str(user.tenant_id),
-            },
+            extra=log_context,
         )
-        raise AuditLoggingUnavailableException(
-            "Evidence audit logging is unavailable.",
-            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
-            context={"audit_required": True},
-        ) from exc
+    error = AuditLoggingUnavailableException(
+        "Evidence audit logging is unavailable.",
+        code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
+        context={"audit_required": True},
+    )
+    if cause is None:
+        raise error
+    raise error from cause

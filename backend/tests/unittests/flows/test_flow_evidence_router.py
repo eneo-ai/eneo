@@ -68,6 +68,23 @@ class FlowErrorResponse(TypedDict):
     payload: dict[str, object]
 
 
+class _EvidenceTransaction:
+    def __init__(
+        self, events: list[str], *, exit_error: Exception | None = None
+    ) -> None:
+        self._events = events
+        self._exit_error = exit_error
+
+    async def __aenter__(self):
+        self._events.append("transaction_enter")
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object):
+        self._events.append("transaction_exit")
+        if self._exit_error is not None:
+            raise self._exit_error
+        return False
+
+
 def _flow_error_response(
     exc: Exception, *, request_id: str | None = None
 ) -> FlowErrorResponse:
@@ -159,6 +176,7 @@ def test_flow_evidence_error_response_omits_request_id_when_absent():
 @pytest.mark.asyncio
 async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     container = MagicMock()
+    events: list[str] = []
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {
@@ -207,7 +225,18 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
-    container.audit_service.return_value = AsyncMock()
+    audit_service = AsyncMock()
+
+    def _record_audit(**_kwargs: object) -> object:
+        events.append("audit_log")
+        return object()
+
+    audit_service.log.side_effect = _record_audit
+    container.audit_service.return_value = audit_service
+    session = MagicMock()
+    session._is_explicit_tx_test_session = True
+    session.begin.return_value = _EvidenceTransaction(events)
+    container.session.return_value = session
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -238,11 +267,12 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     run_service.get_redacted_evidence_bundle.assert_awaited_once_with(
         run_id=run.id, run=run
     )
-    container.audit_service.return_value.log_async.assert_awaited_once()
+    audit_service.log.assert_awaited_once()
     assert (
-        container.audit_service.return_value.log_async.await_args.kwargs["action"]
-        == ActionType.FLOW_EVIDENCE_VIEWED
+        audit_service.log.await_args.kwargs["action"] == ActionType.FLOW_EVIDENCE_VIEWED
     )
+    assert events == ["transaction_enter", "audit_log", "transaction_exit"]
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -697,6 +727,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
 @pytest.mark.asyncio
 async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
     container = MagicMock()
+    events: list[str] = []
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     export_payload = _evidence_export_payload(run)
@@ -704,7 +735,18 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
     container.flow_run_evidence_service.return_value = run_service
-    container.audit_service.return_value = AsyncMock()
+    audit_service = AsyncMock()
+
+    def _record_audit(**_kwargs: object) -> object:
+        events.append("audit_log")
+        return object()
+
+    audit_service.log.side_effect = _record_audit
+    container.audit_service.return_value = audit_service
+    session = MagicMock()
+    session._is_explicit_tx_test_session = True
+    session.begin.return_value = _EvidenceTransaction(events)
+    container.session.return_value = session
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -737,21 +779,24 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
         run=run,
         export_reason="support_debug",
     )
-    container.audit_service.return_value.log_async.assert_awaited_once()
+    audit_service.log.assert_awaited_once()
     assert (
-        container.audit_service.return_value.log_async.await_args.kwargs["action"]
+        audit_service.log.await_args.kwargs["action"]
         == ActionType.FLOW_EVIDENCE_EXPORTED_JSON
     )
-    assert container.audit_service.return_value.log_async.await_args.kwargs["metadata"][
-        "extra"
-    ] == {
+    assert audit_service.log.await_args.kwargs["metadata"]["extra"] == {
         "evidence_detail": "redacted",
         "export_reason": "support_debug",
     }
+    assert events == ["transaction_enter", "audit_log", "transaction_exit"]
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeypatch):
+@pytest.mark.parametrize("audit_outcome", ["none", "exception", "commit"])
+async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavailable(
+    monkeypatch, audit_outcome: str
+):
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
@@ -766,6 +811,9 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
+        "rerun_operations": [],
+        "rerun_invalidated_steps": [],
+        "review_checkpoints": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -793,11 +841,19 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
-        to_dict=lambda: evidence
+        run=evidence["run"],
+        final_output=None,
+        result_files=evidence["result_files"],
+        to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
-    audit_service.log_async.side_effect = RuntimeError("audit unavailable")
+    if audit_outcome == "none":
+        audit_service.log.return_value = None
+    elif audit_outcome == "exception":
+        audit_service.log.side_effect = RuntimeError("audit unavailable")
+    else:
+        audit_service.log.return_value = object()
     container.audit_service.return_value = audit_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -814,6 +870,12 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
         container,
         user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
     )
+    if audit_outcome == "commit":
+        session = MagicMock()
+        session.begin.return_value = _EvidenceTransaction(
+            [], exit_error=RuntimeError("commit unavailable")
+        )
+        container.session.return_value = session
 
     with pytest.raises(AuditLoggingUnavailableException) as exc_info:
         await get_flow_run_evidence(
@@ -827,12 +889,17 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
     assert str(error) == "Evidence audit logging is unavailable."
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
-    logger.exception.assert_called_once()
+    if audit_outcome == "none":
+        logger.error.assert_called_once()
+        logger.exception.assert_not_called()
+    else:
+        logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_export_flow_run_evidence_fails_closed_when_audit_write_fails(
-    monkeypatch,
+@pytest.mark.parametrize("audit_outcome", ["none", "exception", "commit"])
+async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unavailable(
+    monkeypatch, audit_outcome: str
 ):
     container = MagicMock()
     flow_id = uuid4()
@@ -843,7 +910,12 @@ async def test_export_flow_run_evidence_fails_closed_when_audit_write_fails(
     run_service.export_evidence_json.return_value = export_payload
     container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
-    audit_service.log_async.side_effect = RuntimeError("audit unavailable")
+    if audit_outcome == "none":
+        audit_service.log.return_value = None
+    elif audit_outcome == "exception":
+        audit_service.log.side_effect = RuntimeError("audit unavailable")
+    else:
+        audit_service.log.return_value = object()
     container.audit_service.return_value = audit_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
@@ -860,6 +932,12 @@ async def test_export_flow_run_evidence_fails_closed_when_audit_write_fails(
         container,
         user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
     )
+    if audit_outcome == "commit":
+        session = MagicMock()
+        session.begin.return_value = _EvidenceTransaction(
+            [], exit_error=RuntimeError("commit unavailable")
+        )
+        container.session.return_value = session
 
     with pytest.raises(AuditLoggingUnavailableException) as exc_info:
         await export_flow_run_evidence(
@@ -876,7 +954,11 @@ async def test_export_flow_run_evidence_fails_closed_when_audit_write_fails(
     assert str(error) == "Evidence audit logging is unavailable."
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
-    logger.exception.assert_called_once()
+    if audit_outcome == "none":
+        logger.error.assert_called_once()
+        logger.exception.assert_not_called()
+    else:
+        logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -925,7 +1007,7 @@ async def test_export_flow_run_evidence_passes_raw_detail_and_reason(monkeypatch
         run=run,
         export_reason="government_audit_request",
     )
-    assert container.audit_service.return_value.log_async.await_args.kwargs["metadata"][
+    assert container.audit_service.return_value.log.await_args.kwargs["metadata"][
         "extra"
     ] == {
         "evidence_detail": "raw",
@@ -982,7 +1064,7 @@ async def test_export_flow_run_evidence_rejects_raw_invalid_reason(
     }
     run_service.get_run.assert_not_awaited()
     run_service.export_evidence_json.assert_not_awaited()
-    container.audit_service.return_value.log_async.assert_not_awaited()
+    container.audit_service.return_value.log.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,10 @@ from eneo.authentication.auth_models import (
     FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
 )
 from eneo.flows.api import flow_access_context
-from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_api_common import (
+    commit_flow_runtime_write_before_response,
+    error_response,
+)
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowRunEvidenceExportResponse,
@@ -23,14 +26,23 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
-from eneo.flows.api.flow_trace_audit import log_flow_trace_audit_or_raise
+from eneo.flows.api.flow_trace_audit import (
+    FlowTraceAuditActor,
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_redaction import redact_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, ErrorCodes
-from eneo.server.dependencies.container import get_container
+from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
+    BadRequestException,
+    ErrorCodes,
+)
+from eneo.server.dependencies.container import get_container_for_explicit_transaction
 
 router = APIRouter()
 
@@ -113,60 +125,83 @@ async def get_flow_run_evidence(
         ),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    user = container.user()
-    evidence_service = container.flow_run_evidence_service()
-    run = await evidence_service.get_run(
-        run_id=run_id,
-        flow_id=id,
-        access_kind="evidence_view",
-    )
-    evidence = await evidence_service.get_redacted_evidence_bundle(
-        run_id=run_id,
-        run=run,
-    )
-    await log_flow_trace_audit_or_raise(
-        container=container,
-        user=user,
-        run=run,
-        action=ActionType.FLOW_EVIDENCE_VIEWED,
-        description=f"Viewed evidence for flow run {run.id}",
-        extra={"evidence_detail": "view"},
-    )
-    presenter = FlowServicePrincipalActorPresenter(
-        api_key_repo=container.api_key_v2_repo(),
-        tenant_id=user.tenant_id,
-    )
-    payload = await presenter.present_evidence(evidence.to_dict())
-    projected_result = (
-        FlowAssembler.to_run_result_public(
-            run=run.model_copy(
-                update={"output_payload_json": evidence.run.get("output_payload_json")}
-            ),
-            final_output=evidence.final_output,
-            result_files=[
-                FlowRunStepResultFile.model_validate(item)
-                for item in evidence.result_files
-            ],
-        )
-        if evidence.final_output is not None
-        else None
-    )
-    run_payload = cast(dict[str, object], payload["run"])
-    run_payload["result"] = (
-        redact_payload(projected_result.model_dump(mode="json"))
-        if projected_result is not None
-        else None
-    )
-    return FlowRunEvidenceResponse.model_validate(payload)
+    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    try:
+        async with commit_flow_runtime_write_before_response(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            user = container.user()
+            evidence_service = container.flow_run_evidence_service()
+            run = await evidence_service.get_run(
+                run_id=run_id,
+                flow_id=id,
+                access_kind="evidence_view",
+            )
+            evidence = await evidence_service.get_redacted_evidence_bundle(
+                run_id=run_id,
+                run=run,
+            )
+            presenter = FlowServicePrincipalActorPresenter(
+                api_key_repo=container.api_key_v2_repo(),
+                tenant_id=user.tenant_id,
+            )
+            payload = await presenter.present_evidence(evidence.to_dict())
+            projected_result = (
+                FlowAssembler.to_run_result_public(
+                    run=run.model_copy(
+                        update={
+                            "output_payload_json": evidence.run.get(
+                                "output_payload_json"
+                            )
+                        }
+                    ),
+                    final_output=evidence.final_output,
+                    result_files=[
+                        FlowRunStepResultFile.model_validate(item)
+                        for item in evidence.result_files
+                    ],
+                )
+                if evidence.final_output is not None
+                else None
+            )
+            run_payload = cast(dict[str, object], payload["run"])
+            run_payload["result"] = (
+                redact_payload(projected_result.model_dump(mode="json"))
+                if projected_result is not None
+                else None
+            )
+            response = FlowRunEvidenceResponse.model_validate(payload)
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed evidence for flow run {run.id}",
+                extra={"evidence_detail": "view"},
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
 
 
 @router.get(
@@ -252,58 +287,79 @@ async def export_flow_run_evidence(
             ),
         ),
     ] = _DEFAULT_EVIDENCE_EXPORT_REASON,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    access_kind = (
-        "evidence_export_raw" if detail == "raw" else "evidence_export_redacted"
-    )
-    export_reason = reason.strip()
-    if detail == "raw" and (
-        not export_reason or export_reason == _DEFAULT_EVIDENCE_EXPORT_REASON
-    ):
-        raise BadRequestException(
-            _RAW_REASON_REQUIRED_MESSAGE,
-            code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
-            context={
-                "detail": "raw",
-                "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
-            },
-        )
-    user = container.user()
-    evidence_service = container.flow_run_evidence_service()
-    run = await evidence_service.get_run(
-        run_id=run_id,
-        flow_id=id,
-        access_kind=access_kind,
-    )
-    export_payload = await evidence_service.export_evidence_json(
-        run_id=run_id,
-        detail=detail,
-        run=run,
-        export_reason=export_reason,
-    )
-    await log_flow_trace_audit_or_raise(
-        container=container,
-        user=user,
-        run=run,
-        action=ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
-        description=f"Exported evidence JSON for flow run {run.id}",
-        extra={"evidence_detail": detail, "export_reason": export_reason},
-    )
-    filename = f"flow-run-evidence-{run_id}.json"
-    validated_export = FlowRunEvidenceExportResponse.model_validate(export_payload)
-    return Response(
-        content=validated_export.model_dump_json(indent=2),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    try:
+        async with commit_flow_runtime_write_before_response(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            access_kind = (
+                "evidence_export_raw" if detail == "raw" else "evidence_export_redacted"
+            )
+            export_reason = reason.strip()
+            if detail == "raw" and (
+                not export_reason or export_reason == _DEFAULT_EVIDENCE_EXPORT_REASON
+            ):
+                raise BadRequestException(
+                    _RAW_REASON_REQUIRED_MESSAGE,
+                    code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
+                    context={
+                        "detail": "raw",
+                        "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
+                    },
+                )
+            user = container.user()
+            evidence_service = container.flow_run_evidence_service()
+            run = await evidence_service.get_run(
+                run_id=run_id,
+                flow_id=id,
+                access_kind=access_kind,
+            )
+            export_payload = await evidence_service.export_evidence_json(
+                run_id=run_id,
+                detail=detail,
+                run=run,
+                export_reason=export_reason,
+            )
+            filename = f"flow-run-evidence-{run_id}.json"
+            validated_export = FlowRunEvidenceExportResponse.model_validate(
+                export_payload
+            )
+            response = Response(
+                content=validated_export.model_dump_json(indent=2),
+                media_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
+                description=f"Exported evidence JSON for flow run {run.id}",
+                extra={"evidence_detail": detail, "export_reason": export_reason},
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
+                cause=exc,
+            )
+        raise
+    return response
 
 
 __all__ = ["router"]

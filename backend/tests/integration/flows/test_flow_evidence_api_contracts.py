@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
+from sqlalchemy.orm import SessionTransaction
+from starlette.types import Message, Scope
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
@@ -55,6 +63,7 @@ from eneo.flows.published_definition import (
 )
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
+from eneo.server.main import app
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserInDB, UserState
 
@@ -1643,6 +1652,198 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("path_suffix", "query_string", "action"),
+    [
+        ("evidence/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
+        (
+            "evidence/export",
+            b"format=json",
+            ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
+        ),
+    ],
+    ids=["view", "export"],
+)
+async def test_flow_run_evidence_audit_is_committed_before_response_start(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    path_suffix: str,
+    query_string: bytes,
+    action: ActionType,
+):
+    _ = client  # Keep the shared application lifespan active for the direct ASGI call.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}"
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query_string,
+        "root_path": "",
+        "headers": [
+            (b"host", b"test.local"),
+            (b"authorization", f"Bearer {trace_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test.local", 80),
+    }
+    request_received = False
+    response_status: int | None = None
+    response_body = bytearray()
+    audit_count_at_response_start: int | None = None
+
+    async def receive() -> Message:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0)
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal audit_count_at_response_start, response_status
+        if message["type"] == "http.response.start":
+            response_status = cast(int, message["status"])
+            async with db_container() as container:
+                audit_count_at_response_start = await container.session().scalar(
+                    sa.select(sa.func.count(AuditLogTable.id)).where(
+                        AuditLogTable.action == action.value,
+                        AuditLogTable.entity_type == EntityType.FLOW_RUN.value,
+                        AuditLogTable.entity_id == UUID(seeded["run_id"]),
+                    )
+                )
+            return
+        if message["type"] == "http.response.body":
+            response_body.extend(cast(bytes, message.get("body", b"")))
+
+    await app(scope, receive, send)
+
+    assert response_status == 200, response_body.decode(errors="replace")
+    assert audit_count_at_response_start == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("path_suffix", "query_string"),
+    [
+        ("evidence/", b""),
+        ("evidence/export", b"format=json"),
+    ],
+    ids=["view", "export"],
+)
+async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    path_suffix: str,
+    query_string: bytes,
+):
+    _ = client  # Keep the shared application lifespan active for the direct ASGI call.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    events: list[str] = []
+    original_commit = SessionTransaction.commit
+    original_create_audit = AuditLogRepositoryImpl.create
+
+    async def mark_required_audit_transaction(
+        repository: AuditLogRepositoryImpl, audit_log: AuditLog
+    ) -> AuditLog:
+        result = await original_create_audit(repository, audit_log)
+        repository.session.sync_session.info["fail_required_audit_commit"] = True
+        return result
+
+    def fail_audit_commit(
+        transaction: SessionTransaction, *, _to_root: bool = False
+    ) -> None:
+        if transaction.session.info.pop("fail_required_audit_commit", False):
+            events.append("commit_failed")
+            raise RuntimeError("audit commit unavailable")
+        original_commit(transaction, _to_root=_to_root)
+
+    monkeypatch.setattr(
+        AuditLogRepositoryImpl, "create", mark_required_audit_transaction
+    )
+    monkeypatch.setattr(SessionTransaction, "commit", fail_audit_commit)
+    path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}"
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query_string,
+        "root_path": "",
+        "headers": [
+            (b"host", b"test.local"),
+            (b"authorization", f"Bearer {trace_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test.local", 80),
+    }
+    request_received = False
+    response_status: int | None = None
+    response_body = bytearray()
+
+    async def receive() -> Message:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0)
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal response_status
+        if message["type"] == "http.response.start":
+            events.append("response_start")
+            response_status = cast(int, message["status"])
+            return
+        if message["type"] == "http.response.body":
+            response_body.extend(cast(bytes, message.get("body", b"")))
+
+    await app(scope, receive, send)
+
+    assert response_status == 503
+    assert events == ["commit_failed", "response_start"]
+    payload = json.loads(response_body)
+    assert payload["code"] == "flow_evidence_audit_logging_failed"
+    assert payload["context"]["audit_required"] is True
+    assert seeded["run_id"].encode() not in response_body
+    assert b'"manifest"' not in response_body
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     client,
     db_container,
@@ -1660,12 +1861,12 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
-    audit_service = type("FailingAuditService", (), {})()
 
-    async def _raise(*args, **kwargs):
-        raise RuntimeError("audit down")
+    class FailingAuditService:
+        async def log(self, **_kwargs: object) -> None:
+            raise RuntimeError("audit down")
 
-    audit_service.log_async = _raise
+    audit_service = FailingAuditService()
 
     Container.audit_service.override(providers.Object(audit_service))
     try:
@@ -1701,12 +1902,12 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
-    audit_service = type("FailingAuditService", (), {})()
 
-    async def _raise(*args, **kwargs):
-        raise RuntimeError("audit down")
+    class FailingAuditService:
+        async def log(self, **_kwargs: object) -> None:
+            raise RuntimeError("audit down")
 
-    audit_service.log_async = _raise
+    audit_service = FailingAuditService()
 
     Container.audit_service.override(providers.Object(audit_service))
     try:
