@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -12,6 +13,9 @@ import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
 from eneo.main.exceptions import MCPClientError
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _make_server(name: str = "server") -> MCPServer:
@@ -32,7 +36,7 @@ def _make_server(name: str = "server") -> MCPServer:
     )
 
 
-def _make_identity_scoped_server() -> MCPServer:
+def _make_identity_scoped_server(name: str = "identity-server") -> MCPServer:
     server_id = uuid4()
     tools = [
         MCPServerTool(
@@ -46,7 +50,7 @@ def _make_identity_scoped_server() -> MCPServer:
     return MCPServer(
         id=server_id,
         tenant_id=uuid4(),
-        name="identity-server",
+        name=name,
         http_url="http://localhost:8080/mcp",
         forward_identity=True,
         tools=tools,
@@ -99,6 +103,151 @@ class _FakeMCPClient:
         return {"content": [{"type": "text", "text": name}], "is_error": False}
 
 
+class _InMemoryMcpStateRepo:
+    values: dict[tuple[UUID, UUID], str] = {}
+    fail_reads = False
+    fail_writes = False
+
+    def __init__(self, session: object) -> None:
+        self.session = session
+
+    async def get(self, chat_session_id: UUID, mcp_server_id: UUID) -> str | None:
+        if self.fail_reads:
+            raise RuntimeError("persistence unavailable")
+        return self.values.get((chat_session_id, mcp_server_id))
+
+    async def upsert(
+        self,
+        chat_session_id: UUID,
+        mcp_server_id: UUID,
+        mcp_session_id: str,
+    ) -> None:
+        if self.fail_writes:
+            raise RuntimeError("persistence unavailable")
+        self.values[(chat_session_id, mcp_server_id)] = mcp_session_id
+
+
+class _StatefulMCPClient:
+    protocol_sessions: dict[str, set[str]] = {}
+    terminated_session_ids: list[str] = []
+    next_session_number = 1
+    fail_list_tools = False
+
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        *,
+        resume_mcp_session_id: str | None = None,
+        identity_headers: dict[str, str] | None = None,
+        **options: object,
+    ) -> None:
+        self.mcp_server = mcp_server
+        self.resume_mcp_session_id = resume_mcp_session_id
+        self.assigned_mcp_session_id: str | None = None
+        self.supports_tools_list_changed = False
+        self.connect_task: asyncio.Task[object] | None = None
+        self.disconnect_task: asyncio.Task[object] | None = None
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.protocol_sessions = {}
+        cls.terminated_session_ids = []
+        cls.next_session_number = 1
+        cls.fail_list_tools = False
+
+    async def __aenter__(self) -> "_StatefulMCPClient":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.disconnect()
+
+    async def connect(self) -> None:
+        self.connect_task = asyncio.current_task()
+        if (
+            self.resume_mcp_session_id is not None
+            and self.resume_mcp_session_id in self.protocol_sessions
+        ):
+            self.assigned_mcp_session_id = self.resume_mcp_session_id
+            return
+
+        session_id = f"protocol-{type(self).next_session_number}"
+        type(self).next_session_number += 1
+        self.protocol_sessions[session_id] = {"shared"}
+        self.assigned_mcp_session_id = session_id
+
+    async def disconnect(self) -> None:
+        self.disconnect_task = asyncio.current_task()
+
+    async def list_tools(self) -> list[dict[str, str]]:
+        assert self.assigned_mcp_session_id is not None
+        if self.fail_list_tools:
+            raise MCPClientError("discovery unavailable")
+        return [
+            {"name": name}
+            for name in sorted(self.protocol_sessions[self.assigned_mcp_session_id])
+        ]
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
+        assert self.assigned_mcp_session_id is not None
+        if name == "shared":
+            self.protocol_sessions[self.assigned_mcp_session_id].add("admin_only")
+        return {"content": [{"type": "text", "text": name}], "is_error": False}
+
+    async def terminate_protocol_session(self, mcp_session_id: str) -> None:
+        self.terminated_session_ids.append(mcp_session_id)
+        self.protocol_sessions.pop(mcp_session_id, None)
+
+
+class _CoordinatedDiscoveryMCPClient:
+    release_by_name: dict[str, asyncio.Event] = {}
+    finished_by_name: dict[str, asyncio.Event] = {}
+    all_started = asyncio.Event()
+    started_names: set[str] = set()
+    enter_tasks: dict[UUID, asyncio.Task[object] | None] = {}
+    exit_tasks: dict[UUID, asyncio.Task[object] | None] = {}
+
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        **options: object,
+    ) -> None:
+        self.mcp_server = mcp_server
+        self.assigned_mcp_session_id = None
+
+    @classmethod
+    def configure(cls, server_names: tuple[str, ...]) -> None:
+        cls.release_by_name = {name: asyncio.Event() for name in server_names}
+        cls.finished_by_name = {name: asyncio.Event() for name in server_names}
+        cls.all_started = asyncio.Event()
+        cls.started_names = set()
+        cls.enter_tasks = {}
+        cls.exit_tasks = {}
+
+    async def __aenter__(self) -> "_CoordinatedDiscoveryMCPClient":
+        self.enter_tasks[self.mcp_server.id] = asyncio.current_task()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        self.exit_tasks[self.mcp_server.id] = asyncio.current_task()
+
+    async def list_tools(self) -> list[dict[str, str]]:
+        name = self.mcp_server.name
+        self.started_names.add(name)
+        if len(self.started_names) == len(self.release_by_name):
+            self.all_started.set()
+        await self.release_by_name[name].wait()
+        self.finished_by_name[name].set()
+        return [{"name": "shared"}]
+
+    async def terminate_protocol_session(self, mcp_session_id: str) -> None:
+        raise AssertionError("A stateless probe must not require termination")
+
+
 def _install_fake_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -109,6 +258,15 @@ def _install_fake_client(
     _FakeMCPClient.failing_users = set(failing_users)
     _FakeMCPClient.instances = []
     monkeypatch.setattr(proxy_module, "MCPClient", _FakeMCPClient)
+
+
+def _install_stateful_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    _StatefulMCPClient.reset()
+    _InMemoryMcpStateRepo.values = {}
+    _InMemoryMcpStateRepo.fail_reads = False
+    _InMemoryMcpStateRepo.fail_writes = False
+    monkeypatch.setattr(proxy_module, "MCPClient", _StatefulMCPClient)
+    monkeypatch.setattr(proxy_module, "ChatSessionMcpStateRepo", _InMemoryMcpStateRepo)
 
 
 def test_live_tool_refresh_only_exposes_db_approved_definitions():
@@ -214,8 +372,7 @@ async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     assert proxy._owner_task is None
     assert proxy._clients == {}
     [discovery_client] = _FakeMCPClient.instances
-    assert discovery_client.enter_task is discovery_task
-    assert discovery_client.exit_task is discovery_task
+    assert discovery_client.enter_task is discovery_client.exit_task
 
     async def run_streaming_phase():
         current_task = asyncio.current_task()
@@ -232,8 +389,184 @@ async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     assert owner_task is streaming_task
     assert len(_FakeMCPClient.instances) == 2
     runtime_client = _FakeMCPClient.instances[1]
+    assert discovery_client.enter_task is not streaming_task
     assert runtime_client.connect_task is streaming_task
     assert runtime_client.disconnect_task is streaming_task
+
+
+@pytest.mark.asyncio
+async def test_identity_discovery_and_tool_calls_resume_one_protocol_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    server = _make_identity_scoped_server()
+    chat_session_id = uuid4()
+    db_session = cast("AsyncSession", object())
+
+    first_turn = MCPProxySession(
+        [server],
+        chat_session_id=chat_session_id,
+        db_session=db_session,
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+    await first_turn.prepare_tools_for_context()
+    assert first_turn.get_allowed_tool_names() == {"identity-server__shared"}
+
+    [result] = await first_turn.call_tools_parallel([("identity-server__shared", {})])
+    assert result["is_error"] is False
+    await first_turn.close()
+
+    second_turn = MCPProxySession(
+        [server],
+        chat_session_id=chat_session_id,
+        db_session=db_session,
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+    await second_turn.prepare_tools_for_context()
+
+    assert second_turn.get_allowed_tool_names() == {
+        "identity-server__admin_only",
+        "identity-server__shared",
+    }
+    assert _InMemoryMcpStateRepo.values == {(chat_session_id, server.id): "protocol-1"}
+    assert _StatefulMCPClient.protocol_sessions == {
+        "protocol-1": {"admin_only", "shared"}
+    }
+    assert _StatefulMCPClient.terminated_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_identity_discovery_terminates_session_when_it_cannot_be_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    _InMemoryMcpStateRepo.fail_writes = True
+    server = _make_identity_scoped_server()
+    proxy = MCPProxySession(
+        [server],
+        chat_session_id=uuid4(),
+        db_session=cast("AsyncSession", object()),
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+
+
+@pytest.mark.asyncio
+async def test_failed_discovery_does_not_terminate_a_persisted_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    server = _make_identity_scoped_server()
+    chat_session_id = uuid4()
+    _InMemoryMcpStateRepo.values[(chat_session_id, server.id)] = "protocol-1"
+    _StatefulMCPClient.protocol_sessions["protocol-1"] = {"shared"}
+    _StatefulMCPClient.next_session_number = 2
+    _StatefulMCPClient.fail_list_tools = True
+    proxy = MCPProxySession(
+        [server],
+        chat_session_id=chat_session_id,
+        db_session=cast("AsyncSession", object()),
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert _StatefulMCPClient.protocol_sessions == {"protocol-1": {"shared"}}
+    assert _StatefulMCPClient.terminated_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_identity_discovery_fails_closed_when_persisted_session_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    server = _make_identity_scoped_server()
+    chat_session_id = uuid4()
+    _InMemoryMcpStateRepo.values[(chat_session_id, server.id)] = "protocol-1"
+    _InMemoryMcpStateRepo.fail_reads = True
+    _StatefulMCPClient.protocol_sessions["protocol-1"] = {"shared"}
+    _StatefulMCPClient.next_session_number = 2
+    proxy = MCPProxySession(
+        [server],
+        chat_session_id=chat_session_id,
+        db_session=cast("AsyncSession", object()),
+        identity_headers={"X-Eneo-User-Id": "user"},
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+    assert _InMemoryMcpStateRepo.values == {(chat_session_id, server.id): "protocol-1"}
+    assert _StatefulMCPClient.protocol_sessions == {"protocol-1": {"shared"}}
+    assert _StatefulMCPClient.terminated_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_identity_catalog_probes_share_one_preparation_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _CoordinatedDiscoveryMCPClient.configure(("first", "second"))
+    monkeypatch.setattr(proxy_module, "MCPClient", _CoordinatedDiscoveryMCPClient)
+    monkeypatch.setattr(
+        proxy_module,
+        "MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS",
+        0.03,
+        raising=False,
+    )
+    servers = [
+        _make_identity_scoped_server("first"),
+        _make_identity_scoped_server("second"),
+    ]
+    proxy = MCPProxySession(servers, identity_headers={"X-Eneo-User-Id": "user"})
+
+    started_at = time.perf_counter()
+    await asyncio.wait_for(proxy.prepare_tools_for_context(), timeout=0.15)
+    elapsed = time.perf_counter() - started_at
+
+    assert elapsed < 0.12
+    assert _CoordinatedDiscoveryMCPClient.started_names == {"first", "second"}
+    assert proxy.get_tools_for_llm() == []
+    for server in servers:
+        assert (
+            _CoordinatedDiscoveryMCPClient.enter_tasks[server.id]
+            is _CoordinatedDiscoveryMCPClient.exit_tasks[server.id]
+        )
+
+
+@pytest.mark.asyncio
+async def test_identity_catalog_results_keep_configured_server_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _CoordinatedDiscoveryMCPClient.configure(("first", "second"))
+    monkeypatch.setattr(proxy_module, "MCPClient", _CoordinatedDiscoveryMCPClient)
+    servers = [
+        _make_identity_scoped_server("first"),
+        _make_identity_scoped_server("second"),
+    ]
+    proxy = MCPProxySession(servers, identity_headers={"X-Eneo-User-Id": "user"})
+
+    preparation = asyncio.create_task(proxy.prepare_tools_for_context())
+    await asyncio.wait_for(
+        _CoordinatedDiscoveryMCPClient.all_started.wait(), timeout=0.1
+    )
+    _CoordinatedDiscoveryMCPClient.release_by_name["second"].set()
+    await asyncio.wait_for(
+        _CoordinatedDiscoveryMCPClient.finished_by_name["second"].wait(), timeout=0.1
+    )
+    _CoordinatedDiscoveryMCPClient.release_by_name["first"].set()
+    await asyncio.wait_for(preparation, timeout=0.1)
+
+    assert _CoordinatedDiscoveryMCPClient.finished_by_name["second"].is_set()
+    assert [tool["function"]["name"] for tool in proxy.get_tools_for_llm()] == [
+        "first__shared",
+        "second__shared",
+    ]
 
 
 @pytest.mark.asyncio
