@@ -163,6 +163,12 @@ The authoring and approval roles are deliberately separate:
 | Tenant admin              | Publish, unpublish, republish, and delete eligible organisation Skills                           |
 | Tenant admin + Use Skills | Choose approved organisation Skills for Personal Chat                                            |
 
+Only the predefined **Owner** role receives **Use Skills** and **Manage Skills**
+by default. Owners can delegate either capability through a custom role when the
+organisation is ready to broaden access. The predefined User and AI Configurator
+roles do not receive Skill permissions automatically, and upgrades preserve
+explicit Skill permissions already assigned to custom roles.
+
 Runtime use does not depend on the author's current role. Removing an authoring
 permission does not break an Assistant or App that already has an exact,
 permitted Skill attachment.
