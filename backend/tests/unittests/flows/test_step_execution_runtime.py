@@ -165,11 +165,6 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
         retrieve_rag_chunks=AsyncMock(),
         process_typed_output=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {},
-        json_mode_cache_key=lambda assistant_obj: "unused",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
 
     prepared = await prepare_step_execution(
@@ -219,11 +214,6 @@ async def test_prepare_step_execution_reports_prompt_variable_miss_before_provid
         retrieve_rag_chunks=AsyncMock(),
         process_typed_output=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {},
-        json_mode_cache_key=lambda assistant_obj: "unused",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -277,11 +267,6 @@ async def test_prepare_step_execution_keeps_json_binding_underlag_without_contra
         retrieve_rag_chunks=AsyncMock(),
         process_typed_output=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {},
-        json_mode_cache_key=lambda assistant_obj: "unused",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
 
     prepared = await prepare_step_execution(
@@ -335,11 +320,6 @@ async def test_prepare_step_execution_validates_json_binding_when_binding_is_jso
         retrieve_rag_chunks=AsyncMock(),
         process_typed_output=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {},
-        json_mode_cache_key=lambda assistant_obj: "unused",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
 
     prepared = await prepare_step_execution(
@@ -592,6 +572,12 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     original_kwargs = MagicMock(name="original_kwargs")
     json_mode_kwargs = MagicMock(name="json_mode_kwargs")
     assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        litellm_model_name="openai/gpt-test",
+        name="gpt-test",
+        provider_type="openai",
+    )
     assistant.completion_model_kwargs = original_kwargs
     assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
     assistant.get_response = AsyncMock(
@@ -627,11 +613,6 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -647,7 +628,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     second_kwargs = assistant.get_response.await_args_list[1].kwargs
     assert first_kwargs["model_kwargs"] is json_mode_kwargs
     assert second_kwargs["model_kwargs"] is original_kwargs
-    assert state.json_mode_supported["provider:model:1"] is False
+    assert state.json_mode_supported["openai:gpt-test:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
 
@@ -694,11 +675,6 @@ async def test_complete_step_execution_translates_context_window_failure():
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("unused", [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
 
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -788,11 +764,6 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
         llm_request_timeout_seconds=0.3,
     )
 
@@ -872,11 +843,6 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
         llm_request_timeout_seconds=0.1,
     )
 
@@ -937,11 +903,6 @@ async def test_complete_step_execution_times_out_llm_request():
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
         llm_request_timeout_seconds=0.001,
     )
 
@@ -1005,11 +966,6 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
         llm_request_timeout_seconds=10,
         run_cancelled=AsyncMock(return_value=True),
         run_cancel_poll_interval_seconds=0.001,
@@ -1074,11 +1030,6 @@ async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_can
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
-        attach_typed_failure_context=attach_typed_failure_context,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
         llm_request_timeout_seconds=10,
         run_cancelled=AsyncMock(return_value=True),
         run_cancel_poll_interval_seconds=0.001,
@@ -1115,6 +1066,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
     original_kwargs = MagicMock(name="original_kwargs")
     assistant = MagicMock()
     assistant.completion_model = SimpleNamespace(
+        id=None,
         litellm_model_name="openai/gpt-4.1",
         name="gpt-4.1",
         provider_type="openai",
@@ -1153,11 +1105,6 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     caplog.set_level(
@@ -1174,7 +1121,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
 
     assert assistant.get_response.await_count == 1
     assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
-    assert state.json_mode_supported["provider:model:1"] is False
+    assert state.json_mode_supported["openai:gpt-4.1:none"] is False
     assert output.structured_output == {"ok": True}
     assert "Failed to enable native JSON mode for flow step execution." in caplog.text
 
@@ -1193,6 +1140,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     original_kwargs = MagicMock(name="original_kwargs")
     assistant = MagicMock()
     assistant.completion_model = SimpleNamespace(
+        id=None,
         litellm_model_name=None,
         name="claude-3-5-haiku",
         provider_type="anthropic",
@@ -1228,11 +1176,6 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "anthropic:haiku:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -1246,7 +1189,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     assert assistant.completion_model_kwargs.model_copy.call_count == 0
     assert assistant.get_response.await_count == 1
     assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
-    assert state.json_mode_supported["anthropic:haiku:1"] is False
+    assert state.json_mode_supported["anthropic:claude-3-5-haiku:none"] is False
     assert output.structured_output == {"ok": True}
 
 
@@ -1311,11 +1254,6 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
             return_value=_typed_output_result([{"title": "A"}])
         ),
         apply_output_cap=AsyncMock(return_value=('[{"title":"A"}]', [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -1334,7 +1272,16 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_prefers_provider_reported_usage() -> None:
+async def test_complete_step_execution_prefers_provider_reported_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_counter = MagicMock(
+        side_effect=AssertionError("provider usage must bypass token estimation")
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.count_tokens",
+        token_counter,
+    )
     run = _run()
     state = _state()
     step = _step(output_type="text")
@@ -1376,11 +1323,6 @@ async def test_complete_step_execution_prefers_provider_reported_usage() -> None
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text) * 10,
     )
 
     output = await complete_step_execution(
@@ -1393,12 +1335,17 @@ async def test_complete_step_execution_prefers_provider_reported_usage() -> None
 
     assert output.num_tokens_input == 123
     assert output.num_tokens_output == 456
+    token_counter.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_falls_back_to_estimated_usage_when_provider_usage_missing() -> (
-    None
-):
+async def test_complete_step_execution_falls_back_to_estimated_usage_when_provider_usage_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.count_tokens",
+        lambda text: 19,
+    )
     run = _run()
     state = _state()
     step = _step(output_type="text")
@@ -1439,11 +1386,6 @@ async def test_complete_step_execution_falls_back_to_estimated_usage_when_provid
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: 19,
     )
 
     output = await complete_step_execution(
@@ -1467,10 +1409,15 @@ async def test_complete_step_execution_falls_back_to_estimated_usage_when_provid
     ],
 )
 async def test_complete_step_execution_falls_back_per_usage_field(
+    monkeypatch: pytest.MonkeyPatch,
     usage: TokenUsage,
     expected_input_tokens: int,
     expected_output_tokens: int,
 ) -> None:
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.count_tokens",
+        lambda text: 26,
+    )
     run = _run()
     state = _state()
     step = _step(output_type="text")
@@ -1512,11 +1459,6 @@ async def test_complete_step_execution_falls_back_per_usage_field(
         ),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: 26,
     )
 
     output = await complete_step_execution(
@@ -1602,11 +1544,6 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar med kallor", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -1697,11 +1634,6 @@ async def test_complete_step_execution_records_missing_citations_without_failing
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -1780,11 +1712,6 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(
@@ -1911,11 +1838,6 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
         retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
         process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Slutrapport", [])),
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
-        json_mode_cache_key=lambda assistant_obj: "provider:model:1",
-        is_json_mode_rejection=lambda exc: "response_format" in str(exc),
-        count_tokens=lambda text: len(text),
     )
 
     output = await complete_step_execution(

@@ -150,12 +150,8 @@ from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     StepExecutionRuntimeDeps,
-    attach_typed_failure_context,
     build_output_payload,
-    effective_model_parameters,
     execution_hash,
-    is_json_mode_rejection,
-    json_mode_cache_key,
     prepare_step_execution,
 )
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
@@ -1314,11 +1310,6 @@ class FlowRunExecutor:
             retrieve_rag_chunks=self._retrieve_rag_chunks,
             process_typed_output=self._process_typed_output,
             apply_output_cap=self._apply_output_cap,
-            attach_typed_failure_context=attach_typed_failure_context,
-            effective_model_parameters=effective_model_parameters,
-            json_mode_cache_key=json_mode_cache_key,
-            is_json_mode_rejection=is_json_mode_rejection,
-            count_tokens=count_tokens,
             logger=logger,
             llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,

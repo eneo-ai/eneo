@@ -13,6 +13,7 @@ from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
+    count_tokens,
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params,
@@ -147,10 +148,6 @@ class VariableResolverProtocol(Protocol):
     def interpolate(self, template: str, context: dict[str, Any]) -> str: ...
 
 
-class CountTokensFn(Protocol):
-    def __call__(self, text: str) -> int: ...
-
-
 class LoadAssistantFn(Protocol):
     def __call__(
         self,
@@ -210,28 +207,6 @@ class ApplyOutputCapFn(Protocol):
     ) -> Awaitable[tuple[str, list[UUID]]]: ...
 
 
-class AttachTypedFailureContextFn(Protocol):
-    def __call__(
-        self,
-        exc: TypedIOValidationException,
-        *,
-        input_payload_for_result: dict[str, Any],
-        effective_prompt: str,
-    ) -> TypedIOValidationException: ...
-
-
-class EffectiveModelParametersFn(Protocol):
-    def __call__(self, assistant: RuntimeAssistantProtocol) -> dict[str, Any]: ...
-
-
-class JsonModeCacheKeyFn(Protocol):
-    def __call__(self, assistant: RuntimeAssistantProtocol) -> str: ...
-
-
-class JsonModeRejectionFn(Protocol):
-    def __call__(self, exc: Exception) -> bool: ...
-
-
 class RunCancelledFn(Protocol):
     def __call__(
         self,
@@ -266,11 +241,6 @@ class StepExecutionRuntimeDeps:
     retrieve_rag_chunks: RetrieveRagChunksFn
     process_typed_output: ProcessTypedOutputFn
     apply_output_cap: ApplyOutputCapFn
-    attach_typed_failure_context: AttachTypedFailureContextFn
-    effective_model_parameters: EffectiveModelParametersFn
-    json_mode_cache_key: JsonModeCacheKeyFn
-    is_json_mode_rejection: JsonModeRejectionFn
-    count_tokens: CountTokensFn
     logger: logging.Logger | None = None
     llm_request_timeout_seconds: float = 600
     run_cancelled: RunCancelledFn | None = None
@@ -391,7 +361,7 @@ def _typed_context_window_error(
             exc.estimated_tokens,
             exc.max_tokens,
         )
-    return deps.attach_typed_failure_context(
+    return attach_typed_failure_context(
         TypedIOValidationException(
             f"Step {step.step_order}: packaged model input{source_hint} uses "
             f"about {exc.estimated_tokens} tokens, exceeding the selected "
@@ -436,7 +406,7 @@ async def call_assistant_with_timeout(
                 step.step_order,
                 deps.llm_request_timeout_seconds,
             )
-        raise deps.attach_typed_failure_context(
+        raise attach_typed_failure_context(
             TypedIOValidationException(
                 f"Step {step.step_order}: LLM request exceeded "
                 f"{deps.llm_request_timeout_seconds:g}s timeout.",
@@ -543,7 +513,7 @@ async def call_assistant_with_timeout(
                         step.step_order,
                         deps.llm_request_timeout_seconds,
                     )
-                raise deps.attach_typed_failure_context(
+                raise attach_typed_failure_context(
                     TypedIOValidationException(
                         f"Step {step.step_order}: LLM request exceeded "
                         f"{deps.llm_request_timeout_seconds:g}s timeout.",
@@ -570,7 +540,7 @@ async def call_assistant_with_timeout(
                         step.step_order,
                         deps.llm_request_timeout_seconds,
                     )
-                raise deps.attach_typed_failure_context(
+                raise attach_typed_failure_context(
                     TypedIOValidationException(
                         f"Step {step.step_order}: LLM request exceeded "
                         f"{deps.llm_request_timeout_seconds:g}s timeout.",
@@ -609,7 +579,7 @@ async def call_assistant_with_timeout(
                 step.step_order,
                 deps.llm_request_timeout_seconds,
             )
-        raise deps.attach_typed_failure_context(
+        raise attach_typed_failure_context(
             TypedIOValidationException(
                 f"Step {step.step_order}: LLM request exceeded "
                 f"{deps.llm_request_timeout_seconds:g}s timeout.",
@@ -941,7 +911,7 @@ async def prepare_step_execution(
                 requested_file_ids=requested_file_ids,
             )
         except TypedIOValidationException as exc:
-            raise deps.attach_typed_failure_context(
+            raise attach_typed_failure_context(
                 exc,
                 input_payload_for_result=input_payload_for_result,
                 effective_prompt=effective_prompt,
@@ -981,7 +951,7 @@ async def prepare_step_execution(
             files=step_input.files,
         )
     except TypedIOValidationException as exc:
-        raise deps.attach_typed_failure_context(
+        raise attach_typed_failure_context(
             exc,
             input_payload_for_result=input_payload_for_result,
             effective_prompt=effective_prompt,
@@ -1038,7 +1008,7 @@ async def prepare_step_execution(
                 input_payload_for_result["contract_validation"] = (
                     contract_validation_payload
                 )
-            raise deps.attach_typed_failure_context(
+            raise attach_typed_failure_context(
                 exc,
                 input_payload_for_result=input_payload_for_result,
                 effective_prompt=effective_prompt,
@@ -1106,7 +1076,7 @@ async def complete_step_execution(
 
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs
-    cache_key = deps.json_mode_cache_key(prepared.assistant)
+    cache_key = json_mode_cache_key(prepared.assistant)
     native_json_object_requested = resolve_format_spec(
         step.output_type
     ).should_request_native_json_object_mode(step.output_contract)
@@ -1173,7 +1143,7 @@ async def complete_step_execution(
             step_deadline_monotonic=step_deadline_monotonic,
         )
     except Exception as model_exc:
-        if native_json_object_requested and deps.is_json_mode_rejection(model_exc):
+        if native_json_object_requested and is_json_mode_rejection(model_exc):
             state.json_mode_supported[cache_key] = False
             response = await call_assistant_with_timeout(
                 step=step,
@@ -1248,7 +1218,7 @@ async def complete_step_execution(
             run=run,
         )
     except TypedIOValidationException as exc:
-        raise deps.attach_typed_failure_context(
+        raise attach_typed_failure_context(
             exc,
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prompt_override,
@@ -1285,7 +1255,7 @@ async def complete_step_execution(
     num_tokens_output = (
         response_usage.completion_tokens
         if response_usage is not None and response_usage.completion_tokens is not None
-        else deps.count_tokens(raw_full_text) + reasoning_tokens
+        else count_tokens(raw_full_text) + reasoning_tokens
     )
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
@@ -1299,7 +1269,7 @@ async def complete_step_execution(
         num_tokens_input=num_tokens_input,
         num_tokens_output=num_tokens_output,
         effective_prompt=prompt_override,
-        model_parameters_json=deps.effective_model_parameters(prepared.assistant),
+        model_parameters_json=effective_model_parameters(prepared.assistant),
         requested_model=requested_model_name(prepared.assistant),
         response_model=getattr(response_model_info, "name", None),
         provider=getattr(response_model_info, "provider_type", None),

@@ -13,6 +13,7 @@ from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.output_modes import compose_text_violation
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
+from eneo.flows.runtime.step_execution_runtime import attach_typed_failure_context
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -47,7 +48,7 @@ class ComposeTextStepHandler:
             output_mode=step.output_mode,
         )
         if mode_error is not None:
-            raise deps.attach_typed_failure_context(
+            raise attach_typed_failure_context(
                 TypedIOValidationException(
                     mode_error,
                     code=FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION.value,
@@ -63,7 +64,7 @@ class ComposeTextStepHandler:
                 run=run,
             )
         except TypedIOValidationException as exc:
-            raise deps.attach_typed_failure_context(
+            raise attach_typed_failure_context(
                 exc,
                 input_payload_for_result=prepared.input_payload_for_result,
                 effective_prompt=prepared.effective_prompt,

@@ -136,11 +136,6 @@ def _prepared_assistant_step(
         retrieve_rag_chunks=AsyncMock(),
         process_typed_output=resolved_process_typed_output,
         apply_output_cap=resolved_apply_output_cap,
-        attach_typed_failure_context=lambda exc, **kwargs: exc,
-        effective_model_parameters=lambda assistant_obj: {},
-        json_mode_cache_key=lambda assistant_obj: "unused",
-        is_json_mode_rejection=lambda exc: False,
-        count_tokens=lambda text: len(text),
     )
     return PreparedAssistantStep(prepared=prepared, deps=deps)
 

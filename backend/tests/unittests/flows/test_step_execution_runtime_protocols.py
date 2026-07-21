@@ -93,16 +93,6 @@ def _build_assistant(
     )
 
 
-def test_protocols_are_exported() -> None:
-    from eneo.flows.runtime.protocols import (
-        RuntimeAssistantProtocol,
-        RuntimeCompletionModelProtocol,
-    )
-
-    assert RuntimeAssistantProtocol is not None
-    assert RuntimeCompletionModelProtocol is not None
-
-
 def test_effective_model_parameters_accepts_protocol_implementer() -> None:
     from eneo.flows.runtime.step_execution_runtime import effective_model_parameters
 

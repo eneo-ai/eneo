@@ -19,6 +19,7 @@ from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
+    attach_typed_failure_context,
     complete_step_execution,
 )
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
@@ -223,7 +224,7 @@ async def _assemble_per_item_output(
             run=run,
         )
     except TypedIOValidationException as exc:
-        raise first_deps.attach_typed_failure_context(
+        raise attach_typed_failure_context(
             exc,
             input_payload_for_result=input_payload_for_result,
             effective_prompt=first_output.effective_prompt,
