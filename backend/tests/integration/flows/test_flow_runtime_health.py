@@ -15,7 +15,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunStatus
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -100,8 +99,8 @@ async def _create_published_flow(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -236,7 +235,7 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         policy = _policy()
         now = datetime.now(timezone.utc)
 
@@ -407,7 +406,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         policy = _policy()
         now = datetime.now(timezone.utc)
         pending_run = await _create_run(
@@ -510,7 +509,7 @@ async def test_flow_runtime_health_snapshot_reports_webhook_outbox_delivery_stat
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         policy = _policy()
         now = datetime.now(timezone.utc)
         pending_run = await _create_webhook_delivery_attempt(

@@ -25,7 +25,6 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -198,7 +197,6 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
     )
     projected_flow = await FlowRepository(
         session=async_session,
-        factory=FlowFactory(),
     ).get(flow.id, test_tenant.id)
 
     assert (run.id in due_run_ids) is (case.effective_days is not None)

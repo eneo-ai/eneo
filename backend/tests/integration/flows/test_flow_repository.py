@@ -21,7 +21,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from eneo.flows import (
-    FlowFactory,
     FlowRepository,
     FlowVersionRepository,
 )
@@ -183,7 +182,7 @@ async def test_flow_repository_counts_distinct_mcp_assistants_once_in_one_query(
         )
         await session.flush()
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         flow = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -291,7 +290,7 @@ async def test_flow_repository_create_get_and_tenant_scope(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -336,7 +335,7 @@ async def test_flow_repository_replaces_resource_bindings(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -401,7 +400,7 @@ async def test_flow_repository_lists_resource_bindings_as_typed_values(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -464,7 +463,7 @@ async def test_flow_repository_resource_binding_replacement_is_atomic_on_insert_
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -532,7 +531,7 @@ async def test_flow_repository_resource_binding_write_is_tenant_scoped(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -575,7 +574,7 @@ async def test_flow_repository_soft_delete_hides_row(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -624,7 +623,7 @@ async def test_flow_update_deletes_orphaned_flow_managed_assistant(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -696,7 +695,7 @@ async def test_flow_repository_update_preserves_step_ids_during_adjacent_reorder
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -766,7 +765,7 @@ async def test_flow_repository_update_inserts_new_step_without_replacing_existin
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -835,7 +834,7 @@ async def test_flow_repository_update_allows_transcribe_only_output_mode(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -889,7 +888,7 @@ async def test_flow_delete_cascades_owned_flow_managed_assistants(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -946,8 +945,8 @@ async def test_flow_delete_preserves_steps_and_flow_managed_assistant_when_runs_
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         created = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1030,7 +1029,7 @@ async def test_flow_delete_keeps_shared_flow_managed_assistant_referenced_by_oth
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         owner_flow = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1120,7 +1119,7 @@ async def test_flow_repository_rejects_duplicate_active_name_in_space(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         base_flow = _build_flow(
             tenant_id=admin_user.tenant_id,
             space_id=space.id,
@@ -1155,7 +1154,7 @@ async def test_flow_repository_allows_name_reuse_after_soft_delete(
             space_id=space.id,
         )
 
-        repo = FlowRepository(session=session, factory=FlowFactory())
+        repo = FlowRepository(session=session)
         flow = await repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,

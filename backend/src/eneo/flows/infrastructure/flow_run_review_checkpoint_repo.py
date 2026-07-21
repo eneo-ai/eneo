@@ -63,7 +63,6 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
@@ -122,11 +121,9 @@ class FlowRunReviewCheckpointRepository:
         self,
         *,
         session: AsyncSession,
-        factory: FlowFactory,
         audit_outbox_repo: FlowRunAuditOutboxRepository,
     ):
         self.session = session
-        self.factory = factory
         self.audit_outbox_repo = audit_outbox_repo
 
     async def create_or_get_review_checkpoint_for_attempt(
@@ -207,7 +204,7 @@ class FlowRunReviewCheckpointRepository:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
             )
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
 
     async def open_review_checkpoint_for_completed_step(
         self,
@@ -254,10 +251,10 @@ class FlowRunReviewCheckpointRepository:
         )
         if existing_checkpoint_row is not None:
             return FlowRunReviewCheckpointOpenResult(
-                checkpoint=self.factory.from_flow_run_review_checkpoint_db(
+                checkpoint=FlowRunReviewCheckpoint.model_validate(
                     existing_checkpoint_row
                 ),
-                run=self.factory.from_flow_run_db(run_row),
+                run=FlowRun.model_validate(run_row),
                 created=False,
                 audit_outbox_id=None,
             )
@@ -338,7 +335,7 @@ class FlowRunReviewCheckpointRepository:
         )
         return FlowRunReviewCheckpointOpenResult(
             checkpoint=checkpoint,
-            run=self.factory.from_flow_run_db(updated_run_row),
+            run=FlowRun.model_validate(updated_run_row),
             created=True,
             audit_outbox_id=outbox_id,
         )
@@ -371,7 +368,7 @@ class FlowRunReviewCheckpointRepository:
             return None
         if len(checkpoint_rows) > 1:
             raise FlowReviewMultipleActiveCheckpointsError()
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_rows[0])
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_rows[0])
 
     async def get_review_checkpoint_for_edit(
         self,
@@ -404,7 +401,7 @@ class FlowRunReviewCheckpointRepository:
                 FlowRunReviewCheckpointState.EDITED,
             ),
         )
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
 
     async def edit_review_checkpoint_payload(
         self,
@@ -591,10 +588,8 @@ class FlowRunReviewCheckpointRepository:
         if checkpoint_row.state == FlowRunReviewCheckpointState.RESUMED.value:
             if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
                 return FlowRunReviewCheckpointResumeResult(
-                    checkpoint=self.factory.from_flow_run_review_checkpoint_db(
-                        checkpoint_row
-                    ),
-                    run=self.factory.from_flow_run_db(run_row),
+                    checkpoint=FlowRunReviewCheckpoint.model_validate(checkpoint_row),
+                    run=FlowRun.model_validate(run_row),
                     accepted=False,
                 )
             raise FlowReviewCheckpointAlreadyResumedError()
@@ -627,7 +622,7 @@ class FlowRunReviewCheckpointRepository:
         )
         if updated_run_row is None:
             raise FlowReviewRunNoLongerAwaitingReviewError()
-        run = self.factory.from_flow_run_db(updated_run_row)
+        run = FlowRun.model_validate(updated_run_row)
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=updated_checkpoint,
             run_revision=run.revision,
@@ -673,7 +668,7 @@ class FlowRunReviewCheckpointRepository:
         )
         if checkpoint_row is None:
             return None
-        checkpoint = self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        checkpoint = FlowRunReviewCheckpoint.model_validate(checkpoint_row)
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=checkpoint,
             run_revision=run_revision,
@@ -725,7 +720,7 @@ class FlowRunReviewCheckpointRepository:
             .scalars()
             .all()
         )
-        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
+        return [FlowRunReviewCheckpoint.model_validate(row) for row in rows]
 
     async def expire_review_checkpoint_for_reconciliation(
         self,
@@ -771,7 +766,7 @@ class FlowRunReviewCheckpointRepository:
         )
         if checkpoint_row is None:
             return None
-        checkpoint = self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        checkpoint = FlowRunReviewCheckpoint.model_validate(checkpoint_row)
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=checkpoint,
             run_revision=run_row.revision,
@@ -926,7 +921,7 @@ class FlowRunReviewCheckpointRepository:
         )
         if checkpoint_row is None:
             raise FlowReviewCheckpointNotFoundError()
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
 
     async def _insert_review_checkpoint_transition_outbox(
         self,
@@ -984,4 +979,4 @@ class FlowRunReviewCheckpointRepository:
             .scalars()
             .all()
         )
-        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
+        return [FlowRunReviewCheckpoint.model_validate(row) for row in rows]

@@ -30,7 +30,7 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 
 | Contract                                                 | Type        | Source                                | Forbidden                           | Ignored edges                                                           |
 | -------------------------------------------------------- | ----------- | ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| `Flows engine must not import AI Builder`                | `forbidden` | 80 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
+| `Flows engine must not import AI Builder`                | `forbidden` | 79 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
 | `FCM must not import AI Builder`                         | `forbidden` | `eneo.flows.flow_capability_manifest` | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package application must not import AI Builder`    | `forbidden` | `eneo.flow_packages.application`      | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package domain must not import AI Builder`         | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flows.ai_builder`             | none                                                                    |
@@ -218,15 +218,6 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 | --------------------------------- | --------- | ------------------------------------------------------------------------------------- |
 | `flow_ai_builder_budget_settings` | `module`  | Builder budget settings should live with the builder boundary.                        |
 | `ai_builder`                      | `package` | Flow AI Builder plugin boundary; only shared contracts should cross into Flow proper. |
-
-</details>
-
-<details>
-<summary><code>remove-merge-later</code> (1 entries)</summary>
-
-| Entry          | Kind     | Owns / start here                                                             |
-| -------------- | -------- | ----------------------------------------------------------------------------- |
-| `flow_factory` | `module` | Pass-through ORM/domain mapping should be deleted or folded into persistence. |
 
 </details>
 

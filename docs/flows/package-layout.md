@@ -53,7 +53,6 @@ provenance value instead of creating another omission model.
 | flow_capability_manifest | module | domain | Capability vocabulary is a Flow domain contract. |
 | flow_document_limits | module | domain | Document limits are Flow policy values. |
 | flow_evidence_policy | module | domain | Evidence policy is a Flow domain policy. |
-| flow_factory | module | remove-merge-later | Pass-through ORM/domain mapping should be deleted or folded into persistence. |
 | flow_input_limits | module | domain | Runtime input limits are Flow policy values. |
 | flow_metadata | module | domain | Flow metadata is a domain contract. |
 | flow_resource_bindings | module | domain | Resource bindings are Flow domain relationships. |

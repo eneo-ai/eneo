@@ -20,7 +20,6 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunLifecycleSource, FlowRunStatus
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -88,8 +87,8 @@ async def _create_flow_and_run(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -117,7 +116,7 @@ async def _create_flow_and_run(
         flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,

@@ -32,7 +32,6 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource, FlowStepAttemptStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
@@ -156,8 +155,8 @@ async def _create_running_webhook_run(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -202,7 +201,7 @@ async def _create_running_webhook_run(
         flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,
@@ -350,26 +349,23 @@ def _delivery_service(
     audit_service=None,
     encryption_service=None,
 ) -> FlowRunWebhookDeliveryService:
-    flow_run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    flow_run_repo = FlowRunRepository(session=session)
     audit_outbox_repo = FlowRunAuditOutboxRepository(session=session)
     review_checkpoint_repo = FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=audit_outbox_repo,
     )
     return FlowRunWebhookDeliveryService(
         webhook_delivery_repo=webhook_repo,
-        flow_repo=FlowRepository(session=session, factory=FlowFactory()),
+        flow_repo=FlowRepository(session=session),
         flow_run_repo=flow_run_repo,
         flow_version_repo=FlowVersionRepository(
             session=session,
-            factory=FlowFactory(),
         ),
         flow_run_terminalizer=FlowRunTerminalizer(
             flow_run_repo,
             FlowRunRerunRepository(
                 session=flow_run_repo.session,
-                factory=flow_run_repo.factory,
             ),
             audit_outbox_repo,
             review_checkpoint_repo,
@@ -415,7 +411,6 @@ async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconci
 
         stale_runs = await FlowRunRepository(
             session=session,
-            factory=FlowFactory(),
         ).list_stale_running_runs(
             tenant_id=admin_user.tenant_id,
             stale_before=datetime.now(timezone.utc),

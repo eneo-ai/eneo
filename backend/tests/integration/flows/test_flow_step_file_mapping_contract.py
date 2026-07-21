@@ -17,7 +17,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
@@ -105,7 +105,7 @@ async def _create_version(
     flow: Flow,
     tenant_id: UUID,
 ) -> None:
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    version_repo = FlowVersionRepository(session=session)
     await version_repo.create(
         flow_id=flow.id,
         version=1,
@@ -172,7 +172,7 @@ async def _create_running_step_file_flow(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
     flow = await flow_repo.create(
         flow=_flow(
             tenant_id=admin_user.tenant_id,
@@ -192,7 +192,7 @@ async def _create_running_step_file_flow(
         tenant_id=admin_user.tenant_id,
     )
     step = flow.steps[0]
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,
@@ -264,7 +264,7 @@ async def test_semantic_run_payload_separates_input_file_projection(
         input_file_a_id = input_file_a.id
         input_file_b_id = input_file_b.id
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_flow(
                 tenant_id=admin_user.tenant_id,
@@ -291,7 +291,7 @@ async def test_semantic_run_payload_separates_input_file_projection(
             file_ids=[input_file_a_id, input_file_b_id],
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -392,7 +392,7 @@ async def test_same_runtime_file_id_can_bind_to_multiple_steps(
             }
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=base_flow.model_copy(update={"steps": [first_step, second_step]}),
             tenant_id=admin_user.tenant_id,
@@ -415,7 +415,7 @@ async def test_same_runtime_file_id_can_bind_to_multiple_steps(
             file_ids=[input_file_id],
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -519,7 +519,7 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
             )
             for step_order in (1, 2, 3)
         ]
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=base_flow.model_copy(update={"steps": runtime_steps}),
             tenant_id=admin_user.tenant_id,
@@ -543,7 +543,7 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
             file_ids=[file_a_id, file_b_id, file_c_id],
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -821,7 +821,6 @@ async def test_step_result_file_requires_matching_step_attempt(
         )
         saved_result = await FlowRunRepository(
             session=session,
-            factory=FlowFactory(),
         ).save_step_result(
             run.id,
             result,
@@ -893,7 +892,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
         artifact_file_id = artifact_file.id
         purged_file_id = purged_file.id
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_flow(
                 tenant_id=admin_user.tenant_id,
@@ -912,7 +911,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         step = flow.steps[0]
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1113,17 +1112,15 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
         )
 
     async with sessionmanager.session() as terminal_session, terminal_session.begin():
-        run_repo = FlowRunRepository(session=terminal_session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=terminal_session)
         terminalizer = FlowRunTerminalizer(
             run_repo,
             FlowRunRerunRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
             ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
                 audit_outbox_repo=run_repo.audit_outbox_repo,
             ),
         )
@@ -1172,9 +1169,7 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        late_save = await FlowRunRepository(
-            session=late_session, factory=FlowFactory()
-        ).save_step_result(
+        late_save = await FlowRunRepository(session=late_session).save_step_result(
             run.id,
             late_result,
             tenant_id=admin_user.tenant_id,

@@ -47,7 +47,6 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -168,9 +167,8 @@ def _resource_binding_from_row(row: FlowResourceBindings) -> LocalResourceBindin
 class FlowRepository:
     """Tenant-scoped repository for flow aggregate operations."""
 
-    def __init__(self, session: AsyncSession, factory: FlowFactory):
+    def __init__(self, session: AsyncSession):
         self.session = session
-        self.factory = factory
 
     @staticmethod
     def _select_flows_with_run_history_retention() -> sa.Select[
@@ -352,7 +350,10 @@ class FlowRepository:
         ) = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
         return _attach_run_history_retention(
-            self.factory.from_flow_db(flow_in_db=flow_in_db, steps=steps),
+            Flow(
+                **FlowSparse.model_validate(flow_in_db).model_dump(),
+                steps=[FlowStep.model_validate(step) for step in steps],
+            ),
             organization_days=organization_days,
             classification_days=classification_days,
             space_days=space_days,
@@ -412,9 +413,12 @@ class FlowRepository:
 
         return [
             _attach_run_history_retention(
-                self.factory.from_flow_db(
-                    row[0],
-                    steps_by_flow.get(row[0].id, []),
+                Flow(
+                    **FlowSparse.model_validate(row[0]).model_dump(),
+                    steps=[
+                        FlowStep.model_validate(step)
+                        for step in steps_by_flow.get(row[0].id, [])
+                    ],
                 ),
                 organization_days=row[1],
                 classification_days=row[2],
@@ -457,7 +461,7 @@ class FlowRepository:
         flow_rows = (await self.session.execute(stmt)).all()
         return [
             _attach_run_history_retention(
-                self.factory.from_flow_sparse_db(row[0]),
+                FlowSparse.model_validate(row[0]),
                 organization_days=row[1],
                 classification_days=row[2],
                 space_days=row[3],
@@ -798,7 +802,7 @@ class FlowRepository:
         result = await self.session.scalar(stmt)
         if result is None:
             return None
-        return self.factory.from_flow_step_result_db(result)
+        return FlowStepResult.model_validate(result)
 
     async def _sync_flow_steps(
         self,

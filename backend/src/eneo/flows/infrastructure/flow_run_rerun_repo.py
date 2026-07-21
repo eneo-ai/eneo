@@ -56,7 +56,6 @@ from eneo.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
 )
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_input_envelope import (
     RerunInputOverride,
     build_rerun_execution_input_envelope,
@@ -117,10 +116,23 @@ def _rerun_step_input_key(row: FlowRunRerunOperations) -> _RerunStepInputKey:
     )
 
 
+def _rerun_operation_from_row(
+    row: FlowRunRerunOperations,
+    *,
+    root_step_input_override: RerunStepInputOverride | None,
+) -> FlowRunRerunOperation:
+    payload = {
+        field_name: getattr(row, field_name)
+        for field_name in FlowRunRerunOperation.model_fields
+        if field_name != "root_step_input_override"
+    }
+    payload["root_step_input_override"] = root_step_input_override
+    return FlowRunRerunOperation.model_validate(payload)
+
+
 class FlowRunRerunRepository:
-    def __init__(self, session: AsyncSession, factory: FlowFactory):
+    def __init__(self, session: AsyncSession):
         self.session = session
-        self.factory = factory
 
     async def get_latest_completed_attempt_id_for_step(
         self,
@@ -475,7 +487,7 @@ class FlowRunRerunRepository:
             await self._root_step_input_overrides_by_operation_id(rows)
         )
         return [
-            self.factory.from_flow_run_rerun_operation_db(
+            _rerun_operation_from_row(
                 row,
                 root_step_input_override=overrides_by_operation_id[row.id],
             )
@@ -504,9 +516,7 @@ class FlowRunRerunRepository:
             .scalars()
             .all()
         )
-        return [
-            self.factory.from_flow_run_rerun_invalidated_step_db(row) for row in rows
-        ]
+        return [FlowRunRerunInvalidatedStep.model_validate(row) for row in rows]
 
     async def get_active_rerun_operation(
         self,
@@ -557,12 +567,12 @@ class FlowRunRerunRepository:
             await self._root_step_input_overrides_by_operation_id((operation_row,))
         )
         return FlowRunActiveRerunOperation(
-            operation=self.factory.from_flow_run_rerun_operation_db(
+            operation=_rerun_operation_from_row(
                 operation_row,
                 root_step_input_override=overrides_by_operation_id[operation_row.id],
             ),
             invalidated_steps=tuple(
-                self.factory.from_flow_run_rerun_invalidated_step_db(row)
+                FlowRunRerunInvalidatedStep.model_validate(row)
                 for row in invalidated_rows
             ),
         )
@@ -683,13 +693,13 @@ class FlowRunRerunRepository:
             await self._root_step_input_overrides_by_operation_id((operation_row,))
         )
         return FlowRunRerunCommandResult(
-            operation=self.factory.from_flow_run_rerun_operation_db(
+            operation=_rerun_operation_from_row(
                 operation_row,
                 root_step_input_override=overrides_by_operation_id[operation_row.id],
             ),
-            run=self.factory.from_flow_run_db(resolved_run_row),
+            run=FlowRun.model_validate(resolved_run_row),
             invalidated_steps=tuple(
-                self.factory.from_flow_run_rerun_invalidated_step_db(row)
+                FlowRunRerunInvalidatedStep.model_validate(row)
                 for row in invalidated_rows
             ),
             created=created,

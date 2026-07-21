@@ -21,9 +21,14 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from eneo.flows.domain.flow import Flow, FlowStep, RerunStepInputOverride
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowStep,
+    FlowStepResult,
+    RerunStepInputOverride,
+)
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
@@ -116,12 +121,10 @@ def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:
         run_repo,
         FlowRunRerunRepository(
             session=run_repo.session,
-            factory=run_repo.factory,
         ),
         run_repo.audit_outbox_repo,
         FlowRunReviewCheckpointRepository(
             session=run_repo.session,
-            factory=run_repo.factory,
             audit_outbox_repo=run_repo.audit_outbox_repo,
         ),
     )
@@ -294,7 +297,7 @@ async def _create_completed_rerun_scenario(
     session.add_all([rerun_file_a, rerun_file_b])
     await session.flush()
 
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -305,7 +308,7 @@ async def _create_completed_rerun_scenario(
         tenant_id=admin_user.tenant_id,
     )
     definition_json = _published_definition_for_flow(flow)
-    await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+    await FlowVersionRepository(session=session).create(
         flow_id=_require_uuid(flow.id),
         version=1,
         definition_json=definition_json,
@@ -332,7 +335,7 @@ async def _create_completed_rerun_scenario(
     )
     await session.flush()
 
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=_require_uuid(flow.id),
         flow_version=1,
@@ -481,7 +484,6 @@ async def _accept_rerun(
 
     return await FlowRunRerunRepository(
         session=session,
-        factory=FlowFactory(),
     ).accept_or_replay_rerun_operation(
         tenant_id=scenario.tenant_id,
         flow_id=scenario.flow_id,
@@ -610,7 +612,7 @@ async def test_terminalizer_closes_active_rerun_operation_with_structured_failur
             admin_user=admin_user,
         )
         accepted = await _accept_rerun(session=session, scenario=scenario)
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
 
         await _flow_run_terminalizer(run_repo).terminalize_run(
             run_id=scenario.flow_run_id,
@@ -656,7 +658,7 @@ async def test_terminalizer_closes_active_rerun_operation_with_null_failure_code
             admin_user=admin_user,
         )
         accepted = await _accept_rerun(session=session, scenario=scenario)
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
 
         await _flow_run_terminalizer(run_repo).terminalize_run(
             run_id=scenario.flow_run_id,
@@ -694,8 +696,8 @@ async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_a
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         first_attempt = await session.scalar(
             sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
@@ -929,7 +931,6 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         ]
         listed_operations = await FlowRunRerunRepository(
             session=session,
-            factory=FlowFactory(),
         ).list_rerun_operations_for_run(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
@@ -1020,8 +1021,8 @@ async def test_accept_rerun_distinguishes_ordered_file_input_sequences(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         first_order = scenario.rerun_file_ids
         reversed_order = tuple(reversed(first_order))
         prior_root_attempt_id = await session.scalar(
@@ -1212,7 +1213,7 @@ async def test_copy_step_input_files_from_predecessor_attempt_preserves_order(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         source_attempt_id = await session.scalar(
             sa.select(FlowStepAttempts.id)
             .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
@@ -1320,8 +1321,8 @@ async def test_non_override_rerun_does_not_project_copied_rows_as_override(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         source_attempt_id = await session.scalar(
             sa.select(FlowStepAttempts.id)
             .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
@@ -1427,8 +1428,8 @@ async def test_rerun_attempt_start_and_success_records_lineage(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         accepted = await _accept_rerun(session=session, scenario=scenario)
         root_invalidated_step = accepted.invalidated_steps[0]
         assert root_invalidated_step.prior_attempt_id is not None
@@ -1485,9 +1486,7 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         assert operation_after_first_start.started_at == first_started_at
         assert operation_after_first_start.root_attempt_id == started_attempt.id
 
-        await FlowRunRepository(
-            session=session, factory=FlowFactory()
-        ).save_step_result(
+        await FlowRunRepository(session=session).save_step_result(
             scenario.flow_run_id,
             claimed.model_copy(
                 update={
@@ -1563,8 +1562,8 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         accepted = await _accept_rerun(session=session, scenario=scenario)
         root_invalidated_step = next(
             step
@@ -1605,9 +1604,7 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
         assert claimed_row is not None
         saved_result = await run_repo.save_step_result(
             scenario.flow_run_id,
-            FlowFactory()
-            .from_flow_step_result_db(claimed_row)
-            .model_copy(
+            FlowStepResult.model_validate(claimed_row).model_copy(
                 update={
                     "status": FlowStepResultStatus.COMPLETED,
                     "current_attempt_no": started_attempt.attempt_no,
@@ -1646,9 +1643,7 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
         )
-        version = await FlowVersionRepository(
-            session=session, factory=FlowFactory()
-        ).get(
+        version = await FlowVersionRepository(session=session).get(
             flow_id=scenario.flow_id,
             version=run.flow_version,
             tenant_id=scenario.tenant_id,
@@ -1741,8 +1736,8 @@ async def test_rerun_invalidated_step_link_conflict_raises_typed_error(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
+        rerun_repo = FlowRunRerunRepository(session=session)
         accepted = await _accept_rerun(session=session, scenario=scenario)
         root_invalidated_step = accepted.invalidated_steps[0]
         assert root_invalidated_step.prior_attempt_id is not None
@@ -1810,7 +1805,7 @@ async def test_accept_rerun_projects_file_inputs_at_next_root_attempt(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         await session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == scenario.flow_run_id)
@@ -1887,7 +1882,7 @@ async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session)
         started_at = datetime(2026, 1, 1, 10, tzinfo=timezone.utc)
         later_operation = FlowRunRerunOperations(
             tenant_id=scenario.tenant_id,

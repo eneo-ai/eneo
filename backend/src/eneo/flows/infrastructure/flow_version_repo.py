@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import FlowTemplateAssets, FlowVersions
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.published_definition import (
     PublishedTemplateIdentityAuditResult,
     PublishedTemplateIdentityAuditSnapshot,
@@ -104,9 +103,8 @@ async def audit_flow_version_template_identity_readiness(
 class FlowVersionRepository:
     """Tenant-scoped repository for immutable flow definition snapshots."""
 
-    def __init__(self, session: AsyncSession, factory: FlowFactory):
+    def __init__(self, session: AsyncSession):
         self.session = session
-        self.factory = factory
 
     async def create(
         self,
@@ -131,7 +129,7 @@ class FlowVersionRepository:
         version_in_db = await self.session.scalar(stmt)
         if version_in_db is None:
             raise NotFoundException("Could not create flow version.")
-        return self.factory.from_flow_version_db(version_in_db)
+        return FlowVersion.model_validate(version_in_db)
 
     async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion:
         stmt = (
@@ -143,7 +141,7 @@ class FlowVersionRepository:
         version_in_db = await self.session.scalar(stmt)
         if version_in_db is None:
             raise NotFoundException("Flow version not found.")
-        return self.factory.from_flow_version_db(version_in_db)
+        return FlowVersion.model_validate(version_in_db)
 
     async def get_many(
         self,
@@ -163,7 +161,7 @@ class FlowVersionRepository:
         )
         versions = (await self.session.execute(stmt)).scalars().all()
         versions_by_ref = {
-            (item.flow_id, item.version): self.factory.from_flow_version_db(item)
+            (item.flow_id, item.version): FlowVersion.model_validate(item)
             for item in versions
         }
         if any(ref not in versions_by_ref for ref in unique_refs):
@@ -181,7 +179,7 @@ class FlowVersionRepository:
         version_in_db = await self.session.scalar(stmt)
         if version_in_db is None:
             return None
-        return self.factory.from_flow_version_db(version_in_db)
+        return FlowVersion.model_validate(version_in_db)
 
     async def list_versions(self, flow_id: UUID, tenant_id: UUID) -> list[FlowVersion]:
         stmt = (
@@ -191,7 +189,7 @@ class FlowVersionRepository:
             .order_by(FlowVersions.version.desc())
         )
         versions = (await self.session.execute(stmt)).scalars().all()
-        return [self.factory.from_flow_version_db(item) for item in versions]
+        return [FlowVersion.model_validate(item) for item in versions]
 
     async def scan_template_references(
         self,

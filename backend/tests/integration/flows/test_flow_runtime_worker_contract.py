@@ -35,7 +35,6 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -181,8 +180,8 @@ async def _create_runtime_worker_context(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -530,8 +529,7 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
                 )
             )
             assert result_row is not None
-            flow_factory = FlowFactory()
-            late_result = flow_factory.from_flow_step_result_db(result_row).model_copy(
+            late_result = FlowStepResult.model_validate(result_row).model_copy(
                 update={
                     "status": FlowStepResultStatus.COMPLETED,
                     "output_payload_json": {"text": "late completed write"},
@@ -544,7 +542,6 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             )
             flow_run_repo = FlowRunRepository(
                 session=write_session,
-                factory=flow_factory,
             )
             saved = await flow_run_repo.save_step_result(
                 flow_run_id=context.run_id,
@@ -669,8 +666,8 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,

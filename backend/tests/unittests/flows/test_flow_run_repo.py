@@ -8,7 +8,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from eneo.flows import FlowFactory
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
@@ -68,7 +67,7 @@ def _step_result(status: FlowStepResultStatus) -> FlowStepResult:
 async def test_get_raises_flow_run_not_found_error() -> None:
     session = AsyncMock()
     session.scalar.return_value = None
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
     run_id = uuid4()
     tenant_id = uuid4()
 
@@ -83,7 +82,7 @@ async def test_get_raises_flow_run_not_found_error() -> None:
 @pytest.mark.asyncio
 async def test_save_step_result_requires_attempt_for_completed_result() -> None:
     session = AsyncMock()
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
 
     with pytest.raises(
         ValueError,
@@ -102,7 +101,7 @@ async def test_save_step_result_requires_attempt_for_completed_result() -> None:
 @pytest.mark.asyncio
 async def test_save_step_result_requires_attempt_for_result_files() -> None:
     session = AsyncMock()
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
 
     with pytest.raises(
         ValueError,
@@ -128,7 +127,7 @@ async def test_save_step_result_requires_attempt_for_result_files() -> None:
 async def test_create_raises_persistence_invariant_when_insert_returns_no_row() -> None:
     session = AsyncMock()
     session.scalar.return_value = None
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
 
     with pytest.raises(FlowRunPersistenceInvariantError) as exc_info:
         await repo.create(
@@ -149,7 +148,7 @@ async def test_create_or_get_attempt_started_raises_persistence_invariant_when_i
 ):
     session = AsyncMock()
     session.scalar.side_effect = [FlowRunStatus.RUNNING.value, None, None]
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
     run_id = uuid4()
     tenant_id = uuid4()
     flow_id = uuid4()
@@ -179,7 +178,7 @@ async def test_create_raises_runtime_upload_binding_race_payload() -> None:
     session.execute.side_effect = _integrity_error_for_constraint(
         "fk_flow_run_step_input_files_runtime_upload"
     )
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
     flow_id = uuid4()
     tenant_id = uuid4()
     step_id = uuid4()
@@ -210,7 +209,7 @@ async def test_create_reraises_unrelated_step_input_integrity_error() -> None:
     session = AsyncMock()
     session.scalar.return_value = SimpleNamespace(id=uuid4())
     session.execute.side_effect = error
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
 
     with pytest.raises(IntegrityError) as exc_info:
         await repo.create(

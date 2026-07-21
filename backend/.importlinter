@@ -32,7 +32,6 @@ source_modules =
     eneo.flows.flow_document_limits
     eneo.flows.flow_error_taxonomy
     eneo.flows.flow_evidence_policy
-    eneo.flows.flow_factory
     eneo.flows.flow_input_limits
     eneo.flows.flow_metadata
     eneo.flows.flow_resource_bindings

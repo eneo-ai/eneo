@@ -22,7 +22,6 @@ from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowVersions
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -217,7 +216,6 @@ async def test_matching_classification_barrier_matrix_has_one_policy_result(
     )
     projected_flow = await FlowRepository(
         session=async_session,
-        factory=FlowFactory(),
     ).get(flow.id, test_tenant.id)
     preview = await retention_service.preview_flow_retention_organization_change(
         tenant_id=test_tenant.id,
@@ -329,7 +327,7 @@ async def test_barrier_only_classification_and_child_values_do_not_activate_purg
         ).all()
     )
     projection = (
-        await FlowRepository(async_session, FlowFactory()).get(flow.id, test_tenant.id)
+        await FlowRepository(async_session).get(flow.id, test_tenant.id)
     ).run_history_retention
 
     assert run.id not in due_ids
@@ -396,7 +394,7 @@ async def test_nonmatching_classification_policy_does_not_affect_class_three(
         ).all()
     )
     projection = (
-        await FlowRepository(async_session, FlowFactory()).get(flow.id, test_tenant.id)
+        await FlowRepository(async_session).get(flow.id, test_tenant.id)
     ).run_history_retention
 
     assert run.id in due_ids

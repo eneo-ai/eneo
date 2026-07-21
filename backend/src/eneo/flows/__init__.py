@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 
 _LAZY_EXPORTS = {
     "FlowExecutionBackend": ("eneo.flows.execution_backend", "FlowExecutionBackend"),
-    "FlowFactory": ("eneo.flows.flow_factory", "FlowFactory"),
     "FlowRepository": ("eneo.flows.infrastructure.flow_repo", "FlowRepository"),
     "FlowRunRepository": (
         "eneo.flows.infrastructure.flow_run_repo",
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
     from eneo.flows.application.flow_run_service import FlowRunService
     from eneo.flows.application.flow_service import FlowService
     from eneo.flows.execution_backend import FlowExecutionBackend
-    from eneo.flows.flow_factory import FlowFactory
     from eneo.flows.infrastructure.flow_repo import FlowRepository
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
     from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -43,7 +41,6 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
-    "FlowFactory",
     "FlowExecutionBackend",
     "FlowRepository",
     "FlowRunRepository",

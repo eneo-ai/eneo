@@ -33,7 +33,6 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -52,12 +51,10 @@ def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:
         run_repo,
         FlowRunRerunRepository(
             session=run_repo.session,
-            factory=run_repo.factory,
         ),
         run_repo.audit_outbox_repo,
         FlowRunReviewCheckpointRepository(
             session=run_repo.session,
-            factory=run_repo.factory,
             audit_outbox_repo=run_repo.audit_outbox_repo,
         ),
     )
@@ -170,8 +167,8 @@ async def _create_running_run(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -199,7 +196,7 @@ async def _create_running_run(
     flow = flow.model_copy(update={"published_version": 1})
     flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,

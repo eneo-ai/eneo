@@ -49,7 +49,6 @@ from eneo.flows.enums import (
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     TERMINAL_FLOW_RUN_STATUSES,
 )
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunError,
@@ -117,11 +116,9 @@ class FlowRunRepository:
     def __init__(
         self,
         session: AsyncSession,
-        factory: FlowFactory,
         audit_outbox_repo: FlowRunAuditOutboxRepository | None = None,
     ):
         self.session = session
-        self.factory = factory
         self.audit_outbox_repo = audit_outbox_repo or FlowRunAuditOutboxRepository(
             session=session
         )
@@ -208,7 +205,7 @@ class FlowRunRepository:
             rows=step_input_file_rows,
         )
 
-        return self.factory.from_flow_run_db(run_row)
+        return FlowRun.model_validate(run_row)
 
     async def get(
         self,
@@ -232,7 +229,7 @@ class FlowRunRepository:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
             )
-        return self.factory.from_flow_run_db(run_row)
+        return FlowRun.model_validate(run_row)
 
     async def get_idempotent_run(
         self,
@@ -258,7 +255,7 @@ class FlowRunRepository:
         row = await self.session.scalar(stmt)
         if row is None:
             return None
-        return self.factory.from_flow_run_db(row), row.request_fingerprint
+        return FlowRun.model_validate(row), row.request_fingerprint
 
     async def count_active_runs(self, *, tenant_id: UUID) -> int:
         count = await self.session.scalar(
@@ -306,7 +303,7 @@ class FlowRunRepository:
             stmt = stmt.limit(limit)
 
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self.factory.from_flow_run_db(row) for row in rows]
+        return [FlowRun.model_validate(row) for row in rows]
 
     async def list_token_usage_for_runs(
         self,
@@ -376,7 +373,7 @@ class FlowRunRepository:
             stmt = stmt.where(FlowRuns.id == run_id)
 
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self.factory.from_flow_run_db(row) for row in rows]
+        return [FlowRun.model_validate(row) for row in rows]
 
     async def list_stale_running_runs(
         self,
@@ -404,7 +401,7 @@ class FlowRunRepository:
             .limit(limit)
         )
         rows = (await self.session.execute(stmt)).scalars().all()
-        return [self.factory.from_flow_run_db(row) for row in rows]
+        return [FlowRun.model_validate(row) for row in rows]
 
     async def claim_queued_run_for_dispatch(
         self,
@@ -439,7 +436,7 @@ class FlowRunRepository:
         )
         if claimed is None:
             return None
-        return self.factory.from_flow_run_db(claimed)
+        return FlowRun.model_validate(claimed)
 
     async def mark_dispatch_exhausted_if_due(
         self,
@@ -467,7 +464,7 @@ class FlowRunRepository:
         )
         if exhausted is None:
             return None
-        return self.factory.from_flow_run_db(exhausted)
+        return FlowRun.model_validate(exhausted)
 
     async def record_dispatch_accepted(
         self,
@@ -500,7 +497,7 @@ class FlowRunRepository:
         )
         if accepted is None:
             return None
-        return self.factory.from_flow_run_db(accepted)
+        return FlowRun.model_validate(accepted)
 
     async def record_dispatch_failure(
         self,
@@ -540,7 +537,7 @@ class FlowRunRepository:
         )
         if failed is None:
             return None
-        return self.factory.from_flow_run_db(failed)
+        return FlowRun.model_validate(failed)
 
     async def terminalize_run_status(
         self,
@@ -581,7 +578,7 @@ class FlowRunRepository:
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
             return None
-        return self.factory.from_flow_run_db(run_row)
+        return FlowRun.model_validate(run_row)
 
     async def count_active_step_results(self, *, run_id: UUID, tenant_id: UUID) -> int:
         count = await self.session.scalar(
@@ -689,7 +686,7 @@ class FlowRunRepository:
             .scalars()
             .all()
         )
-        return [self.factory.from_flow_step_result_db(row) for row in rows]
+        return [FlowStepResult.model_validate(row) for row in rows]
 
     async def list_step_attempts(
         self,
@@ -712,7 +709,7 @@ class FlowRunRepository:
             .scalars()
             .all()
         )
-        return [self.factory.from_flow_step_attempt_db(row) for row in rows]
+        return [FlowStepAttempt.model_validate(row) for row in rows]
 
     async def list_step_input_file_ids(
         self,
@@ -987,7 +984,7 @@ class FlowRunRepository:
         )
         if row is None:
             return None
-        return self.factory.from_flow_step_result_db(row)
+        return FlowStepResult.model_validate(row)
 
     async def save_step_result(
         self,
@@ -1073,7 +1070,7 @@ class FlowRunRepository:
                 result_file_references=result_file_references,
                 attempt_no=result_file_attempt_no,
             )
-        return self.factory.from_flow_step_result_db(saved)
+        return FlowStepResult.model_validate(saved)
 
     async def _replace_step_result_file_rows(
         self,
@@ -1150,7 +1147,7 @@ class FlowRunRepository:
         )
         if row is None:
             return None
-        return self.factory.from_flow_step_result_db(row)
+        return FlowStepResult.model_validate(row)
 
     async def allocate_next_attempt_no(
         self,
@@ -1231,7 +1228,7 @@ class FlowRunRepository:
                 tenant_id=tenant_id,
                 flow_id=flow_id,
             )
-        return self.factory.from_flow_step_attempt_db(row)
+        return FlowStepAttempt.model_validate(row)
 
     async def copy_step_input_files_from_predecessor_attempt(
         self,
@@ -1339,7 +1336,7 @@ class FlowRunRepository:
         )
         if row is None:
             return None
-        return self.factory.from_flow_step_attempt_db(row)
+        return FlowStepAttempt.model_validate(row)
 
     async def finish_attempt(
         self,
@@ -1394,7 +1391,7 @@ class FlowRunRepository:
                 completed_attempt_row=row,
                 tenant_id=tenant_id,
             )
-        return self.factory.from_flow_step_attempt_db(row)
+        return FlowStepAttempt.model_validate(row)
 
     async def _mark_predecessor_superseded_by_attempt(
         self,

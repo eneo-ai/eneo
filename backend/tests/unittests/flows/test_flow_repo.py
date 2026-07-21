@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows import FlowFactory
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -29,7 +28,7 @@ class _RowsResult:
 async def test_update_requires_persisted_flow_id() -> None:
     tenant_id = uuid4()
     session = AsyncMock()
-    repo = FlowRepository(session=session, factory=FlowFactory())
+    repo = FlowRepository(session=session)
     flow = Flow(
         id=None,
         tenant_id=tenant_id,
@@ -74,7 +73,7 @@ async def test_get_assistant_snapshots_scopes_collection_query_to_tenant() -> No
             _RowsResult([]),
         ]
     )
-    repo = FlowRepository(session=session, factory=FlowFactory())
+    repo = FlowRepository(session=session)
 
     snapshots = await repo.get_assistant_snapshots(
         assistant_ids=[assistant_id],

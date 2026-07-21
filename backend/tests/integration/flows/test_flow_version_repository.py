@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import FlowTemplateAssets
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.infrastructure.flow_version_repo import (
     audit_flow_version_template_identity_readiness,
@@ -157,8 +157,8 @@ async def test_create_derives_definition_checksum_from_stored_definition(
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_flow(
                 tenant_id=admin_user.tenant_id,
@@ -228,8 +228,8 @@ async def test_template_asset_reference_check_scans_non_current_versions(
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_flow(
                 tenant_id=admin_user.tenant_id,
@@ -299,8 +299,8 @@ async def test_template_identity_readiness_audit_scans_versions_and_active_asset
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_flow(
                 tenant_id=admin_user.tenant_id,

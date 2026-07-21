@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.flows import FlowFactory
 from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResultStatus,
@@ -80,7 +79,7 @@ def _integrity_error_for_constraint(constraint_name: str) -> IntegrityError:
 
 def _prepare_completed_rerun_accept_scenario(monkeypatch) -> _RerunAcceptScenario:
     session = AsyncMock()
-    repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRerunRepository(session=session)
     tenant_id = uuid4()
     flow_id = uuid4()
     run_id = uuid4()
@@ -132,7 +131,7 @@ def _prepare_completed_rerun_accept_scenario(monkeypatch) -> _RerunAcceptScenari
 async def test_get_active_rerun_operation_rejects_multiple_active_rows() -> None:
     session = AsyncMock()
     session.execute.return_value = _ExecuteRows([object(), object()])
-    repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRerunRepository(session=session)
     run_id = uuid4()
 
     with pytest.raises(FlowRunRerunMultipleActiveOperationsError) as exc_info:
@@ -151,7 +150,7 @@ async def test_accept_or_replay_rerun_operation_raises_flow_run_not_found_error(
 ) -> None:
     session = AsyncMock()
     session.scalar.return_value = None
-    repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRerunRepository(session=session)
     tenant_id = uuid4()
     flow_id = uuid4()
     run_id = uuid4()
@@ -272,7 +271,7 @@ async def test_accept_or_replay_existing_rerun_operation_raises_flow_run_not_fou
     monkeypatch,
 ) -> None:
     session = AsyncMock()
-    repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRerunRepository(session=session)
     tenant_id = uuid4()
     flow_id = uuid4()
     run_id = uuid4()

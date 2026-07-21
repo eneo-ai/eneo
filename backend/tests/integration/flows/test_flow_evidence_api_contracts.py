@@ -25,7 +25,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.api import flow_run_execution_router
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import (
@@ -227,8 +227,8 @@ async def _seed_flow_run_contract_data(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,

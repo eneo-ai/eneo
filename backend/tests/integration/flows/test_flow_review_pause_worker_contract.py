@@ -40,7 +40,6 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_factory import FlowFactory
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -251,8 +250,8 @@ async def _create_review_pause_runtime_context(
         model.id,
         space_id=space.id,
     )
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_review_pause_flow(
             tenant_id=admin_user.tenant_id,

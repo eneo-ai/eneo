@@ -95,7 +95,6 @@ from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
 from eneo.flows import (
-    FlowFactory,
     FlowRepository,
     FlowRunRepository,
     FlowRunService,
@@ -615,7 +614,7 @@ class Container(containers.DeclarativeContainer):
 
     storage_info_factory = providers.Factory(StorageInfoFactory)
     app_run_factory = providers.Factory(AppRunFactory)
-    flow_factory = providers.Factory(FlowFactory)
+
     actor_factory = providers.Factory(ActorFactory)
 
     # Managers
@@ -811,12 +810,10 @@ class Container(containers.DeclarativeContainer):
     flow_repo = providers.Factory(
         FlowRepository,
         session=session,
-        factory=flow_factory,
     )
     flow_version_repo = providers.Factory(
         FlowVersionRepository,
         session=session,
-        factory=flow_factory,
     )
     flow_template_asset_repo = providers.Factory(
         FlowTemplateAssetRepository,
@@ -841,18 +838,15 @@ class Container(containers.DeclarativeContainer):
     flow_run_repo = providers.Factory(
         FlowRunRepository,
         session=session,
-        factory=flow_factory,
         audit_outbox_repo=flow_run_audit_outbox_repo,
     )
     flow_run_rerun_repo = providers.Factory(
         FlowRunRerunRepository,
         session=session,
-        factory=flow_factory,
     )
     flow_run_review_checkpoint_repo = providers.Factory(
         FlowRunReviewCheckpointRepository,
         session=session,
-        factory=flow_factory,
         audit_outbox_repo=flow_run_audit_outbox_repo,
     )
     flow_run_terminalizer = providers.Factory(

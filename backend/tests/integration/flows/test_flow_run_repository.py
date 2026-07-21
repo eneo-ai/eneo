@@ -18,7 +18,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
 )
@@ -212,7 +212,7 @@ async def test_create_run_preseeds_pending_step_results(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -222,7 +222,7 @@ async def test_create_run_preseeds_pending_step_results(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -245,7 +245,7 @@ async def test_create_run_preseeds_pending_step_results(
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -308,9 +308,9 @@ async def test_save_step_result_upserts_on_run_and_step(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        run_repo = FlowRunRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -449,8 +449,8 @@ async def test_list_runs_filters_by_flow_id(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
 
         first_flow = await flow_repo.create(
             flow=_build_flow(
@@ -500,7 +500,7 @@ async def test_list_runs_filters_by_flow_id(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         await run_repo.create(
             flow_id=first_flow.id,
             flow_version=1,
@@ -559,9 +559,9 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
+        run_repo = FlowRunRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -701,9 +701,9 @@ async def test_list_token_usage_for_runs_returns_sparse_map_when_usage_is_empty(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
+        run_repo = FlowRunRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -789,7 +789,7 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -799,7 +799,7 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -809,7 +809,7 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         created = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -859,7 +859,7 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -869,7 +869,7 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -886,7 +886,7 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
             display_name="Flow service principal",
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         user_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -962,7 +962,7 @@ async def test_service_principal_idempotency_replays_after_api_key_rotation(
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -972,7 +972,7 @@ async def test_service_principal_idempotency_replays_after_api_key_rotation(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+        await FlowVersionRepository(session=session).create(
             flow_id=flow.id,
             version=1,
             definition_json={"steps": []},
@@ -995,7 +995,7 @@ async def test_service_principal_idempotency_replays_after_api_key_rotation(
             service_principal_id=service_principal_id,
             rotated_from_key_id=first_key_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         created = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1048,7 +1048,7 @@ async def test_idempotency_key_isolated_between_service_principals(
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1058,7 +1058,7 @@ async def test_idempotency_key_isolated_between_service_principals(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+        await FlowVersionRepository(session=session).create(
             flow_id=flow.id,
             version=1,
             definition_json={"steps": []},
@@ -1080,7 +1080,7 @@ async def test_idempotency_key_isolated_between_service_principals(
             created_by_user_id=admin_user.id,
             display_name="Second Flow service principal",
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         first_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1159,7 +1159,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1169,7 +1169,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1185,7 +1185,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         queued_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1248,12 +1248,10 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
             run_repo,
             FlowRunRerunRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
             ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
                 audit_outbox_repo=run_repo.audit_outbox_repo,
             ),
         ).terminalize_run(
@@ -1295,7 +1293,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1305,7 +1303,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1321,7 +1319,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1374,7 +1372,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1384,7 +1382,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1400,7 +1398,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1419,12 +1417,10 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             run_repo,
             FlowRunRerunRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
             ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
                 audit_outbox_repo=run_repo.audit_outbox_repo,
             ),
         )
@@ -1479,7 +1475,7 @@ async def test_get_sanitizes_corrupt_persisted_run_error_json(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1489,7 +1485,7 @@ async def test_get_sanitizes_corrupt_persisted_run_error_json(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1505,7 +1501,7 @@ async def test_get_sanitizes_corrupt_persisted_run_error_json(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1567,7 +1563,7 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1577,7 +1573,7 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1593,7 +1589,7 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1618,12 +1614,10 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
             run_repo,
             FlowRunRerunRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
             ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
                 audit_outbox_repo=run_repo.audit_outbox_repo,
             ),
         ).terminalize_run(
@@ -1667,7 +1661,7 @@ async def test_claim_step_result_is_single_winner(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1677,7 +1671,7 @@ async def test_claim_step_result_is_single_winner(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1692,7 +1686,7 @@ async def test_claim_step_result_is_single_winner(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1755,7 +1749,7 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1765,7 +1759,7 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1780,7 +1774,7 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -1801,7 +1795,7 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
 
     async def _claim_step() -> UUID | None:
         async with sessionmanager.session() as session, session.begin():
-            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            repo = FlowRunRepository(session=session)
             claimed = await repo.claim_step_result(
                 run_id=run_id,
                 step_id=step_id,
@@ -1844,7 +1838,7 @@ async def test_claim_step_result_serializes_against_terminalization(
             model.id,
             space_id=space.id,
         )
-        flow = await FlowRepository(session=session, factory=FlowFactory()).create(
+        flow = await FlowRepository(session=session).create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
                 space_id=space.id,
@@ -1853,7 +1847,7 @@ async def test_claim_step_result_serializes_against_terminalization(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+        await FlowVersionRepository(session=session).create(
             flow_id=flow.id,
             version=1,
             definition_json={
@@ -1867,7 +1861,7 @@ async def test_claim_step_result_serializes_against_terminalization(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run = await FlowRunRepository(session=session, factory=FlowFactory()).create(
+        run = await FlowRunRepository(session=session).create(
             flow_id=flow.id,
             flow_version=1,
             principal_user_id=admin_user.id,
@@ -1895,9 +1889,7 @@ async def test_claim_step_result_serializes_against_terminalization(
                 lambda _state: competing_query_started.set(),
                 once=True,
             )
-            return await FlowRunRepository(
-                session=session, factory=FlowFactory()
-            ).claim_step_result(
+            return await FlowRunRepository(session=session).claim_step_result(
                 run_id=run_id,
                 step_id=step_id,
                 tenant_id=tenant_id,
@@ -1905,19 +1897,15 @@ async def test_claim_step_result_serializes_against_terminalization(
 
     async with sessionmanager.session() as terminal_session:
         async with terminal_session.begin():
-            terminal_repo = FlowRunRepository(
-                session=terminal_session, factory=FlowFactory()
-            )
+            terminal_repo = FlowRunRepository(session=terminal_session)
             terminalized = await FlowRunTerminalizer(
                 terminal_repo,
                 FlowRunRerunRepository(
                     session=terminal_session,
-                    factory=terminal_repo.factory,
                 ),
                 terminal_repo.audit_outbox_repo,
                 FlowRunReviewCheckpointRepository(
                     session=terminal_session,
-                    factory=terminal_repo.factory,
                     audit_outbox_repo=terminal_repo.audit_outbox_repo,
                 ),
             ).terminalize_run(
@@ -1970,7 +1958,7 @@ async def test_mark_running_if_claimable_is_single_winner(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -1980,7 +1968,7 @@ async def test_mark_running_if_claimable_is_single_winner(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -1995,7 +1983,7 @@ async def test_mark_running_if_claimable_is_single_winner(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2047,7 +2035,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2057,7 +2045,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2072,7 +2060,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2093,7 +2081,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
 
     async def _claim_run() -> bool:
         async with sessionmanager.session() as session, session.begin():
-            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            repo = FlowRunRepository(session=session)
             return await repo.mark_running_if_claimable(
                 run_id=run_id,
                 tenant_id=tenant_id,
@@ -2132,7 +2120,7 @@ async def test_dispatch_claim_has_one_winner_under_concurrency(
             model.id,
             space_id=space.id,
         )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2142,7 +2130,7 @@ async def test_dispatch_claim_has_one_winner_under_concurrency(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+        await FlowVersionRepository(session=session).create(
             flow_id=flow.id,
             version=1,
             definition_json={
@@ -2158,7 +2146,6 @@ async def test_dispatch_claim_has_one_winner_under_concurrency(
         )
         run = await FlowRunRepository(
             session=session,
-            factory=FlowFactory(),
         ).create(
             flow_id=flow.id,
             flow_version=1,
@@ -2184,7 +2171,6 @@ async def test_dispatch_claim_has_one_winner_under_concurrency(
         async with sessionmanager.session() as session, session.begin():
             return await FlowRunRepository(
                 session=session,
-                factory=FlowFactory(),
             ).claim_queued_run_for_dispatch(
                 run_id=run_id,
                 tenant_id=tenant_id,
@@ -2223,7 +2209,7 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2233,7 +2219,7 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2249,7 +2235,7 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
             tenant_id=admin_user.tenant_id,
         )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2319,7 +2305,7 @@ async def test_list_runs_supports_limit_and_offset(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2329,7 +2315,7 @@ async def test_list_runs_supports_limit_and_offset(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2344,7 +2330,7 @@ async def test_list_runs_supports_limit_and_offset(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         for index in range(3):
             await run_repo.create(
                 flow_id=flow.id,
@@ -2401,7 +2387,7 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2411,7 +2397,7 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2426,7 +2412,7 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2472,7 +2458,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2482,7 +2468,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2497,7 +2483,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2565,7 +2551,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2575,7 +2561,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2590,7 +2576,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2612,7 +2598,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
 
     async def _start_attempt(worker_name: str) -> UUID:
         async with sessionmanager.session() as session, session.begin():
-            repo = FlowRunRepository(session=session, factory=FlowFactory())
+            repo = FlowRunRepository(session=session)
             attempt = await repo.create_or_get_attempt_started(
                 run_id=run_id,
                 flow_id=flow_id,
@@ -2661,7 +2647,7 @@ async def test_attempt_start_serializes_against_terminalization(
             model.id,
             space_id=space.id,
         )
-        flow = await FlowRepository(session=session, factory=FlowFactory()).create(
+        flow = await FlowRepository(session=session).create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
                 space_id=space.id,
@@ -2670,7 +2656,7 @@ async def test_attempt_start_serializes_against_terminalization(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        await FlowVersionRepository(session=session, factory=FlowFactory()).create(
+        await FlowVersionRepository(session=session).create(
             flow_id=flow.id,
             version=1,
             definition_json={
@@ -2684,7 +2670,7 @@ async def test_attempt_start_serializes_against_terminalization(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run = await FlowRunRepository(session=session, factory=FlowFactory()).create(
+        run = await FlowRunRepository(session=session).create(
             flow_id=flow.id,
             flow_version=1,
             principal_user_id=admin_user.id,
@@ -2716,9 +2702,7 @@ async def test_attempt_start_serializes_against_terminalization(
                 once=True,
             )
             try:
-                await FlowRunRepository(
-                    session=session, factory=FlowFactory()
-                ).create_or_get_attempt_started(
+                await FlowRunRepository(session=session).create_or_get_attempt_started(
                     run_id=run_id,
                     flow_id=flow_id,
                     tenant_id=tenant_id,
@@ -2733,19 +2717,15 @@ async def test_attempt_start_serializes_against_terminalization(
 
     async with sessionmanager.session() as terminal_session:
         async with terminal_session.begin():
-            terminal_repo = FlowRunRepository(
-                session=terminal_session, factory=FlowFactory()
-            )
+            terminal_repo = FlowRunRepository(session=terminal_session)
             terminalized = await FlowRunTerminalizer(
                 terminal_repo,
                 FlowRunRerunRepository(
                     session=terminal_session,
-                    factory=terminal_repo.factory,
                 ),
                 terminal_repo.audit_outbox_repo,
                 FlowRunReviewCheckpointRepository(
                     session=terminal_session,
-                    factory=terminal_repo.factory,
                     audit_outbox_repo=terminal_repo.audit_outbox_repo,
                 ),
             ).terminalize_run(
@@ -2807,7 +2787,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2817,7 +2797,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2837,7 +2817,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -2875,12 +2855,10 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             run_repo,
             FlowRunRerunRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
             ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
-                factory=run_repo.factory,
                 audit_outbox_repo=run_repo.audit_outbox_repo,
             ),
         ).terminalize_run(
@@ -2932,7 +2910,7 @@ async def test_finish_attempt_is_idempotent(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
         flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -2942,7 +2920,7 @@ async def test_finish_attempt_is_idempotent(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        version_repo = FlowVersionRepository(session=session)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
@@ -2957,7 +2935,7 @@ async def test_finish_attempt_is_idempotent(
             },
             tenant_id=admin_user.tenant_id,
         )
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
@@ -3049,8 +3027,8 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
             space_id=space.id,
         )
 
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
         first_flow = await flow_repo.create(
             flow=_build_flow(
                 tenant_id=admin_user.tenant_id,
@@ -3085,7 +3063,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
                 tenant_id=admin_user.tenant_id,
             )
 
-        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run_repo = FlowRunRepository(session=session)
 
         async def _create_run(*, flow: Flow, case: str) -> FlowRun:
             return await run_repo.create(

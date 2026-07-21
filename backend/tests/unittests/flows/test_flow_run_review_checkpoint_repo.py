@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.flows import FlowFactory
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
@@ -28,7 +27,6 @@ async def test_create_or_get_review_checkpoint_raises_persistence_invariant_when
     session.scalar.side_effect = [None, None]
     repo = FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=AsyncMock(),
     )
 
@@ -60,7 +58,6 @@ async def test_approve_review_checkpoint_raises_flow_run_not_found_error_when_pa
     session.scalar.return_value = None
     repo = FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=AsyncMock(),
     )
     run_id = uuid4()
@@ -93,7 +90,6 @@ async def test_open_review_checkpoint_raises_flow_run_not_found_error_when_paren
     session.scalar.return_value = None
     repo = FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=AsyncMock(),
     )
     run_id = uuid4()
@@ -130,7 +126,6 @@ async def test_expire_review_checkpoint_for_reconciliation_raises_flow_run_not_f
     session.scalar.return_value = None
     repo = FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=AsyncMock(),
     )
     run_id = uuid4()

@@ -21,7 +21,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
-from eneo.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
@@ -93,7 +93,6 @@ def _review_checkpoint_repo(
 ) -> FlowRunReviewCheckpointRepository:
     return FlowRunReviewCheckpointRepository(
         session=session,
-        factory=FlowFactory(),
         audit_outbox_repo=run_repo.audit_outbox_repo,
     )
 
@@ -210,7 +209,7 @@ async def _create_review_checkpoint_scenario(
         space_id=space.id,
     )
 
-    flow_repo = FlowRepository(session=session, factory=FlowFactory())
+    flow_repo = FlowRepository(session=session)
     flow = await flow_repo.create(
         flow=_build_flow(
             tenant_id=admin_user.tenant_id,
@@ -224,7 +223,7 @@ async def _create_review_checkpoint_scenario(
     assert first_step.review_policy == FlowStepReviewPolicy(
         mode=FlowStepReviewMode.VIEW
     )
-    version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+    version_repo = FlowVersionRepository(session=session)
     await version_repo.create(
         flow_id=_require_uuid(flow.id),
         version=1,
@@ -249,7 +248,7 @@ async def _create_review_checkpoint_scenario(
         tenant_id=admin_user.tenant_id,
     )
 
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     run = await run_repo.create(
         flow_id=_require_uuid(flow.id),
         flow_version=1,
@@ -375,7 +374,7 @@ async def _complete_reviewed_step_result(
     scenario: ReviewCheckpointScenario,
     output_payload_json: dict[str, object] | None = None,
 ) -> None:
-    repo = FlowRunRepository(session=session, factory=FlowFactory())
+    repo = FlowRunRepository(session=session)
     await _ensure_completed_step_attempt(
         repo=repo,
         scenario=scenario,
@@ -417,13 +416,13 @@ def _review_run_service(
     session: AsyncSession,
     admin_user,
 ) -> FlowReviewExpiryReconciler:
-    run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    run_repo = FlowRunRepository(session=session)
     checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=run_repo)
     return FlowReviewExpiryReconciler(
         flow_run_review_checkpoint_repo=checkpoint_repo,
         flow_run_terminalizer=FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(session=session, factory=run_repo.factory),
+            FlowRunRerunRepository(session=session),
             run_repo.audit_outbox_repo,
             checkpoint_repo,
         ),
@@ -448,7 +447,7 @@ async def test_create_or_get_review_checkpoint_for_attempt_is_idempotent(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
 
         checkpoint = await _create_checkpoint(
@@ -496,7 +495,7 @@ async def test_service_key_run_can_open_review_checkpoint_without_user_requester
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         service_principal_id = await _create_service_principal_id(
             session=session,
@@ -595,7 +594,7 @@ async def test_review_checkpoint_allows_one_active_checkpoint_per_run(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await _create_checkpoint(
             checkpoint_repo=checkpoint_repo,
@@ -647,7 +646,7 @@ async def test_review_checkpoint_transition_uses_revision_cas(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -712,7 +711,7 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         first_step_id, second_step_id = scenario.step_ids
         await _ensure_completed_step_attempt(
@@ -835,7 +834,7 @@ async def test_open_review_checkpoint_transitions_run_and_writes_outbox(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -915,7 +914,7 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -978,7 +977,7 @@ async def test_review_checkpoint_custom_expiry_is_not_extended_by_edit(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1033,7 +1032,7 @@ async def test_edit_review_checkpoint_updates_projection_without_execution_hash(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1141,7 +1140,7 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1269,7 +1268,7 @@ async def test_resume_review_checkpoint_rolls_back_checkpoint_and_run_together(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1361,7 +1360,7 @@ async def test_review_checkpoint_lookup_missing_checkpoint_raises_typed_error(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
 
         with pytest.raises(FlowReviewCheckpointNotFoundError):
@@ -1393,7 +1392,7 @@ async def test_review_checkpoint_mutation_rejects_non_awaiting_run(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1450,7 +1449,7 @@ async def test_review_checkpoint_mutation_rejects_inactive_checkpoint_state(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1511,7 +1510,7 @@ async def test_resume_review_checkpoint_rejects_unapproved_and_rejected_states(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1586,7 +1585,7 @@ async def test_edit_review_checkpoint_missing_projection_raises_typed_error(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1643,7 +1642,7 @@ async def test_open_review_checkpoint_requires_running_run_and_completed_step(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
 
         with pytest.raises(FlowReviewCheckpointRunNotRunningError) as queued_exc:
@@ -1746,7 +1745,7 @@ async def test_open_review_checkpoint_late_run_state_race_has_no_fake_status(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1807,7 +1806,7 @@ async def test_review_checkpoint_outbox_uses_checkpoint_revision_key(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         checkpoint = await _create_checkpoint(
             checkpoint_repo=checkpoint_repo,
@@ -1901,7 +1900,7 @@ async def test_mark_running_preserves_original_started_at_on_resume_claim(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
 
         first_claim = await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1949,7 +1948,7 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -1972,7 +1971,7 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
 
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session, factory=repo.factory),
+            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2044,7 +2043,7 @@ async def test_failed_running_run_cancels_active_checkpoint_by_terminalizer(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2060,7 +2059,7 @@ async def test_failed_running_run_cancels_active_checkpoint_by_terminalizer(
 
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session, factory=repo.factory),
+            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2123,7 +2122,7 @@ async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2248,7 +2247,7 @@ async def test_review_expiry_task_commits_checkpoint_and_run_from_fresh_session(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2331,7 +2330,7 @@ async def test_reconcile_expired_review_checkpoint_ignores_approved_checkpoint(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2397,7 +2396,7 @@ async def test_expire_review_checkpoint_ignores_late_approved_checkpoint(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2475,7 +2474,7 @@ async def test_approved_review_checkpoint_can_resume_after_expiry_time(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2541,7 +2540,7 @@ async def test_review_checkpoint_edit_after_expiry_returns_expired_error(
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2601,7 +2600,7 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
             assistant_factory=assistant_factory,
             admin_user=admin_user,
         )
-        repo = FlowRunRepository(session=session, factory=FlowFactory())
+        repo = FlowRunRepository(session=session)
         checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
         await repo.mark_running_if_claimable(
             run_id=scenario.flow_run_id,
@@ -2633,7 +2632,7 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         )
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session, factory=repo.factory),
+            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2704,7 +2703,7 @@ async def test_awaiting_review_run_rejects_rerun_without_waiting_branch(
             .where(FlowRuns.id == scenario.flow_run_id)
             .values(status=FlowRunStatus.AWAITING_REVIEW.value)
         )
-        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session)
 
         with pytest.raises(FlowRunRerunInvalidTransitionError) as exc_info:
             await rerun_repo.accept_or_replay_rerun_operation(
