@@ -7,6 +7,7 @@ from uuid import UUID
 
 from eneo.files.file_models import File
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -15,7 +16,6 @@ from eneo.flows.flow_input_limits import (
     effective_runtime_max_files,
 )
 from eneo.flows.principal import FlowPrincipal
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime_input import (
     build_runtime_input_config,
     runtime_input_accept_mimetypes,

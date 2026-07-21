@@ -24,15 +24,15 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_step_result_file import build_step_result_file_references
-from eneo.flows.runtime.models import (
+from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult

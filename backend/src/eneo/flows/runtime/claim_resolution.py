@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.runtime import RunExecutionState
 from eneo.flows.enums import ACTIVE_FLOW_STEP_RESULT_STATUSES
-from eneo.flows.runtime.models import RunExecutionState
 
 ClaimAction = Literal[
     "proceed", "missing_step_result", "step_already_claimed", "append_completed", "skip"

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 from uuid import UUID
 
+from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.flow_run_provenance import default_rag_tracking
-from eneo.flows.runtime.models import StepDiagnostic
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_metadata import build_rag_references
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore

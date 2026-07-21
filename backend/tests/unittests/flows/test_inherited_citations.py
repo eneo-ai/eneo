@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.enums import FlowStepResultStatus
 from eneo.flows.runtime.inherited_citations import collect_inherited_citation_context
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 
 
 def _completed_grounded_result(*, step_order: int) -> FlowStepResult:

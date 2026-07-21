@@ -21,6 +21,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -57,7 +58,6 @@ from eneo.flows.runtime.http_orchestration import (
     deliver_webhook,
 )
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException

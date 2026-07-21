@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.input_binding_contract_rules import effective_question_binding
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,

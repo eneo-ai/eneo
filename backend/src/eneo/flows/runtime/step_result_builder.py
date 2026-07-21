@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
-from eneo.flows.runtime.models import RuntimeStep, StepExecutionOutput
+from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
 
 
 def build_default_failed_input_payload(*, input_source: str) -> dict[str, Any]:

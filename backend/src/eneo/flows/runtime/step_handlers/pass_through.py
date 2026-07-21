@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import complete_step_execution
 from eneo.flows.runtime.step_handlers.base import (

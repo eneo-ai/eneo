@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.flows.domain.flow import Flow, FlowTemplateAsset
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import FlowInputLimitsSource
@@ -34,7 +35,6 @@ from eneo.flows.published_runtime import (
     FlowRuntimeVersionSource,
     load_published_runtime_inputs,
 )
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.main.exceptions import NotFoundException
 
 logger = logging.getLogger(__name__)

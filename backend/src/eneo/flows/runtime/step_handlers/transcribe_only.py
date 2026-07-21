@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eneo.flows.domain.flow import FlowRun
-from eneo.flows.enums import FlowOutputMode
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.output_modes import transcribe_only_violation
-from eneo.flows.runtime.models import (
+from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
 )
+from eneo.flows.enums import FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.output_modes import transcribe_only_violation
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
 from eneo.flows.runtime.step_result_builder import build_transcribe_only_rag_metadata

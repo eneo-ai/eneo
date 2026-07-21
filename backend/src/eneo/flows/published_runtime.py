@@ -6,6 +6,7 @@ from typing import Protocol, assert_never
 from uuid import UUID
 
 from eneo.flows.domain.flow import Flow, FlowVersion
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -21,7 +22,6 @@ from eneo.flows.published_definition import (
     PublishedFlowDefinition,
     parse_verified_published_definition,
 )
-from eneo.flows.runtime.models import RuntimeStep
 
 
 class FlowRuntimeFlowSource(Protocol):

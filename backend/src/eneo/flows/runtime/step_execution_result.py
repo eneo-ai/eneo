@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from eneo.flows.runtime.models import StepExecutionOutput
+from eneo.flows.domain.runtime import StepExecutionOutput
 
 
 @dataclass(frozen=True)

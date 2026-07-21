@@ -10,6 +10,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
@@ -18,7 +19,6 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.runtime.claim_resolution import StepClaimResolution
 from eneo.flows.runtime.executor import _build_attempt_provenance
-from eneo.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.runtime.step_attempt_runtime import (
     StepFailurePlan,
     build_generic_failure_plan,

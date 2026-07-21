@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from eneo.flows.runtime.models import StepDiagnostic, StepExecutionOutput
+from eneo.flows.domain.runtime import StepDiagnostic, StepExecutionOutput
 
 
 def sum_optional_token_counts(values: Iterable[int | None]) -> int | None:

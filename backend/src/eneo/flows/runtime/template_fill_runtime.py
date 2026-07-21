@@ -12,18 +12,18 @@ from uuid import UUID
 from eneo.files.file_models import File, FileCreate, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.flow import FlowRun, FlowStepResultStatus
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepExecutionOutput,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
-)
-from eneo.flows.runtime.models import (
-    RunExecutionState,
-    RuntimeStep,
-    StepDiagnostic,
-    StepExecutionOutput,
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (

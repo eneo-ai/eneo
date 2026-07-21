@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.runtime import RunExecutionState
 from eneo.flows.runtime.claim_resolution import resolve_step_claim
-from eneo.flows.runtime.models import RunExecutionState
 
 
 def _result(step_order: int, *, status: FlowStepResultStatus) -> FlowStepResult:

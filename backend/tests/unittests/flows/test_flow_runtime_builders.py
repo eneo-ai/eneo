@@ -5,8 +5,8 @@ from uuid import uuid4
 
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.runtime.execution_state_builder import build_run_execution_state
-from eneo.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from eneo.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_default_failed_input_payload,

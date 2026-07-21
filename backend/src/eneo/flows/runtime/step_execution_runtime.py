@@ -26,6 +26,13 @@ from eneo.flows.citation_sidecar import (
     strip_inline_reference_tags,
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepExecutionOutput,
+    StepInputValue,
+)
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     build_text_overflow_metadata,
@@ -36,13 +43,6 @@ from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
-)
-from eneo.flows.runtime.models import (
-    RunExecutionState,
-    RuntimeStep,
-    StepDiagnostic,
-    StepExecutionOutput,
-    StepInputValue,
 )
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions

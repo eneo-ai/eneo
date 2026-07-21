@@ -47,6 +47,13 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepExecutionOutput,
+    StepInputValue,
+)
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -122,13 +129,6 @@ from eneo.flows.runtime.http_orchestration import (
     resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
 )
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
-from eneo.flows.runtime.models import (
-    RunExecutionState,
-    RuntimeStep,
-    StepDiagnostic,
-    StepExecutionOutput,
-    StepInputValue,
-)
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,

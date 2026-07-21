@@ -6,8 +6,8 @@ from typing import Protocol
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.enums import FlowOutputMode
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     PreparedStepExecution,

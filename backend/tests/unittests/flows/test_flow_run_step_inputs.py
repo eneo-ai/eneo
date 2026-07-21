@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
@@ -17,7 +18,6 @@ from eneo.flows.flow_run_step_inputs import (
     validate_submitted_step_inputs,
 )
 from eneo.flows.principal import FlowPrincipal
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.main.exceptions import BadRequestException
 
 

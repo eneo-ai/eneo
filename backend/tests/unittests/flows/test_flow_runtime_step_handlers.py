@@ -10,15 +10,15 @@ import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
-from eneo.flows.enums import FlowOutputMode
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.runtime.executor import FlowRunExecutor
-from eneo.flows.runtime.models import (
+from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.enums import FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.runtime.executor import FlowRunExecutor
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -176,12 +176,12 @@ def test_executor_builds_expected_step_handler(
 ) -> None:
     executor = cast(
         FlowRunExecutor,
-            SimpleNamespace(
-                _prepare_assistant_step=AsyncMock(),
-                _list_step_input_file_ids=AsyncMock(),
-                _template_fill_runtime_deps=MagicMock(),
-            ),
-        )
+        SimpleNamespace(
+            _prepare_assistant_step=AsyncMock(),
+            _list_step_input_file_ids=AsyncMock(),
+            _template_fill_runtime_deps=MagicMock(),
+        ),
+    )
 
     handler = FlowRunExecutor._build_step_handler(executor, mode)
 

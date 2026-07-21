@@ -16,10 +16,10 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
     execute_template_fill_step,

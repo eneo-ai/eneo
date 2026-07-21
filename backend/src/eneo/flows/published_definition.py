@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from eneo.flows.assistant_execution_snapshot import stable_hash
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
     FlowRuntimeInvariantError,
@@ -23,7 +24,6 @@ from eneo.flows.flow_metadata import (
     FlowMetadataParseMode,
     parse_flow_metadata,
 )
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.flows.runtime.step_definition_parser import (
     PublishedStepIdentity,
     parse_published_step_identities,

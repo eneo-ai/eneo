@@ -7,6 +7,12 @@ explicit architecture decision.
 When a root entry moves into a package, lower the guard's expected root count in
 the same commit.
 
+Shared execution contract dataclasses (`RuntimeStep`, `RunExecutionState`,
+`StepInputValue`, `StepExecutionOutput`, and `StepDiagnostic`) are owned by
+`eneo.flows.domain.runtime`. Runtime executor and step-handler behavior remains
+under `eneo.flows.runtime`; there is no compatibility module at
+`eneo.flows.runtime.models`.
+
 Allowed target homes:
 
 - `api`: HTTP adapters, API schemas, OpenAPI-facing errors, and presenters.

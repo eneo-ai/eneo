@@ -65,6 +65,35 @@ def _format_layout_entries(entries: set[tuple[str, str]]) -> str:
     return ", ".join(f"{entry} ({kind})" for entry, kind in sorted(entries))
 
 
+def _imported_modules(module_path: Path) -> set[str]:
+    tree = ast.parse(module_path.read_text(), filename=str(module_path))
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+    package_parts = [
+        "eneo",
+        "flows",
+        *module_path.relative_to(FLOW_ROOT).parent.parts,
+    ]
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if node.level == 0:
+            imported_modules.add(node.module)
+            continue
+
+        parent_hops = node.level - 1
+        imported_modules.add(
+            ".".join((*package_parts[: len(package_parts) - parent_hops], node.module))
+        )
+
+    return imported_modules
+
+
 def test_ddd_flow_modules_are_no_longer_compatibility_stubs() -> None:
     targets = [
         FLOW_ROOT / "application" / "flow_service.py",
@@ -79,6 +108,29 @@ def test_ddd_flow_modules_are_no_longer_compatibility_stubs() -> None:
     for path in targets:
         text = path.read_text()
         assert "Compatibility re-export" not in text, path.name
+
+
+def test_runtime_contracts_are_owned_by_domain_without_a_compatibility_module() -> None:
+    assert (FLOW_ROOT / "domain" / "runtime.py").is_file()
+    assert not (FLOW_ROOT / "runtime" / "models.py").exists()
+
+
+def test_flow_domain_does_not_import_outer_flow_layers() -> None:
+    forbidden_prefixes = (
+        "eneo.flows.api",
+        "eneo.flows.infrastructure",
+        "eneo.flows.runtime",
+    )
+    violations: list[str] = []
+
+    for module_path in sorted((FLOW_ROOT / "domain").rglob("*.py")):
+        for imported_module in sorted(_imported_modules(module_path)):
+            if imported_module.startswith(forbidden_prefixes):
+                violations.append(
+                    f"{module_path.relative_to(FLOW_ROOT)}: {imported_module}"
+                )
+
+    assert not violations, "Flow domain imports outer layers: " + ", ".join(violations)
 
 
 def test_portable_package_artifact_modules_do_not_depend_on_flow_verticals() -> None:

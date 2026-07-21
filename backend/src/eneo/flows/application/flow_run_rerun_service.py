@@ -20,6 +20,7 @@ from eneo.flows.domain.rerun_exceptions import (
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -60,7 +61,6 @@ from eneo.flows.published_definition import (
     PublishedFlowDefinition,
     parse_verified_published_definition,
 )
-from eneo.flows.runtime.models import RuntimeStep
 from eneo.main.exceptions import NotFoundException
 from eneo.settings.setting_service import SettingService
 from eneo.users.user import UserInDB

@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.output_processing import (
     StructuredOutputValue,
     prune_extras_to_strict_schema,
     schema_yields_top_level_object,
 )
-from eneo.flows.runtime.models import StepDiagnostic
 
 _MAX_DROPPED_PATHS_REPORTED = 20
 _MAX_DROPPED_PATH_LENGTH = 200

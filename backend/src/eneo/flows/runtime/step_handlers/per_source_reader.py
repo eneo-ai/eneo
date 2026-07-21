@@ -9,13 +9,13 @@ from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.runtime.models import (
+from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
     StepExecutionOutput,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (

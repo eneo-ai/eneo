@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.enums import FlowOutputMode
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,

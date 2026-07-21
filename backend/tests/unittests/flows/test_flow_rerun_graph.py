@@ -5,12 +5,12 @@ from uuid import UUID
 
 import pytest
 
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import RerunDependencyKind
 from eneo.flows.flow_run_rerun_graph import (
     RerunGraphStepNotFound,
     build_rerun_invalidation_graph,
 )
-from eneo.flows.runtime.models import RuntimeStep
 
 
 def _uuid(value: int) -> UUID:

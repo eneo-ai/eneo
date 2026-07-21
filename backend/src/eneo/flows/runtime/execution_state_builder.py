@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
-from eneo.flows.runtime.models import RunExecutionState, RuntimeStep
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.step_lineage import build_step_ref_mapping
 
 

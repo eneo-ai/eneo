@@ -7,6 +7,7 @@ from uuid import UUID
 
 from eneo.files.file_models import FileCreate, FileType
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.output_processing import StructuredOutputValue
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.document_rendering.limits import (
@@ -14,7 +15,6 @@ from eneo.flows.runtime.document_rendering.limits import (
     DocumentRenderLimits,
     ensure_source_within_limits,
 )
-from eneo.flows.runtime.models import StepDiagnostic
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import (
     OutputFormatProcessingContext,
