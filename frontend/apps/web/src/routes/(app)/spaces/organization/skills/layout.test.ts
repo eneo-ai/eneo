@@ -1,6 +1,10 @@
 import type { Permission } from "@eneo/eneo-js";
 import { describe, expect, test } from "vitest";
 import { load } from "./+layout";
+import {
+  hasOrganizationNavigationPermission,
+  resolveOrganizationSkillsAccess
+} from "./organizationSkillsAccess";
 
 function eventWithPermissions(permissions: Permission[]) {
   return {
@@ -41,5 +45,33 @@ describe("organisation Skills layout", () => {
       status: 307,
       location: "/spaces/list"
     });
+  });
+
+  test("shows administrators only the reachable organisation workspace destinations", () => {
+    const access = resolveOrganizationSkillsAccess({
+      admin: true,
+      skills: false,
+      skillsManagement: false
+    });
+
+    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "read", "website")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "read", "collection")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "edit", "space")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "read", "service")).toBe(false);
+    expect(hasOrganizationNavigationPermission(access, "edit", "website")).toBe(false);
+  });
+
+  test("limits delegated users to the Skills destination", () => {
+    const access = resolveOrganizationSkillsAccess({
+      admin: false,
+      skills: true,
+      skillsManagement: true
+    });
+
+    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "read", "website")).toBe(false);
+    expect(hasOrganizationNavigationPermission(access, "read", "collection")).toBe(false);
+    expect(hasOrganizationNavigationPermission(access, "edit", "space")).toBe(false);
   });
 });

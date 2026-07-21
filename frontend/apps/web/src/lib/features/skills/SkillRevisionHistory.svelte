@@ -10,7 +10,6 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { getErrorMessage } from "$lib/core/errors";
@@ -33,6 +32,8 @@
     onAnnounce?: (message: string) => Promise<void> | void;
     onRestored?: (outcome: SkillRevisionRestorePublic) => Promise<void>;
   };
+
+  type ComparableRevisionField = "display_name" | "description" | "instructions";
 
   let {
     currentRevision,
@@ -175,46 +176,82 @@
   function revisionTitle(revision: SkillRevisionPublic | SkillRevisionSummaryPublic): string {
     return m.skills_revision_label({ revision: String(revision.revision_number) });
   }
+
+  function fieldChanged(
+    revision: SkillRevisionPublic,
+    comparison: SkillRevisionPublic | null,
+    field: ComparableRevisionField
+  ): boolean {
+    return comparison !== null && revision[field] !== comparison[field];
+  }
 </script>
 
-{#snippet revisionPreview(revision: SkillRevisionPublic, isCurrent = false)}
-  <Card.Root>
-    <Card.Header class="gap-2">
+{#snippet revisionPreview(
+  revision: SkillRevisionPublic,
+  comparison: SkillRevisionPublic | null,
+  isCurrent = false
+)}
+  <section class="min-w-0">
+    <header class="mb-5">
       <div class="flex flex-wrap items-center gap-2">
-        <Card.Title class="text-base">{revisionTitle(revision)}</Card.Title>
+        <h3 class="text-base font-semibold">{revisionTitle(revision)}</h3>
         {#if isCurrent}
           <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
         {/if}
       </div>
-      <Card.Description>{formatCreatedAt(revision.created_at)}</Card.Description>
-    </Card.Header>
-    <Card.Content>
-      <dl class="flex flex-col gap-4">
-        <div class="flex flex-col gap-1">
-          <dt class="text-muted-foreground text-xs font-medium">{m.name()}</dt>
-          <dd class="text-sm">{revision.display_name}</dd>
-        </div>
-        <div class="flex flex-col gap-1">
-          <dt class="text-muted-foreground text-xs font-medium">{m.description()}</dt>
-          <dd class="text-sm">{revision.description}</dd>
-        </div>
-        <div class="flex flex-col gap-1">
-          <dt class="text-muted-foreground text-xs font-medium">
-            {m.skills_instructions_label()}
-          </dt>
-          <dd
-            class="border-border bg-muted/25 max-h-72 overflow-y-auto rounded-md border p-3 text-sm break-words whitespace-pre-wrap"
-          >
-            {revision.instructions}
-          </dd>
-        </div>
-      </dl>
-    </Card.Content>
-  </Card.Root>
+      <p class="text-muted-foreground mt-1 text-sm">{formatCreatedAt(revision.created_at)}</p>
+    </header>
+    <dl class="flex flex-col gap-4">
+      <div
+        data-changed={fieldChanged(revision, comparison, "display_name")}
+        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
+      >
+        <dt
+          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
+        >
+          {m.name()}
+          {#if fieldChanged(revision, comparison, "display_name")}
+            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+          {/if}
+        </dt>
+        <dd class="text-sm">{revision.display_name}</dd>
+      </div>
+      <div
+        data-changed={fieldChanged(revision, comparison, "description")}
+        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
+      >
+        <dt
+          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
+        >
+          {m.description()}
+          {#if fieldChanged(revision, comparison, "description")}
+            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+          {/if}
+        </dt>
+        <dd class="text-sm">{revision.description}</dd>
+      </div>
+      <div
+        data-changed={fieldChanged(revision, comparison, "instructions")}
+        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
+      >
+        <dt
+          class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
+        >
+          <span>{m.skills_instructions_label()}</span>
+          {#if fieldChanged(revision, comparison, "instructions")}
+            <span class="text-accent-stronger font-normal">{m.skills_library_changed_field()}</span>
+          {/if}
+        </dt>
+        <dd class="text-sm break-words whitespace-pre-wrap">
+          {revision.instructions}
+        </dd>
+      </div>
+    </dl>
+  </section>
 {/snippet}
 
-<Card.Root>
-  <Table.Root>
+<div class="border-border overflow-x-auto border-y">
+  <Table.Root class="min-w-[640px]">
     <Table.Header>
       <Table.Row>
         <Table.Head>{m.skills_library_revision_column()}</Table.Head>
@@ -246,6 +283,7 @@
               <Button
                 variant="ghost"
                 size="icon-sm"
+                class="size-11 md:size-7"
                 disabled={viewingRevisionId !== null}
                 title={m.view()}
                 aria-label={m.skills_library_view_revision_aria({
@@ -266,7 +304,7 @@
     </Table.Body>
   </Table.Root>
   {#if nextCursor !== null || loadError || previewError}
-    <Card.Footer class="flex-col items-center gap-3 border-t">
+    <div class="border-border flex flex-col items-center gap-3 border-t px-6 py-4">
       {#if loadError}
         <p class="text-destructive text-sm" role="alert">{loadError}</p>
       {/if}
@@ -283,19 +321,19 @@
           {/if}
         </Button>
       {/if}
-    </Card.Footer>
+    </div>
   {/if}
-</Card.Root>
+</div>
 
 <Dialog.Root
   open={viewedRevision !== null}
   onOpenChange={(open) => !open && (viewedRevision = null)}
 >
   <Dialog.Content
-    class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl"
+    class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-4xl"
     closeLabel={m.close()}
   >
-    <Dialog.Header>
+    <Dialog.Header class="border-b px-6 py-5 pr-12">
       <Dialog.Title>
         {viewedRevision?.id === comparisonCurrentRevision.id
           ? m.skills_library_view_revision_title({
@@ -309,29 +347,37 @@
         <Dialog.Description>{m.skills_library_compare_revision_description()}</Dialog.Description>
       {/if}
     </Dialog.Header>
-    {#if restoreError}
-      <Alert.Root variant="destructive">
-        <Alert.Title>{m.skills_library_restore_error()}</Alert.Title>
-        <Alert.Description>{restoreError}</Alert.Description>
-      </Alert.Root>
-      {#if hasUnsavedChanges}
-        <Alert.Root>
-          <Alert.Title>{m.skills_library_restore_unsaved_title()}</Alert.Title>
-          <Alert.Description>{m.skills_library_restore_unsaved_warning()}</Alert.Description>
-        </Alert.Root>
-      {/if}
-    {/if}
-    {#if viewedRevision}
-      {#if viewedRevision.id === comparisonCurrentRevision.id}
-        {@render revisionPreview(viewedRevision, true)}
-      {:else}
-        <div class="grid gap-4 md:grid-cols-2">
-          {@render revisionPreview(viewedRevision)}
-          {@render revisionPreview(comparisonCurrentRevision, true)}
+    <div class="min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+      {#if restoreError}
+        <div class="flex flex-col gap-3 px-6 pt-6">
+          <Alert.Root variant="destructive">
+            <Alert.Title>{m.skills_library_restore_error()}</Alert.Title>
+            <Alert.Description>{restoreError}</Alert.Description>
+          </Alert.Root>
+          {#if hasUnsavedChanges}
+            <Alert.Root>
+              <Alert.Title>{m.skills_library_restore_unsaved_title()}</Alert.Title>
+              <Alert.Description>{m.skills_library_restore_unsaved_warning()}</Alert.Description>
+            </Alert.Root>
+          {/if}
         </div>
       {/if}
-    {/if}
-    <Dialog.Footer>
+      {#if viewedRevision}
+        {#if viewedRevision.id === comparisonCurrentRevision.id}
+          <div class="p-6">{@render revisionPreview(viewedRevision, null, true)}</div>
+        {:else}
+          <div class="divide-border grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div class="p-6">
+              {@render revisionPreview(viewedRevision, comparisonCurrentRevision)}
+            </div>
+            <div class="p-6">
+              {@render revisionPreview(comparisonCurrentRevision, null, true)}
+            </div>
+          </div>
+        {/if}
+      {/if}
+    </div>
+    <Dialog.Footer class="border-t px-6 py-4">
       {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
         <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />

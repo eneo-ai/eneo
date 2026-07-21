@@ -173,5 +173,62 @@ describe("organisation Skill catalogue page", () => {
     await expect
       .element(page.getByRole("link", { name: m.skills_library_create(), exact: true }))
       .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("searchbox", { name: m.skills_library_search_placeholder() }))
+      .not.toBeInTheDocument();
+  });
+
+  test("replaces appended results when the server page refreshes", async () => {
+    const first = skill("first", "draft");
+    const appended = skill("appended", "published");
+    const refreshed = skill("refreshed", "published");
+    const data = {
+      mode: "manage",
+      search: "",
+      canManage: true,
+      canPublish: true,
+      page: {
+        items: [first],
+        count: 1,
+        limit: 1,
+        next_cursor: "next-page"
+      },
+      eneo: {
+        skills: {
+          organization: {
+            delete: vi.fn(),
+            list: vi.fn(async () => ({
+              items: [appended],
+              count: 1,
+              limit: 1,
+              next_cursor: null
+            }))
+          },
+          catalogue: {
+            list: vi.fn()
+          }
+        }
+      }
+    };
+    const rendered = render(OrganizationSkillsPage, { data: data as never });
+
+    await page.getByRole("button", { name: m.organization_skills_load_more() }).click();
+    await expect.element(page.getByText(appended.display_name)).toBeVisible();
+
+    await rendered.rerender({
+      data: {
+        ...data,
+        page: {
+          items: [refreshed],
+          count: 1,
+          limit: 1,
+          next_cursor: null
+        }
+      } as never
+    });
+
+    await expect.element(page.getByText(refreshed.display_name)).toBeVisible();
+    await expect.element(page.getByText(first.display_name)).not.toBeInTheDocument();
+    await expect.element(page.getByText(appended.display_name)).not.toBeInTheDocument();
   });
 });

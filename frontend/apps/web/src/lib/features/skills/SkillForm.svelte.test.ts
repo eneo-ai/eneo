@@ -72,6 +72,7 @@ describe("SkillForm", () => {
     await nameInput.fill("HR support");
     const discardButton = page.getByRole("button", { name: m.discard_all_changes() });
     await expect.element(discardButton).toBeVisible();
+    await expect.element(page.getByText(m.skills_form_unsaved_status())).toBeVisible();
     await vi.waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
 
     await discardButton.click();
@@ -156,5 +157,6 @@ describe("SkillForm", () => {
 
     finishSubmit?.();
     await expect.element(page.getByRole("button", { name: "Save revision" })).toBeEnabled();
+    await expect.element(page.getByText(m.skills_form_saved_status())).toBeVisible();
   });
 });

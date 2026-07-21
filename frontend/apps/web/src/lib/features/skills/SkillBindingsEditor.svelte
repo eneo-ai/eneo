@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
-  import { ArrowDown, ArrowUp, ChevronsUpDown, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
+  import { ArrowDown, ArrowUp, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -79,6 +79,12 @@
   const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
   const rows = $derived(getSkillBindingRows(bindings, bindingSummaries, catalog));
+  const emptyChoiceMessage = $derived.by(() => {
+    if (skillCatalog.loading) return m.skills_search_loading();
+    if (skillCatalog.query.trim()) return m.skills_search_no_results();
+    if (catalog.length > 0 && addExistingChoices.length === 0) return m.skills_all_attached();
+    return m.skills_no_available();
+  });
 
   function rowName(row: SkillBindingRow): string {
     return row.displayName ?? m.skills_unknown_skill();
@@ -155,6 +161,12 @@
     if (!open) createFormDirty = false;
   }
 
+  function setAddExistingOpen(open: boolean) {
+    addExistingOpen = open;
+    if (open) return;
+    if (skillCatalog.query) skillCatalog.setQuery("");
+  }
+
   function rowId(skillId: string): string {
     return `${id}-row-${skillId}`;
   }
@@ -162,7 +174,9 @@
 
 <div class="flex flex-col gap-4">
   <div class="flex items-start justify-between gap-3">
-    <p class="text-muted-foreground text-sm">{m.skills_binding_draft_description()}</p>
+    <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+      {m.skills_binding_draft_description()}
+    </p>
     {#if rows.length > 0}
       <Badge variant="secondary" class="shrink-0">
         {m.skills_binding_count({ count: String(rows.length) })}
@@ -175,17 +189,17 @@
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
     <div
-      class="focus-visible:ring-ring flex max-h-[min(32rem,60dvh)] flex-col gap-2 overflow-y-auto overscroll-contain pr-1 outline-none focus-visible:ring-2 focus-visible:ring-offset-2 [scrollbar-gutter:stable]"
+      class="border-border focus-visible:ring-ring max-h-[min(32rem,60dvh)] overflow-y-auto overscroll-contain border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2 [scrollbar-gutter:stable]"
       role="region"
       aria-label={m.skills_binding_scroll_region_label({ count: String(rows.length) })}
       tabindex="0"
     >
-      <ol class="flex flex-col gap-2" aria-label={m.skills_binding_order_label()}>
+      <ol class="divide-border divide-y" aria-label={m.skills_binding_order_label()}>
         {#each rows as row, index (row.reference.skill_id)}
           <li
             id={rowId(row.reference.skill_id)}
             tabindex="-1"
-            class="border-border focus-visible:ring-ring flex flex-col gap-3 rounded-lg border p-3 outline-none focus-visible:ring-2 sm:flex-row sm:items-start sm:justify-between"
+            class="focus-visible:ring-ring flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
           >
             <div class="flex min-w-0 flex-1 items-start gap-3">
               <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
@@ -194,7 +208,9 @@
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{rowName(row)}</p>
                 {#if row.description}
-                  <p class="text-muted-foreground mt-1 text-sm leading-normal">{row.description}</p>
+                  <p class="text-muted-foreground mt-1 line-clamp-2 max-w-[75ch] text-sm leading-6">
+                    {row.description}
+                  </p>
                 {/if}
                 <div class="mt-2 flex flex-wrap items-center gap-1.5">
                   {#if row.pinnedRevision !== undefined}
@@ -240,6 +256,7 @@
                 type="button"
                 variant="ghost"
                 size="icon-sm"
+                class="size-11 md:size-7"
                 disabled={!canEditBindings || index === 0}
                 aria-label={m.skills_move_up_aria({ name: rowName(row) })}
                 title={m.skills_move_up_aria({ name: rowName(row) })}
@@ -251,6 +268,7 @@
                 type="button"
                 variant="ghost"
                 size="icon-sm"
+                class="size-11 md:size-7"
                 disabled={!canEditBindings || index === rows.length - 1}
                 aria-label={m.skills_move_down_aria({ name: rowName(row) })}
                 title={m.skills_move_down_aria({ name: rowName(row) })}
@@ -262,6 +280,7 @@
                 type="button"
                 variant="ghost"
                 size="icon-sm"
+                class="text-muted-foreground hover:text-destructive size-11 md:size-7"
                 disabled={!canEditBindings}
                 aria-label={m.skills_remove_aria({ name: rowName(row) })}
                 title={m.skills_remove_aria({ name: rowName(row) })}
@@ -277,7 +296,7 @@
   {/if}
 
   <div class="flex flex-wrap gap-2">
-    <Popover.Root bind:open={addExistingOpen}>
+    <Popover.Root bind:open={addExistingOpen} onOpenChange={setAddExistingOpen}>
       <Popover.Trigger>
         {#snippet child({ props })}
           <Button
@@ -289,7 +308,7 @@
             aria-label={m.skills_add_existing()}
             aria-expanded={addExistingOpen}
           >
-            <ChevronsUpDown data-icon="inline-start" aria-hidden="true" />
+            <Plus data-icon="inline-start" aria-hidden="true" />
             {m.skills_add_existing()}
           </Button>
         {/snippet}
@@ -327,7 +346,7 @@
               </p>
             {:else if addExistingChoices.length === 0}
               <p class="text-muted-foreground px-4 py-6 text-center text-sm">
-                {m.skills_no_available()}
+                {emptyChoiceMessage}
               </p>
             {/if}
             {#if addExistingChoices.length > 0}
@@ -391,25 +410,28 @@
           {/snippet}
         </Dialog.Trigger>
         <Dialog.Content
-          class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-2xl"
           closeLabel={m.close()}
         >
-          <Dialog.Header>
+          <Dialog.Header class="border-b px-6 py-5 pr-12">
             <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
             <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
           </Dialog.Header>
+          <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
+            <div class="flex flex-col gap-5">
+              <Alert.Root>
+                <Info aria-hidden="true" />
+                <Alert.Title>{m.skills_create_immediate_title()}</Alert.Title>
+                <Alert.Description>{m.skills_create_immediate_description()}</Alert.Description>
+              </Alert.Root>
 
-          <Alert.Root>
-            <Info aria-hidden="true" />
-            <Alert.Title>{m.skills_create_immediate_title()}</Alert.Title>
-            <Alert.Description>{m.skills_create_immediate_description()}</Alert.Description>
-          </Alert.Root>
-
-          <SkillForm
-            mode="create"
-            onSubmit={createSkill}
-            onDirtyChange={(dirty) => (createFormDirty = dirty)}
-          />
+              <SkillForm
+                mode="create"
+                onSubmit={createSkill}
+                onDirtyChange={(dirty) => (createFormDirty = dirty)}
+              />
+            </div>
+          </div>
         </Dialog.Content>
       </Dialog.Root>
     {/if}

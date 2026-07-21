@@ -7,7 +7,6 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { getErrorMessage } from "$lib/core/errors";
@@ -20,9 +19,9 @@
 
   let { data } = $props();
 
-  let items = $state<CatalogueItem[]>(untrack(() => [...data.page.items]));
-  let nextCursor = $state(untrack(() => data.page.next_cursor ?? null));
-  let resultKey = $state(untrack(() => `${data.mode}:${data.search}`));
+  let serverPage = $state.raw(untrack(() => data.page));
+  let items = $state<CatalogueItem[]>(untrack(() => [...serverPage.items]));
+  let nextCursor = $state(untrack(() => serverPage.next_cursor ?? null));
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
   let deleteTarget = $state<OrganizationSkillSummaryPublic | null>(null);
@@ -30,11 +29,11 @@
   let deleting = $state(false);
 
   $effect(() => {
-    const nextResultKey = `${data.mode}:${data.search}`;
-    if (nextResultKey === resultKey) return;
-    resultKey = nextResultKey;
-    items = [...data.page.items];
-    nextCursor = data.page.next_cursor ?? null;
+    const refreshedPage = data.page;
+    if (refreshedPage === serverPage) return;
+    serverPage = refreshedPage;
+    items = [...refreshedPage.items];
+    nextCursor = refreshedPage.next_cursor ?? null;
     loadError = null;
   });
 
@@ -142,14 +141,14 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-6 py-6">
+    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div class="max-w-3xl">
         <h2 class="text-foreground text-lg font-semibold">
           {data.mode === "manage"
             ? m.organization_skills_manage_heading()
             : m.organization_skills_browse_heading()}
         </h2>
-        <p class="text-muted-foreground mt-1 text-sm leading-6">
+        <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
           {data.mode === "manage"
             ? m.organization_skills_manage_intro()
             : m.organization_skills_browse_intro()}
@@ -166,45 +165,45 @@
         </Alert.Root>
       {/if}
 
-      <form
-        method="GET"
-        action={resolve("/spaces/organization/skills")}
-        class="flex max-w-xl flex-col gap-2 sm:flex-row"
-        role="search"
-      >
-        <InputGroup.Root class="flex-1">
-          <InputGroup.Addon>
-            <Search aria-hidden="true" />
-          </InputGroup.Addon>
-          <InputGroup.Input
-            name="search"
-            type="search"
-            value={data.search}
-            maxlength={200}
-            placeholder={m.skills_library_search_placeholder()}
-            aria-label={m.skills_library_search_placeholder()}
-          />
-        </InputGroup.Root>
-        <div class="flex gap-2">
-          <Button type="submit" variant="outline">{m.search()}</Button>
-          {#if data.search}
-            <Button
-              href={resolve("/spaces/organization/skills")}
-              variant="ghost"
-              aria-label={m.organization_skills_clear_search()}
-            >
-              <X aria-hidden="true" />
-              {m.clear()}
-            </Button>
-          {/if}
-        </div>
-      </form>
+      {#if items.length > 0 || data.search}
+        <form
+          method="GET"
+          action={resolve("/spaces/organization/skills")}
+          class="flex max-w-xl flex-col gap-2 sm:flex-row"
+          role="search"
+        >
+          <InputGroup.Root class="flex-1">
+            <InputGroup.Addon>
+              <Search aria-hidden="true" />
+            </InputGroup.Addon>
+            <InputGroup.Input
+              name="search"
+              type="search"
+              value={data.search}
+              maxlength={200}
+              placeholder={m.skills_library_search_placeholder()}
+              aria-label={m.skills_library_search_placeholder()}
+            />
+          </InputGroup.Root>
+          <div class="flex gap-2">
+            <Button type="submit" variant="outline">{m.search()}</Button>
+            {#if data.search}
+              <Button
+                href={resolve("/spaces/organization/skills")}
+                variant="ghost"
+                aria-label={m.organization_skills_clear_search()}
+              >
+                <X aria-hidden="true" />
+                {m.clear()}
+              </Button>
+            {/if}
+          </div>
+        </form>
+      {/if}
 
       {#if items.length === 0}
-        <div
-          class="border-border bg-muted/25 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-16"
-        >
-          <h2 class="text-foreground mb-2 text-lg font-medium">
+        <div class="border-border flex max-w-3xl flex-col items-center border-y px-6 py-10">
+          <h2 class="text-foreground text-base font-medium">
             {data.search
               ? m.skills_library_no_results()
               : data.mode === "manage"
@@ -212,13 +211,13 @@
                 : m.organization_skills_empty_browse_title()}
           </h2>
           {#if !data.search}
-            <p class="text-muted-foreground max-w-lg text-center text-sm leading-6">
+            <p class="text-muted-foreground mt-2 max-w-lg text-center text-sm leading-6">
               {data.mode === "manage"
                 ? m.organization_skills_empty_manage_description()
                 : m.organization_skills_empty_browse_description()}
             </p>
             {#if data.canManage}
-              <Button class="mt-6" href={resolve("/spaces/organization/skills/new")}>
+              <Button class="mt-5" href={resolve("/spaces/organization/skills/new")}>
                 <Plus data-icon="inline-start" aria-hidden="true" />
                 {m.skills_library_create_first()}
               </Button>
@@ -226,8 +225,8 @@
           {/if}
         </div>
       {:else}
-        <Card.Root>
-          <Table.Root>
+        <div class="border-border overflow-x-auto border-y">
+          <Table.Root class="min-w-[860px]">
             <Table.Header>
               <Table.Row>
                 <Table.Head>{m.name()}</Table.Head>
@@ -242,8 +241,8 @@
             </Table.Header>
             <Table.Body>
               {#each items as skill (skill.id)}
-                <Table.Row>
-                  <Table.Cell class="font-medium">
+                <Table.Row class="[&>td]:align-top">
+                  <Table.Cell class="w-[24%] font-medium">
                     <a
                       href={resolve(`/spaces/organization/skills/${skill.id}`)}
                       class="text-foreground hover:text-accent-default focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
@@ -252,7 +251,7 @@
                     </a>
                     <p class="text-muted-foreground mt-0.5 text-xs">{skill.slug}</p>
                   </Table.Cell>
-                  <Table.Cell class="text-muted-foreground max-w-lg">
+                  <Table.Cell class="text-muted-foreground w-[40%] max-w-lg whitespace-normal">
                     <p class="line-clamp-2">{skill.description}</p>
                   </Table.Cell>
                   <Table.Cell>
@@ -272,6 +271,7 @@
                         <Button
                           variant="ghost"
                           size="icon-sm"
+                          class="size-11 md:size-7"
                           title={m.delete()}
                           aria-label={m.skills_library_delete_aria({
                             name: skill.display_name
@@ -288,7 +288,7 @@
             </Table.Body>
           </Table.Root>
           {#if nextCursor !== null || loadError}
-            <Card.Footer class="flex-col items-center gap-3 border-t">
+            <div class="border-border flex flex-col items-center gap-3 border-t px-6 py-4">
               {#if loadError}
                 <p class="text-destructive text-sm" role="alert">{loadError}</p>
               {/if}
@@ -302,9 +302,9 @@
                   {/if}
                 </Button>
               {/if}
-            </Card.Footer>
+            </div>
           {/if}
-        </Card.Root>
+        </div>
       {/if}
     </div>
   </Page.Main>

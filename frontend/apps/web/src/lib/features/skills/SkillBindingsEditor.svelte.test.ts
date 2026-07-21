@@ -307,4 +307,50 @@ describe("SkillBindingsEditor", () => {
     expect(region.element().querySelectorAll("li")).toHaveLength(20);
     await expect.element(page.getByText(m.skills_binding_count({ count: "20" }))).toBeVisible();
   });
+
+  test("explains when the existing-Skill picker has no available Skills", async () => {
+    render(SkillBindingsEditor, {
+      bindings: [],
+      availableSkills: [],
+      bindingSummaries: [],
+      canEditBindings: true
+    });
+
+    const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });
+    await trigger.click();
+    await expect.element(page.getByText(m.skills_no_available())).toBeVisible();
+    await trigger.click();
+  });
+
+  test("explains when every available Skill is already attached", async () => {
+    const attached = makeSkill("attached");
+    const attachedSummary = makeSummary(attached, 1, 0);
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: attached.id, skill_revision_id: attachedSummary.skill_revision_id }],
+      availableSkills: [attached],
+      bindingSummaries: [attachedSummary],
+      canEditBindings: true
+    });
+
+    const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });
+    await trigger.click();
+    await expect.element(page.getByText(m.skills_all_attached())).toBeVisible();
+    await trigger.click();
+  });
+
+  test("explains when no available Skills match the search", async () => {
+    const searchable = makeSkill("searchable");
+    render(SkillBindingsEditor, {
+      bindings: [],
+      availableSkills: [searchable],
+      bindingSummaries: [],
+      canEditBindings: true
+    });
+
+    const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });
+    await trigger.click();
+    await page.getByPlaceholder(m.skills_search_existing()).fill("does not exist");
+    await expect.element(page.getByText(m.skills_search_no_results())).toBeVisible();
+    await trigger.click();
+  });
 });

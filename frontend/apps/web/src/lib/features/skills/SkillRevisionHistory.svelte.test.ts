@@ -120,6 +120,8 @@ describe("SkillRevisionHistory", () => {
     await vi.waitFor(() => expect(onView).toHaveBeenCalledWith(historical.id));
     await expect.element(page.getByText(historical.instructions)).toBeVisible();
     await expect.element(page.getByText(current.instructions)).toBeVisible();
+    const comparisonDialog = page.getByRole("dialog");
+    expect(comparisonDialog.element().querySelectorAll('[data-changed="true"]')).toHaveLength(3);
     await page
       .getByRole("button", { name: m.skills_library_restore_revision_from_preview() })
       .click();

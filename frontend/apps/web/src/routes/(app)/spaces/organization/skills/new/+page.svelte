@@ -46,9 +46,9 @@
     ></Page.Title>
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-6">
-      <div>
-        <h2 class="text-foreground text-lg font-semibold">
+    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div class="max-w-[65ch]">
+        <h2 class="text-foreground text-base font-semibold">
           {m.organization_skills_new_heading()}
         </h2>
         <p class="text-muted-foreground mt-1 text-sm leading-6">
