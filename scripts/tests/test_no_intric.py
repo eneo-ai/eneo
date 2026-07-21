@@ -53,7 +53,9 @@ class NoIntricGuardTests(unittest.TestCase):
         root = self.make_repo()
         target = root / "backend" / "alembic" / "versions" / "20260629_bad.py"
         target.parent.mkdir(parents=True)
-        target.write_text("from intric.jobs.task_models import UploadInfoBlob\n", encoding="utf-8")
+        target.write_text(
+            "from intric.jobs.task_models import UploadInfoBlob\n", encoding="utf-8"
+        )
         subprocess.run(
             ["git", "add", str(target.relative_to(root))],
             cwd=root,
@@ -119,6 +121,36 @@ class NoIntricGuardTests(unittest.TestCase):
             observations.append((result.returncode, path in result.stdout))
 
         self.assertEqual(observations, [(0, False), (1, True), (1, True)])
+
+    def test_excludes_only_exact_frozen_goal_evidence_files(self) -> None:
+        goal_root = "docs/goals/eneo-flows-and-builder-9-of-10"
+        cases = (
+            (f"{goal_root}/state.yaml", 0),
+            (f"{goal_root}/notes/handoff.md", 0),
+            (f"{goal_root}/notes/current.md", 1),
+            (f"{goal_root}/other.yaml", 1),
+        )
+
+        observations = []
+        for path, _expected_returncode in cases:
+            root = self.make_repo()
+            target = root / path
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                "Historical intric namespace evidence.\n", encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", path],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            result = self.run_check(root)
+            observations.append(result.returncode)
+
+        self.assertEqual(observations, [expected for _path, expected in cases])
 
 
 if __name__ == "__main__":

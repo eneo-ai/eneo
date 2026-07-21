@@ -13,9 +13,16 @@ and release-readiness objective.
 
 ## Current Tranche
 
-Restore or prove the Flow M0 and Builder BM0 proof fences on the current
-integration revision, then execute the largest safe source-proved disjoint Flow
-batch.
+Fresh read-only Judge T089 verified that the preserved T076 M4.5a candidate is
+an exact mechanical replay on published base `92dac395...`. The PM then stopped
+T090 before Worker dispatch because its required normal commit would invoke a
+container-only Pyright hook while no `eneo` devcontainer exists. Exact resumed
+Judge T091 returned `blocked_authority`: the user's one-commit host substitution
+was limited to T086 and cannot be inferred for T090. T090 remains clean,
+untouched, and undispatched pending one narrowly scoped authorization to use
+`SKIP=pyright` for its single normal commit only after an immediately preceding
+full host Pyright run is 0/0/0; every other hook must run normally. No second
+Writer is dependency-ready; M4.5b and M4.5c remain unauthorized.
 
 ## Problem and Why It Matters
 
@@ -204,10 +211,11 @@ iterating indefinitely.
 
 ## Runtime Profiles
 
-- PM/orchestrator: `gpt-5.6-sol`, `ultra`, full access.
-- Workers: installed `goal_worker`, `gpt-5.6-sol`, `high`, Fast mode, full
+- PM/orchestrator: `gpt-5.6-sol`, `xhigh`, standard mode, full access.
+- Workers: installed `goal_worker`, `gpt-5.6-sol`, `high`, standard mode, full
   access.
-- Judge: installed `goal_judge`, read-only.
+- Judge: installed `goal_judge`, `gpt-5.6-sol`, `xhigh`, standard mode,
+  read-only.
 - Scouts: read-only and used only when source evidence is missing.
 - Fable: never automatic.
 - Claude Opus/Max: the complementary peer loop defined by

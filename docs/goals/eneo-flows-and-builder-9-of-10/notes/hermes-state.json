@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "program": "eneo-flows-and-builder-9-of-10",
+  "updated_at": "2026-07-21T16:09:27+02:00",
+  "orchestration": {
+    "owner": "hermes-default-profile",
+    "status": "setup",
+    "writer_job": null,
+    "writer_lock": "/Users/cimen/.hermes/programs/eneo-flows/writer.lock",
+    "max_parallel_workers": 4,
+    "parallel_writers_require_isolated_worktrees": true,
+    "route_returned_work_before_dispatch": true
+  },
+  "authorities": {
+    "execution_roadmaps": [
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flows-proper/roadmap.md",
+        "sha256": "sha256:b58ce901ad01ae3555da8b237ac10657ce7f61727df9ddeb7487bcc0f872c696"
+      },
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flow-ai-builder/roadmap.md",
+        "sha256": "sha256:16a0dc63ae5b70c7fccd0935753e0551480bc5715f04bd2c15db9e331e88bc31"
+      }
+    ],
+    "context_sources": [
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flows-proper/findings.md",
+        "sha256": "sha256:b1e9eb076590073b4db5923ec4bbf1e00c9b5e2a82e23be7296e8a8b610e6a4e"
+      },
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flows-proper/blueprint.md",
+        "sha256": "sha256:5cda2b1a645ec5db9c1401d12c7ea688749d2022e934cfa4dce31e1649c0de34"
+      },
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flow-ai-builder/findings.md",
+        "sha256": "sha256:d2c5d0c08ec7940d0b221d175b4c0cea62cb8e6c30ada2174a93eaa6ba586c6b"
+      },
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/flow-ai-builder/blueprint.md",
+        "sha256": "sha256:b5df0f41f48a2c679eec1c12055dbf1c5f1d80644a5789fbc890b600ce654597"
+      },
+      {
+        "path": "fablereview/flows-9-of-10-2026-07-16/delivery-coordination.md",
+        "sha256": "sha256:0a3f7104b016f60c28ecd480e77e8714e71980e45234c402b89fc77628bb009b"
+      }
+    ],
+    "engineering_standards": [
+      "docs/engineering/maintainability-standards.md",
+      "docs/engineering/comment-and-readability-standard.md",
+      "docs/engineering/api-design-standard.md",
+      "docs/engineering/testing-standard.md",
+      "docs/engineering/frontend-state-standard.md",
+      "docs/engineering/ai-review-workflow.md"
+    ]
+  },
+  "migration": {
+    "from": "codex-goal-maker",
+    "frozen_at": "2026-07-21T16:09:27+02:00",
+    "frozen_codex_state": "docs/goals/eneo-flows-and-builder-9-of-10/state.yaml",
+    "frozen_codex_state_sha256": "sha256:09889dfd19a95abbf0801990430984d8fb411a32c60deb079daf96319bd4e0b4",
+    "frozen_evidence_ids": [
+      "T015",
+      "T076",
+      "T080",
+      "M3.1",
+      "T089",
+      "T090",
+      "T091"
+    ],
+    "codex_automations": {
+      "eneo-flows-implementation-watchdog": "paused",
+      "eneo-flows-commit-push-reporter": "paused",
+      "eneo-overnight-06-00-recovery-check": "paused",
+      "eneo-overnight-08-30-outcome-summary": "paused",
+      "eneo-flows-hourly-roadmap-brief": "paused"
+    },
+    "overlay_fingerprint": "sha256:58ab1e620f14ac70094ebbcf4987afe8699ede9c5cc3c34d0f9aa887da82834d"
+  },
+  "delivery": {
+    "branch": "refactor/flows-clean",
+    "pull_requests": false,
+    "develop_mutation": false,
+    "last_verified_push": "92dac39587feeecf9f3f84579017dd3868e71413",
+    "last_verified_at": "2026-07-21T12:56:56Z",
+    "protected_dirty": [
+      ".devcontainer/devcontainer.json",
+      ".gitignore",
+      "docs/goals/eneo-flows-and-builder-9-of-10/goal.md",
+      "docs/goals/eneo-flows-and-builder-9-of-10/notes/handoff.md",
+      "docs/goals/eneo-flows-and-builder-9-of-10/state.yaml",
+      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-state.json",
+      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-supervisor-prompt.md",
+      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-recovery.md",
+      ".hermes/desktop-attachments/eneo-flows-hermes-handoff-prompt.md",
+      "AGENTS.md.backup-20260629-220449"
+    ]
+  },
+  "progress": {
+    "required_total": 90,
+    "completed": [
+      "M0.1",
+      "M0.2",
+      "M0.3",
+      "M0.4",
+      "M0.5",
+      "BM0.1",
+      "M1.4",
+      "M1.2",
+      "M1.1",
+      "BM1.1",
+      "M3.7",
+      "M2.2",
+      "M5.1",
+      "M2.1",
+      "M1.5",
+      "M2.3",
+      "M5.2",
+      "M2.8",
+      "M2.5"
+    ],
+    "remaining": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5",
+      "M1.3",
+      "M2.4",
+      "M2.6",
+      "M2.7",
+      "M2.9",
+      "M3.1",
+      "M3.2",
+      "M3.3",
+      "M3.4",
+      "M3.5",
+      "M3.6",
+      "M3.8",
+      "M3.9",
+      "M4.1",
+      "M4.2",
+      "M4.3",
+      "M4.4",
+      "M4.5",
+      "M4.6",
+      "M4.7",
+      "M4.8",
+      "M4.9",
+      "M4.10",
+      "M4.11",
+      "M5.3",
+      "M6.1",
+      "M6.2",
+      "M6.3",
+      "M6.4",
+      "M6.5",
+      "M6.6",
+      "BD2",
+      "BD3",
+      "BM0.2",
+      "BM1.2",
+      "BM1.3",
+      "BM1.4",
+      "BM1.5",
+      "BM1.6",
+      "BM2.1",
+      "BM2.2",
+      "BM2.3",
+      "BM2.4",
+      "BM2.5",
+      "BM2.6",
+      "BM3.1",
+      "BM3.2",
+      "BM3.3",
+      "BM3.4",
+      "BM4.1",
+      "BM4.2",
+      "BM4.3",
+      "BM4.4",
+      "BM4.5",
+      "BM4.6",
+      "BM4.7",
+      "BM4.8",
+      "BM4.9",
+      "BM5.1",
+      "BM5.2",
+      "BM5.3",
+      "BM5.4",
+      "FE.1",
+      "FE.2",
+      "FE.3",
+      "FE.4"
+    ],
+    "deferred": [
+      "D6 (owned by the existing Flow finalization ADR delivery order)",
+      "BD1 (future HTTP-authoring capability milestone outside this roadmap)",
+      "BD5 (evidence-gated; no work until comparative evidence exists)",
+      "BM5.5 (requires explicit live-run authorization, isolation, and provider-spend approval)",
+      "FLOW-P3 (record-only unless it enables a required slice)",
+      "BUILDER-P3 (record-only unless it enables a required slice)"
+    ],
+    "excluded": [
+      "BD4 (reference-only alias of Flow D2; no Builder-side work)"
+    ]
+  },
+  "focus": {
+    "roadmap_slice": "M4.5",
+    "execution_slice": "M4.5a",
+    "summary": "Exact preserved-candidate replay and validation"
+  },
+  "active_work": [],
+  "blockers": [
+    {
+      "id": "m4-5a-pyright-hook-environment",
+      "status": "decision-required",
+      "roadmap_slice": "M4.5",
+      "execution_slice": "M4.5a",
+      "summary": "The required pre-commit hook resolves Pyright through a devcontainer, but no Eneo devcontainer is running. Full host Pyright plus every other hook is available; the earlier one-commit SKIP=pyright approval was explicitly non-transferable.",
+      "safe_parallel_policy": "Continue only a freshly proven dependency-ready, collision-disjoint lane while this decision remains open."
+    }
+  ],
+  "reporting": {
+    "morning_report": "/Users/cimen/Downloads/eneo-flows-overnight-progress.md",
+    "timezone": "Europe/Stockholm",
+    "last_morning_report_date": null,
+    "last_material_update_at": "2026-07-21T16:09:27+02:00",
+    "last_material_fingerprint": null
+  },
+  "limits": {
+    "material_events": 32,
+    "active_work": 4,
+    "worker_attempts_per_slice": 3,
+    "read_only_lookaheads_per_collision": 2
+  },
+  "material_events": [
+    {
+      "at": "2026-07-21T16:09:27+02:00",
+      "kind": "orchestrator-transition",
+      "summary": "Paused all Codex automations after verifying no active product writer; migrated 19/90 progress and frozen evidence references into the bounded Hermes ledger.",
+      "commit": "92dac39587feeecf9f3f84579017dd3868e71413"
+    }
+  ]
+}
