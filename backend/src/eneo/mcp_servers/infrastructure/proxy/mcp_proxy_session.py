@@ -18,7 +18,7 @@ from uuid import UUID
 
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -29,6 +29,10 @@ from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl 
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
 
 logger = get_logger(__name__)
 
@@ -60,6 +64,7 @@ class MCPProxySession:
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         """
         Initialize proxy session.
@@ -84,6 +89,7 @@ class MCPProxySession:
         self.auth_credentials_map = auth_credentials_map or {}
         self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
+        self._mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
             if chat_session_id is not None and db_session is not None
@@ -319,7 +325,7 @@ class MCPProxySession:
 
         try:
             async with self._mcp_state_lock:
-                await self._mcp_state_repo.upsert(
+                persisted = await self._mcp_state_repo.upsert(
                     chat_session_id=self.chat_session_id,
                     mcp_server_id=server.id,
                     mcp_session_id=assigned_id,
@@ -331,7 +337,7 @@ class MCPProxySession:
                 exc,
             )
             return False
-        return True
+        return persisted
 
     async def _discover_identity_scoped_tools(
         self, server: MCPServer, resume_id: str | None
@@ -378,6 +384,39 @@ class MCPProxySession:
                         server.name,
                         exc,
                     )
+
+    async def _stage_unknown_live_tools(
+        self, server: MCPServer, live_tools: list[dict[str, Any]]
+    ) -> None:
+        """Queue user-visible unknown definitions for admin review.
+
+        Runtime discovery remains fail-closed: staging does not add the new
+        entity to ``server.tools``, so this request still intersects against
+        the pre-approved in-memory catalog.
+        """
+        if self._mcp_server_tool_repo is None:
+            return
+
+        known_names = {tool.name for tool in (server.tools or [])}
+        for live_tool in live_tools:
+            name = live_tool["name"]
+            if name in known_names:
+                continue
+            pending = MCPServerTool.pending_discovery(
+                mcp_server_id=server.id,
+                name=name,
+                title=live_tool.get("title"),
+                description=live_tool.get("description"),
+                input_schema=live_tool.get("input_schema"),
+            )
+            staged = await self._mcp_server_tool_repo.add_if_absent(pending)
+            known_names.add(name)
+            if staged is not None:
+                logger.info(
+                    "[MCPProxy] Staged user-observed tool '%s/%s' for admin approval",
+                    server.name,
+                    name,
+                )
 
     async def prepare_tools_for_context(self) -> None:
         """Resolve identity-scoped tool catalogs before model exposure.
@@ -444,6 +483,7 @@ class MCPProxySession:
                 live_tools: list[dict[str, Any]] = []
             else:
                 live_tools = task.result()
+            await self._stage_unknown_live_tools(server, live_tools)
             self._rebuild_server_tools(server, live_tools)
 
     async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:

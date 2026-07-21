@@ -41,6 +41,29 @@ class MCPServerTool(Entity):
         self.requires_approval = requires_approval
         self.removed_from_remote = removed_from_remote
 
+    @classmethod
+    def pending_discovery(
+        cls,
+        *,
+        mcp_server_id: UUID,
+        name: str,
+        title: str | None,
+        description: str | None,
+        input_schema: dict[str, Any] | None,
+    ) -> "MCPServerTool":
+        """Create a discovered definition that cannot run before approval."""
+        return cls(
+            mcp_server_id=mcp_server_id,
+            name=name,
+            title=title,
+            description=None,
+            input_schema=None,
+            is_enabled_by_default=True,
+            pending_description=description,
+            pending_input_schema=input_schema,
+            requires_approval=True,
+        )
+
 
 class MCPServer(Entity):
     """Domain entity for MCP server (tenant-scoped, HTTP-only)."""

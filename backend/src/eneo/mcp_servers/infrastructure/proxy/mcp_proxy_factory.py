@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
     from eneo.settings.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,7 @@ class MCPProxySessionFactory:
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -99,6 +103,7 @@ class MCPProxySessionFactory:
             chat_session_id=chat_session_id,
             db_session=db_session,
             identity_headers=identity_headers,
+            mcp_server_tool_repo=mcp_server_tool_repo,
         )
 
     async def terminate(

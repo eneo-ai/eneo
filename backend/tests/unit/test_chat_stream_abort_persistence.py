@@ -15,7 +15,8 @@ exercised in tests/integration/services/test_conversation_stream_abort.py.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -66,6 +67,32 @@ def _make_session_in_db() -> SimpleNamespace:
     return SimpleNamespace(id=uuid4(), questions=[])
 
 
+@contextmanager
+def _independent_placeholder_store(service: SessionService) -> Iterator[None]:
+    @asynccontextmanager
+    async def _session_scope():
+        yield service.question_repo.session
+
+    @asynccontextmanager
+    async def _transaction_scope():
+        yield
+
+    service.question_repo.session.begin.return_value = _transaction_scope()
+    with (
+        patch.object(
+            session_service_module.sessionmanager,
+            "session",
+            _session_scope,
+        ),
+        patch.object(
+            session_service_module,
+            "QuestionRepository",
+            return_value=service.question_repo,
+        ),
+    ):
+        yield
+
+
 # ----- SessionService.create_question_placeholder ---------------------------
 
 
@@ -77,9 +104,12 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
     new_question_id = uuid4()
     service = _make_session_service(question_id=new_question_id)
 
-    with patch.object(
-        session_service_module, "count_tokens", return_value=42
-    ) as count_mock:
+    with (
+        patch.object(
+            session_service_module, "count_tokens", return_value=42
+        ) as count_mock,
+        _independent_placeholder_store(service),
+    ):
         returned = await service.create_question_placeholder(
             question="how do I cancel a stream?",
             session=_make_session_in_db(),
@@ -114,7 +144,10 @@ async def test_create_question_placeholder_falls_back_to_zero_when_count_tokens_
     def boom(*_: object, **__: object) -> int:
         raise KeyError("unknown model")
 
-    with patch.object(session_service_module, "count_tokens", side_effect=boom):
+    with (
+        patch.object(session_service_module, "count_tokens", side_effect=boom),
+        _independent_placeholder_store(service),
+    ):
         await service.create_question_placeholder(
             question="test",
             session=_make_session_in_db(),
@@ -134,7 +167,10 @@ async def test_create_question_placeholder_without_model_records_zero_tokens():
     even try to count — store 0 and move on."""
     service = _make_session_service()
 
-    with patch.object(session_service_module, "count_tokens") as count_mock:
+    with (
+        patch.object(session_service_module, "count_tokens") as count_mock,
+        _independent_placeholder_store(service),
+    ):
         await service.create_question_placeholder(
             question="test",
             session=_make_session_in_db(),

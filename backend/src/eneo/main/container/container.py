@@ -816,6 +816,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
         redis_client=redis_client,
+        mcp_server_tool_repo=mcp_server_tool_repo,
     )
 
     # Datastore

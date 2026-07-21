@@ -6,7 +6,9 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.chat_session_mcp_state_table import ChatSessionMcpState
+from eneo.database.tables.sessions_table import Sessions
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,14 +19,11 @@ class ChatSessionMcpStateRepo:
     (chat session, MCP server). Used by ``MCPProxySession`` to resume a
     logical MCP session across user turns.
 
-    The eneo sessionmaker is configured with ``autobegin=False``, and during
-    SSE streaming the outer request transaction from
-    ``get_session_with_transaction`` is no longer active by the time the
-    LLM emits its first tool call (FastAPI tears down yield-style deps when
-    the handler returns the StreamingResponse, not when the stream
-    finishes). Every other write in the streaming path defends with the
-    same "use outer tx if present, else open a short one" pattern (see
-    ``SessionService._write_transaction``); this repo does the same.
+    The eneo sessionmaker is configured with ``autobegin=False``. Writes use a
+    short independent transaction. A newly assigned remote protocol session is
+    only durable once this row commits; tying it to the request transaction
+    could orphan the remote session if later context or model preparation rolls
+    that request back.
     """
 
     def __init__(self, session: "AsyncSession"):
@@ -62,15 +61,26 @@ class ChatSessionMcpStateRepo:
         chat_session_id: UUID,
         mcp_server_id: UUID,
         mcp_session_id: str,
-    ) -> None:
-        stmt = pg_insert(ChatSessionMcpState).values(
-            chat_session_id=chat_session_id,
-            mcp_server_id=mcp_server_id,
-            mcp_session_id=mcp_session_id,
+    ) -> bool:
+        """Commit protocol state only for a committed chat session.
+
+        A new chat can still belong to the caller's uncommitted request
+        transaction. Selecting the parent row in this independent transaction
+        makes that case a no-op instead of waiting on, or violating, the
+        foreign key. The caller then terminates the unpersisted remote session.
+        """
+        values = sa.select(
+            Sessions.id,
+            sa.literal(mcp_server_id),
+            sa.literal(mcp_session_id),
+        ).where(Sessions.id == chat_session_id)
+        stmt = pg_insert(ChatSessionMcpState).from_select(
+            ["chat_session_id", "mcp_server_id", "mcp_session_id"],
+            values,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=["chat_session_id", "mcp_server_id"],
             set_={"mcp_session_id": stmt.excluded.mcp_session_id},
-        )
-        async with self._tx():
-            await self.session.execute(stmt)
+        ).returning(ChatSessionMcpState.chat_session_id)
+        async with sessionmanager.session() as session, session.begin():
+            return await session.scalar(stmt) is not None

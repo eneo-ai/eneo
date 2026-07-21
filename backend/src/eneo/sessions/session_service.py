@@ -279,6 +279,13 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
+        """Create the conversation identity in a short committed transaction.
+
+        Completion setup may create durable external state, including MCP
+        protocol sessions, before the request transaction ends. Committing the
+        parent row here makes those child writes independently durable and
+        prevents a later request rollback from orphaning remote state.
+        """
         user_id, api_key_id = self._principal_columns()
         session_add = SessionAdd(
             name=name,
@@ -287,8 +294,8 @@ class SessionService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with self._write_transaction():
-            return await self.session_repo.add(session_add)
+        async with sessionmanager.session() as session, session.begin():
+            return await SessionRepository(session).add(session_add)
 
     async def create_question_placeholder(
         self,
@@ -305,11 +312,10 @@ class SessionService:
         stream finishes (normally or via abort). This guarantees the user's message is
         durably stored before any LLM token streams out.
 
-        Note: a placeholder row commits with the router's request transaction, so it
-        remains in the DB even if the LLM call later raises (rate limit, model
-        unavailable, network drop). The conversation lists endpoint will surface those
-        rows with `answer=""` — that is intentional, the row reflects what the user
-        asked.
+        The placeholder uses its own short transaction, so it remains in the DB
+        if later context construction, MCP discovery, or model preparation fails.
+        The conversation lists endpoint will surface the row with ``answer=""``;
+        that is intentional because the row records what the user asked.
 
         `num_tokens_question` is seeded with `count_tokens(question, model_name)` so
         analytics don't undercount aborted requests. The normal-completion path later
@@ -331,8 +337,8 @@ class SessionService:
             tool_calls=None,
         )
 
-        async with self._write_transaction():
-            question_record = await self.question_repo.add(
+        async with sessionmanager.session() as db_session, db_session.begin():
+            question_record = await QuestionRepository(db_session).add(
                 question_add,
                 info_blob_chunks=[],
                 files=list(files or []),

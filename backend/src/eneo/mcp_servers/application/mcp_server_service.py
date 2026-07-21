@@ -450,16 +450,12 @@ class MCPServerService:
 
                 if name not in existing_by_name:
                     # New tool — create with pending state, not yet active
-                    tool = MCPServerTool(
+                    tool = MCPServerTool.pending_discovery(
                         mcp_server_id=mcp_server.id,
                         name=name,
                         title=remote_title,
-                        description=None,  # No active description yet
-                        input_schema=None,  # No active schema yet
-                        is_enabled_by_default=True,
-                        pending_description=remote_desc,
-                        pending_input_schema=remote_schema,
-                        requires_approval=True,
+                        description=remote_desc,
+                        input_schema=remote_schema,
                     )
                     synced = await self.tool_repo.upsert_by_server_and_name(tool)
                     result.new_tools.append(
@@ -503,20 +499,22 @@ class MCPServerService:
                             await self.tool_repo.update(existing)
                         result.unchanged_count += 1
 
-            # Detect tools removed from remote
-            for name, existing in existing_by_name.items():
-                if name not in remote_names and not existing.removed_from_remote:
-                    existing.removed_from_remote = True
-                    existing.requires_approval = True
-                    await self.tool_repo.update(existing)
-                    result.removed_tools.append(
-                        ToolChange(
-                            tool=existing,
-                            change_type="removed",
-                            current_description=existing.description,
-                            current_input_schema=existing.input_schema,
+            # An identity-scoped admin catalog is only that admin's view. Its
+            # omissions cannot prove that a user-specific tool disappeared.
+            if not mcp_server.forward_identity:
+                for name, existing in existing_by_name.items():
+                    if name not in remote_names and not existing.removed_from_remote:
+                        existing.removed_from_remote = True
+                        existing.requires_approval = True
+                        await self.tool_repo.update(existing)
+                        result.removed_tools.append(
+                            ToolChange(
+                                tool=existing,
+                                change_type="removed",
+                                current_description=existing.description,
+                                current_input_schema=existing.input_schema,
+                            )
                         )
-                    )
 
             logger.info(
                 f"Sync for {mcp_server.name}: "

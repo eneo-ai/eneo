@@ -7,58 +7,101 @@ from uuid import uuid4
 
 import pytest
 
+import eneo.sessions.session_service as session_service_module
 from eneo.files.file_service import FileService
 from eneo.sessions.session_service import SessionService
 
 
 @pytest.mark.asyncio
-async def test_session_service_create_session_starts_short_transaction_when_needed():
-    entered = 0
+async def test_session_service_create_session_commits_independently(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fresh_session = MagicMock()
+    request_session = MagicMock()
+    request_session.in_transaction.return_value = True
+    request_repo = SimpleNamespace(session=request_session, add=AsyncMock())
+    fresh_repo = SimpleNamespace(add=AsyncMock(return_value=SimpleNamespace()))
+
+    @asynccontextmanager
+    async def _fresh_session_scope():
+        yield fresh_session
 
     @asynccontextmanager
     async def _begin():
-        nonlocal entered
-        entered += 1
         yield
 
-    session = MagicMock()
-    session.in_transaction.return_value = False
-    session.begin.return_value = _begin()
-
-    session_repo = SimpleNamespace(
-        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    fresh_session.begin.return_value = _begin()
+    monkeypatch.setattr(
+        session_service_module.sessionmanager,
+        "session",
+        _fresh_session_scope,
+    )
+    session_repo_factory = MagicMock(return_value=fresh_repo)
+    monkeypatch.setattr(
+        session_service_module,
+        "SessionRepository",
+        session_repo_factory,
     )
     service = SessionService(
-        session_repo=session_repo,
+        session_repo=request_repo,
         question_repo=AsyncMock(),
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
     )
 
     await service.create_session(name="new-session", assistant_id=uuid4())
 
-    assert entered == 1
-    session_repo.add.assert_awaited_once()
+    session_repo_factory.assert_called_once_with(fresh_session)
+    fresh_repo.add.assert_awaited_once()
+    request_repo.add.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_session_service_create_session_reuses_existing_transaction():
-    session = MagicMock()
-    session.in_transaction.return_value = True
-    session.begin = MagicMock()
+async def test_question_placeholder_commits_independently(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fresh_session = MagicMock()
+    request_session = MagicMock()
+    request_session.in_transaction.return_value = True
+    request_session_repo = SimpleNamespace(session=request_session)
+    request_question_repo = SimpleNamespace(add=AsyncMock())
+    fresh_question_repo = SimpleNamespace(
+        add=AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    )
 
-    session_repo = SimpleNamespace(
-        session=session, add=AsyncMock(return_value=SimpleNamespace())
+    @asynccontextmanager
+    async def _fresh_session_scope():
+        yield fresh_session
+
+    @asynccontextmanager
+    async def _begin():
+        yield
+
+    fresh_session.begin.return_value = _begin()
+    monkeypatch.setattr(
+        session_service_module.sessionmanager,
+        "session",
+        _fresh_session_scope,
+    )
+    question_repo_factory = MagicMock(return_value=fresh_question_repo)
+    monkeypatch.setattr(
+        session_service_module,
+        "QuestionRepository",
+        question_repo_factory,
     )
     service = SessionService(
-        session_repo=session_repo,
-        question_repo=AsyncMock(),
+        session_repo=request_session_repo,
+        question_repo=request_question_repo,
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
     )
 
-    await service.create_session(name="existing-tx", assistant_id=uuid4())
+    await service.create_question_placeholder(
+        question="Keep this question",
+        session=SimpleNamespace(id=uuid4()),
+    )
 
-    session.begin.assert_not_called()
-    session_repo.add.assert_awaited_once()
+    question_repo_factory.assert_called_once_with(fresh_session)
+    fresh_question_repo.add.assert_awaited_once()
+    request_question_repo.add.assert_not_awaited()
 
 
 @pytest.mark.asyncio

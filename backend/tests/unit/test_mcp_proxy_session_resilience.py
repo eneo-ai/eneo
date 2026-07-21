@@ -11,8 +11,10 @@ import pytest
 
 import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
 from eneo.main.exceptions import MCPClientError
+from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,10 +123,42 @@ class _InMemoryMcpStateRepo:
         chat_session_id: UUID,
         mcp_server_id: UUID,
         mcp_session_id: str,
-    ) -> None:
+    ) -> bool:
         if self.fail_writes:
             raise RuntimeError("persistence unavailable")
         self.values[(chat_session_id, mcp_server_id)] = mcp_session_id
+        return True
+
+
+class _InMemoryToolRepo:
+    def __init__(self, tools: list[MCPServerTool]) -> None:
+        self.tools = {tool.id: tool for tool in tools}
+
+    async def add_if_absent(self, tool: MCPServerTool) -> MCPServerTool | None:
+        existing = next(
+            (
+                saved
+                for saved in self.tools.values()
+                if saved.mcp_server_id == tool.mcp_server_id and saved.name == tool.name
+            ),
+            None,
+        )
+        if existing is not None:
+            return None
+        self.tools[tool.id] = tool
+        return tool
+
+    async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
+        return [
+            tool for tool in self.tools.values() if tool.mcp_server_id == mcp_server_id
+        ]
+
+    async def one(self, id: UUID) -> MCPServerTool:
+        return self.tools[id]
+
+    async def update(self, tool: MCPServerTool) -> MCPServerTool:
+        self.tools[tool.id] = tool
+        return tool
 
 
 class _StatefulMCPClient:
@@ -332,6 +366,74 @@ async def test_identity_scoped_catalog_is_intersected_with_each_users_live_tools
     assert ordinary_proxy.get_allowed_tool_names() == {
         "identity-server__shared",
         "identity-server__ordinary_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_only_tool_is_staged_then_requires_admin_approval_before_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [
+                {"name": "shared"},
+                {
+                    "name": "ordinary_only",
+                    "title": "Ordinary only",
+                    "description": "Visible only to an ordinary user",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                },
+            ]
+        },
+    )
+    server = _make_identity_scoped_server()
+    server.tools = [tool for tool in server.tools if tool.name != "ordinary_only"]
+    tool_repo = _InMemoryToolRepo(server.tools)
+
+    first_turn = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+    await first_turn.prepare_tools_for_context()
+
+    assert first_turn.get_allowed_tool_names() == {"identity-server__shared"}
+    staged_tools = await tool_repo.by_server(server.id)
+    staged = next(tool for tool in staged_tools if tool.name == "ordinary_only")
+    assert staged.description is None
+    assert staged.input_schema is None
+    assert staged.pending_description == "Visible only to an ordinary user"
+    assert staged.pending_input_schema == {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+    }
+    assert staged.requires_approval is True
+
+    admin = SimpleNamespace(
+        tenant_id=server.tenant_id,
+        permissions=[Permission.ADMIN],
+    )
+    server_repo = AsyncMock()
+    server_repo.one.return_value = server
+    service = MCPServerService(server_repo, tool_repo, admin)
+    approved = await service.approve_tool_changes(server.id, [staged.id])
+    assert [tool.name for tool in approved] == ["ordinary_only"]
+
+    server.tools = await tool_repo.by_server(server.id)
+    second_turn = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+    await second_turn.prepare_tools_for_context()
+
+    assert second_turn.get_allowed_tool_names() == {
+        "identity-server__ordinary_only",
+        "identity-server__shared",
     }
 
 

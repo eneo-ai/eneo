@@ -36,6 +36,9 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.users.user import UserInDB
@@ -59,6 +62,7 @@ class CompletionService:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
@@ -72,6 +76,7 @@ class CompletionService:
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
+        self.mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
@@ -279,6 +284,7 @@ class CompletionService:
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
                 identity_headers=identity_headers,
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
             )
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()

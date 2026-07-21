@@ -87,6 +87,19 @@ class MCPServerToolRepoImpl(
         return self.mapper.to_entities(records)
 
     @override
+    async def add_if_absent(self, obj: MCPServerTool) -> MCPServerTool | None:
+        """Atomically stage a new server/name without changing an existing row."""
+        stmt = (
+            insert(self._db_model)
+            .values(self.mapper.to_db_dict(obj))
+            .on_conflict_do_nothing(index_elements=["mcp_server_id", "name"])
+            .returning(self._db_model)
+        )
+        record = await self.session.scalar(stmt)
+        await self.session.flush()
+        return self.mapper.to_entity(record) if record is not None else None
+
+    @override
     async def upsert_by_server_and_name(self, obj: MCPServerTool) -> MCPServerTool:
         """Upsert a tool (update if exists by server+name, insert otherwise)."""
         db_dict = self.mapper.to_db_dict(obj)

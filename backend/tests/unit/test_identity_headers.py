@@ -14,6 +14,7 @@ import pytest
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
@@ -202,6 +203,60 @@ class TestManagementPathsCarryIdentity:
         assert result.connection.success
         identity = client_cls.call_args.kwargs["identity_headers"]
         assert identity["X-Eneo-User-Id"] == str(user.id)
+
+    @pytest.mark.asyncio
+    async def test_identity_scoped_admin_sync_does_not_remove_user_only_tools(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = True
+        existing = MCPServerTool(
+            mcp_server_id=server.id,
+            name="ordinary_only",
+            description="Approved ordinary-user tool",
+            input_schema={"type": "object", "properties": {}},
+        )
+        service.tool_repo.by_server = AsyncMock(return_value=[existing])
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert result.connection.success
+        assert result.removed_tools == []
+        service.tool_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_global_admin_sync_still_marks_missing_tools_removed(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = False
+        existing = MCPServerTool(
+            mcp_server_id=server.id,
+            name="removed_tool",
+            description="Previously approved",
+            input_schema={"type": "object", "properties": {}},
+        )
+        service.tool_repo.by_server = AsyncMock(return_value=[existing])
+        client_cls = self._recording_client_cls()
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert [change.tool.name for change in result.removed_tools] == ["removed_tool"]
+        assert existing.removed_from_remote is True
+        assert existing.requires_approval is True
 
 
 class TestTerminationCarriesIdentityOnTheWire:

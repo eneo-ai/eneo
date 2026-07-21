@@ -47,6 +47,11 @@ class MCPServerToolRepository(ABC):
         ...
 
     @abstractmethod
+    async def add_if_absent(self, obj: "MCPServerTool") -> "MCPServerTool | None":
+        """Insert a tool unless the server/name pair already exists."""
+        ...
+
+    @abstractmethod
     async def update(self, obj: "MCPServerTool") -> "MCPServerTool":
         """Update an existing tool."""
         ...
