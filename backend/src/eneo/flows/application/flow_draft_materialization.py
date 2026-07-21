@@ -14,6 +14,7 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
     StepSpec,
+    metadata_json_from_authoring_form_fields,
 )
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
@@ -327,19 +328,9 @@ def build_flow_draft_metadata_json(
     if current_flow and current_flow.metadata_json:
         metadata = normalize_persisted_flow_metadata(current_flow.metadata_json) or {}
 
-    if spec.form_fields is not None:
-        fields: list[FlowPersistedJsonObject] = []
-        for field in spec.form_fields:
-            field_dict: FlowPersistedJsonObject = {
-                "name": field.name,
-                "type": field.type,
-                "label": field.label,
-                "required": field.required,
-            }
-            if field.options is not None:
-                field_dict["options"] = field.options
-            fields.append(field_dict)
-        metadata["form_schema"] = {"fields": fields}
+    form_metadata = metadata_json_from_authoring_form_fields(spec.form_fields)
+    if form_metadata is not None:
+        metadata.update(form_metadata)
 
     metadata = (
         apply_audio_transcription_defaults(

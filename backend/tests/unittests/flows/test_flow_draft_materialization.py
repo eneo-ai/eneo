@@ -115,6 +115,34 @@ def test_shared_compile_does_not_stamp_ai_builder_metadata() -> None:
     assert "ai_builder" not in changeset.metadata_json
 
 
+def test_shared_compile_distinguishes_absent_and_empty_form_fields() -> None:
+    existing_form_schema = {
+        "fields": [
+            {
+                "name": "case_id",
+                "type": "text",
+                "label": "Case id",
+                "required": True,
+            }
+        ]
+    }
+    current_flow = _flow(metadata_json={"form_schema": existing_form_schema})
+
+    absent_fields = compile_flow_draft_changeset(
+        FlowDraftSpecCore(flow_name="Updated flow", steps=[], form_fields=None),
+        current_flow=current_flow,
+    )
+    empty_fields = compile_flow_draft_changeset(
+        FlowDraftSpecCore(flow_name="Updated flow", steps=[], form_fields=[]),
+        current_flow=current_flow,
+    )
+
+    assert absent_fields.metadata_json is not None
+    assert absent_fields.metadata_json["form_schema"] == existing_form_schema
+    assert empty_fields.metadata_json is not None
+    assert empty_fields.metadata_json["form_schema"] == {"fields": []}
+
+
 def test_shared_compile_preserves_output_config_when_output_mode_is_unchanged() -> None:
     existing_config = {"template_asset_id": "template-a"}
     existing_step = _flow_step(
