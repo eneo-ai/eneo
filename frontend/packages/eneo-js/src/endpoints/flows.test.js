@@ -14,8 +14,9 @@ describe("flows templates endpoint", () => {
     await flows.templates.upload({ id: "flow-1", file });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/template-files/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/template-files/");
     expect(fetch.mock.calls[0][1].method).toBe("post");
+    expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
     expect(fetch.mock.calls[0][1].requestBody["multipart/form-data"]).toBeInstanceOf(FormData);
   });
 
@@ -26,8 +27,9 @@ describe("flows templates endpoint", () => {
     await flows.templates.list({ id: "flow-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/template-files/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/template-files/");
     expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
   });
 
   it("deletes template assets through the flow template route", async () => {
@@ -37,8 +39,11 @@ describe("flows templates endpoint", () => {
     await flows.templates.delete({ id: "flow-1", fileId: "template-asset-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/template-files/template-asset-1/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/template-files/{file_id}/");
     expect(fetch.mock.calls[0][1].method).toBe("delete");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", file_id: "template-asset-1" }
+    });
   });
 
   it("loads run contract from canonical runtime route", async () => {
@@ -48,8 +53,9 @@ describe("flows templates endpoint", () => {
     await flows.runContract.get({ id: "flow-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/run-contract/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/run-contract/");
     expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
   });
 
   it("loads the published runtime projection from the canonical route", async () => {
@@ -63,8 +69,9 @@ describe("flows templates endpoint", () => {
     await flows.published.get({ id: "flow-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/published/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/published/");
     expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
   });
 
   it("loads the published runtime projection from a string id", async () => {
@@ -78,8 +85,9 @@ describe("flows templates endpoint", () => {
     await flows.published.get("flow-1");
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/published/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/published/");
     expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({ path: { id: "flow-1" } });
   });
 
   it("loads canonical run status capabilities for client lifecycle logic", async () => {
@@ -286,8 +294,11 @@ describe("flows templates endpoint", () => {
     await flows.templates.signedUrl({ id: "flow-1", fileId: "file-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/template-files/file-1/signed-url/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/template-files/{file_id}/signed-url/");
     expect(fetch.mock.calls[0][1].method).toBe("post");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", file_id: "file-1" }
+    });
   });
 
   it("uploads runtime files to step-scoped route", async () => {
@@ -354,9 +365,12 @@ describe("flows templates endpoint", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe(
-      "/api/v1/flows/flow-1/runs/run-1/artifacts/file-1/signed-url/"
+      "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"
     );
     expect(fetch.mock.calls[0][1].method).toBe("post");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", run_id: "run-1", file_id: "file-1" }
+    });
   });
 
   it("exports evidence from the canonical flow run route", async () => {
@@ -369,10 +383,10 @@ describe("flows templates endpoint", () => {
     await flows.runs.exportEvidence({ id: "run-1", flowId: "flow-1" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/runs/run-1/evidence/export");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/runs/{run_id}/evidence/export");
     expect(fetch.mock.calls[0][1]).toMatchObject({
       method: "get",
-      params: { query: { format: "json" } }
+      params: { path: { id: "flow-1", run_id: "run-1" }, query: { format: "json" } }
     });
   });
 
@@ -498,12 +512,15 @@ describe("flows templates endpoint", () => {
     await flows.runs.exportEvidence(createdRun);
 
     expect(fetch.mock.calls).toEqual([
-      ["/api/v1/flows/flow-1/run-contract/", { method: "get" }],
+      ["/api/v1/flows/{id}/run-contract/", { method: "get", params: { path: { id: "flow-1" } } }],
       [
-        "/api/v1/flows/flow-1/runs/",
+        "/api/v1/flows/{id}/runs/",
         {
           method: "post",
-          params: { header: { "Idempotency-Key": "flow-run:test-key" } },
+          params: {
+            path: { id: "flow-1" },
+            header: { "Idempotency-Key": "flow-run:test-key" }
+          },
           requestBody: {
             "application/json": {
               expected_flow_version: 7,
@@ -515,14 +532,26 @@ describe("flows templates endpoint", () => {
           }
         }
       ],
-      ["/api/v1/flows/flow-1/runs/run-1/", { method: "get" }],
-      ["/api/v1/flows/flow-1/runs/run-1/steps/", { method: "get" }],
-      ["/api/v1/flows/flow-1/runs/run-1/evidence/", { method: "get" }],
       [
-        "/api/v1/flows/flow-1/runs/run-1/evidence/export",
+        "/api/v1/flows/{id}/runs/{run_id}/",
+        { method: "get", params: { path: { id: "flow-1", run_id: "run-1" } } }
+      ],
+      [
+        "/api/v1/flows/{id}/runs/{run_id}/steps/",
+        { method: "get", params: { path: { id: "flow-1", run_id: "run-1" } } }
+      ],
+      [
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/",
+        { method: "get", params: { path: { id: "flow-1", run_id: "run-1" } } }
+      ],
+      [
+        "/api/v1/flows/{id}/runs/{run_id}/evidence/export",
         {
           method: "get",
-          params: { query: { format: "json" } }
+          params: {
+            path: { id: "flow-1", run_id: "run-1" },
+            query: { format: "json", detail: undefined, reason: undefined }
+          }
         }
       ]
     ]);
@@ -562,14 +591,17 @@ describe("flows templates endpoint", () => {
     });
 
     expect(fetch.mock.calls.map((call) => call[0])).toEqual([
-      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/active/",
-      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/",
-      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/approve/",
-      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/reject/",
-      "/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/resume/"
+      "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+      "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+      "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+      "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+      "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/"
     ]);
     expect(fetch.mock.calls[1][1]).toMatchObject({
       method: "patch",
+      params: {
+        path: { id: "flow-1", run_id: "run-1", checkpoint_id: "checkpoint-1" }
+      },
       requestBody: {
         "application/json": {
           expected_checkpoint_revision: 1,
@@ -579,7 +611,10 @@ describe("flows templates endpoint", () => {
     });
     expect(fetch.mock.calls[4][1]).toMatchObject({
       method: "post",
-      params: { header: { "Idempotency-Key": "flow-review-resume:checkpoint-1:3" } },
+      params: {
+        path: { id: "flow-1", run_id: "run-1", checkpoint_id: "checkpoint-1" },
+        header: { "Idempotency-Key": "flow-review-resume:checkpoint-1:3" }
+      },
       requestBody: {
         "application/json": {
           expected_checkpoint_revision: 3
@@ -602,7 +637,8 @@ describe("flows templates endpoint", () => {
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/flow-1/runs/");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/runs/");
+    expect(fetch.mock.calls[0][1].params.path).toEqual({ id: "flow-1" });
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).not.toHaveProperty("flow_id");
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_flow_version: 7,
@@ -647,6 +683,7 @@ describe("flows templates endpoint", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1" },
       header: { "Idempotency-Key": "flow-run:test-key" }
     });
   });

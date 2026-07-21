@@ -32,14 +32,13 @@ function withFlowPackageOmissions(response) {
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initFlows(client) {
-  /** @param {string} path @param {object} options */
-  const _fetch = (path, options) => /** @type {any} */ (client).fetch(path, options);
-  /** @param {string} path @param {object} options */
+  const _fetch = client.fetch;
+  /** @type {import('../types/fetch').EneoBinaryFetchFunction} */
   const _binaryFetch = (path, options) => {
     if (!("binaryFetch" in client) || typeof client.binaryFetch !== "function") {
       throw new Error("Flow package export requires a client with binaryFetch support.");
     }
-    return /** @type {any} */ (client).binaryFetch(path, options);
+    return client.binaryFetch(path, options);
   };
   const _textEncoder = new TextEncoder();
 
@@ -268,7 +267,10 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     get: async (flow) => {
-      return _fetch(`/api/v1/flows/${flow.id}/`, { method: "get" });
+      return _fetch("/api/v1/flows/{id}/", {
+        method: "get",
+        params: { path: { id: flow.id } }
+      });
     },
 
     /**
@@ -277,8 +279,9 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     update: async ({ flow, update }) => {
-      return _fetch(`/api/v1/flows/${flow.id}/`, {
+      return _fetch("/api/v1/flows/{id}/", {
         method: "patch",
+        params: { path: { id: flow.id } },
         requestBody: { "application/json": update }
       });
     },
@@ -290,7 +293,10 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     delete: async (flow) => {
-      await _fetch(`/api/v1/flows/${flow.id}/`, { method: "delete" });
+      await _fetch("/api/v1/flows/{id}/", {
+        method: "delete",
+        params: { path: { id: flow.id } }
+      });
       return true;
     },
 
@@ -300,7 +306,10 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     publish: async (flow) => {
-      return _fetch(`/api/v1/flows/${flow.id}/publish/`, { method: "post" });
+      return _fetch("/api/v1/flows/{id}/publish/", {
+        method: "post",
+        params: { path: { id: flow.id } }
+      });
     },
 
     /**
@@ -309,7 +318,10 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     unpublish: async (flow) => {
-      return _fetch(`/api/v1/flows/${flow.id}/unpublish/`, { method: "post" });
+      return _fetch("/api/v1/flows/{id}/unpublish/", {
+        method: "post",
+        params: { path: { id: flow.id } }
+      });
     },
 
     /**
@@ -319,9 +331,9 @@ export function initFlows(client) {
      */
     graph: async ({ id, run_id }) => {
       const query = run_id ? { run_id } : {};
-      return _fetch(`/api/v1/flows/${id}/graph/`, {
+      return _fetch("/api/v1/flows/{id}/graph/", {
         method: "get",
-        params: { query }
+        params: { path: { id }, query }
       });
     },
 
@@ -415,7 +427,10 @@ export function initFlows(client) {
        */
       get: async (flowOrId) => {
         const id = typeof flowOrId === "string" ? flowOrId : flowOrId.id;
-        return _fetch(`/api/v1/flows/${id}/published/`, { method: "get" });
+        return _fetch("/api/v1/flows/{id}/published/", {
+          method: "get",
+          params: { path: { id } }
+        });
       }
     },
 
@@ -426,7 +441,10 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       get: async ({ id }) => {
-        return _fetch(`/api/v1/flows/${id}/run-contract/`, { method: "get" });
+        return _fetch("/api/v1/flows/{id}/run-contract/", {
+          method: "get",
+          params: { path: { id } }
+        });
       }
     },
 
@@ -436,9 +454,9 @@ export function initFlows(client) {
      * @throws {EneoError}
      */
     inspectTemplate: async ({ id, fileId }) => {
-      return _fetch(`/api/v1/flows/${id}/template-inspect/`, {
+      return _fetch("/api/v1/flows/{id}/template-inspect/", {
         method: "get",
-        params: { query: { file_id: fileId } }
+        params: { path: { id }, query: { file_id: fileId } }
       });
     },
 
@@ -449,8 +467,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       list: async ({ id }) => {
-        return _fetch(`/api/v1/flows/${id}/template-files/`, {
-          method: "get"
+        return _fetch("/api/v1/flows/{id}/template-files/", {
+          method: "get",
+          params: { path: { id } }
         });
       },
 
@@ -462,8 +481,9 @@ export function initFlows(client) {
       upload: async ({ id, file, signal }) => {
         const formData = new FormData();
         formData.append("upload_file", file);
-        return _fetch(`/api/v1/flows/${id}/template-files/`, {
+        return _fetch("/api/v1/flows/{id}/template-files/", {
           method: "post",
+          params: { path: { id } },
           requestBody: { "multipart/form-data": formData },
           signal
         });
@@ -475,8 +495,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       delete: async ({ id, fileId, signal }) => {
-        return _fetch(`/api/v1/flows/${id}/template-files/${fileId}/`, {
+        return _fetch("/api/v1/flows/{id}/template-files/{file_id}/", {
           method: "delete",
+          params: { path: { id, file_id: fileId } },
           signal
         });
       },
@@ -487,9 +508,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       inspect: async ({ id, fileId }) => {
-        return _fetch(`/api/v1/flows/${id}/template-inspect/`, {
+        return _fetch("/api/v1/flows/{id}/template-inspect/", {
           method: "get",
-          params: { query: { file_id: fileId } }
+          params: { path: { id }, query: { file_id: fileId } }
         });
       },
 
@@ -499,8 +520,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       signedUrl: async ({ id, fileId, expiresIn = 3600, contentDisposition = "attachment" }) => {
-        return _fetch(`/api/v1/flows/${id}/template-files/${fileId}/signed-url/`, {
+        return _fetch("/api/v1/flows/{id}/template-files/{file_id}/signed-url/", {
           method: "post",
+          params: { path: { id, file_id: fileId } },
           requestBody: {
             "application/json": {
               expires_in: expiresIn,
@@ -574,8 +596,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       create: async ({ id, name }) => {
-        return _fetch(`/api/v1/flows/${id}/assistants/`, {
+        return _fetch("/api/v1/flows/{id}/assistants/", {
           method: "post",
+          params: { path: { id } },
           requestBody: { "application/json": { name } }
         });
       },
@@ -586,8 +609,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       get: async ({ id, assistantId }) => {
-        return _fetch(`/api/v1/flows/${id}/assistants/${assistantId}/`, {
-          method: "get"
+        return _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
+          method: "get",
+          params: { path: { id, assistant_id: assistantId } }
         });
       },
 
@@ -603,8 +627,9 @@ export function initFlows(client) {
         if (typeof body.description === "string" && body.description.trim() === "") {
           body.description = null;
         }
-        return _fetch(`/api/v1/flows/${id}/assistants/${assistantId}/`, {
+        return _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
           method: "patch",
+          params: { path: { id, assistant_id: assistantId } },
           requestBody: { "application/json": body }
         });
       },
@@ -616,8 +641,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       delete: async ({ id, assistantId }) => {
-        await _fetch(`/api/v1/flows/${id}/assistants/${assistantId}/`, {
-          method: "delete"
+        await _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
+          method: "delete",
+          params: { path: { id, assistant_id: assistantId } }
         });
         return true;
       }
@@ -665,9 +691,12 @@ export function initFlows(client) {
           input_payload_json,
           step_inputs
         });
-        return _fetch(`/api/v1/flows/${flow.id}/runs/`, {
+        return _fetch("/api/v1/flows/{id}/runs/", {
           method: "post",
-          params: idempotencyKey ? { header: { "Idempotency-Key": idempotencyKey } } : undefined,
+          params: {
+            path: { id: flow.id },
+            header: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined
+          },
           requestBody: {
             "application/json": requestBody
           }
@@ -697,9 +726,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       list: async ({ flowId, limit = 50, offset = 0, status }) => {
-        return _fetch(`/api/v1/flows/${flowId}/runs/`, {
+        return _fetch("/api/v1/flows/{id}/runs/", {
           method: "get",
-          params: { query: { limit, offset, status } }
+          params: { path: { id: flowId }, query: { limit, offset, status } }
         });
       },
 
@@ -710,8 +739,9 @@ export function initFlows(client) {
        */
       get: async (run) => {
         const flowId = _requireFlowIdForRunRoute(run, "get");
-        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/`, {
-          method: "get"
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
         });
       },
 
@@ -721,8 +751,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       steps: async ({ flowId, runId }) => {
-        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/steps/`, {
-          method: "get"
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: runId } }
         });
       },
 
@@ -733,8 +764,9 @@ export function initFlows(client) {
        */
       cancel: async (run) => {
         const flowId = _requireFlowIdForRunRoute(run, "cancel");
-        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/cancel/`, {
-          method: "post"
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/cancel/", {
+          method: "post",
+          params: { path: { id: flowId, run_id: run.id } }
         });
       },
 
@@ -745,8 +777,9 @@ export function initFlows(client) {
        * @throws {EneoError}
        */
       rerunStep: async ({ flowId, runId, stepId, ...requestBody }) => {
-        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/steps/${stepId}/rerun/`, {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", {
           method: "post",
+          params: { path: { id: flowId, run_id: runId, step_id: stepId } },
           requestBody: { "application/json": requestBody }
         });
       },
@@ -759,8 +792,9 @@ export function initFlows(client) {
        */
       redispatch: async (run) => {
         const flowId = _requireFlowIdForRunRoute(run, "redispatch");
-        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/redispatch/`, {
-          method: "post"
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/redispatch/", {
+          method: "post",
+          params: { path: { id: flowId, run_id: run.id } }
         });
       },
 
@@ -771,8 +805,9 @@ export function initFlows(client) {
        */
       evidence: async (run) => {
         const flowId = _requireFlowIdForRunRoute(run, "evidence");
-        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/`, {
-          method: "get"
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/evidence/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
         });
       },
 
@@ -784,9 +819,10 @@ export function initFlows(client) {
        */
       exportEvidence: async (run) => {
         const flowId = _requireFlowIdForRunRoute(run, "exportEvidence");
-        return _fetch(`/api/v1/flows/${flowId}/runs/${run.id}/evidence/export`, {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/evidence/export", {
           method: "get",
           params: {
+            path: { id: flowId, run_id: run.id },
             query: {
               format: run.format ?? "json",
               detail: run.detail,
@@ -802,8 +838,9 @@ export function initFlows(client) {
          * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint | null>}
          */
         active: async ({ flowId, runId }) => {
-          return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/active/`, {
-            method: "get"
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId } }
           });
         },
 
@@ -818,18 +855,16 @@ export function initFlows(client) {
           expectedCheckpointRevision,
           currentPayloadJson
         }) => {
-          return _fetch(
-            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/`,
-            {
-              method: "patch",
-              requestBody: {
-                "application/json": {
-                  expected_checkpoint_revision: expectedCheckpointRevision,
-                  current_payload_json: _stableSortObjectKeys(currentPayloadJson)
-                }
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/", {
+            method: "patch",
+            params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
+            requestBody: {
+              "application/json": {
+                expected_checkpoint_revision: expectedCheckpointRevision,
+                current_payload_json: _stableSortObjectKeys(currentPayloadJson)
               }
             }
-          );
+          });
         },
 
         /**
@@ -838,9 +873,10 @@ export function initFlows(client) {
          */
         approve: async ({ flowId, runId, checkpointId, expectedCheckpointRevision }) => {
           return _fetch(
-            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/approve/`,
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
             {
               method: "post",
+              params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
               requestBody: {
                 "application/json": {
                   expected_checkpoint_revision: expectedCheckpointRevision
@@ -856,9 +892,10 @@ export function initFlows(client) {
          */
         reject: async ({ flowId, runId, checkpointId, expectedCheckpointRevision, reason }) => {
           return _fetch(
-            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/reject/`,
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
             {
               method: "post",
+              params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
               requestBody: {
                 "application/json": {
                   expected_checkpoint_revision: expectedCheckpointRevision,
@@ -881,10 +918,13 @@ export function initFlows(client) {
           idempotencyKey
         }) => {
           return _fetch(
-            `/api/v1/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/resume/`,
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
             {
               method: "post",
-              params: { header: { "Idempotency-Key": idempotencyKey } },
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                header: { "Idempotency-Key": idempotencyKey }
+              },
               requestBody: {
                 "application/json": {
                   expected_checkpoint_revision: expectedCheckpointRevision
@@ -908,8 +948,9 @@ export function initFlows(client) {
         expiresIn = 3600,
         contentDisposition = "attachment"
       }) => {
-        return _fetch(`/api/v1/flows/${flowId}/runs/${runId}/artifacts/${fileId}/signed-url/`, {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/", {
           method: "post",
+          params: { path: { id: flowId, run_id: runId, file_id: fileId } },
           requestBody: {
             "application/json": {
               expires_in: expiresIn,
