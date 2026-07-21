@@ -60,22 +60,24 @@ def get_container(
     ) -> Container:
         if request.method == "OPTIONS":
             return container
+
+        async def _authenticate_and_setup_user() -> UserInDB:
+            user = await container.user_service().authenticate(
+                token=token, api_key=api_key, request=request
+            )
+            if not user.is_active:
+                await setup_user(container=container, user=user)
+            return user
+
         try:
             session = cast(AsyncSession, container.session())
             if session.in_transaction():
-                user = await container.user_service().authenticate(
-                    token=token, api_key=api_key, request=request
-                )
+                user = await _authenticate_and_setup_user()
             else:
                 async with session.begin():
-                    user = await container.user_service().authenticate(
-                        token=token, api_key=api_key, request=request
-                    )
+                    user = await _authenticate_and_setup_user()
         except ApiKeyValidationError as exc:
             _raise_api_key_http_error(exc, request=request)
-
-        if not user.is_active:
-            await setup_user(container=container, user=user)
 
         override_user(container=container, user=user)
 

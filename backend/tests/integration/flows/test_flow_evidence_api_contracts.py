@@ -1844,6 +1844,7 @@ async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize("audit_outcome", ["none", "exception"])
 async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     client,
     db_container,
@@ -1852,6 +1853,7 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     space_factory,
     assistant_factory,
     admin_user,
+    audit_outcome: str,
 ):
     seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
@@ -1864,6 +1866,8 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
 
     class FailingAuditService:
         async def log(self, **_kwargs: object) -> None:
+            if audit_outcome == "none":
+                return None
             raise RuntimeError("audit down")
 
     audit_service = FailingAuditService()
@@ -1885,6 +1889,7 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize("audit_outcome", ["none", "exception"])
 async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unavailable(
     client,
     db_container,
@@ -1893,6 +1898,7 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
     space_factory,
     assistant_factory,
     admin_user,
+    audit_outcome: str,
 ):
     seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
@@ -1905,6 +1911,8 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
 
     class FailingAuditService:
         async def log(self, **_kwargs: object) -> None:
+            if audit_outcome == "none":
+                return None
             raise RuntimeError("audit down")
 
     audit_service = FailingAuditService()
