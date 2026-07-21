@@ -1,13 +1,13 @@
 {
   "version": 1,
   "program": "eneo-flows-and-builder-9-of-10",
-  "updated_at": "2026-07-21T16:09:27+02:00",
+  "updated_at": "2026-07-21T16:30:55+02:00",
   "orchestration": {
     "owner": "hermes-default-profile",
-    "status": "setup",
-    "writer_job": null,
+    "status": "active",
+    "writer_job": "1a052c178dee",
     "writer_lock": "/Users/cimen/.hermes/programs/eneo-flows/writer.lock",
-    "max_parallel_workers": 4,
+    "max_parallel_workers": 3,
     "parallel_writers_require_isolated_worktrees": true,
     "route_returned_work_before_dispatch": true
   },
@@ -80,17 +80,11 @@
     "branch": "refactor/flows-clean",
     "pull_requests": false,
     "develop_mutation": false,
-    "last_verified_push": "92dac39587feeecf9f3f84579017dd3868e71413",
-    "last_verified_at": "2026-07-21T12:56:56Z",
+    "last_verified_push": "6a9723ea1ee6f2c55e2904cc66d700b669863762",
+    "last_verified_at": "2026-07-21T16:30:55+02:00",
     "protected_dirty": [
       ".devcontainer/devcontainer.json",
       ".gitignore",
-      "docs/goals/eneo-flows-and-builder-9-of-10/goal.md",
-      "docs/goals/eneo-flows-and-builder-9-of-10/notes/handoff.md",
-      "docs/goals/eneo-flows-and-builder-9-of-10/state.yaml",
-      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-state.json",
-      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-supervisor-prompt.md",
-      "docs/goals/eneo-flows-and-builder-9-of-10/notes/hermes-recovery.md",
       ".hermes/desktop-attachments/eneo-flows-hermes-handoff-prompt.md",
       "AGENTS.md.backup-20260629-220449"
     ]
@@ -223,7 +217,7 @@
     "morning_report": "/Users/cimen/Downloads/eneo-flows-overnight-progress.md",
     "timezone": "Europe/Stockholm",
     "last_morning_report_date": null,
-    "last_material_update_at": "2026-07-21T16:09:27+02:00",
+    "last_material_update_at": "2026-07-21T16:30:55+02:00",
     "last_material_fingerprint": null
   },
   "limits": {
@@ -238,6 +232,12 @@
       "kind": "orchestrator-transition",
       "summary": "Paused all Codex automations after verifying no active product writer; migrated 19/90 progress and frozen evidence references into the bounded Hermes ledger.",
       "commit": "92dac39587feeecf9f3f84579017dd3868e71413"
+    },
+    {
+      "at": "2026-07-21T16:30:55+02:00",
+      "kind": "supervisor-activated",
+      "summary": "Verified whole-run locking, gateway supervision, recurring cron execution cd53a8a88101450ba82cde2185b16b35, remote convergence, skills, protected dirt, and preserved worktrees; activated job 1a052c178dee for roadmap execution.",
+      "commit": "6a9723ea1ee6f2c55e2904cc66d700b669863762"
     }
   ]
 }
