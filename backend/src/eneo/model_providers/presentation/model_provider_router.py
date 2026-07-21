@@ -119,7 +119,7 @@ ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)
     "/",
     response_model=list[ModelProviderPublic],
     description="List all model providers for the tenant.",
-    responses=responses.get_responses([403]),
+    responses=responses.get_responses([403, 503]),
 )
 async def list_providers(
     user: CurrentUser,
@@ -374,7 +374,7 @@ async def get_model_defaults(
 @router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 503]),
 )
 async def get_provider(
     provider_id: UUID,
@@ -497,7 +497,7 @@ async def validate_model(
     "/{provider_id}/",
     response_model=dict[str, str],
     description="Delete a model provider.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 503]),
 )
 async def delete_provider(
     provider_id: UUID,
