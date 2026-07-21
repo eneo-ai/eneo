@@ -598,6 +598,7 @@ jobs:
 
       - name: Independently verify registry provenance and SBOM attestations
         env:
+          GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.SEAWEEDFS_IMAGE_NAME }}
           MANIFEST_DIGEST: ${{ steps.manifest.outputs.manifest-digest }}
         run: |

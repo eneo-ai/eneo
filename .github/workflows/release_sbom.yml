@@ -393,6 +393,7 @@ jobs:
 
       - name: Verify SeaweedFS provenance and platform SBOM attestations
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
