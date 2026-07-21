@@ -1607,6 +1607,7 @@ async def test_flow_run_poll_sanitizes_corrupt_persisted_error_json(
         "schema_version": 1,
         "code": "flow_run_error_payload_invalid",
         "message": "Persisted flow run error payload is invalid.",
+        "retryable": False,
         "source": None,
         "step_id": None,
         "step_order": None,
