@@ -2115,9 +2115,17 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     error_schema = _resolve_component_ref(openapi_spec, structured_error_ref)
 
     assert error_schema.get("title") == "FlowRunError"
-    assert {"code", "message"}.issubset(set(error_schema.get("required", [])))
+    assert {"code", "message", "retryable"}.issubset(
+        set(error_schema.get("required", []))
+    )
     assert error_schema.get("additionalProperties") is False
     assert "Clients should branch on `code`" in error_schema.get("description", "")
+
+    retryable_schema = error_schema.get("properties", {}).get("retryable", {})
+    assert retryable_schema.get("type") == "boolean"
+    assert retryable_schema.get("readOnly") is True
+    assert "new logical run" in retryable_schema.get("description", "")
+    assert "automatically" in retryable_schema.get("description", "")
 
     code_schema = _resolve_component_ref(
         openapi_spec,
@@ -2635,6 +2643,27 @@ def test_openapi_create_flow_run_documents_top_level_file_ids_error(
     assert "flow_run_top_level_file_ids_not_supported" in description
     assert "flow_run_top_level_file_ids_not_supported" in operation_description
     assert "step_inputs[step_id].file_ids" in operation_description
+
+
+def test_openapi_create_flow_run_documents_concurrency_limit(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/runs/", "post")
+    response = operation.get("responses", {}).get("429", {})
+    schema = response.get("content", {}).get("application/json", {}).get("schema", {})
+    resolved = _resolve_component_ref(openapi_spec, schema)
+    example = response.get("content", {}).get("application/json", {}).get("example", {})
+    retry_after = response.get("headers", {}).get("Retry-After", {})
+
+    assert resolved.get("title") == "GeneralError"
+    assert example == {
+        "message": "Concurrent flow run limit reached for this tenant.",
+        "eneo_error_code": 9007,
+        "code": "flow_run_concurrency_limit_reached",
+        "context": {"max_concurrent_runs": 4, "retry_after_seconds": 60},
+    }
+    assert retry_after.get("schema", {}).get("type") == "integer"
+    assert retry_after.get("schema", {}).get("example") == 60
 
 
 def test_openapi_flow_run_step_rerun_contract(openapi_spec: dict) -> None:

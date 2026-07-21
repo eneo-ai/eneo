@@ -12,12 +12,14 @@ from pydantic import (
     Field,
     ValidationError,
     WithJsonSchema,
+    computed_field,
     model_validator,
 )
 
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
+    FLOW_RUN_TERMINAL_ERROR_RETRYABILITY,
     FlowApiErrorCode,
 )
 
@@ -78,7 +80,12 @@ class FlowRunDispatchError(BaseModel):
     schema_version: Literal[1] = 1
     kind: FlowRunDispatchErrorKind
     code: FlowRunDispatchErrorCode
-    retryable: bool
+    retryable: bool = Field(
+        description=(
+            "Whether internal recovery may retry the current dispatch epoch before "
+            "terminalization. This does not automatically start work."
+        )
+    )
     message: str = Field(
         min_length=1,
         max_length=512,
@@ -240,6 +247,16 @@ class FlowRunError(BaseModel):
         description="Small, API-safe context for diagnostics and UI guidance.",
     )
 
+    @computed_field(
+        description=(
+            "Whether a consumer may safely submit a new logical run after "
+            "terminalization. This does not automatically start work."
+        )
+    )
+    @property
+    def retryable(self) -> bool:
+        return FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[self.code]
+
     @classmethod
     def from_source(
         cls,
@@ -264,7 +281,10 @@ class FlowRunError(BaseModel):
 def dump_flow_run_error(error: FlowRunError | None) -> FlowRunErrorJson | None:
     if error is None:
         return None
-    return cast(FlowRunErrorJson, error.model_dump(mode="json", exclude_none=True))
+    return cast(
+        FlowRunErrorJson,
+        error.model_dump(mode="json", exclude_none=True, exclude={"retryable"}),
+    )
 
 
 def parse_flow_run_error(value: object) -> FlowRunError | None:

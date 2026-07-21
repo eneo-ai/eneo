@@ -564,6 +564,12 @@ Run creation supports caller-supplied idempotency. Reusing the same key with the
 
 This is especially useful for browser retries, webhook retries, and unreliable networks.
 
+When tenant capacity is full, create returns HTTP `429`, `Retry-After: 60`, and
+code `flow_run_concurrency_limit_reached`. Branch on the HTTP status plus that
+string code, wait at least the advertised delay while polling existing runs,
+then submit the logical run again. Numeric `eneo_error_code: 9007` is a legacy
+category and is not the client control-flow contract.
+
 If you use `@eneo/eneo-js` (`frontend/packages/eneo-js`), the Flow client accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus the uploaded runtime file bindings you submit in `step_inputs`. It also exports `FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS` and `FlowRunReservedInputPayloadKey` for custom form validation. Use the same per-step file order for the key and the run creation request.
 
 Example:
@@ -705,6 +711,18 @@ Example run response:
   "updated_at": "2026-03-17T10:05:00Z"
 }
 ```
+
+#### What the two `retryable` fields mean
+
+`dispatch_last_error.retryable` is an internal recovery signal for the current
+dispatch epoch before terminalization. It tells you that the server may retry
+the same queued work; it does not tell a client to create another run.
+
+After terminalization, `error.retryable` answers a different question: whether
+a consumer may safely submit a new logical run. It is conservative and true
+only for `flow_dispatch_failed` and `flow_step_attempt_start_failed`. A true
+value does not start work automatically; the consumer still decides whether
+and when to submit a new run.
 
 #### What redispatch does
 

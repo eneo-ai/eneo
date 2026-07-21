@@ -23,7 +23,10 @@ from eneo.flows.domain.flow import (
     FlowRunTokenUsage,
     FlowStepResult,
 )
-from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowRunConcurrencyLimitReachedError,
+    FlowRunNotFoundError,
+)
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -404,10 +407,8 @@ class FlowRunService:
             tenant_id=self.user.tenant_id
         )
         if active_runs >= self.max_concurrent_runs:
-            raise FlowBadRequestException(
-                "Concurrent flow run limit reached for this tenant.",
-                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
-                context={"max_concurrent_runs": self.max_concurrent_runs},
+            raise FlowRunConcurrencyLimitReachedError(
+                max_concurrent_runs=self.max_concurrent_runs
             )
         return None
 

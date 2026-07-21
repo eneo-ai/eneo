@@ -432,7 +432,8 @@ const validFlowRunTokenUsage: FlowRunTokenUsage = {
 const validFlowRunError: FlowRunError = {
   schema_version: 1,
   code: "flow_step_execution_failed",
-  message: "Step execution failed."
+  message: "Step execution failed.",
+  retryable: false
 };
 const validFlowRunRedispatchResult: FlowRunRedispatchResult = {
   run: validFlowRun,

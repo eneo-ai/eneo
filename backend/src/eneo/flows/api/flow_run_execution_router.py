@@ -15,6 +15,7 @@ from fastapi import (
     Request,
     status,
 )
+from fastapi.responses import JSONResponse
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -69,16 +70,18 @@ from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes, InternalServerException
-from eneo.main.models import OffsetPaginatedResponse
+from eneo.main.models import GeneralError, OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
 )
+from eneo.server.exception_handlers import extract_request_id
 
 router = APIRouter()
 
@@ -96,6 +99,8 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Replay is available while the matching run row is retained; clients should keep "
     "the returned run id as the durable polling handle."
 )
+
+_FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS: Final[int] = 60
 
 _FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Required caller-supplied idempotency key for review resume retries."
@@ -706,6 +711,30 @@ async def get_flow_run_status_capabilities(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        429: {
+            **error_response(
+                description=(
+                    "The tenant already has the maximum number of active Flow runs. "
+                    "Wait for capacity, then submit the logical run again."
+                ),
+                message="Concurrent flow run limit reached for this tenant.",
+                eneo_error_code=ErrorCodes.BAD_REQUEST,
+                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
+                context={
+                    "max_concurrent_runs": 4,
+                    "retry_after_seconds": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                },
+            ),
+            "headers": {
+                "Retry-After": {
+                    "description": "Suggested delay before submitting a new run.",
+                    "schema": {
+                        "type": "integer",
+                        "example": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                    },
+                }
+            },
+        },
     },
 )
 async def create_flow_run(
@@ -726,56 +755,74 @@ async def create_flow_run(
     container: Container = Depends(
         get_container_for_explicit_transaction(with_user=True)
     ),
-) -> FlowRunPublic:
+) -> FlowRunPublic | JSONResponse:
     assembler = FlowAssembler()
     dispatch_run: FlowRun | None = None
     completed_replay_view = None
-    async with _commit_flow_runtime_write_before_response(container):
-        await flow_access_context.enforce_flow_scope(
-            request,
-            container,
-            flow_id=id,
-            required_access=FlowApiAction.RUN,
-            allow_service_key_principals=True,
-            require_published_for_service_key=True,
-        )
-        run_service = container.flow_run_service()
-        user = container.user()
-        actor_kwargs = audit_actor_kwargs(user)
-        create_result = await run_service.create_run(
-            flow_id=id,
-            input_payload_json=run_in.input_payload_json,
-            expected_flow_version=run_in.expected_flow_version,
-            step_inputs=(
-                {
-                    step_id: FlowRunStepInputFiles(file_ids=tuple(step_input.file_ids))
-                    for step_id, step_input in run_in.step_inputs.items()
-                }
-                if run_in.step_inputs is not None
-                else None
-            ),
-            idempotency_key=idempotency_key,
-        )
-        run = create_result.run
-        if create_result.created:
-            await container.audit_service().log_async(
-                tenant_id=user.tenant_id,
-                actor_id=actor_kwargs["actor_id"],
-                actor_type=actor_kwargs["actor_type"],
-                actor_api_key_id=actor_kwargs["actor_api_key_id"],
-                action=ActionType.FLOW_RUN_CREATED,
-                entity_type=EntityType.FLOW_RUN,
-                entity_id=run.id,
-                description=f"Created flow run for flow {id}",
-                metadata=AuditMetadata.standard(actor=user, target=run),
+    try:
+        async with _commit_flow_runtime_write_before_response(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.RUN,
+                allow_service_key_principals=True,
+                require_published_for_service_key=True,
             )
-            dispatch_run = run
-        elif run.status is FlowRunStatus.COMPLETED:
-            completed_replay_view = (
-                await run_service.enrich_run_with_result_files_and_token_usage(
-                    run=run,
+            run_service = container.flow_run_service()
+            user = container.user()
+            actor_kwargs = audit_actor_kwargs(user)
+            create_result = await run_service.create_run(
+                flow_id=id,
+                input_payload_json=run_in.input_payload_json,
+                expected_flow_version=run_in.expected_flow_version,
+                step_inputs=(
+                    {
+                        step_id: FlowRunStepInputFiles(
+                            file_ids=tuple(step_input.file_ids)
+                        )
+                        for step_id, step_input in run_in.step_inputs.items()
+                    }
+                    if run_in.step_inputs is not None
+                    else None
+                ),
+                idempotency_key=idempotency_key,
+            )
+            run = create_result.run
+            if create_result.created:
+                await container.audit_service().log_async(
+                    tenant_id=user.tenant_id,
+                    actor_id=actor_kwargs["actor_id"],
+                    actor_type=actor_kwargs["actor_type"],
+                    actor_api_key_id=actor_kwargs["actor_api_key_id"],
+                    action=ActionType.FLOW_RUN_CREATED,
+                    entity_type=EntityType.FLOW_RUN,
+                    entity_id=run.id,
+                    description=f"Created flow run for flow {id}",
+                    metadata=AuditMetadata.standard(actor=user, target=run),
                 )
-            )
+                dispatch_run = run
+            elif run.status is FlowRunStatus.COMPLETED:
+                completed_replay_view = (
+                    await run_service.enrich_run_with_result_files_and_token_usage(
+                        run=run,
+                    )
+                )
+    except FlowRunConcurrencyLimitReachedError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(_FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS)},
+            content=GeneralError(
+                message="Concurrent flow run limit reached for this tenant.",
+                eneo_error_code=ErrorCodes.BAD_REQUEST,
+                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED.value,
+                context={
+                    "max_concurrent_runs": exc.max_concurrent_runs,
+                    "retry_after_seconds": _FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                },
+                request_id=extract_request_id(request),
+            ).model_dump(mode="json", exclude_none=True),
+        )
 
     if dispatch_run is not None:
         background_tasks.add_task(

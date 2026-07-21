@@ -40,7 +40,10 @@ from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowRunConcurrencyLimitReachedError,
+    FlowRunNotFoundError,
+)
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -584,12 +587,14 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     flow_run_repo.count_active_runs.return_value = 1
 
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(FlowRunConcurrencyLimitReachedError) as exc_info:
         await service.create_run(flow_id=flow.id, input_payload_json={"x": 1})
-    assert exc_info.value.code == "flow_run_concurrency_limit_reached"
+    assert exc_info.value.max_concurrent_runs == 1
     flow_run_repo.acquire_tenant_run_creation_lock.assert_awaited_once_with(
         tenant_id=user.tenant_id
     )
+    flow_run_repo.count_active_runs.assert_awaited_once_with(tenant_id=user.tenant_id)
+    flow_run_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

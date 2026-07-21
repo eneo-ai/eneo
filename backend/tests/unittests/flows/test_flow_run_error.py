@@ -13,9 +13,12 @@ from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
+    FLOW_RUN_TERMINAL_ERROR_RETRYABILITY,
     FlowApiErrorCode,
 )
 from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
     FlowRunError,
     FlowRunErrorDetails,
     dump_flow_run_error,
@@ -25,6 +28,22 @@ from eneo.flows.flow_run_error import (
 
 def test_flow_run_error_from_source_requires_public_error_code() -> None:
     assert get_type_hints(FlowRunError.from_source)["code"] is FlowApiErrorCode
+
+
+def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 76
+    assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
+    assert {
+        code
+        for code, retryable in FLOW_RUN_TERMINAL_ERROR_RETRYABILITY.items()
+        if retryable
+    } == {
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+    }
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
+    ]
 
 
 def test_flow_run_error_from_source_preserves_machine_code_and_step_context() -> None:
@@ -47,6 +66,41 @@ def test_flow_run_error_from_source_preserves_machine_code_and_step_context() ->
         step_order=3,
         details={"step_description": "Analysera bakgrund"},
     )
+
+
+def test_flow_run_error_exposes_retryability_without_changing_persisted_dump() -> None:
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        message="Step output was not valid JSON.",
+    )
+
+    assert error.retryable is False
+    assert error.model_dump(mode="json")["retryable"] is False
+    assert "retryable" not in (dump_flow_run_error(error) or {})
+
+
+def test_dispatch_and_terminal_retryability_have_distinct_public_semantics() -> None:
+    dispatch_error = FlowRunDispatchError.from_kind(
+        FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+    )
+    terminal_error = FlowRunError.from_source(
+        FlowRunLifecycleSource.DISPATCH_FAILURE,
+        code=FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        message="Flow run dispatch exhausted its bounded attempts.",
+    )
+    dispatch_description = FlowRunDispatchError.model_json_schema()["properties"][
+        "retryable"
+    ]["description"]
+    terminal_description = FlowRunError.model_json_schema(mode="serialization")[
+        "properties"
+    ]["retryable"]["description"]
+
+    assert dispatch_error.retryable is terminal_error.retryable is True
+    assert "current dispatch epoch" in dispatch_description
+    assert "new logical run" in terminal_description
+    assert "automatically" in dispatch_description
+    assert "automatically" in terminal_description
 
 
 def test_dump_flow_run_error_returns_openapi_safe_json_object() -> None:
@@ -134,6 +188,15 @@ def _assert_corrupt_run_error(error: FlowRunError | None) -> None:
                 "secret_token": "must not leak",
             },
             "secret_token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Stored payload injected a derived field.",
+                "retryable": True,
+            },
+            "injected a derived field",
         ),
     ],
 )

@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 
+@dataclass(slots=True)
+class FlowRunConcurrencyLimitReachedError(Exception):
+    max_concurrent_runs: int
+
+
 @dataclass(frozen=True, slots=True)
 class FlowRunNotFoundError(Exception):
     run_id: UUID

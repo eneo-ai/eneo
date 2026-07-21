@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
@@ -1109,6 +1111,100 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert evidence["step_results"][0]["output_payload_json"] == {
         "answer": "consumer-visible"
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_create_concurrency_limit_preserves_creation_side_effects(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+):
+    dispatch_requests: list[tuple[UUID, UUID, int]] = []
+
+    async def _record_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        dispatch_requests.append((run_id, tenant_id, expected_revision))
+
+    monkeypatch.setattr(
+        flow_run_execution_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _record_dispatch,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    flow_id = flow["id"]
+    tenant_id: str | None = None
+
+    for index in range(4):
+        response = await client.post(
+            f"/api/v1/flows/{flow_id}/runs/",
+            json={
+                "expected_flow_version": flow["published_version"],
+                "input_payload_json": {"index": index},
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 201, response.text
+        tenant_id = response.json()["tenant_id"]
+
+    assert tenant_id is not None
+    async with db_container() as container:
+        session = container.session()
+        run_count_before = await session.scalar(
+            sa.select(sa.func.count(FlowRuns.id)).where(
+                FlowRuns.flow_id == UUID(flow_id),
+                FlowRuns.tenant_id == UUID(tenant_id),
+            )
+        )
+        audit_count_before = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == UUID(tenant_id),
+                AuditLogTable.action == ActionType.FLOW_RUN_CREATED.value,
+            )
+        )
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"index": 4},
+        },
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "x-request-id": "flow-run-concurrency-limit-test",
+        },
+    )
+
+    assert response.status_code == 429, response.text
+    assert response.headers["Retry-After"] == "60"
+    assert response.json() == {
+        "message": "Concurrent flow run limit reached for this tenant.",
+        "eneo_error_code": 9007,
+        "code": "flow_run_concurrency_limit_reached",
+        "context": {"max_concurrent_runs": 4, "retry_after_seconds": 60},
+        "request_id": "flow-run-concurrency-limit-test",
+    }
+    async with db_container() as container:
+        session = container.session()
+        run_count_after = await session.scalar(
+            sa.select(sa.func.count(FlowRuns.id)).where(
+                FlowRuns.flow_id == UUID(flow_id),
+                FlowRuns.tenant_id == UUID(tenant_id),
+            )
+        )
+        audit_count_after = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == UUID(tenant_id),
+                AuditLogTable.action == ActionType.FLOW_RUN_CREATED.value,
+            )
+        )
+
+    assert run_count_before == run_count_after == 4
+    assert audit_count_before == audit_count_after
+    assert len(dispatch_requests) == 4
 
 
 @pytest.mark.asyncio

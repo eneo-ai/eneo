@@ -250,3 +250,12 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     }
     | FLOW_TYPED_IO_ERROR_CODES
 )
+# Only pre-provider/pre-execution failures are safe; lifecycle drift must revisit this allowlist.
+FLOW_RUN_TERMINAL_ERROR_RETRYABILITY: dict[FlowApiErrorCode, bool] = {
+    code: code
+    in {
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+    }
+    for code in FLOW_RUN_TERMINAL_ERROR_CODES
+}

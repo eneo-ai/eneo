@@ -15989,7 +15989,10 @@ export interface components {
        * @enum {string}
        */
       code: "flow_dispatch_failed" | "flow_missing_principal";
-      /** Retryable */
+      /**
+       * Retryable
+       * @description Whether internal recovery may retry the current dispatch epoch before terminalization. This does not automatically start work.
+       */
       retryable: boolean;
       /**
        * Message
@@ -16115,6 +16118,11 @@ export interface components {
       step_order?: number | null;
       /** @description Small, API-safe context for diagnostics and UI guidance. */
       details?: components["schemas"]["FlowRunErrorDetails"] | null;
+      /**
+       * Retryable
+       * @description Whether a consumer may safely submit a new logical run after terminalization. This does not automatically start work.
+       */
+      readonly retryable: boolean;
     };
     /** FlowRunErrorDetails */
     FlowRunErrorDetails: {
@@ -44635,6 +44643,28 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The tenant already has the maximum number of active Flow runs. Wait for capacity, then submit the logical run again. */
+      429: {
+        headers: {
+          /** @description Suggested delay before submitting a new run. */
+          "Retry-After"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Concurrent flow run limit reached for this tenant.",
+           *       "eneo_error_code": 9007,
+           *       "code": "flow_run_concurrency_limit_reached",
+           *       "context": {
+           *         "max_concurrent_runs": 4,
+           *         "retry_after_seconds": 60
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
