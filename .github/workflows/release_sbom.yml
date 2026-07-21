@@ -16,13 +16,6 @@ on:
         default: false
         type: boolean
 
-permissions:
-  contents: write
-  packages: read
-  attestations: write
-  artifact-metadata: write
-  id-token: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
@@ -30,6 +23,8 @@ concurrency:
 env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
+  SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
+  SEAWEEDFS_VERSION: 4.39-eneo.1
   PLATFORM: linux/amd64
   PLATFORM_OS: linux
   PLATFORM_ARCH: amd64
@@ -37,11 +32,19 @@ env:
   CDXGEN_VERSION: 12.4.4
   CYCLONEDX_BOM_VERSION: "7.3.0"
   CYCLONEDX_SPEC_VERSION: "1.6"
+  BUILDX_VERSION: v0.33.0
+  BUILDKIT_IMAGE: moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
 
 jobs:
   release-sbom:
     name: Release SBOM
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+      attestations: write
+      artifact-metadata: write
+      id-token: write
 
     steps:
       - name: Resolve release inputs
@@ -82,6 +85,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -119,12 +125,14 @@ jobs:
 
           resolve_platform_digest() {
             local image_ref="$1"
+            local platform_os="$2"
+            local platform_arch="$3"
             local raw_manifest
             local digest
 
             for attempt in {1..60}; do
               if raw_manifest="$(docker buildx imagetools inspect "$image_ref" --raw 2>/tmp/image-inspect-error.log)"; then
-                digest="$(jq -r --arg os "$PLATFORM_OS" --arg arch "$PLATFORM_ARCH" '
+                digest="$(jq -r --arg os "$platform_os" --arg arch "$platform_arch" '
                   [.manifests[]?
                     | select(.platform.os == $os and .platform.architecture == $arch)
                     | .digest][0] // empty
@@ -135,7 +143,7 @@ jobs:
                   return 0
                 fi
 
-                echo "::error::Image $image_ref does not expose a $PLATFORM platform manifest." >&2
+                echo "::error::Image $image_ref does not expose linux/$platform_arch." >&2
                 return 1
               fi
 
@@ -152,23 +160,29 @@ jobs:
           generate_component_sbom() {
             local component="$1"
             local image="$2"
-            local image_ref="$image:$IMAGE_TAG"
+            local image_tag="${3:-$IMAGE_TAG}"
+            local platform="${4:-$PLATFORM}"
+            local platform_os="${5:-$PLATFORM_OS}"
+            local platform_arch="${6:-$PLATFORM_ARCH}"
+            local image_ref="$image:$image_tag"
             local digest
             local digest_ref
             local asset_prefix
 
-            digest="$(resolve_platform_digest "$image_ref")"
+            digest="$(resolve_platform_digest "$image_ref" "$platform_os" "$platform_arch")"
             digest_ref="$image@$digest"
-            asset_prefix="eneo-${component}-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}"
+            asset_prefix="eneo-${component}-${RELEASE_TAG}-${platform_os}-${platform_arch}"
 
-            printf '%s %s %s\n' "$component" "$image_ref" "$digest_ref" >> "$out_dir/IMAGE-DIGESTS.txt"
+            printf '%s %s %s %s\n' \
+              "$component" "$platform" "$image_ref" "$digest_ref" \
+              >> "$out_dir/IMAGE-DIGESTS.txt"
 
             if [[ "$component" == "backend" ]]; then
               backend_digest_ref="$digest_ref"
             fi
 
             "$SYFT_CMD" "registry:$digest_ref" \
-              --platform "$PLATFORM" \
+              --platform "$platform" \
               -q \
               -o "cyclonedx-json=$out_dir/${asset_prefix}.cyclonedx.json" \
               -o "spdx-json=$out_dir/${asset_prefix}.spdx.json" \
@@ -327,6 +341,33 @@ jobs:
           generate_component_sbom "backend" "$BACKEND_IMAGE"
           generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
+          source_sha="$(git rev-parse HEAD)"
+          seaweedfs_tag="${SEAWEEDFS_VERSION}-${source_sha}"
+          generate_component_sbom \
+            "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
+            "linux/amd64" "linux" "amd64"
+          generate_component_sbom \
+            "seaweedfs" "$SEAWEEDFS_IMAGE" "$seaweedfs_tag" \
+            "linux/arm64" "linux" "arm64"
+
+          seaweedfs_image_ref="$SEAWEEDFS_IMAGE:$seaweedfs_tag"
+          seaweedfs_manifest_digest="$(docker buildx imagetools inspect \
+            "$seaweedfs_image_ref" --format '{{json .Manifest}}' | jq -r '.digest')"
+          [[ "$seaweedfs_manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'seaweedfs manifest %s %s@%s\n' \
+            "$seaweedfs_image_ref" "$SEAWEEDFS_IMAGE" "$seaweedfs_manifest_digest" \
+            >> "$out_dir/IMAGE-DIGESTS.txt"
+
+          for seaweedfs_target in manifest linux/amd64 linux/arm64; do
+            row_count="$(awk -v target="$seaweedfs_target" '
+              $1 == "seaweedfs" && $2 == target { count += 1 }
+              END { print count + 0 }
+            ' "$out_dir/IMAGE-DIGESTS.txt")"
+            if [[ "$row_count" -ne 1 ]]; then
+              echo "::error::Expected exactly one SeaweedFS $seaweedfs_target digest row, found $row_count." >&2
+              exit 1
+            fi
+          done
           generate_frontend_source_sbom
 
           (
@@ -337,17 +378,60 @@ jobs:
           {
             echo "## Release SBOMs"
             echo ""
-            echo "Generated SBOMs for \`$RELEASE_TAG\` from \`$PLATFORM\` image digests."
+            echo "Generated SBOMs for \`$RELEASE_TAG\` from immutable image digests."
             echo ""
-            echo "| Component | Image tag | Image digest |"
-            echo "| --- | --- | --- |"
-            while read -r component image_ref digest_ref; do
-              echo "| $component | \`$image_ref\` | \`$digest_ref\` |"
+            echo "| Component | Target | Image tag | Image digest |"
+            echo "| --- | --- | --- | --- |"
+            while read -r component target image_ref digest_ref; do
+              echo "| $component | $target | \`$image_ref\` | \`$digest_ref\` |"
             done < "$out_dir/IMAGE-DIGESTS.txt"
             echo ""
             echo "Generated a backend Python runtime SBOM from \`/app/.venv\` in the backend image."
             echo "Generated a frontend source dependency SBOM from the checked-out release tag."
+            echo "Generated SeaweedFS SBOMs for both published Linux platform digests."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify SeaweedFS provenance and platform SBOM attestations
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          source_sha="$(git rev-parse HEAD)"
+          image_ref="${SEAWEEDFS_IMAGE}:${SEAWEEDFS_VERSION}-${source_sha}"
+          manifest_digest="$(docker buildx imagetools inspect "$image_ref" \
+            --format '{{json .Manifest}}' | jq -r '.digest')"
+          recorded_manifest_ref="$(awk '
+            $1 == "seaweedfs" && $2 == "manifest" { print $4 }
+          ' release-sbom/IMAGE-DIGESTS.txt)"
+          if [[ "$recorded_manifest_ref" != "${SEAWEEDFS_IMAGE}@${manifest_digest}" ]]; then
+            echo "::error::Recorded SeaweedFS manifest does not match the published image." >&2
+            exit 1
+          fi
+          signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/build_and_push_images.yml"
+          common_flags=(
+            --repo "$GITHUB_REPOSITORY"
+            --signer-workflow "$signer_workflow"
+            --source-digest "$source_sha"
+            --source-ref "refs/tags/$RELEASE_TAG"
+            --deny-self-hosted-runners
+            --bundle-from-oci
+          )
+
+          gh attestation verify \
+            "oci://${SEAWEEDFS_IMAGE}@${manifest_digest}" \
+            "${common_flags[@]}" \
+            --predicate-type https://slsa.dev/provenance/v1
+          while read -r component target _ digest_ref; do
+            if [[ "$component" == "seaweedfs" && "$target" == linux/* ]]; then
+              gh attestation verify "oci://$digest_ref" \
+                "${common_flags[@]}" \
+                --predicate-type https://slsa.dev/provenance/v1
+              gh attestation verify "oci://$digest_ref" \
+                "${common_flags[@]}" \
+                --predicate-type https://spdx.dev/Document/v2.3
+            fi
+          done <release-sbom/IMAGE-DIGESTS.txt
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -381,6 +465,12 @@ jobs:
             "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Frontend image SBOM - SPDX JSON"
             "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Frontend image packages - readable table"
             "release-sbom/eneo-frontend-source-${RELEASE_TAG}.cyclonedx.json#Frontend source dependencies - CycloneDX JSON"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.cyclonedx.json#SeaweedFS linux/amd64 image SBOM - CycloneDX JSON"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.spdx.json#SeaweedFS linux/amd64 image SBOM - SPDX JSON"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.table.txt#SeaweedFS linux/amd64 image packages - readable table"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.cyclonedx.json#SeaweedFS linux/arm64 image SBOM - CycloneDX JSON"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.spdx.json#SeaweedFS linux/arm64 image SBOM - SPDX JSON"
+            "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-arm64.table.txt#SeaweedFS linux/arm64 image packages - readable table"
             "release-sbom/IMAGE-DIGESTS.txt#Image digests scanned"
             "release-sbom/SBOM-SHA256SUMS.txt#SBOM file checksums"
           )

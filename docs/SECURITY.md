@@ -57,7 +57,8 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend and frontend container
+- Release SBOMs are generated from the published backend, frontend, and bundled
+  SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
   CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
@@ -66,10 +67,29 @@ The repository uses GitHub security features and CI to prevent regressions:
   checked-out release tag with the frozen Bun lockfile, so JavaScript
   dependencies remain visible even when the runtime image only contains the
   bundled build output. Release SBOM assets are attested through GitHub artifact
-  attestations, and the pushed backend and frontend images include provenance
-  attestations in GHCR.
-  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` records the
-  exact image digests scanned.
+  attestations, and the pushed backend, frontend, and SeaweedFS images include
+  provenance attestations in GHCR.
+  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
+  exact image digests scanned by platform and records the bundled store's
+  multi-platform manifest reference for deployment.
+- The bundled object store is an Eneo-built artifact, not an upstream-signed
+  SeaweedFS image. The trusted publication job is restricted to protected
+  push/manual runs and uses the GitHub OIDC workflow identity—no PAT, registry
+  password, or signing key. It pins the SeaweedFS 4.39 source commit/archive,
+  Dockerfile frontend, compiler image, runtime image, tools, and every Action by
+  immutable digest or full commit SHA. It publishes only after both Linux
+  platform candidates pass source/license policy, the exact reference Compose
+  bootstrap and persistence smoke, a reachable Go vulnerability scan, and a
+  Grype gate that includes unfixed HIGH/CRITICAL findings.
+- SeaweedFS source-license classifier gaps are resolved only by exact
+  module/version/license-file hashes in `docker/seaweedfs/verify-supply-chain.sh`.
+  Any dependency, version, license content, or unknown-package drift fails the
+  job for review. This is not a general allowlist or vulnerability waiver.
+- Configure the `object-content-supply-chain` GitHub Environment as a protected
+  trusted-publication boundary. Do not grant package write, OIDC, or attestation
+  permissions to pull-request workflows. The canonical image/SBOM owners remain
+  `.github/workflows/build_and_push_images.yml` and
+  `.github/workflows/release_sbom.yml`; do not create a parallel signing system.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
 - The normal `CI` gate validates frozen backend and frontend installs before
@@ -202,6 +222,11 @@ Each accepted risk or delayed fix needs:
 - mitigation
 - target date
 - review date or expiry condition
+
+Object-content image policy has no standing exceptions. A future CVE or license
+exception must name the exact advisory/license and artifact digest, owner,
+reason, compensating control, and expiry. Absent that human-approved record, the
+publication fails closed.
 
 ## Developer Expectations
 

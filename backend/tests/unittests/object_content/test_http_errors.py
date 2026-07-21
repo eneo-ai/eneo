@@ -1,0 +1,102 @@
+from typing import Annotated
+
+import pytest
+from fastapi import FastAPI, Header
+from fastapi.testclient import TestClient
+
+from eneo.object_content.content import (
+    ByteRange,
+    ObjectContentDisabledError,
+    ObjectContentIdempotencyConflictError,
+    ObjectContentIntegrityError,
+    ObjectContentUnavailableError,
+)
+from eneo.server.exception_handlers import add_exception_handlers
+
+
+def _client_for(error: Exception) -> TestClient:
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/failure")
+    async def fail() -> None:
+        raise error
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_store_unavailable_has_stable_typed_503_contract() -> None:
+    response = _client_for(
+        ObjectContentUnavailableError(
+            "Durable object content is temporarily unavailable"
+        )
+    ).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "message": "Durable object content is temporarily unavailable",
+        "eneo_error_code": 9038,
+        "code": "object_content_unavailable",
+    }
+
+
+def test_disabled_capability_has_a_distinct_typed_503_contract() -> None:
+    response = _client_for(
+        ObjectContentDisabledError("Durable object content is disabled")
+    ).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "object_content_disabled"
+
+
+def test_integrity_failure_has_stable_typed_503_contract() -> None:
+    response = _client_for(
+        ObjectContentIntegrityError("Durable object verification failed")
+    ).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "object_content_integrity_failure"
+
+
+def test_idempotency_conflict_is_not_reported_as_server_failure() -> None:
+    response = _client_for(
+        ObjectContentIdempotencyConflictError(
+            "The idempotency key is bound to another request"
+        )
+    ).get("/failure")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "object_content_idempotency_conflict"
+
+
+@pytest.mark.parametrize(
+    "range_header",
+    [
+        f"bytes={'9' * 5_000}-",
+        f"bytes=0-{'9' * 5_000}",
+        f"bytes=-{'9' * 5_000}",
+    ],
+)
+def test_oversized_numeric_range_has_sanitized_416_contract(
+    range_header: str,
+) -> None:
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/content")
+    async def open_content(
+        range_header: Annotated[str, Header(alias="Range")],
+    ) -> None:
+        ByteRange.parse(range_header, size_bytes=10)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/content",
+        headers={"Range": range_header},
+    )
+
+    assert response.status_code == 416
+    assert response.json() == {
+        "message": "The byte range is malformed",
+        "eneo_error_code": 9007,
+        "code": "object_content_range_invalid",
+    }

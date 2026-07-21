@@ -15076,12 +15076,24 @@ export interface components {
       /** Message */
       message: string;
     };
+    /** SettingsBase */
+    SettingsBase: {
+      /** Chatbot Widget */
+      chatbot_widget?: {
+        [key: string]: unknown;
+      };
+    };
     /** SettingsPublic */
     SettingsPublic: {
       /** Chatbot Widget */
       chatbot_widget?: {
         [key: string]: unknown;
       };
+      /**
+       * Object Content Enabled
+       * @default false
+       */
+      object_content_enabled?: boolean;
       /**
        * Using Templates
        * @default false
@@ -21488,7 +21500,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SettingsPublic"];
+        "application/json": components["schemas"]["SettingsBase"];
       };
     };
     responses: {

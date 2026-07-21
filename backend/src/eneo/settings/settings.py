@@ -20,6 +20,7 @@ class SettingsInDB(SettingsUpsert, InDB):
 
 
 class SettingsPublic(SettingsBase):
+    object_content_enabled: bool = False
     using_templates: bool = False  # Feature flag for template management
     tenant_credentials_enabled: bool = (
         False  # Global config for tenant credential enforcement

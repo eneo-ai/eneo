@@ -12,6 +12,13 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+      - OBJECT_CONTENT_ENDPOINT_URL=${OBJECT_CONTENT_ENDPOINT_URL:-http://object-content:8333}
+      - OBJECT_CONTENT_REGION=${OBJECT_CONTENT_REGION:-local}
+      - OBJECT_CONTENT_BUCKET=${OBJECT_CONTENT_BUCKET:-eneo-object-content-dev}
+      - OBJECT_CONTENT_ACCESS_KEY_ID=${OBJECT_CONTENT_ACCESS_KEY_ID:-eneo-dev-object-content}
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY=${OBJECT_CONTENT_SECRET_ACCESS_KEY:-local-development-only-secret}
+      - OBJECT_CONTENT_DEPLOYMENT_ID=${OBJECT_CONTENT_DEPLOYMENT_ID:-b7be1672-fcd3-4d28-a5fb-c5673b519618}
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
@@ -20,6 +27,39 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     # Docker group is created dynamically in post-create.sh with the correct GID
     # This ensures it works on any system regardless of the host's docker GID
+    depends_on:
+      - object-content
+
+  object-content:
+    build:
+      context: ../docker/seaweedfs
+      dockerfile: Dockerfile
+    command:
+      - mini
+      - -dir=/data
+      - -webdav=false
+      - -admin.ui=false
+      - -master.telemetry=false
+      - -s3.iam=false
+    networks:
+      - eneo
+    environment:
+      # SeaweedFS uses these conventional S3 gateway variable names. No AWS
+      # service is selected or contacted.
+      AWS_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:-eneo-dev-object-content}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:-local-development-only-secret}
+      S3_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content-dev}
+    volumes:
+      - object_content_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8333"
 
   db:
     image: pgvector/pgvector:pg13
@@ -43,6 +83,7 @@ volumes:
   postgres_data:
   redis_data:
   backend_venv:
+  object_content_data:
 
 networks:
   eneo:

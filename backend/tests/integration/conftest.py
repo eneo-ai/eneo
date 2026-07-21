@@ -573,21 +573,26 @@ async def app(setup_database):
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
+    from eneo.object_content.runtime import object_content_runtime
     from eneo.server.dependencies.lifespan import startup
 
-    await startup()
+    try:
+        await startup()
 
-    # Verify app initialization
-    print("\n=== Application Verification ===")
-    print("✓ FastAPI app initialized")
-    # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
-    # Endpoint-level route contracts are covered by the route contract tests.
-    print(f"✓ Routes registered: {len(application.routes)} route entries")
-    print("✓ Ready for testing\n")
+        # Verify app initialization
+        print("\n=== Application Verification ===")
+        print("✓ FastAPI app initialized")
+        # FastAPI 0.138 keeps included routers as lazy _IncludedRouter entries here.
+        # Endpoint-level route contracts are covered by the route contract tests.
+        print(f"✓ Routes registered: {len(application.routes)} route entries")
+        print("✓ Ready for testing\n")
 
-    yield application
-
-    # Note: We skip shutdown() to keep sessionmanager open for cleanup
+        yield application
+    finally:
+        # Full shutdown closes the session manager needed by cleanup_database.
+        # Release the new process-owned byte-plane clients independently so
+        # every function-scoped application gets a fresh runtime without leaks.
+        await object_content_runtime.stop()
 
 
 @pytest.fixture
