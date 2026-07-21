@@ -21,9 +21,13 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointNotActiveError,
     FlowReviewCheckpointNotApprovedError,
     FlowReviewCheckpointNotFoundError,
+    FlowReviewCheckpointOpenTerminalInvariantFailure,
     FlowReviewCheckpointRejectedError,
     FlowReviewCheckpointStaleRevisionError,
+    FlowReviewCheckpointStepResultIncompleteError,
     FlowReviewEditStepResultMissingError,
+    FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
@@ -46,6 +50,29 @@ from eneo.users.user import UserInDB
 _ReviewOperationResult = TypeVar("_ReviewOperationResult")
 _REVIEW_REJECT_REASON_MAX_LENGTH = 1024
 _REVIEW_RESUME_IDEMPOTENCY_KEY_MAX_LENGTH = 255
+
+
+def review_open_terminal_invariant_error(
+    exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
+) -> tuple[FlowApiErrorCode, str]:
+    match exc:
+        case FlowReviewOpenBlockedByActiveCheckpointError():
+            return (
+                FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT,
+                "Review checkpoint opening failed because another checkpoint is active.",
+            )
+        case FlowReviewMultipleActiveCheckpointsError():
+            return (
+                FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT,
+                "Review checkpoint opening failed because multiple checkpoints are active.",
+            )
+        case FlowReviewCheckpointStepResultIncompleteError():
+            return (
+                FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT,
+                "Review checkpoint opening failed because the completed step result was unavailable.",
+            )
+        case _:
+            assert_never(exc)
 
 
 def _review_checkpoint_expired_context(

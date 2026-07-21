@@ -31,6 +31,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow import (
     Flow,
     FlowStep,
@@ -100,6 +101,20 @@ _EXPECTED_RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
     "started_at": None,
     "finished_at": None,
 }
+
+
+def _assistant_snapshot(*, assistant_id: UUID, instructions: str) -> dict[str, object]:
+    snapshot: dict[str, object] = {
+        "schema_version": 1,
+        "assistant_id": str(assistant_id),
+        "origin": "flow_managed",
+        "instructions": instructions,
+        "completion_model": None,
+        "completion_model_kwargs": {},
+        "knowledge_refs": [],
+    }
+    snapshot["execution_surface_hash"] = assistant_execution_surface_hash(snapshot)
+    return snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +243,10 @@ def _published_definition_for_flow(flow: Flow) -> dict[str, object]:
             _published_step(second_step),
             {
                 **_published_step(third_step),
-                "assistant_snapshot": {"instructions": "Use {{föregående_steg}}."},
+                "assistant_snapshot": _assistant_snapshot(
+                    assistant_id=third_step.assistant_id,
+                    instructions="Use {{föregående_steg}}.",
+                ),
             },
         ],
     )

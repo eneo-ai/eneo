@@ -11,6 +11,7 @@ from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
+    review_open_terminal_invariant_error,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
@@ -23,8 +24,10 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointNotFoundError,
     FlowReviewCheckpointRejectedError,
     FlowReviewCheckpointStaleRevisionError,
+    FlowReviewCheckpointStepResultIncompleteError,
     FlowReviewEditStepResultMissingError,
     FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
@@ -137,6 +140,39 @@ def _service(
         access_policy=access_policy or AsyncMock(),
         flow_run_terminalizer=terminalizer or AsyncMock(),
     )
+
+
+@pytest.mark.parametrize(
+    ("invariant_error", "expected_code", "expected_message"),
+    [
+        (
+            FlowReviewOpenBlockedByActiveCheckpointError(active_checkpoint_id=uuid4()),
+            "flow_review_open_active_conflict_invariant",
+            "Review checkpoint opening failed because another checkpoint is active.",
+        ),
+        (
+            FlowReviewCheckpointStepResultIncompleteError(
+                step_id=uuid4(), attempt_no=1
+            ),
+            "flow_review_open_step_result_incomplete_invariant",
+            "Review checkpoint opening failed because the completed step result was unavailable.",
+        ),
+        (
+            FlowReviewMultipleActiveCheckpointsError(),
+            "flow_review_open_multiple_active_checkpoints_invariant",
+            "Review checkpoint opening failed because multiple checkpoints are active.",
+        ),
+    ],
+)
+def test_review_open_terminal_invariant_mapping_is_owned_by_checkpoint_service(
+    invariant_error,
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    code, message = review_open_terminal_invariant_error(invariant_error)
+
+    assert code.value == expected_code
+    assert message == expected_message
 
 
 @pytest.mark.asyncio

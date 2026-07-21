@@ -2,11 +2,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+from collections.abc import Mapping
 from typing import Any, cast
+from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.main.exceptions import BadRequestException
 
 ASSISTANT_SNAPSHOT_SCHEMA_VERSION = 1
+_ASSISTANT_SNAPSHOT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "assistant_id",
+        "origin",
+        "instructions",
+        "completion_model",
+        "completion_model_kwargs",
+        "knowledge_refs",
+        "execution_surface_hash",
+    }
+)
+_COMPLETION_MODEL_FIELDS = frozenset({"id", "name", "nickname", "litellm_model_name"})
+_KNOWLEDGE_REF_FIELDS = frozenset({"kind", "id", "name"})
 
 
 def build_assistant_execution_snapshot(
@@ -41,6 +59,133 @@ def build_assistant_execution_snapshot(
 
 def assistant_execution_surface_hash(snapshot: dict[str, Any]) -> str:
     return stable_hash(_execution_surface_from_snapshot(snapshot))
+
+
+def validate_assistant_execution_snapshot(
+    *,
+    snapshot: Mapping[str, object],
+    assistant_id: UUID,
+) -> FlowPersistedJsonObject:
+    raw_keys = set(cast(Mapping[object, object], snapshot))
+    if not all(isinstance(key, str) for key in raw_keys):
+        raise BadRequestException("Assistant snapshot contains unsupported fields.")
+    snapshot_keys = cast(set[str], raw_keys)
+    missing_fields = _ASSISTANT_SNAPSHOT_FIELDS - snapshot_keys
+    if missing_fields:
+        raise BadRequestException(
+            "Assistant snapshot is missing required fields: "
+            f"{', '.join(sorted(missing_fields))}."
+        )
+    unsupported_fields = snapshot_keys - _ASSISTANT_SNAPSHOT_FIELDS
+    if unsupported_fields:
+        raise BadRequestException(
+            "Assistant snapshot contains unsupported fields: "
+            f"{', '.join(sorted(unsupported_fields))}."
+        )
+
+    schema_version = snapshot["schema_version"]
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != ASSISTANT_SNAPSHOT_SCHEMA_VERSION
+    ):
+        raise BadRequestException("Assistant snapshot schema_version is unsupported.")
+
+    snapshot_assistant_id = snapshot["assistant_id"]
+    if not isinstance(snapshot_assistant_id, str):
+        raise BadRequestException("Assistant snapshot assistant_id is invalid.")
+    try:
+        parsed_assistant_id = UUID(snapshot_assistant_id)
+    except ValueError as exc:
+        raise BadRequestException(
+            "Assistant snapshot assistant_id is invalid."
+        ) from exc
+    if parsed_assistant_id != assistant_id:
+        raise BadRequestException(
+            "Assistant snapshot assistant_id does not match the flow step."
+        )
+
+    if not _is_optional_string(snapshot["origin"]):
+        raise BadRequestException("Assistant snapshot origin is invalid.")
+    if not _is_optional_string(snapshot["instructions"]):
+        raise BadRequestException("Assistant snapshot instructions are invalid.")
+    _validate_completion_model(snapshot["completion_model"])
+
+    completion_model_kwargs = snapshot["completion_model_kwargs"]
+    if not isinstance(completion_model_kwargs, dict):
+        raise BadRequestException(
+            "Assistant snapshot completion_model_kwargs is invalid."
+        )
+    if not _is_json_value(cast(object, completion_model_kwargs)):
+        raise BadRequestException(
+            "Assistant snapshot completion_model_kwargs is invalid."
+        )
+    _validate_knowledge_refs(snapshot["knowledge_refs"])
+
+    stored_hash = snapshot["execution_surface_hash"]
+    if not (
+        isinstance(stored_hash, str)
+        and len(stored_hash) == 64
+        and all(character in "0123456789abcdef" for character in stored_hash)
+    ):
+        raise BadRequestException(
+            "Assistant snapshot execution_surface_hash must be a lowercase SHA-256 hash."
+        )
+
+    validated_snapshot = cast(FlowPersistedJsonObject, dict(snapshot))
+    if stored_hash != assistant_execution_surface_hash(validated_snapshot):
+        raise BadRequestException(
+            "Assistant snapshot execution_surface_hash does not match its payload."
+        )
+    return validated_snapshot
+
+
+def _is_optional_string(value: object) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _is_json_value(value: object) -> bool:
+    if value is None or isinstance(value, str | bool | int):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in cast(list[object], value))
+    if isinstance(value, dict):
+        entries = cast(dict[object, object], value)
+        return all(
+            isinstance(key, str) and _is_json_value(item)
+            for key, item in entries.items()
+        )
+    return False
+
+
+def _validate_completion_model(value: object) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise BadRequestException("Assistant snapshot completion_model is invalid.")
+    completion_model = cast(dict[str, object], value)
+    if set(completion_model) != set(_COMPLETION_MODEL_FIELDS) or not all(
+        _is_optional_string(field_value) for field_value in completion_model.values()
+    ):
+        raise BadRequestException("Assistant snapshot completion_model is invalid.")
+
+
+def _validate_knowledge_refs(value: object) -> None:
+    if not isinstance(value, list):
+        raise BadRequestException("Assistant snapshot knowledge_refs is invalid.")
+    for item in cast(list[object], value):
+        if not isinstance(item, dict):
+            raise BadRequestException("Assistant snapshot knowledge_refs is invalid.")
+        knowledge_ref = cast(dict[str, object], item)
+        if (
+            set(knowledge_ref) != set(_KNOWLEDGE_REF_FIELDS)
+            or not isinstance(knowledge_ref.get("kind"), str)
+            or not isinstance(knowledge_ref.get("id"), str)
+            or not _is_optional_string(knowledge_ref.get("name"))
+        ):
+            raise BadRequestException("Assistant snapshot knowledge_refs is invalid.")
 
 
 def stable_hash(value: Any) -> str:

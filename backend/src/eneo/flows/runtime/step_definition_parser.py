@@ -9,6 +9,9 @@ from eneo.database.tables.flow_tables import (
     FLOW_STEP_INPUT_TYPE_VALUES,
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
+from eneo.flows.assistant_execution_snapshot import (
+    validate_assistant_execution_snapshot,
+)
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime import RuntimeStep
@@ -466,13 +469,27 @@ def _parse_output_config(
     return output_config
 
 
-def _parse_optional_fields(item: Mapping[str, object]) -> _StepOptionalFields:
+def _parse_optional_fields(
+    item: Mapping[str, object],
+    *,
+    assistant_id: UUID,
+) -> _StepOptionalFields:
     plan_step_ref = _non_empty_string(item.get("plan_step_ref"))
     existing_step_ref = _non_empty_string(item.get("existing_step_ref"))
+    raw_assistant_snapshot = item.get("assistant_snapshot")
+    if raw_assistant_snapshot is None:
+        assistant_snapshot = None
+    elif not isinstance(raw_assistant_snapshot, dict):
+        raise BadRequestException("Assistant snapshot must be an object.")
+    else:
+        assistant_snapshot = validate_assistant_execution_snapshot(
+            snapshot=cast(dict[str, object], raw_assistant_snapshot),
+            assistant_id=assistant_id,
+        )
     return _StepOptionalFields(
         plan_step_ref=plan_step_ref,
         existing_step_ref=existing_step_ref,
-        assistant_snapshot=_optional_json_object(item.get("assistant_snapshot")),
+        assistant_snapshot=assistant_snapshot,
         timeout_seconds=_optional_positive_int(
             item.get("timeout_seconds"),
             "timeout_seconds",
@@ -570,7 +587,10 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 raw_policy=item_dict.get("review_policy"),
                 output_mode=FlowOutputMode(output_fields.output_mode),
             )
-            optional_fields = _parse_optional_fields(item_dict)
+            optional_fields = _parse_optional_fields(
+                item_dict,
+                assistant_id=identity.assistant_id,
+            )
         except BadRequestException as exc:
             raise _step_scoped_exception(
                 exc,

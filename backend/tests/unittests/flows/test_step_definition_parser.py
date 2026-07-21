@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
 from eneo.main.exceptions import BadRequestException
@@ -23,6 +24,20 @@ def _step_snapshot(**overrides: object) -> dict[str, object]:
 
 def _definition(*steps: dict[str, object]) -> dict[str, object]:
     return {"steps": list(steps)}
+
+
+def _assistant_snapshot(assistant_id: object) -> dict[str, object]:
+    snapshot: dict[str, object] = {
+        "schema_version": 1,
+        "assistant_id": str(assistant_id),
+        "origin": "flow_managed",
+        "instructions": "Pinned at publish time.",
+        "completion_model": None,
+        "completion_model_kwargs": {},
+        "knowledge_refs": [],
+    }
+    snapshot["execution_surface_hash"] = assistant_execution_surface_hash(snapshot)
+    return snapshot
 
 
 def _per_source_step(
@@ -554,19 +569,52 @@ def test_parse_runtime_steps_includes_typed_fields():
     assert steps[0].input_contract == {"type": "string"}
 
 
-def test_parse_runtime_steps_includes_publish_assistant_snapshot():
-    assistant_snapshot = {
-        "schema_version": 1,
-        "instructions": "Pinned at publish time.",
-        "execution_surface_hash": "def",
-    }
+def test_parse_runtime_steps_includes_validated_publish_assistant_snapshot():
+    assistant_id = uuid4()
+    assistant_snapshot = _assistant_snapshot(assistant_id)
 
     steps = parse_runtime_steps(
-        _definition(_step_snapshot(assistant_snapshot=assistant_snapshot))
+        _definition(
+            _step_snapshot(
+                assistant_id=str(assistant_id),
+                assistant_snapshot=assistant_snapshot,
+            )
+        )
     )
 
     assert steps[0].step_order == 1
     assert steps[0].assistant_snapshot == assistant_snapshot
+
+
+def test_parse_runtime_steps_rejects_snapshot_with_altered_instructions() -> None:
+    assistant_id = uuid4()
+    assistant_snapshot = _assistant_snapshot(assistant_id)
+    assistant_snapshot["instructions"] = "Altered after publication."
+
+    with pytest.raises(BadRequestException, match="does not match its payload"):
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    assistant_id=str(assistant_id),
+                    assistant_snapshot=assistant_snapshot,
+                )
+            )
+        )
+
+
+def test_parse_runtime_steps_rejects_snapshot_for_another_assistant() -> None:
+    assistant_snapshot = _assistant_snapshot(uuid4())
+
+    with pytest.raises(BadRequestException, match="assistant_id"):
+        parse_runtime_steps(
+            _definition(_step_snapshot(assistant_snapshot=assistant_snapshot))
+        )
+
+
+def test_parse_runtime_steps_preserves_legacy_definition_without_snapshot() -> None:
+    steps = parse_runtime_steps(_definition(_step_snapshot()))
+
+    assert steps[0].assistant_snapshot is None
 
 
 def test_parse_runtime_steps_defaults_typed_fields():

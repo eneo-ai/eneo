@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
-from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_rerun_service import FlowRunRerunService
+from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from eneo.flows.domain.flow import FlowRunStatus, RerunStepInputOverride
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.rerun_exceptions import (
@@ -66,6 +67,23 @@ def _file_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.get_list_by_id_for_owner.return_value = []
     return repo
+
+
+def _assistant_snapshot(*, assistant_id: UUID, instructions: str) -> dict[str, object]:
+    snapshot = build_assistant_execution_snapshot(
+        assistant=SimpleNamespace(
+            id=assistant_id,
+            origin="flow_managed",
+            prompt=SimpleNamespace(text=instructions),
+            completion_model=None,
+            completion_model_kwargs={},
+            collections=[],
+            websites=[],
+            integration_knowledge_list=[],
+        )
+    )
+    assert snapshot is not None
+    return snapshot
 
 
 def _rerun_service(
@@ -265,6 +283,146 @@ async def test_rerun_step_builds_repository_command(user):
             downstream_step.id,
             downstream_step.step_order,
             (RerunDependencyKind.INPUT_SOURCE_PREVIOUS_STEP,),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rerun_rejects_invalid_snapshot_before_graph_analysis(
+    user,
+    monkeypatch,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
+    root_step = flow.steps[0]
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED, "revision": 2}
+    )
+    service = _rerun_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+    flow_run_repo.get.return_value = run
+    version = _runtime_version(user=user, flow=flow)
+    definition_json = dict(version.definition_json)
+    definition_steps = [
+        dict(step) for step in cast(list[dict[str, object]], definition_json["steps"])
+    ]
+    snapshot = _assistant_snapshot(
+        assistant_id=root_step.assistant_id,
+        instructions="Use the published source.",
+    )
+    snapshot["instructions"] = "Altered after publication."
+    definition_steps[0]["assistant_snapshot"] = snapshot
+    definition_json["steps"] = definition_steps
+    flow_version_repo.get.return_value = version.model_copy(
+        update={
+            "definition_json": definition_json,
+            "definition_checksum": published_definition_checksum(definition_json),
+        }
+    )
+    graph_resolver = MagicMock()
+    monkeypatch.setattr(service, "_resolve_rerun_graph", graph_resolver)
+
+    with pytest.raises(BadRequestException, match="does not match its payload"):
+        await service.rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=root_step.id,
+            expected_run_revision=2,
+            reason="Refresh answer",
+        )
+
+    graph_resolver.assert_not_called()
+    flow_run_rerun_repo.accept_or_replay_rerun_operation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rerun_dependencies_use_validated_executed_snapshot_instructions(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    root_step = flow.steps[0]
+    downstream_step = flow.steps[1].model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://example.org/source",
+                "auth": {"mode": "none"},
+            },
+        }
+    )
+    flow = flow.model_copy(update={"steps": [root_step, downstream_step]})
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED, "revision": 4}
+    )
+    service = _rerun_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+    flow_run_repo.get.return_value = run
+    version = _runtime_version(user=user, flow=flow)
+    definition_json = dict(version.definition_json)
+    definition_steps = [
+        dict(step) for step in cast(list[dict[str, object]], definition_json["steps"])
+    ]
+    definition_steps[0]["assistant_snapshot"] = _assistant_snapshot(
+        assistant_id=root_step.assistant_id,
+        instructions="Execute the root step.",
+    )
+    definition_steps[1]["assistant_snapshot"] = _assistant_snapshot(
+        assistant_id=downstream_step.assistant_id,
+        instructions="Revise {{ step_1.output.text }}.",
+    )
+    definition_json["steps"] = definition_steps
+    flow_version_repo.get.return_value = version.model_copy(
+        update={
+            "definition_json": definition_json,
+            "definition_checksum": published_definition_checksum(definition_json),
+        }
+    )
+    flow_run_rerun_repo.get_latest_completed_attempt_id_for_step.return_value = None
+    expected_result = _rerun_command_result(
+        user=user,
+        run=run,
+        rerun_step_id=root_step.id,
+        invalidated_step_ids=[root_step.id, downstream_step.id],
+    )
+    flow_run_rerun_repo.accept_or_replay_rerun_operation.return_value = expected_result
+
+    result = await service.rerun_step(
+        flow_id=flow.id,
+        run_id=run.id,
+        rerun_step_id=root_step.id,
+        expected_run_revision=4,
+        reason="Refresh answer",
+    )
+
+    assert result == expected_result
+    invalidated_steps = (
+        flow_run_rerun_repo.accept_or_replay_rerun_operation.await_args.kwargs[
+            "invalidated_steps"
+        ]
+    )
+    assert [(step.step_id, step.dependency_kinds) for step in invalidated_steps] == [
+        (root_step.id, ()),
+        (
+            downstream_step.id,
+            (RerunDependencyKind.ASSISTANT_SNAPSHOT_INSTRUCTIONS,),
         ),
     ]
 

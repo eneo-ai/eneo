@@ -23,8 +23,8 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizer,
 )
 from eneo.flows.assistant_execution_snapshot import (
-    assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
+    validate_assistant_execution_snapshot,
 )
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
@@ -43,9 +43,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES,
     FlowReviewCheckpointOpenTerminalInvariantFailure,
     FlowReviewCheckpointRunNotRunningError,
-    FlowReviewCheckpointStepResultIncompleteError,
     FlowReviewMultipleActiveCheckpointsError,
-    FlowReviewOpenBlockedByActiveCheckpointError,
 )
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -237,39 +235,6 @@ def _flow_api_error_code_or_default(
         default_code.value,
     )
     return default_code
-
-
-def _review_open_terminal_invariant_error_code(
-    exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
-) -> FlowApiErrorCode:
-    match exc:
-        case FlowReviewOpenBlockedByActiveCheckpointError():
-            return FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT
-        case FlowReviewMultipleActiveCheckpointsError():
-            return FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT
-        case FlowReviewCheckpointStepResultIncompleteError():
-            return FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT
-        case _:
-            assert_never(exc)
-
-
-def _review_open_terminal_invariant_message(
-    exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
-) -> str:
-    match exc:
-        case FlowReviewOpenBlockedByActiveCheckpointError():
-            return (
-                "Review checkpoint opening failed because another checkpoint is active."
-            )
-        case FlowReviewMultipleActiveCheckpointsError():
-            return "Review checkpoint opening failed because multiple checkpoints are active."
-        case FlowReviewCheckpointStepResultIncompleteError():
-            return (
-                "Review checkpoint opening failed because the completed step result was "
-                "unavailable."
-            )
-        case _:
-            assert_never(exc)
 
 
 def _utf8_prefix(text: str, *, max_bytes: int) -> str:
@@ -1859,8 +1824,11 @@ class FlowRunExecutor:
         step: RuntimeStep,
         exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
     ) -> dict[str, Any]:
-        error_code = _review_open_terminal_invariant_error_code(exc)
-        error_message = _review_open_terminal_invariant_message(exc)
+        from eneo.flows.application.flow_run_review_checkpoint_service import (
+            review_open_terminal_invariant_error,
+        )
+
+        error_code, error_message = review_open_terminal_invariant_error(exc)
         await self._rollback()
         if isinstance(exc, FlowReviewMultipleActiveCheckpointsError):
             logger.critical(
@@ -2065,6 +2033,10 @@ class FlowRunExecutor:
                     )
                 continue
 
+            validated_snapshot = validate_assistant_execution_snapshot(
+                snapshot=step.assistant_snapshot,
+                assistant_id=step.assistant_id,
+            )
             current_assistant = await self._load_assistant(step.assistant_id, state)
             self._reject_flow_mcp_assistant(current_assistant)
             current_snapshot = build_assistant_execution_snapshot(
@@ -2075,11 +2047,7 @@ class FlowRunExecutor:
                     f"Step {step.step_order}: assistant snapshot could not be validated."
                 )
 
-            expected_hash = step.assistant_snapshot.get("execution_surface_hash")
-            if not isinstance(expected_hash, str) or not expected_hash:
-                expected_hash = assistant_execution_surface_hash(
-                    step.assistant_snapshot
-                )
+            expected_hash = cast(str, validated_snapshot["execution_surface_hash"])
             current_hash = current_snapshot.get("execution_surface_hash")
             if expected_hash == current_hash:
                 continue

@@ -4169,6 +4169,62 @@ async def test_execute_step_marks_flow_step_span_failed(user, captured_flow_span
 
 
 @pytest.mark.asyncio
+async def test_execute_rejects_stale_snapshot_before_step_claim_or_assistant_load(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    snapshot = build_assistant_execution_snapshot(
+        assistant=_default_snapshot_assistant(assistant_id)
+    )
+    assert snapshot is not None
+    snapshot["instructions"] = "Altered after publication."
+    flow_run_repo.get = AsyncMock(return_value=running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.list_step_results = AsyncMock()
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._load_assistant = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "assistant_snapshot": snapshot,
+                    }
+                ],
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "flow_definition_steps_invalid"}
+    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._load_assistant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_validate_assistant_snapshots_accepts_matching_execution_surface(user):
     executor, _, _, _ = _build_executor(user)
     assistant_id = uuid4()
