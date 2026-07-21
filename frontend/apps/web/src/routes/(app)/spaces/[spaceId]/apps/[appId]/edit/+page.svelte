@@ -286,25 +286,27 @@
         </Settings.Row>
 
         {#if $currentSpace.hasPermission("read", "skill")}
-          <Settings.Row
-            title={m.skills()}
-            description={m.skills_editor_description()}
-            hasChanges={$currentChanges.diff.skill_bindings !== undefined}
-            revertFn={() => discardChanges("skill_bindings")}
-            fullWidth
-          >
-            <SkillBindingsEditor
-              bind:bindings={$update.skill_bindings}
-              initialSkillPage={data.skills}
-              bindingSummaries={data.skillBindings}
-              canEditBindings={data.app.permissions?.includes("edit") ?? false}
-              canCreateSkills={$currentSpace.organization !== true &&
-                $currentSpace.hasPermission("create", "skill")}
-              onListSkills={(params) =>
-                data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
-              onCreateSkill={createSkill}
-            />
-          </Settings.Row>
+          <div id="skills" class="scroll-mt-20">
+            <Settings.Row
+              title={m.skills()}
+              description={m.skills_editor_description()}
+              hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+              revertFn={() => discardChanges("skill_bindings")}
+              fullWidth
+            >
+              <SkillBindingsEditor
+                bind:bindings={$update.skill_bindings}
+                initialSkillPage={data.skills}
+                bindingSummaries={data.skillBindings}
+                canEditBindings={data.app.permissions?.includes("edit") ?? false}
+                canCreateSkills={$currentSpace.organization !== true &&
+                  $currentSpace.hasPermission("create", "skill")}
+                onListSkills={(params) =>
+                  data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
+                onCreateSkill={createSkill}
+              />
+            </Settings.Row>
+          </div>
         {/if}
 
         <Settings.Row

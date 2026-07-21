@@ -189,8 +189,11 @@ describe("SkillBindingsEditor", () => {
     await expect
       .element(page.getByText(m.skills_newer_revision_available({ revision: "2" })))
       .toBeVisible();
-    await expect.element(page.getByText(m.skills_inactive_status())).toBeVisible();
-    await expect.element(page.getByText(m.skills_inactive_binding_explanation())).toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_unavailable_status(), { exact: true }))
+      .toBeVisible();
+    await expect.element(page.getByText(m.skills_unavailable_binding_explanation())).toBeVisible();
+    await expect.element(page.getByText(m.skills_binding_count({ count: "2" }))).toBeVisible();
 
     await page
       .getByRole("button", {
@@ -280,5 +283,28 @@ describe("SkillBindingsEditor", () => {
     await expect.element(searchInput).toBeVisible();
     expect(searchInput.element().getAttribute("aria-label")).toBe(m.skills_search_existing());
     await expect.element(page.getByText("Budget support", { exact: true })).toBeVisible();
+  });
+
+  test("keeps twenty attached Skills in one keyboard-scrollable instruction list", async () => {
+    const skills = Array.from({ length: 20 }, (_, index) => makeSkill(String(index + 1)));
+    const summaries = skills.map((skill, index) => makeSummary(skill, 1, index));
+
+    render(SkillBindingsEditor, {
+      bindings: summaries.map((summary) => ({
+        skill_id: summary.skill_id,
+        skill_revision_id: summary.skill_revision_id
+      })),
+      availableSkills: skills,
+      bindingSummaries: summaries,
+      canEditBindings: true
+    });
+
+    const region = page.getByRole("region", {
+      name: m.skills_binding_scroll_region_label({ count: "20" })
+    });
+    await expect.element(region).toBeVisible();
+    expect(region.element().getAttribute("tabindex")).toBe("0");
+    expect(region.element().querySelectorAll("li")).toHaveLength(20);
+    await expect.element(page.getByText(m.skills_binding_count({ count: "20" }))).toBeVisible();
   });
 });

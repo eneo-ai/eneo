@@ -161,99 +161,119 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <p class="text-muted-foreground text-sm">{m.skills_binding_draft_description()}</p>
+  <div class="flex items-start justify-between gap-3">
+    <p class="text-muted-foreground text-sm">{m.skills_binding_draft_description()}</p>
+    {#if rows.length > 0}
+      <Badge variant="secondary" class="shrink-0">
+        {m.skills_binding_count({ count: String(rows.length) })}
+      </Badge>
+    {/if}
+  </div>
 
   {#if rows.length === 0}
     <p class="text-muted-foreground py-2 text-sm">{m.skills_no_bindings()}</p>
   {:else}
-    <ol class="flex flex-col gap-2" aria-label={m.skills_binding_order_label()}>
-      {#each rows as row, index (row.reference.skill_id)}
-        <li
-          id={rowId(row.reference.skill_id)}
-          tabindex="-1"
-          class="border-border focus-visible:ring-ring flex flex-col gap-3 rounded-lg border p-3 outline-none focus-visible:ring-2 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">{rowName(row)}</p>
-            {#if row.description}
-              <p class="text-muted-foreground mt-1 text-sm leading-normal">{row.description}</p>
-            {/if}
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              {#if row.pinnedRevision !== undefined}
-                <Badge variant="outline">
-                  {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
-                </Badge>
-              {/if}
-              {#if row.isActive === false}
-                <Badge variant="outline">{m.skills_inactive_status()}</Badge>
-                <span class="text-muted-foreground text-xs">
-                  {m.skills_inactive_binding_explanation()}
-                </span>
-              {/if}
-              {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined}
-                <Badge variant="secondary">
-                  {m.skills_newer_revision_available({
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
+    <div
+      class="focus-visible:ring-ring flex max-h-[min(32rem,60dvh)] flex-col gap-2 overflow-y-auto overscroll-contain pr-1 outline-none focus-visible:ring-2 focus-visible:ring-offset-2 [scrollbar-gutter:stable]"
+      role="region"
+      aria-label={m.skills_binding_scroll_region_label({ count: String(rows.length) })}
+      tabindex="0"
+    >
+      <ol class="flex flex-col gap-2" aria-label={m.skills_binding_order_label()}>
+        {#each rows as row, index (row.reference.skill_id)}
+          <li
+            id={rowId(row.reference.skill_id)}
+            tabindex="-1"
+            class="border-border focus-visible:ring-ring flex flex-col gap-3 rounded-lg border p-3 outline-none focus-visible:ring-2 sm:flex-row sm:items-start sm:justify-between"
+          >
+            <div class="flex min-w-0 flex-1 items-start gap-3">
+              <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
+                {index + 1}
+              </Badge>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium">{rowName(row)}</p>
+                {#if row.description}
+                  <p class="text-muted-foreground mt-1 text-sm leading-normal">{row.description}</p>
+                {/if}
+                <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                  {#if row.pinnedRevision !== undefined}
+                    <Badge variant="outline">
+                      {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
+                    </Badge>
+                  {/if}
+                  {#if row.isActive === false}
+                    <Badge variant="outline">{m.skills_unavailable_status()}</Badge>
+                    <span class="text-muted-foreground text-xs">
+                      {m.skills_unavailable_binding_explanation()}
+                    </span>
+                  {/if}
+                  {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined}
+                    <Badge variant="secondary">
+                      {m.skills_newer_revision_available({
+                        revision: String(row.currentRevisionNumber)
+                      })}
+                    </Badge>
+                  {/if}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+              {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined && row.isActive}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!canEditBindings}
+                  aria-label={m.skills_use_latest_revision_aria({
+                    name: rowName(row),
                     revision: String(row.currentRevisionNumber)
                   })}
-                </Badge>
+                  onclick={() => useLatestRevision(row, index)}
+                >
+                  <RefreshCw data-icon="inline-start" aria-hidden="true" />
+                  {m.skills_use_latest_revision()}
+                </Button>
               {/if}
-            </div>
-          </div>
-
-          <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
-            {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined && row.isActive}
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canEditBindings}
-                aria-label={m.skills_use_latest_revision_aria({
-                  name: rowName(row),
-                  revision: String(row.currentRevisionNumber)
-                })}
-                onclick={() => useLatestRevision(row, index)}
+                variant="ghost"
+                size="icon-sm"
+                disabled={!canEditBindings || index === 0}
+                aria-label={m.skills_move_up_aria({ name: rowName(row) })}
+                title={m.skills_move_up_aria({ name: rowName(row) })}
+                onclick={() => move(row, index, "up")}
               >
-                <RefreshCw data-icon="inline-start" aria-hidden="true" />
-                {m.skills_use_latest_revision()}
+                <ArrowUp aria-hidden="true" />
               </Button>
-            {/if}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!canEditBindings || index === 0}
-              aria-label={m.skills_move_up_aria({ name: rowName(row) })}
-              title={m.skills_move_up_aria({ name: rowName(row) })}
-              onclick={() => move(row, index, "up")}
-            >
-              <ArrowUp aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!canEditBindings || index === rows.length - 1}
-              aria-label={m.skills_move_down_aria({ name: rowName(row) })}
-              title={m.skills_move_down_aria({ name: rowName(row) })}
-              onclick={() => move(row, index, "down")}
-            >
-              <ArrowDown aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!canEditBindings}
-              aria-label={m.skills_remove_aria({ name: rowName(row) })}
-              title={m.skills_remove_aria({ name: rowName(row) })}
-              onclick={() => remove(row, index)}
-            >
-              <Trash2 aria-hidden="true" />
-            </Button>
-          </div>
-        </li>
-      {/each}
-    </ol>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!canEditBindings || index === rows.length - 1}
+                aria-label={m.skills_move_down_aria({ name: rowName(row) })}
+                title={m.skills_move_down_aria({ name: rowName(row) })}
+                onclick={() => move(row, index, "down")}
+              >
+                <ArrowDown aria-hidden="true" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!canEditBindings}
+                aria-label={m.skills_remove_aria({ name: rowName(row) })}
+                title={m.skills_remove_aria({ name: rowName(row) })}
+                onclick={() => remove(row, index)}
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
+            </div>
+          </li>
+        {/each}
+      </ol>
+    </div>
   {/if}
 
   <div class="flex flex-wrap gap-2">

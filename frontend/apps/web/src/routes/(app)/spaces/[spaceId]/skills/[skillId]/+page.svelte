@@ -3,9 +3,8 @@
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
@@ -21,6 +20,7 @@
   let statusSaving = $state(false);
   let formDirty = $state(false);
   let restoreAnnouncement = $state("");
+  let availabilityChecked = $derived(data.skill.is_active);
 
   const spaceRouteId = $derived(
     data.currentSpace.personal
@@ -87,6 +87,8 @@
   }
 
   async function setActive(isActive: boolean) {
+    const previousValue = availabilityChecked;
+    availabilityChecked = isActive;
     statusSaving = true;
     statusError = null;
     try {
@@ -97,6 +99,7 @@
       });
       await invalidate("space:skills");
     } catch (error) {
+      availabilityChecked = previousValue;
       const failure = error as { message?: string };
       statusError = failure.message ?? m.skills_library_status_error();
     } finally {
@@ -128,36 +131,37 @@
   <Page.Main>
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-6">
       <Card.Root>
-        <Card.Header class="flex-row items-start justify-between gap-4">
-          <div>
-            <Card.Title>{m.skills_library_status_heading()}</Card.Title>
-            <Card.Description>{m.skills_library_status_description()}</Card.Description>
-          </div>
-          <Badge variant={data.skill.is_active ? "secondary" : "outline"}>
-            {data.skill.is_active ? m.skills_active_status() : m.skills_inactive_status()}
-          </Badge>
+        <Card.Header>
+          <Card.Title>{m.skills_library_status_heading()}</Card.Title>
+          <Card.Description>{m.skills_library_status_description()}</Card.Description>
         </Card.Header>
         <Card.Content class="flex flex-col gap-3">
-          <p class="text-muted-foreground text-sm">
-            {data.skill.is_active
-              ? m.skills_library_active_explanation()
-              : m.skills_library_inactive_explanation()}
-          </p>
+          <div class="border-border flex items-center justify-between gap-4 rounded-lg border p-3">
+            <div class="min-w-0">
+              <label for="skill-availability" class="text-sm font-medium">
+                {m.skills_library_availability_switch_label()}
+              </label>
+              <p id="skill-availability-description" class="text-muted-foreground mt-1 text-sm">
+                {data.skill.is_active
+                  ? m.skills_library_active_explanation()
+                  : m.skills_library_inactive_explanation()}
+              </p>
+            </div>
+            <Switch
+              id="skill-availability"
+              checked={availabilityChecked}
+              disabled={!canEdit || statusSaving}
+              aria-describedby="skill-availability-description"
+              onCheckedChange={setActive}
+            />
+          </div>
           {#if statusError}
             <p class="text-destructive text-sm" role="alert">{statusError}</p>
           {/if}
-          {#if canEdit}
-            <Button
-              variant={data.skill.is_active ? "outline" : "default"}
-              disabled={statusSaving}
-              onclick={() => setActive(!data.skill.is_active)}
-            >
-              {statusSaving
-                ? m.skills_library_status_saving()
-                : data.skill.is_active
-                  ? m.skills_library_deactivate()
-                  : m.skills_library_activate()}
-            </Button>
+          {#if statusSaving}
+            <p class="text-muted-foreground text-sm" role="status" aria-live="polite">
+              {m.skills_library_status_saving()}
+            </p>
           {/if}
         </Card.Content>
       </Card.Root>

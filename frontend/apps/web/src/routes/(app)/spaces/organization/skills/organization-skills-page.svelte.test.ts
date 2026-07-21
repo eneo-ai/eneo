@@ -139,4 +139,39 @@ describe("organisation Skill catalogue page", () => {
     await expect.element(page.getByText(unpublished.display_name)).not.toBeInTheDocument();
     await expect.element(page.getByText(draft.display_name)).toBeVisible();
   });
+
+  test("offers one clear creation action when the catalogue is empty", async () => {
+    render(OrganizationSkillsPage, {
+      data: {
+        mode: "manage",
+        search: "",
+        canManage: true,
+        canPublish: true,
+        page: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: vi.fn(),
+              list: vi.fn()
+            },
+            catalogue: {
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByRole("link", { name: m.skills_library_create_first() }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("link", { name: m.skills_library_create(), exact: true }))
+      .not.toBeInTheDocument();
+  });
 });

@@ -134,7 +134,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.skills()}></Page.Title>
-    {#if data.canManage}
+    {#if data.canManage && (items.length > 0 || data.search)}
       <Button href={resolve("/spaces/organization/skills/new")}>
         <Plus data-icon="inline-start" aria-hidden="true" />
         {m.skills_library_create()}

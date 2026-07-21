@@ -156,6 +156,7 @@ export function getSkillCandidateRevisionNumber(skill: SkillBindingCandidate): n
 }
 
 export function isSkillCandidateActive(skill: SkillBindingCandidate): boolean {
+  // Publication is the availability boundary for organisation catalogue candidates.
   return "is_active" in skill ? skill.is_active : true;
 }
 

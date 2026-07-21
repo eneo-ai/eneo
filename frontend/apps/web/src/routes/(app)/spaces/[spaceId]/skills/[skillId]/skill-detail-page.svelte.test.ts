@@ -141,4 +141,82 @@ describe("Skill detail page", () => {
     await expect.element(page.getByText(historical.instructions)).toBeVisible();
     expect(invalidate).not.toHaveBeenCalled();
   });
+
+  test("controls availability for new attachments without describing existing bindings as disabled", async () => {
+    const current = revision(2);
+    const setActive = vi.fn(async () => {});
+
+    render(SkillDetailPage, {
+      data: {
+        currentSpace: {
+          id: "space-1",
+          personal: false,
+          organization: false,
+          skill_permissions: ["read", "edit"]
+        },
+        skill: skill(current),
+        revisionPage: revisionPage(current, revision(1)),
+        eneo: {
+          skills: {
+            createRevision: vi.fn(),
+            getRevision: vi.fn(),
+            listRevisionSummaries: vi.fn(),
+            restoreRevision: vi.fn(),
+            setActive
+          }
+        }
+      } as never
+    });
+
+    const availability = page.getByRole("switch", {
+      name: "Tillgänglig för nya kopplingar"
+    });
+    await expect.element(availability).toBeChecked();
+    await availability.click();
+
+    expect(setActive).toHaveBeenCalledWith({
+      spaceId: "space-1",
+      skillId: "skill-1",
+      is_active: false
+    });
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));
+    await expect.element(page.getByText(/befintliga kopplingar.*fortsätter/i)).toBeVisible();
+  });
+
+  test("restores the availability switch when the update fails", async () => {
+    const current = revision(2);
+    const setActive = vi.fn(async () => {
+      throw new Error("Temporary failure");
+    });
+
+    render(SkillDetailPage, {
+      data: {
+        currentSpace: {
+          id: "space-1",
+          personal: false,
+          organization: false,
+          skill_permissions: ["read", "edit"]
+        },
+        skill: skill(current),
+        revisionPage: revisionPage(current, revision(1)),
+        eneo: {
+          skills: {
+            createRevision: vi.fn(),
+            getRevision: vi.fn(),
+            listRevisionSummaries: vi.fn(),
+            restoreRevision: vi.fn(),
+            setActive
+          }
+        }
+      } as never
+    });
+
+    const availability = page.getByRole("switch", {
+      name: "Tillgänglig för nya kopplingar"
+    });
+    await availability.click();
+
+    await expect.element(page.getByText("Temporary failure", { exact: true })).toBeVisible();
+    await expect.element(availability).toBeChecked();
+  });
 });

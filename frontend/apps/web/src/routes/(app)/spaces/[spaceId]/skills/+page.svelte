@@ -83,7 +83,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.skills()}></Page.Title>
-    {#if canCreate}
+    {#if canCreate && data.skills.length > 0}
       <Button href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
         <Plus data-icon="inline-start" aria-hidden="true" />
         {m.skills_library_create()}
@@ -178,7 +178,9 @@
                     </Table.Cell>
                     <Table.Cell>
                       <Badge variant={skill.is_active ? "secondary" : "outline"}>
-                        {skill.is_active ? m.skills_active_status() : m.skills_inactive_status()}
+                        {skill.is_active
+                          ? m.skills_available_status()
+                          : m.skills_unavailable_status()}
                       </Badge>
                     </Table.Cell>
                     <Table.Cell class="text-muted-foreground text-sm">

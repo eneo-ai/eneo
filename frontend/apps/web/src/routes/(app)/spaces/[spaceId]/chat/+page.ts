@@ -28,6 +28,8 @@ export const load: PageLoad = async (event) => {
   const accessDenied =
     partnerType === "default-assistant" &&
     !(currentSpace.default_assistant?.permissions?.includes("read") ?? false);
+  const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
+  const supportsDirectSkills = partnerType === "assistant";
 
   const getPartner = async () => {
     switch (partnerType) {
@@ -71,8 +73,17 @@ export const load: PageLoad = async (event) => {
   const partnerPromise = getPartner();
   const historyPromise = listSessions();
   const initialSessionPromise = loadSession();
+  const skillBindingsPromise =
+    canReadSkills && supportsDirectSkills
+      ? eneo.skills
+          .listAssistantBindings({
+            spaceId: currentSpace.id,
+            assistantId: partnerId
+          })
+          .catch(() => [])
+      : Promise.resolve([]);
 
-  const partner = await partnerPromise;
+  const [partner, skillBindings] = await Promise.all([partnerPromise, skillBindingsPromise]);
 
   // Help assistants run behind the scenes to support users and must never be
   // opened as a chat (the backend ask-guard also blocks the actual ask). This
@@ -86,6 +97,7 @@ export const load: PageLoad = async (event) => {
 
   return {
     chatPartner: partner,
+    skillBindings,
     accessDenied,
     initialHistory: historyPromise,
     initialConversation: initialSessionPromise
