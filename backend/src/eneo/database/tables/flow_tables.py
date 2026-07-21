@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import (
@@ -29,6 +30,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSource,
     FlowPackageImportStatus,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     FLOW_INPUT_SOURCE_VALUES,
@@ -115,6 +117,8 @@ FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES = tuple(
 )
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
+FLOW_RUNTIME_UPLOAD_OWNER_TYPE_VALUES = tuple(item.value for item in PrincipalType)
+FLOW_RUN_PRINCIPAL_TYPE_VALUES = tuple(item.value for item in PrincipalType)
 FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
 MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
 MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
@@ -586,7 +590,7 @@ class FlowRuntimeUploadedFiles(BaseCrossReference):
             name="fk_flow_runtime_uploaded_files_file_tenant",
         ),
         CheckConstraint(
-            "owner_type IN ('user','service_key')",
+            f"owner_type IN ({_check_values(FLOW_RUNTIME_UPLOAD_OWNER_TYPE_VALUES)})",
             name="ck_flow_runtime_uploaded_files_owner_type",
         ),
         CheckConstraint(
@@ -797,7 +801,7 @@ class FlowRuns(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "principal_type IN ('user','service_key')",
+            f"principal_type IN ({_check_values(FLOW_RUN_PRINCIPAL_TYPE_VALUES)})",
             name="ck_flow_runs_principal_type",
         ),
         CheckConstraint(
@@ -2082,18 +2086,8 @@ class FlowRunWebhookDeliveries(BasePublic):
     )
 
 
-BUILDER_SESSION_STATUS_VALUES = (
-    "chatting",
-    "awaiting_approval",
-    "applied",
-    "cancelled",
-)
-BUILDER_PLAN_STATUS_VALUES = (
-    "proposed",
-    "approved",
-    "applied",
-    "superseded",
-)
+BUILDER_SESSION_STATUS_VALUES = tuple(item.value for item in SessionStatus)
+BUILDER_PLAN_STATUS_VALUES = tuple(item.value for item in PlanStatus)
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")
 BUILDER_TURN_STATE_VALUES = (
     "open",
@@ -2208,7 +2202,7 @@ class BuilderSessions(BasePublic):
             name="ck_builder_sessions_target_kind",
         ),
         CheckConstraint(
-            f"status IN ({','.join(repr(v) for v in BUILDER_SESSION_STATUS_VALUES)})",
+            f"status IN ({_check_values(BUILDER_SESSION_STATUS_VALUES)})",
             name="ck_builder_sessions_status",
         ),
         CheckConstraint(
@@ -2322,7 +2316,7 @@ class BuilderPlans(BasePublic):
             name="fk_builder_plans_session_tenant",
         ),
         CheckConstraint(
-            f"status IN ({','.join(repr(v) for v in BUILDER_PLAN_STATUS_VALUES)})",
+            f"status IN ({_check_values(BUILDER_PLAN_STATUS_VALUES)})",
             name="ck_builder_plans_status",
         ),
     )

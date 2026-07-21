@@ -8,12 +8,18 @@ from pydantic import ValidationError
 from sqlalchemy import CheckConstraint
 from sqlalchemy.sql.schema import Column
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.flow_tables import (
+    BuilderPlans,
+    BuilderSessions,
+    FlowRuns,
+    FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
     FlowTemplateAssets,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
 from eneo.flows.domain.flow import FlowStepAttempt, FlowStepResult
 from eneo.flows.enums import (
     FlowInputType,
@@ -133,6 +139,30 @@ def _references_flow_steps(table_column: Column[object]) -> bool:
             "ck_flow_step_attempts_status",
             FlowStepAttemptStatus,
             "FLOW_STEP_ATTEMPT_STATUS_VALUES",
+        ),
+        (
+            BuilderSessions,
+            "ck_builder_sessions_status",
+            SessionStatus,
+            "BUILDER_SESSION_STATUS_VALUES",
+        ),
+        (
+            BuilderPlans,
+            "ck_builder_plans_status",
+            PlanStatus,
+            "BUILDER_PLAN_STATUS_VALUES",
+        ),
+        (
+            FlowRuntimeUploadedFiles,
+            "ck_flow_runtime_uploaded_files_owner_type",
+            PrincipalType,
+            "FLOW_RUNTIME_UPLOAD_OWNER_TYPE_VALUES",
+        ),
+        (
+            FlowRuns,
+            "ck_flow_runs_principal_type",
+            PrincipalType,
+            "FLOW_RUN_PRINCIPAL_TYPE_VALUES",
         ),
     ],
 )
