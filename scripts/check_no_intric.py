@@ -56,6 +56,10 @@ ALLOWED = [
     AllowedOccurrence(re.compile(r"no-intric")),
     AllowedOccurrence(re.compile(r"NO_INTRIC_RESULT")),
     AllowedOccurrence(re.compile(r"No intric references")),
+    AllowedOccurrence(
+        re.compile(r"^- No Python namespace migration from `intric\.\*` to `eneo\.\*`\.$"),
+        paths=("docs/goals/eneo-flows-and-builder-9-of-10/goal.md",),
+    ),
     # Transitional ARQ pickle compatibility for queued jobs created before the
     # package rename. Remove this allowance with backend/src/eneo/jobs/job_serialization.py
     # after all pre-rename Redis job payloads have expired.

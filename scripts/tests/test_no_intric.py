@@ -92,6 +92,34 @@ class NoIntricGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("backend/.env.template", result.stdout)
 
+    def test_allows_only_exact_goal_namespace_non_migration_charter(self) -> None:
+        canonical_path = "docs/goals/eneo-flows-and-builder-9-of-10/goal.md"
+        charter = "- No Python namespace migration from `intric.*` to `eneo.*`."
+        cases = (
+            (canonical_path, charter),
+            ("docs/goals/other/goal.md", charter),
+            (canonical_path, f"{charter} Extra text."),
+        )
+        observations = []
+
+        for path, line in cases:
+            root = self.make_repo()
+            target = root / path
+            target.parent.mkdir(parents=True)
+            target.write_text(f"{line}\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", path],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            result = self.run_check(root)
+            observations.append((result.returncode, path in result.stdout))
+
+        self.assertEqual(observations, [(0, False), (1, True), (1, True)])
+
 
 if __name__ == "__main__":
     unittest.main()
