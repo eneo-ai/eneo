@@ -1,3 +1,5 @@
+import inspect
+import re
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -10,9 +12,17 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
+    FlowTemplateAssets,
 )
 from eneo.flows.domain.flow import FlowStepAttempt, FlowStepResult
-from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
+from eneo.flows.enums import (
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+    FlowTemplateAssetStatus,
+)
 
 
 def _flow_step_result_payload() -> dict[str, object]:
@@ -83,6 +93,63 @@ def _references_flow_steps(table_column: Column[object]) -> bool:
         foreign_key.column.table.name == "flow_steps"
         for foreign_key in table_column.foreign_keys
     )
+
+
+@pytest.mark.parametrize(
+    ("table", "constraint_name", "enum_type", "canonical_values_name"),
+    [
+        (
+            FlowSteps,
+            "ck_flow_steps_input_type",
+            FlowInputType,
+            "FLOW_STEP_INPUT_TYPE_VALUES",
+        ),
+        (
+            FlowSteps,
+            "ck_flow_steps_output_mode",
+            FlowOutputMode,
+            "FLOW_STEP_OUTPUT_MODE_VALUES",
+        ),
+        (
+            FlowSteps,
+            "ck_flow_steps_output_type",
+            FlowOutputType,
+            "FLOW_STEP_OUTPUT_TYPE_VALUES",
+        ),
+        (
+            FlowTemplateAssets,
+            "ck_flow_template_assets_status",
+            FlowTemplateAssetStatus,
+            "FLOW_TEMPLATE_ASSET_STATUS_VALUES",
+        ),
+        (
+            FlowStepResults,
+            "ck_flow_step_results_status",
+            FlowStepResultStatus,
+            "FLOW_STEP_RESULT_STATUS_VALUES",
+        ),
+        (
+            FlowStepAttempts,
+            "ck_flow_step_attempts_status",
+            FlowStepAttemptStatus,
+            "FLOW_STEP_ATTEMPT_STATUS_VALUES",
+        ),
+    ],
+)
+def test_enum_backed_flow_check_values_follow_their_canonical_enums(
+    table, constraint_name, enum_type, canonical_values_name
+) -> None:
+    constraint = next(
+        constraint
+        for constraint in table.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+        and constraint.name == constraint_name
+    )
+
+    assert tuple(re.findall(r"'([^']+)'", str(constraint.sqltext))) == tuple(
+        item.value for item in enum_type
+    )
+    assert f"_check_values({canonical_values_name})" in inspect.getsource(table)
 
 
 def test_runtime_step_result_step_id_is_snapshot_owned_not_draft_step_fk():

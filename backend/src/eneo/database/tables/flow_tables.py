@@ -284,15 +284,15 @@ class FlowSteps(BasePublic):
             name="ck_flow_steps_input_source",
         ),
         CheckConstraint(
-            "input_type IN ('text','json','image','audio','document','file','any')",
+            f"input_type IN ({_check_values(FLOW_STEP_INPUT_TYPE_VALUES)})",
             name="ck_flow_steps_input_type",
         ),
         CheckConstraint(
-            "output_mode IN ('pass_through','compose_text','http_post','transcribe_only','template_fill','render_verbatim')",
+            f"output_mode IN ({_check_values(FLOW_STEP_OUTPUT_MODE_VALUES)})",
             name="ck_flow_steps_output_mode",
         ),
         CheckConstraint(
-            "output_type IN ('text','json','pdf','docx')",
+            f"output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
             name="ck_flow_steps_output_type",
         ),
         CheckConstraint(
@@ -445,7 +445,7 @@ class FlowTemplateAssets(BasePublic):
             name="fk_flow_template_assets_file_tenant",
         ),
         CheckConstraint(
-            "status IN ('ready','needs_action','read_only','unavailable')",
+            f"status IN ({_check_values(FLOW_TEMPLATE_ASSET_STATUS_VALUES)})",
             name="ck_flow_template_assets_status",
         ),
         Index(
@@ -966,7 +966,7 @@ class FlowStepResults(BasePublic):
             name="ck_flow_step_results_current_attempt_no_positive",
         ),
         CheckConstraint(
-            "status IN ('pending','running','completed','failed','cancelled')",
+            f"status IN ({_check_values(FLOW_STEP_RESULT_STATUS_VALUES)})",
             name="ck_flow_step_results_status",
         ),
         ForeignKeyConstraint(
@@ -1201,7 +1201,7 @@ class FlowStepAttempts(BasePublic):
             name="ck_flow_step_attempts_attempt_no_positive",
         ),
         CheckConstraint(
-            "status IN ('started','failed','completed','cancelled')",
+            f"status IN ({_check_values(FLOW_STEP_ATTEMPT_STATUS_VALUES)})",
             name="ck_flow_step_attempts_status",
         ),
         ForeignKeyConstraint(
