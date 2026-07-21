@@ -47,6 +47,34 @@ def test_eneo_flows_package_does_not_import_services_as_side_effect() -> None:
     assert "eneo.flows.application.flow_run_service" not in sys.modules
 
 
+def test_flow_api_contract_models_do_not_import_routers_as_side_effect() -> None:
+    backend_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    source_path = str(backend_root / "src")
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{source_path}:{existing_pythonpath}" if existing_pythonpath else source_path
+    )
+    script = """
+import sys
+import eneo.flows.api.flow_run_contract_models
+
+assert "eneo.flows.api.flow_router" not in sys.modules
+assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=backend_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_eneo_flows_runtime_package_does_not_import_celery_as_side_effect() -> None:
     sys.modules.pop("eneo.flows.runtime", None)
     sys.modules.pop("eneo.flows.runtime.celery_app", None)

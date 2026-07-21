@@ -41,12 +41,12 @@ from eneo.flows.api.flow_models import (
     FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE,
     FLOW_RUN_STEP_PUBLIC_EXAMPLE,
 )
+from eneo.flows.api.flow_run_contract_models import FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE
 from eneo.flows.api.flow_runtime_endpoint_registry import (
     flow_runtime_endpoint_by_operation_id,
 )
 from eneo.flows.api.flow_runtime_paths import build_flow_endpoint_template
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_contract_models import FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE
 
 CONSUMER_GUIDE_PAGE_SLUG = "integrating-flows"
 FLOW_CONSUMER_GUIDE_DOCS_OUTPUT_PATH = output_path_for(CONSUMER_GUIDE_PAGE_SLUG)

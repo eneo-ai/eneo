@@ -10,6 +10,7 @@ from uuid import UUID
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.files.file_repo import FileRepository
+from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -40,7 +41,6 @@ from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
 )
-from eneo.flows.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope

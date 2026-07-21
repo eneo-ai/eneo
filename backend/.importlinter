@@ -39,7 +39,6 @@ source_modules =
     eneo.flows.flow_retention_tombstone
     eneo.flows.flow_review_expiry_policy
     eneo.flows.flow_review_policy
-    eneo.flows.flow_run_contract_models
     eneo.flows.flow_run_contract_service
     eneo.flows.flow_run_dispatch_request
     eneo.flows.flow_run_error

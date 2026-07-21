@@ -8,6 +8,14 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Literal, get_args
 
+from eneo.flows.api.flow_run_contract_models import (
+    FlowFinalOutputContractPublic,
+    FlowReviewStepContractPublic,
+    FlowRunContractPublic,
+    FlowRuntimeInputContractPublic,
+    FlowRuntimeUploadPolicyPublic,
+    FormFieldPublic,
+)
 from eneo.flows.api.flow_runtime_endpoint_registry import (
     FLOW_RUNTIME_ENDPOINT_CONTRACTS,
     FlowRuntimeEndpointContract,
@@ -27,14 +35,6 @@ from eneo.flows.flow_capability_manifest import (
     RuntimeInputMode,
 )
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
-from eneo.flows.flow_run_contract_models import (
-    FlowFinalOutputContractPublic,
-    FlowReviewStepContractPublic,
-    FlowRunContractPublic,
-    FlowRuntimeInputContractPublic,
-    FlowRuntimeUploadPolicyPublic,
-    FormFieldPublic,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_GUIDES_DIR = (

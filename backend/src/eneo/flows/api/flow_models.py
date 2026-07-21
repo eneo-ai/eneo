@@ -20,6 +20,36 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import FilePublic, FileRestrictions
+from eneo.flows.api.flow_run_contract_models import (
+    FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowOutputDelivery as FlowOutputDelivery,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowReviewStepContractPublic as FlowReviewStepContractPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunContractPublic as FlowRunContractPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunResultPublic as FlowRunResultPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRuntimeInputContractPublic as FlowRuntimeInputContractPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRuntimeUploadPolicyPublic as FlowRuntimeUploadPolicyPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowTemplateReadinessPublic as FlowTemplateReadinessPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FormFieldPublic as FormFieldPublic,
+)
 from eneo.flows.domain.flow import FlowRunRetentionProjection
 from eneo.flows.enums import (
     FlowInputSource,
@@ -39,36 +69,6 @@ from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
     FlowStepReviewMode,
     FlowStepReviewPolicy,
-)
-from eneo.flows.flow_run_contract_models import (
-    FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowOutputDelivery as FlowOutputDelivery,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowReviewStepContractPublic as FlowReviewStepContractPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowRunContractPublic as FlowRunContractPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowRunResultPublic as FlowRunResultPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowRuntimeInputContractPublic as FlowRuntimeInputContractPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowRuntimeUploadPolicyPublic as FlowRuntimeUploadPolicyPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FlowTemplateReadinessPublic as FlowTemplateReadinessPublic,
-)
-from eneo.flows.flow_run_contract_models import (
-    FormFieldPublic as FormFieldPublic,
 )
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,

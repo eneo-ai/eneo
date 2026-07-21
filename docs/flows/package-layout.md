@@ -13,6 +13,10 @@ Shared execution contract dataclasses (`RuntimeStep`, `RunExecutionState`,
 under `eneo.flows.runtime`; there is no compatibility module at
 `eneo.flows.runtime.models`.
 
+Public Flow run Pydantic schemas are canonically owned by
+`eneo.flows.api.flow_run_contract_models`; no compatibility module remains at the
+Flow package root.
+
 Allowed target homes:
 
 - `api`: HTTP adapters, API schemas, OpenAPI-facing errors, and presenters.
@@ -66,7 +70,6 @@ provenance value instead of creating another omission model.
 | flow_retention_tombstone | module | domain | Retention tombstones are domain audit records. |
 | flow_review_expiry_policy | module | domain | Review expiry rules are Flow domain policy. |
 | flow_review_policy | module | domain | Review requirements are Flow domain policy. |
-| flow_run_contract_models | module | api | Run contract models are public API-facing schemas. |
 | flow_run_contract_service | module | application | Run-contract assembly is an application use case. |
 | flow_run_dispatch_request | module | runtime | Dispatch payload is a worker/runtime command. |
 | flow_run_error | module | domain | Run error payloads are Flow domain contracts. |

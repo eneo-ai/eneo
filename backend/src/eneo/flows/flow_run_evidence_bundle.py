@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence, cast
 from uuid import UUID
 
+from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -15,7 +16,6 @@ from eneo.flows.domain.flow import (
     FlowVersion,
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
-from eneo.flows.flow_run_contract_models import FlowFinalOutputContractPublic
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_evidence import build_debug_export
 from eneo.flows.flow_run_provenance import (

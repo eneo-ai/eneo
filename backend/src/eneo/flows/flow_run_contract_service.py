@@ -6,13 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from eneo.flows.domain.flow import Flow, FlowTemplateAsset
-from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_input_limits import FlowInputLimitsSource
-from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
-from eneo.flows.flow_run_contract_models import (
+from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
     FlowReviewStepContractPublic,
@@ -22,6 +16,12 @@ from eneo.flows.flow_run_contract_models import (
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
+from eneo.flows.domain.flow import Flow, FlowTemplateAsset
+from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_input_limits import FlowInputLimitsSource
+from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
     aggregate_runtime_file_limit,
