@@ -4550,6 +4550,58 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel flow run
+     * @description Cancel a flow run if it is not already terminal.
+     *
+     *     This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
+     *     is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
+     *     tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
+     *     principals can cancel only their own runs.
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
+     */
+    post: operations["cancel_flow_run"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Redispatch due queued run
+     * @description Attempt to dispatch a queued run whose durable next-at clock is due.
+     *
+     *         Returns the refreshed run payload together with `redispatched_count`, which indicates
+     *         whether dispatch was re-triggered for this request.
+     *
+     *         Service-key principals may redispatch only their own queued runs in v1.
+     */
+    post: operations["redispatch_flow_run"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {
     parameters: {
       query?: never;
@@ -4728,33 +4780,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Cancel flow run
-     * @description Cancel a flow run if it is not already terminal.
-     *
-     *     This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
-     *     is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
-     *     tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
-     *     principals can cancel only their own runs.
-     *
-     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
-     */
-    post: operations["cancel_flow_run"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {
     parameters: {
       query?: never;
@@ -4780,31 +4805,6 @@ export interface paths {
      *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["rerun_flow_run_step"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Redispatch due queued run
-     * @description Attempt to dispatch a queued run whose durable next-at clock is due.
-     *
-     *         Returns the refreshed run payload together with `redispatched_count`, which indicates
-     *         whether dispatch was re-triggered for this request.
-     *
-     *         Service-key principals may redispatch only their own queued runs in v1.
-     */
-    post: operations["redispatch_flow_run"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8784,7 +8784,11 @@ export interface components {
      * @enum {string}
      */
     AIBuilderOutputMode:
-      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
+      | "pass_through"
+      | "compose_text"
+      | "transcribe_only"
+      | "template_fill"
+      | "render_verbatim";
     /**
      * AIBuilderPlanEditContext
      * @description Structured intent for revising an already proposed AI Builder plan.
@@ -9581,7 +9585,11 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
+      | "exact_secret"
+      | "key_suffix"
+      | "name_or_description"
+      | "owner"
+      | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -11067,7 +11075,11 @@ export interface components {
      * @enum {string}
      */
     BuilderTurnState:
-      "open" | "processing" | "committed" | "failed_before_provider" | "provider_outcome_unknown";
+      | "open"
+      | "processing"
+      | "committed"
+      | "failed_before_provider"
+      | "provider_outcome_unknown";
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -12997,7 +13009,10 @@ export interface components {
        * @enum {string}
        */
       provenance_persisted_version_status:
-        "not_tracked" | "tracked" | "corrupt" | "retention_purged";
+        | "not_tracked"
+        | "tracked"
+        | "corrupt"
+        | "retention_purged";
       /** Content Hash */
       content_hash: string;
       /**
@@ -14691,7 +14706,8 @@ export interface components {
       model_kind: components["schemas"]["FlowPackageModelKind"];
       matching_preferences: components["schemas"]["FlowPackageModelMatchingPreferences"];
       completion_constraints?:
-        components["schemas"]["FlowPackageCompletionModelConstraints"] | null;
+        | components["schemas"]["FlowPackageCompletionModelConstraints"]
+        | null;
       /** Eligible Candidate Count */
       eligible_candidate_count: number;
       policy_status: components["schemas"]["FlowPackagePolicyStatus"];
@@ -16005,7 +16021,9 @@ export interface components {
      * @enum {string}
      */
     FlowRunDispatchErrorKind:
-      "invalid_request" | "execution_backend_failure" | "invalid_persisted_error";
+      | "invalid_request"
+      | "execution_backend_failure"
+      | "invalid_persisted_error";
     /**
      * FlowRunError
      * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
@@ -17385,7 +17403,8 @@ export interface components {
       } | null;
       /** @description Root-step runtime file override recorded at rerun acceptance time. Null means files were inherited from the predecessor attempt. */
       root_step_input_override?:
-        components["schemas"]["FlowRunRerunStepInputOverridePublic"] | null;
+        | components["schemas"]["FlowRunRerunStepInputOverridePublic"]
+        | null;
       /**
        * Root Step Input Override Requested
        * @description True when the rerun request explicitly replaced or cleared root step runtime files; false when the root attempt inherits files from its predecessor.
@@ -17395,7 +17414,8 @@ export interface components {
       /** Requested By User Id */
       requested_by_user_id?: string | null;
       requested_by_service_principal?:
-        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       /** @description Stable machine-readable rerun failure code. */
       failure_code?:
         | (
@@ -17737,7 +17757,8 @@ export interface components {
       /** Decided By User Id */
       decided_by_user_id?: string | null;
       decided_by_service_principal?:
-        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -17872,7 +17893,8 @@ export interface components {
       /** Decided By User Id */
       decided_by_user_id?: string | null;
       decided_by_service_principal?:
-        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -18012,7 +18034,13 @@ export interface components {
      * @enum {string}
      */
     FlowRunReviewCheckpointState:
-      "awaiting_review" | "edited" | "approved" | "rejected" | "resumed" | "cancelled" | "expired";
+      | "awaiting_review"
+      | "edited"
+      | "approved"
+      | "rejected"
+      | "resumed"
+      | "cancelled"
+      | "expired";
     /**
      * FlowRunStatus
      * @enum {string}
@@ -20494,7 +20522,11 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
+      | "text-field"
+      | "text-upload"
+      | "audio-upload"
+      | "audio-recorder"
+      | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -32053,7 +32085,8 @@ export interface operations {
         };
         content: {
           "application/json":
-            components["schemas"]["FlowClassificationRetentionPolicyPublic"] | null;
+            | components["schemas"]["FlowClassificationRetentionPolicyPublic"]
+            | null;
         };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
@@ -32913,7 +32946,8 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  components["schemas"]["SecurityClassificationPublic"] | null;
+                  | components["schemas"]["SecurityClassificationPublic"]
+                  | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -33339,7 +33373,8 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  components["schemas"]["SecurityClassificationPublic"] | null;
+                  | components["schemas"]["SecurityClassificationPublic"]
+                  | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -44739,6 +44774,144 @@ export interface operations {
       };
     };
   };
+  cancel_flow_run: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run to cancel. */
+        id: string;
+        /** @description Identifier of the run to cancel. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "eneo_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  redispatch_flow_run: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the stale queued run. */
+        id: string;
+        /** @description Identifier of the queued run to dispatch if it is due. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Flow run not found.",
+           *       "eneo_error_code": 9000,
+           *       "code": "not_found"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_active_flow_run_review_checkpoint: {
     parameters: {
       query?: never;
@@ -45340,75 +45513,6 @@ export interface operations {
       };
     };
   };
-  cancel_flow_run: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Identifier of the flow that owns the run to cancel. */
-        id: string;
-        /** @description Identifier of the run to cancel. */
-        run_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunPublic"];
-        };
-      };
-      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "API key space scope does not match requested flow.",
-           *       "eneo_error_code": 9001,
-           *       "code": "insufficient_scope",
-           *       "context": {
-           *         "auth_layer": "api_key_scope"
-           *       }
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Run not found for this flow and tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "Flow run not found.",
-           *       "eneo_error_code": 9000,
-           *       "code": "not_found"
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   rerun_flow_run_step: {
     parameters: {
       query?: never;
@@ -45460,75 +45564,6 @@ export interface operations {
            *       "code": "insufficient_tenant_permission",
            *       "context": {
            *         "auth_layer": "tenant_role"
-           *       }
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Run not found for this flow and tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "Flow run not found.",
-           *       "eneo_error_code": 9000,
-           *       "code": "not_found"
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  redispatch_flow_run: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Identifier of the flow that owns the stale queued run. */
-        id: string;
-        /** @description Identifier of the queued run to dispatch if it is due. */
-        run_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRedispatchResponse"];
-        };
-      };
-      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "API key space scope does not match requested flow.",
-           *       "eneo_error_code": 9001,
-           *       "code": "insufficient_scope",
-           *       "context": {
-           *         "auth_layer": "api_key_scope"
            *       }
            *     }
            */
