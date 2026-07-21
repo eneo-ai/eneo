@@ -1,9 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 from eneo.main.exceptions import (
     BadRequestException,
+    EncryptionNotConfiguredException,
     ErrorCodes,
     FileTooLargeException,
 )
@@ -131,3 +134,27 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert body["message"] == "Bad input"
     assert body["eneo_error_code"] == ErrorCodes.BAD_REQUEST
     assert "details" not in body
+
+
+def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/providers")
+    async def create_provider():
+        raise EncryptionNotConfiguredException(
+            "Credential encryption is not configured. Set ENCRYPTION_KEY and "
+            "restart the backend."
+        )
+
+    with caplog.at_level(logging.ERROR, logger="eneo.server.exception_handlers"):
+        response = TestClient(app, raise_server_exceptions=False).post("/providers")
+
+    assert response.status_code == 503
+    assert response.json()["eneo_error_code"] == ErrorCodes.ENCRYPTION_NOT_CONFIGURED
+    assert response.json()["message"] == (
+        "Credential encryption is not configured. Set ENCRYPTION_KEY and restart "
+        "the backend."
+    )
+    assert "POST /providers → 503" in caplog.text
+    assert "ENCRYPTION_KEY" in caplog.text

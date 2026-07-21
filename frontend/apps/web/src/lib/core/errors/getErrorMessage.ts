@@ -37,6 +37,7 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
   9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
+  9042: () => m.eneo_error_9042(), // ENCRYPTION_NOT_CONFIGURED
 
   // --- AI service errors ---
   9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED

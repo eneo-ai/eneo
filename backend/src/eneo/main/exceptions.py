@@ -63,6 +63,8 @@ class ErrorCodes(int, Enum):
     SYSTEM_USER_PROTECTED = 9040
     # AI provider deterministically rejected the request (4xx upstream)
     PROVIDER_REJECTED_REQUEST = 9041
+    # Deployment configuration errors
+    ENCRYPTION_NOT_CONFIGURED = 9042
 
 
 class NotFoundException(Exception):
@@ -364,6 +366,10 @@ class APIKeyNotConfiguredException(Exception):
     pass
 
 
+class EncryptionNotConfiguredException(Exception):
+    pass
+
+
 class SystemUserProtected(Exception):
     """Raised when an admin path tries to delete or mutate a system user.
 
@@ -477,6 +483,11 @@ EXCEPTION_MAP = {
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
+    EncryptionNotConfiguredException: (
+        503,
+        None,
+        ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
+    ),
     # File extraction errors - use None to pass through the exception's own message
     ExtractionError: (400, None, ErrorCodes.FILE_EXTRACTION_ERROR),
     EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),

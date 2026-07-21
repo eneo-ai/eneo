@@ -122,6 +122,7 @@ OIDC_CLOCK_LEEWAY_SECONDS=120
 # ENCRYPTION_KEY is REQUIRED when enabling:
 #   - TENANT_CREDENTIALS_ENABLED=true (tenant-specific LLM API keys)
 #   - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+#   - Model provider management in Admin > Models
 #
 # Generate key:
 #   Development: uv run python -m eneo.cli.generate_encryption_key

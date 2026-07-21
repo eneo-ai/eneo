@@ -622,6 +622,7 @@
   "eneo_error_9035": "Assistentens modell uppfyller inte ytans krav på säkerhetsklassning.",
   "eneo_error_9036": "En extern verktygstjänst är tillfälligt otillgänglig. Försök igen senare.",
   "eneo_error_9037": "En extern verktygstjänst avvisade anslutningsuppgifterna. Kontakta din administratör för att verifiera serverkonfigurationen.",
+  "eneo_error_9042": "Kryptering av anslutningsuppgifter är inte konfigurerad. Be en systemadministratör att ange ENCRYPTION_KEY och starta om backend.",
   "exit_fullscreen": "Avsluta helskärm",
   "export": "Exportera",
   "export_data": "Exportera data",
