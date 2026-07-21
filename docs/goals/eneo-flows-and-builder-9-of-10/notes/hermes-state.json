@@ -1,7 +1,7 @@
 {
   "version": 1,
   "program": "eneo-flows-and-builder-9-of-10",
-  "updated_at": "2026-07-21T17:22:34+02:00",
+  "updated_at": "2026-07-21T18:20:27+02:00",
   "orchestration": {
     "owner": "hermes-default-profile",
     "status": "active",
@@ -80,8 +80,8 @@
     "branch": "refactor/flows-clean",
     "pull_requests": false,
     "develop_mutation": false,
-    "last_verified_push": "bedc5b42fbbd558a4133bd511c893dc64b7a7537",
-    "last_verified_at": "2026-07-21T17:22:34+02:00",
+    "last_verified_push": "1d889e431de3a7acfbcc35fa7c17f156df50232e",
+    "last_verified_at": "2026-07-21T18:20:27+02:00",
     "protected_dirty": [
       ".devcontainer/devcontainer.json",
       ".gitignore",
@@ -199,8 +199,8 @@
   },
   "focus": {
     "roadmap_slice": "M4.3",
-    "execution_slice": "M4.3a",
-    "summary": "Home runtime contract models in the domain before executing package-layout moves"
+    "execution_slice": "M4.3b",
+    "summary": "Execute the remaining guarded package-layout moves after runtime contracts moved into the domain"
   },
   "active_work": [],
   "blockers": [],
@@ -208,7 +208,7 @@
     "morning_report": "/Users/cimen/Downloads/eneo-flows-overnight-progress.md",
     "timezone": "Europe/Stockholm",
     "last_morning_report_date": "2026-07-21",
-    "last_material_update_at": "2026-07-21T17:22:34+02:00",
+    "last_material_update_at": "2026-07-21T18:20:27+02:00",
     "last_material_fingerprint": null
   },
   "limits": {
@@ -235,6 +235,12 @@
       "kind": "roadmap-slice-completed",
       "summary": "Completed M4.2: deleted the pass-through FlowFactory, moved ORM projection into repository owners, converged DI/package-layout documentation, and verified 100 focused unit plus 205 integration tests, full strict Pyright, Ruff, generated-doc idempotence, pre-commit, and pre-push checks.",
       "commit": "bedc5b42fbbd558a4133bd511c893dc64b7a7537"
+    },
+    {
+      "at": "2026-07-21T18:20:27+02:00",
+      "kind": "roadmap-sub-slice-completed",
+      "summary": "Completed M4.3a: moved Flow runtime contract dataclasses to the domain owner without a compatibility module, updated all importers and maintainer documentation, and added a domain import-direction guard; verified 4,950 Flow tests, strict Pyright, Ruff, import-linter, generated-doc idempotence, pre-commit, and pre-push checks.",
+      "commit": "1d889e431de3a7acfbcc35fa7c17f156df50232e"
     }
   ]
 }
