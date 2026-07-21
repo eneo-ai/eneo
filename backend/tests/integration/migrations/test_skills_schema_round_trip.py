@@ -14,7 +14,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Thread
+from threading import Event, Thread
+from time import monotonic, sleep
 from uuid import uuid4
 
 import psycopg2
@@ -31,7 +32,9 @@ PRE_SKILLS_REVISION = "202607221000"
 SKILLS_SCHEMA_REVISION = "202607221200"
 SKILLS_PERMISSION_REVISION = "202607221300"
 SKILLS_PROVENANCE_INDEX_REVISION = "202607221400"
-SKILLS_HEAD_REVISION = SKILLS_PROVENANCE_INDEX_REVISION
+PRE_RESOURCE_BINDING_SCOPE_REVISION = "202607151400"
+PRE_PERMISSION_CONVERGENCE_REVISION = "202607201830"
+SKILLS_HEAD_REVISION = "202607211000"
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,7 @@ def _insert_role(
     tenant_id: str,
     label: str,
     permissions: list[str],
+    predefined_source: str | None = None,
 ) -> str:
     role_id = str(uuid4())
     with connection.cursor() as cursor:
@@ -155,9 +159,15 @@ def _insert_role(
                 id, name, permissions, tenant_id, predefined_source,
                 created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, NULL, now(), now())
+            VALUES (%s, %s, %s, %s, %s, now(), now())
             """,
-            (role_id, f"Skills {label} {uuid4().hex[:6]}", permissions, tenant_id),
+            (
+                role_id,
+                f"Skills {label} {uuid4().hex[:6]}",
+                permissions,
+                tenant_id,
+                predefined_source,
+            ),
         )
     return role_id
 
@@ -176,6 +186,89 @@ def _current_revision(connection: PgConnection) -> str:
         row = cursor.fetchone()
     assert row is not None
     return str(row[0])
+
+
+def test_permission_convergence_changes_only_predefined_roles(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_PERMISSION_CONVERGENCE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "permission-convergence")
+    role_ids = {
+        "owner": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="owner-before-convergence",
+            permissions=["admin", "skills"],
+            predefined_source="Owner",
+        ),
+        "user": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="user-before-convergence",
+            permissions=["assistants", "skills"],
+            predefined_source="User",
+        ),
+        "ai_configurator": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="ai-configurator-before-convergence",
+            permissions=["AI", "skills", "skills_management"],
+            predefined_source="AI Configurator",
+        ),
+        "custom_manager": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="custom-manager-before-convergence",
+            permissions=["assistants", "skills", "skills_management"],
+        ),
+        "custom_plain": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="custom-plain-before-convergence",
+            permissions=["assistants"],
+        ),
+    }
+
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+    assert _current_revision(connection) == SKILLS_HEAD_REVISION
+    assert _permissions(connection, role_ids["owner"]) == [
+        "admin",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["user"]) == ["assistants"]
+    assert _permissions(connection, role_ids["ai_configurator"]) == ["AI"]
+    assert _permissions(connection, role_ids["custom_manager"]) == [
+        "assistants",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_plain"]) == ["assistants"]
+
+    command.downgrade(config, PRE_PERMISSION_CONVERGENCE_REVISION)
+
+    assert _permissions(connection, role_ids["owner"]) == [
+        "admin",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["user"]) == ["assistants", "skills"]
+    assert _permissions(connection, role_ids["ai_configurator"]) == [
+        "AI",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_manager"]) == [
+        "assistants",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_plain"]) == ["assistants"]
 
 
 def _insert_assistant(connection: PgConnection, *, user_id: str, space_id: str) -> str:
@@ -413,6 +506,247 @@ def _assert_constraint(
     assert error.value.diag.constraint_name in expected_names
 
 
+def _insert_populated_resource_bindings(
+    connection: PgConnection,
+    *,
+    tenant_id: str,
+    user_id: str,
+    space_id: str,
+    skill_id: str,
+    skill_revision_id: str,
+    row_count: int,
+) -> tuple[str, str]:
+    seed = uuid4().hex
+    resource_name = f"Migration lock probe {seed}"
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO assistants (
+                id, user_id, space_id, name, logging_enabled, is_default,
+                published, type, insight_enabled, created_at, updated_at
+            )
+            SELECT
+                md5(%s || '-assistant-' || ordinal::text)::uuid,
+                %s, %s, %s, false, false, false, 'assistant', false,
+                now(), now()
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, user_id, space_id, resource_name, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, skill_id, skill_revision_id, space_id, position
+            )
+            SELECT
+                md5(%s || '-assistant-' || ordinal::text)::uuid,
+                %s, %s, %s, 0
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, skill_id, skill_revision_id, space_id, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO apps (
+                id, tenant_id, user_id, space_id, name, published,
+                created_at, updated_at
+            )
+            SELECT
+                md5(%s || '-app-' || ordinal::text)::uuid,
+                %s, %s, %s, %s, false, now(), now()
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, tenant_id, user_id, space_id, resource_name, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO app_skill_bindings (
+                app_id, skill_id, skill_revision_id, space_id, position
+            )
+            SELECT
+                md5(%s || '-app-' || ordinal::text)::uuid,
+                %s, %s, %s, 0
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, skill_id, skill_revision_id, space_id, row_count),
+        )
+        cursor.execute(
+            "SELECT id FROM assistants WHERE name = %s ORDER BY id LIMIT 1",
+            (resource_name,),
+        )
+        assistant_id = cursor.fetchone()
+        cursor.execute(
+            "SELECT id FROM apps WHERE name = %s ORDER BY id LIMIT 1",
+            (resource_name,),
+        )
+        app_id = cursor.fetchone()
+
+    assert assistant_id is not None
+    assert app_id is not None
+    return str(assistant_id[0]), str(app_id[0])
+
+
+def test_resource_binding_validation_does_not_retain_exclusive_table_locks(
+    pre_skills_database: MigrationDatabase,
+    test_settings,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "online-binding-contract")
+    user_id = _insert_user(connection, tenant_id, "online-binding-contract")
+    space_id = _insert_space(connection, tenant_id, "online-binding-contract")
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=space_id,
+        created_by_user_id=user_id,
+        label="online-binding-contract",
+    )
+    assistant_id, app_id = _insert_populated_resource_bindings(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=space_id,
+        skill_id=skill_id,
+        skill_revision_id=revision_id,
+        row_count=50_000,
+    )
+
+    stop_writer = Event()
+    writer_ready = Event()
+    writer_iterations = [0]
+    writer_errors: list[BaseException] = []
+    migration_errors: list[BaseException] = []
+
+    def keep_reader_and_writer_active() -> None:
+        writer_connection = psycopg2.connect(
+            host=test_settings.postgres_host,
+            port=test_settings.postgres_port,
+            dbname=test_settings.postgres_db,
+            user=test_settings.postgres_user,
+            password=test_settings.postgres_password,
+        )
+        writer_connection.autocommit = True
+        try:
+            with writer_connection.cursor() as cursor:
+                cursor.execute("SET statement_timeout = '2s'")
+                writer_ready.set()
+                while not stop_writer.is_set():
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM assistant_skill_bindings
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    cursor.execute(
+                        """
+                        UPDATE assistant_skill_bindings
+                        SET updated_at = clock_timestamp()
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM app_skill_bindings
+                        WHERE app_id = %s AND skill_id = %s
+                        """,
+                        (app_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    cursor.execute(
+                        """
+                        UPDATE app_skill_bindings
+                        SET updated_at = clock_timestamp()
+                        WHERE app_id = %s AND skill_id = %s
+                        """,
+                        (app_id, skill_id),
+                    )
+                    writer_iterations[0] += 1
+                    sleep(0.002)
+        except BaseException as error:
+            writer_errors.append(error)
+        finally:
+            writer_connection.close()
+
+    def run_scope_migration() -> None:
+        try:
+            command.upgrade(
+                _alembic_config(config.get_main_option("sqlalchemy.url")),
+                PRE_PERMISSION_CONVERGENCE_REVISION,
+            )
+        except BaseException as error:
+            migration_errors.append(error)
+
+    writer = Thread(target=keep_reader_and_writer_active, daemon=True)
+    writer.start()
+    assert writer_ready.wait(timeout=5)
+    writer_start_deadline = monotonic() + 5
+    while (
+        writer_iterations[0] < 2
+        and not writer_errors
+        and monotonic() < writer_start_deadline
+    ):
+        sleep(0.002)
+    assert not writer_errors
+    assert writer_iterations[0] >= 2
+
+    migration = Thread(target=run_scope_migration, daemon=True)
+    migration.start()
+
+    observed_validations: set[str] = set()
+    exclusive_locks_during_validation: list[str] = []
+    while migration.is_alive():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT activity.query,
+                       EXISTS (
+                           SELECT 1
+                           FROM pg_locks AS held_lock
+                           JOIN pg_class AS relation
+                             ON relation.oid = held_lock.relation
+                           WHERE held_lock.pid = activity.pid
+                             AND held_lock.granted
+                             AND held_lock.mode = 'AccessExclusiveLock'
+                             AND relation.relname = ANY(%s)
+                       )
+                FROM pg_stat_activity AS activity
+                WHERE activity.datname = current_database()
+                  AND activity.pid <> pg_backend_pid()
+                  AND activity.query LIKE 'ALTER TABLE %%VALIDATE CONSTRAINT%%'
+                """,
+                (list(("assistant_skill_bindings", "app_skill_bindings")),),
+            )
+            validation_rows = cursor.fetchall()
+
+        for query, has_exclusive_lock in validation_rows:
+            for table in ("assistant_skill_bindings", "app_skill_bindings"):
+                if f"ALTER TABLE {table} VALIDATE CONSTRAINT" in query:
+                    observed_validations.add(table)
+                    if has_exclusive_lock:
+                        exclusive_locks_during_validation.append(table)
+        sleep(0.001)
+
+    migration.join(timeout=5)
+    stop_writer.set()
+    writer.join(timeout=5)
+
+    assert not migration_errors
+    assert not writer_errors
+    assert writer_iterations[0] > 2
+    assert observed_validations == {
+        "assistant_skill_bindings",
+        "app_skill_bindings",
+    }
+    assert exclusive_locks_during_validation == []
+
+
 def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     pre_skills_database: MigrationDatabase,
 ):
@@ -429,6 +763,27 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     )
 
     role_ids = {
+        "owner": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="owner",
+            permissions=["admin"],
+            predefined_source="Owner",
+        ),
+        "user": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="user",
+            permissions=["assistants", "apps"],
+            predefined_source="User",
+        ),
+        "ai_configurator": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="ai-configurator",
+            permissions=["AI", "assistants", "apps"],
+            predefined_source="AI Configurator",
+        ),
         "assistants": _insert_role(
             connection,
             tenant_id=tenant_id,
@@ -496,18 +851,27 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     command.upgrade(config, SKILLS_HEAD_REVISION)
 
     assert _current_revision(connection) == SKILLS_HEAD_REVISION
-    for qualifying_role in ("assistants", "apps", "admin", "ai", "already_granted"):
-        permissions = _permissions(connection, role_ids[qualifying_role])
-        assert permissions.count("skills") == 1
-    for qualifying_role in ("admin", "ai", "already_managed"):
-        permissions = _permissions(connection, role_ids[qualifying_role])
-        assert permissions.count("skills_management") == 1
-    for use_only_role in ("assistants", "apps", "already_granted"):
-        assert "skills_management" not in _permissions(
-            connection, role_ids[use_only_role]
-        )
-    assert "skills" not in _permissions(connection, role_ids["unrelated"])
-    assert "skills_management" not in _permissions(connection, role_ids["unrelated"])
+    owner_permissions = _permissions(connection, role_ids["owner"])
+    assert owner_permissions.count("skills") == 1
+    assert owner_permissions.count("skills_management") == 1
+
+    for role_name in (
+        "user",
+        "ai_configurator",
+        "assistants",
+        "apps",
+        "admin",
+        "ai",
+        "unrelated",
+    ):
+        permissions = _permissions(connection, role_ids[role_name])
+        assert "skills" not in permissions
+        assert "skills_management" not in permissions
+
+    assert _permissions(connection, role_ids["already_granted"]).count("skills") == 1
+    already_managed_permissions = _permissions(connection, role_ids["already_managed"])
+    assert already_managed_permissions.count("skills") == 1
+    assert already_managed_permissions.count("skills_management") == 1
 
     expected_indexes = {
         "uq_assistants_space_id_id",
@@ -604,9 +968,13 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
 
     command.downgrade(config, SKILLS_SCHEMA_REVISION)
     assert _current_revision(connection) == SKILLS_SCHEMA_REVISION
-    for role_id in role_ids.values():
-        assert "skills" not in _permissions(connection, role_id)
-        assert "skills_management" not in _permissions(connection, role_id)
+    owner_permissions = _permissions(connection, role_ids["owner"])
+    assert "skills" not in owner_permissions
+    assert "skills_management" not in owner_permissions
+    assert _permissions(connection, role_ids["already_granted"]).count("skills") == 1
+    already_managed_permissions = _permissions(connection, role_ids["already_managed"])
+    assert already_managed_permissions.count("skills") == 1
+    assert already_managed_permissions.count("skills_management") == 1
 
     command.downgrade(config, PRE_SKILLS_REVISION)
     assert _current_revision(connection) == PRE_SKILLS_REVISION

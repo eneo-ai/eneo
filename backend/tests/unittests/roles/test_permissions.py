@@ -258,7 +258,7 @@ class TestRoleTemplates:
         user = templates["User"]
         assert "personal_chat" in user
         assert "assistants" in user
-        assert "skills" in user
+        assert "skills" not in user
         assert "skills_management" not in user
         assert "shared_spaces" in user
         assert "collections" in user
@@ -269,8 +269,8 @@ class TestRoleTemplates:
         ai = templates["AI Configurator"]
         assert "AI" in ai
         assert "assistants" in ai
-        assert "skills" in ai
-        assert "skills_management" in ai
+        assert "skills" not in ai
+        assert "skills_management" not in ai
         assert "shared_spaces" in ai
         assert "admin" not in ai
 

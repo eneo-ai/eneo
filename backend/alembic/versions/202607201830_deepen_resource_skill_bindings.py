@@ -19,16 +19,30 @@ depends_on: str | Sequence[str] | None = None
 _BACKFILL_BATCH_SIZE = 1_000
 _BINDING_TABLES = ("assistant_skill_bindings", "app_skill_bindings")
 _SCOPE_TRIGGER_FUNCTION = "eneo_fill_resource_skill_binding_scope"
+_CONTRACT_LOCK_TIMEOUT = "5s"
+
+
+def _execute_with_contract_lock_timeout(statement: str) -> None:
+    op.execute(f"SET lock_timeout = '{_CONTRACT_LOCK_TIMEOUT}'")
+    try:
+        op.execute(statement)
+    finally:
+        op.execute("RESET lock_timeout")
 
 
 def _add_scope_columns_and_legacy_write_trigger(*, table: str) -> None:
     # IF NOT EXISTS keeps the migration restartable because the concurrent index
     # phase below commits independently of Alembic's surrounding transaction.
-    op.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id UUID")
-    op.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS skill_space_id UUID")
-    op.execute(f"DROP TRIGGER IF EXISTS fill_resource_skill_binding_scope ON {table}")
-    op.execute(
+    _execute_with_contract_lock_timeout(
         f"""
+        ALTER TABLE {table}
+            ADD COLUMN IF NOT EXISTS tenant_id UUID,
+            ADD COLUMN IF NOT EXISTS skill_space_id UUID
+        """
+    )
+    _execute_with_contract_lock_timeout(
+        f"""
+        DROP TRIGGER IF EXISTS fill_resource_skill_binding_scope ON {table};
         CREATE TRIGGER fill_resource_skill_binding_scope
         BEFORE INSERT OR UPDATE OF space_id, tenant_id, skill_space_id ON {table}
         FOR EACH ROW
@@ -103,95 +117,108 @@ def _create_scope_index(*, table: str) -> None:
     )
 
 
-def _enforce_binding_scope(*, table: str) -> None:
+def _replace_binding_scope_constraints(*, table: str) -> None:
     tenant_not_null = f"ck_{table}_tenant_id_not_null"
     skill_space_not_null = f"ck_{table}_skill_space_id_not_null"
 
-    op.drop_constraint(f"fk_{table}_skill", table, type_="foreignkey")
-    op.create_foreign_key(
+    # One ALTER makes the old-FK/new-NOT-VALID contract swap atomic. Each target
+    # constraint is dropped first so a retry after a later committed migration
+    # phase remains deterministic.
+    _execute_with_contract_lock_timeout(
+        f"""
+        ALTER TABLE {table}
+            DROP CONSTRAINT IF EXISTS fk_{table}_parent_space,
+            DROP CONSTRAINT IF EXISTS fk_{table}_skill_space,
+            DROP CONSTRAINT IF EXISTS fk_{table}_skill,
+            DROP CONSTRAINT IF EXISTS {tenant_not_null},
+            DROP CONSTRAINT IF EXISTS {skill_space_not_null},
+            ADD CONSTRAINT fk_{table}_parent_space
+                FOREIGN KEY (tenant_id, space_id)
+                REFERENCES spaces (tenant_id, id)
+                ON DELETE NO ACTION NOT VALID,
+            ADD CONSTRAINT fk_{table}_skill_space
+                FOREIGN KEY (tenant_id, skill_space_id)
+                REFERENCES spaces (tenant_id, id)
+                ON DELETE NO ACTION NOT VALID,
+            ADD CONSTRAINT fk_{table}_skill
+                FOREIGN KEY (skill_space_id, skill_id)
+                REFERENCES skills (space_id, id)
+                ON DELETE NO ACTION NOT VALID,
+            ADD CONSTRAINT {tenant_not_null}
+                CHECK (tenant_id IS NOT NULL) NOT VALID,
+            ADD CONSTRAINT {skill_space_not_null}
+                CHECK (skill_space_id IS NOT NULL) NOT VALID
+        """
+    )
+
+
+def _validate_binding_scope_constraints(*, table: str) -> None:
+    constraints = (
         f"fk_{table}_parent_space",
-        table,
-        "spaces",
-        ["tenant_id", "space_id"],
-        ["tenant_id", "id"],
-        ondelete="NO ACTION",
-        postgresql_not_valid=True,
-    )
-    op.create_foreign_key(
         f"fk_{table}_skill_space",
-        table,
-        "spaces",
-        ["tenant_id", "skill_space_id"],
-        ["tenant_id", "id"],
-        ondelete="NO ACTION",
-        postgresql_not_valid=True,
-    )
-    op.create_foreign_key(
         f"fk_{table}_skill",
-        table,
-        "skills",
-        ["skill_space_id", "skill_id"],
-        ["space_id", "id"],
-        ondelete="NO ACTION",
-        postgresql_not_valid=True,
+        f"ck_{table}_tenant_id_not_null",
+        f"ck_{table}_skill_space_id_not_null",
     )
-    op.create_check_constraint(
-        tenant_not_null,
-        table,
-        "tenant_id IS NOT NULL",
-        postgresql_not_valid=True,
-    )
-    op.create_check_constraint(
-        skill_space_not_null,
-        table,
-        "skill_space_id IS NOT NULL",
-        postgresql_not_valid=True,
-    )
+    for constraint in constraints:
+        op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT {constraint}")
 
-    op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT fk_{table}_parent_space")
-    op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT fk_{table}_skill_space")
-    op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT fk_{table}_skill")
-    op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT {tenant_not_null}")
-    op.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT {skill_space_not_null}")
 
-    op.alter_column(table, "tenant_id", nullable=False)
-    op.alter_column(table, "skill_space_id", nullable=False)
-    op.drop_constraint(tenant_not_null, table, type_="check")
-    op.drop_constraint(skill_space_not_null, table, type_="check")
+def _contract_binding_scope_columns(*, table: str) -> None:
+    tenant_not_null = f"ck_{table}_tenant_id_not_null"
+    skill_space_not_null = f"ck_{table}_skill_space_id_not_null"
+
+    # The validated checks let PostgreSQL prove NOT NULL without another table
+    # scan. Keep the two column changes and helper-check removal in one short,
+    # retry-safe contract statement.
+    _execute_with_contract_lock_timeout(
+        f"""
+        ALTER TABLE {table}
+            ALTER COLUMN tenant_id SET NOT NULL,
+            ALTER COLUMN skill_space_id SET NOT NULL,
+            DROP CONSTRAINT IF EXISTS {tenant_not_null},
+            DROP CONSTRAINT IF EXISTS {skill_space_not_null}
+        """
+    )
 
 
 def upgrade() -> None:
-    op.execute(
-        f"""
-        CREATE OR REPLACE FUNCTION {_SCOPE_TRIGGER_FUNCTION}()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        AS $$
-        BEGIN
-            IF NEW.skill_space_id IS NULL THEN
-                NEW.skill_space_id := NEW.space_id;
-            END IF;
-            IF NEW.tenant_id IS NULL THEN
-                SELECT tenant_id
-                INTO NEW.tenant_id
-                FROM spaces
-                WHERE id = NEW.space_id;
-            END IF;
-            RETURN NEW;
-        END;
-        $$
-        """
-    )
-    for table in _BINDING_TABLES:
-        _add_scope_columns_and_legacy_write_trigger(table=table)
-
+    # Each statement commits independently. Short metadata locks therefore
+    # never span sibling tables or populated-table scans, while every phase is
+    # restartable if a bounded lock attempt asks the deployment to retry.
     with op.get_context().autocommit_block():
+        op.execute(
+            f"""
+            CREATE OR REPLACE FUNCTION {_SCOPE_TRIGGER_FUNCTION}()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.skill_space_id IS NULL THEN
+                    NEW.skill_space_id := NEW.space_id;
+                END IF;
+                IF NEW.tenant_id IS NULL THEN
+                    SELECT tenant_id
+                    INTO NEW.tenant_id
+                    FROM spaces
+                    WHERE id = NEW.space_id;
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """
+        )
+        for table in _BINDING_TABLES:
+            _add_scope_columns_and_legacy_write_trigger(table=table)
         for table in _BINDING_TABLES:
             _backfill_scope_columns(table=table)
             _create_scope_index(table=table)
-
-    for table in _BINDING_TABLES:
-        _enforce_binding_scope(table=table)
+        for table in _BINDING_TABLES:
+            _replace_binding_scope_constraints(table=table)
+        for table in _BINDING_TABLES:
+            _validate_binding_scope_constraints(table=table)
+        for table in _BINDING_TABLES:
+            _contract_binding_scope_columns(table=table)
 
     # Keep the trigger until every supported backend version writes both scope
     # columns. A later contract migration can then remove it safely.

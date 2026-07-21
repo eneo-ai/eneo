@@ -457,6 +457,17 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
         assert repeated.previous_is_active is True
         assert repeated.skill.first_published_at == published.skill.first_published_at
 
+        pending = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Benefits pending review",
+            description="Pending description",
+            instructions="Pending instructions",
+            content_digest="3" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert pending is not None
+        assert pending.skill.publication_state is SkillPublicationState.UPDATE_PENDING
+
         with pytest.raises(PublishedSkillDeletionError):
             await repo.delete_organization(
                 tenant_id=admin_user.tenant_id,
@@ -482,7 +493,7 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
         republished = await repo.publish_organization(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
-            expected_revision_id=revised.revision.id,
+            expected_revision_id=pending.revision.id,
         )
         assert republished is not None
         assert republished.previous_is_active is False

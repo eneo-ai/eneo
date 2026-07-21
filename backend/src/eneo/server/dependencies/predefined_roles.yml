@@ -3,7 +3,6 @@ roles:
     permissions:
       - personal_chat
       - assistants
-      - skills
       - group_chats
       - apps
       - collections
@@ -13,8 +12,6 @@ roles:
     permissions:
       - personal_chat
       - assistants
-      - skills
-      - skills_management
       - group_chats
       - apps
       - services

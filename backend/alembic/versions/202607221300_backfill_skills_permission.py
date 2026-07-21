@@ -1,4 +1,4 @@
-"""backfill Skill use and management permissions onto existing capable roles
+"""grant Skill use and management permissions to existing Owner roles
 
 Revision ID: 202607221300
 Revises: 202607221200
@@ -20,12 +20,7 @@ def upgrade() -> None:
         """
         UPDATE roles
         SET permissions = array_append(permissions, 'skills')
-        WHERE (
-            'assistants' = ANY(permissions)
-            OR 'apps' = ANY(permissions)
-            OR 'AI' = ANY(permissions)
-            OR 'admin' = ANY(permissions)
-        )
+        WHERE predefined_source = 'Owner'
           AND NOT ('skills' = ANY(permissions))
         """
     )
@@ -33,10 +28,7 @@ def upgrade() -> None:
         """
         UPDATE roles
         SET permissions = array_append(permissions, 'skills_management')
-        WHERE (
-            'AI' = ANY(permissions)
-            OR 'admin' = ANY(permissions)
-        )
+        WHERE predefined_source = 'Owner'
           AND NOT ('skills_management' = ANY(permissions))
         """
     )
@@ -47,13 +39,15 @@ def downgrade() -> None:
         """
         UPDATE roles
         SET permissions = array_remove(permissions, 'skills_management')
-        WHERE 'skills_management' = ANY(permissions)
+        WHERE predefined_source IN ('Owner', 'User', 'AI Configurator')
+          AND 'skills_management' = ANY(permissions)
         """
     )
     op.execute(
         """
         UPDATE roles
         SET permissions = array_remove(permissions, 'skills')
-        WHERE 'skills' = ANY(permissions)
+        WHERE predefined_source IN ('Owner', 'User', 'AI Configurator')
+          AND 'skills' = ANY(permissions)
         """
     )
