@@ -375,151 +375,21 @@ curl -fsS https://your-domain.com/version
 
 ## Object Content Storage
 
-PostgreSQL owns content identity, authorization references, canonical SHA-256,
-size/type, lifecycle, holds, retention, audit, and bounded reconciliation facts.
-The private S3-compatible endpoint owns durable byte streams. Endpoint, bucket,
-key, and provider details are never exposed by ordinary APIs.
-
-The reference deployment enables object content. During a custom rollout,
-backend and worker may omit every `OBJECT_CONTENT_*` setting and start with the
-capability explicitly disabled, but only while PostgreSQL has no active
-object-content records. Blank or partial settings fail startup. Disabled
-readiness is healthy with code `disabled`; the public settings response exposes
-only `object_content_enabled=false`, never endpoint, bucket, or key. If active
-records exist, Eneo fails closed with `configuration_required` until the full
-configuration is restored. This is deployment state, not an administrator or
-tenant toggle. API and worker processes evaluate it independently, so give each
-process the same setting set. Before the first active row, any mismatch appears
-in their capability/readiness projections; after a row exists, a disabled
-process fails the safety guard.
-
-On the first enabled startup, Eneo creates one random PostgreSQL identity and
-grants one process a bounded bootstrap claim. Only that process may
-conditionally create the private, non-overwriting bucket marker; competing API
-or worker processes remain unready and later verify the confirmed pair.
-Startup, readiness, and every reconciliation run require the same pair before
-mutating content state. A reachable empty or foreign bucket reports
-`configuration_required`; Eneo never silently adopts or overwrites it.
-
-The claim expires after `OBJECT_CONTENT_BINDING_CLAIM_SECONDS` (default `30`),
-which must cover the configured readiness request window. Recovery verifies a
-marker written before a crash. The timeout controls liveness and retry timing;
-durable creation intent supplies the safety guarantee. If PostgreSQL says marker
-creation began but the configured store has no marker, Eneo fails closed rather
-than create one in a possibly different store; stop writers and reconciliation
-and recover the matching PostgreSQL/object backup pair. The marker is internal
-and must be preserved with the bucket backup—it is not an administrator or
-tenant setting. Invalid configuration diagnostics omit supplied values,
-including a rejected credential-bearing endpoint URL.
-
-The reference deployment starts an Eneo-built SeaweedFS 4.39 image. Eneo pins
-and reviews upstream source, builds minimal non-root amd64/arm64 images, blocks
-license and HIGH/CRITICAL vulnerability policy failures, publishes CycloneDX
-1.6/SPDX SBOMs, and signs provenance with GitHub OIDC. This is an Eneo-attested
-build—not supplier-signed upstream provenance.
-
-Self-hosted and European-operated endpoints, including external MinIO, use the
-same application contract; there is no provider-specific code or Amazon service
-dependency. To use one, configure its HTTPS endpoint, SigV4 signing scope,
-bucket, credentials, addressing style, and optional private CA, then run:
-
-```bash
-docker compose up -d --scale object-content=0
-```
-
-Leave `ENEO_SEAWEEDFS_IMAGE` pinned to the verified release digest because
-Compose validates the complete file; scale zero prevents that service from
-starting, and Eneo connects only to the configured external endpoint.
-
-The signing-scope value does not determine where the bundled volume lives. The
-bundled SeaweedFS service uses `local`; an external endpoint must use the value
-required by its operator. Eneo always connects to the explicit endpoint and
-never discovers or falls back to an Amazon service.
-
-### Use an external MinIO deployment
-
-Deploy and license MinIO under its current production guidance; Eneo does not
-ship or administer it. Create one private `eneo-object-content` bucket and one
-non-admin application identity limited to list and multipart-list on that
-bucket, plus get, put, delete, multipart-abort, and multipart-part-list on its
-objects. The part-list permission is exercised by Eneo's endpoint conformance
-suite. MinIO policy files use IAM-compatible `arn:aws:s3` resource strings as
-local syntax; this does not introduce an Amazon service dependency.
-
-Configure the protected deployment `.env` with the MinIO API endpoint and
-application credentials:
-
-```dotenv
-OBJECT_CONTENT_ENDPOINT_URL=https://minio.storage.example.eu:9000
-OBJECT_CONTENT_REGION=<the MinIO operator's signing scope>
-OBJECT_CONTENT_BUCKET=eneo-object-content
-OBJECT_CONTENT_ACCESS_KEY_ID=<application access key>
-OBJECT_CONTENT_SECRET_ACCESS_KEY=<application secret key>
-OBJECT_CONTENT_ALLOW_INSECURE_HTTP=false
-```
-
-Keep path-style addressing unless the MinIO operator provides wildcard DNS and
-TLS for virtual-host buckets. Mount a private CA into both backend and worker
-when required. Start Eneo with `--scale object-content=0`, verify `/api/readyz`,
-then validate single/multipart upload, ordered parts, full/range read, delete,
-and paired restore in staging against the exact MinIO build before production
-use. Eneo's object-content integration suite defines the expected behaviors.
-
-The repository's [object-content operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#external-minio-example)
-contains the exact least-privilege policy and commands. See MinIO's current
-[installation](https://docs.min.io/aistor/installation/),
-[TLS](https://docs.min.io/aistor/installation/linux/network-encryption/enable-tls-encryption/),
-and [S3 compatibility](https://docs.min.io/aistor/developers/s3-api-compatibility/)
-documentation for the storage service itself.
-
 <Callout type="warning">
-  **No database-only backup is complete.** Stop writers and back up PostgreSQL
-  and the object byte plane as one named recovery point. Preserve the stable
-  deployment UUID. Restore both halves while reconciliation is stopped, verify
-  readiness plus full/range reads, and only then reopen traffic.
+  PostgreSQL and object storage form one recovery unit. Back up and restore
+  them together.
 </Callout>
 
-The settings in `env_backend.env` control transport timeouts, bounded spool and
-multipart sizes, leases, retries, and reconciliation concurrency. They do not
-define business upload limits; administrators retain ownership of user-facing
-limits. Object keys and storage topology remain tenant-neutral.
+The reference Compose stack runs a private, Eneo-built SeaweedFS service.
+Deployments that need an existing storage platform or multi-node availability
+can use another compatible endpoint, including MinIO. Both paths use the same
+S3 contract and fail closed when configuration or the database/bucket binding
+does not match.
 
-PostgreSQL rejects direct deletion of active holds and retained content.
-Tombstone cleanup is also fail-closed: a row is purgeable only after its
-database-owned purge horizon is present and has elapsed. Do not treat a null
-horizon as an immediate-delete default. Account erasure may clear the user
-attribution on a hold, but it does not release that hold or advance content
-deletion.
-
-PostgreSQL also rejects a new `pending` content row that reaches commit without
-its first concrete File, InfoBlob, or Icon reference. Producers must create that
-reference in the same transaction as the content intent; later attachment of an
-ownerless pending row is never a recovery path.
-
-Object inventory pages must return complete, advancing cursors. Eneo rejects an
-invalid page without completing the scan or marking unseen rows missing. A
-complete scan reports missing retained bytes as an integrity failure without
-changing the retained lifecycle state. A truncated multipart page must include
-an advancing next-key and next-upload-ID marker pair.
-
-Full and single-range reads recompute the PostgreSQL-owned SHA-256 before
-emitting response bytes. Memory use is bounded by the configured spool
-threshold; larger objects use temporary disk, and each verified read is linear
-in full object size. Capacity planning must include the resulting concurrent
-temporary-disk demand.
-
-Capacity planning must cover PostgreSQL and the byte plane. Monitor bucket
-bytes/object count, durable free space, request latency/errors, pending and
-failed content, delete backlog, reconciliation lag, multipart uploads, and
-orphan-candidate age. Size the backend/worker temporary volume for concurrent
-in-flight spools: memory remains bounded at the configured threshold, while the
-remainder uses temporary disk until upload completes. Organizations needing
-multi-node storage availability should use an externally operated compatible
-endpoint with their standard redundancy and disaster-recovery controls.
-
-See the repository's [durable object-content operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md)
-for the exact S3 subset, TLS/custom-CA setup, attestation verification, paired
-backup/restore, skew recovery, capacity, upgrade, and rollback procedures.
+Follow [Object Content Storage](/guides/object-content-storage) for the image
+digest, credentials, MinIO policy, TLS, readiness, backup, and troubleshooting
+steps. See [Object Content Architecture](/docs/object-content-architecture) for
+the control-plane boundary, lifecycle, reconciliation, and image supply chain.
 
 ---
 
@@ -933,4 +803,5 @@ docker compose up -d --scale backend=3 --scale worker=2
 - [SharePoint Integration](/guides/sharepoint-integration) - Connect SharePoint and OneDrive
 - [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
 - [System Architecture](/docs/architecture) - Complete architecture overview
+- [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
