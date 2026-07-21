@@ -265,20 +265,21 @@
 
             {#if data.canPublish}
               <div class="flex flex-col items-start gap-2">
-                {#if data.skill.publication_state === "published"}
+                {#if data.skill.publication_state !== "published"}
+                  <Button disabled={formDirty} onclick={() => (publicationAction = "publish")}>
+                    <ShieldCheck aria-hidden="true" />
+                    {data.skill.publication_state === "update_pending"
+                      ? m.organization_skills_publish_update_action()
+                      : m.organization_skills_publish_action()}
+                  </Button>
+                {/if}
+                {#if data.skill.publication_state === "published" || data.skill.publication_state === "update_pending"}
                   <Button
                     variant="outline"
                     disabled={formDirty}
                     onclick={() => (publicationAction = "unpublish")}
                   >
                     {m.organization_skills_unpublish_action()}
-                  </Button>
-                {:else}
-                  <Button disabled={formDirty} onclick={() => (publicationAction = "publish")}>
-                    <ShieldCheck aria-hidden="true" />
-                    {data.skill.publication_state === "update_pending"
-                      ? m.organization_skills_publish_update_action()
-                      : m.organization_skills_publish_action()}
                   </Button>
                 {/if}
                 {#if formDirty}
