@@ -625,6 +625,7 @@
   "eneo_error_9035": "The assistant's model does not meet this space's security classification requirements.",
   "eneo_error_9036": "An external tool service is temporarily unavailable. Please try again later.",
   "eneo_error_9037": "An external tool service rejected the connection credentials. Contact your administrator to verify the server configuration.",
+  "eneo_error_9042": "Credential encryption is not configured. Ask a system administrator to set ENCRYPTION_KEY and restart the backend.",
   "exit_fullscreen": "Exit fullscreen",
   "export": "Export",
   "export_data": "Export Data",

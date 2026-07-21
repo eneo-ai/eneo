@@ -40,6 +40,12 @@ else
     echo -e "${GREEN}${BOLD}All .env files found or created from templates!${NC} Please check the files for any missing variables."
 fi
 
+if [ -f "/workspace/backend/.env" ] && ! grep -Eq '^[[:space:]]*ENCRYPTION_KEY=[^[:space:]]+' "/workspace/backend/.env"; then
+    echo -e "${YELLOW}${BOLD}ENCRYPTION_KEY is empty.${NC} Saving provider credentials in Admin > Models will fail until it is configured."
+    echo "Generate one with: cd backend && uv run python -m eneo.cli.generate_encryption_key"
+    echo "Add the generated value to backend/.env, then restart the backend."
+fi
+
 echo ""
 echo -e "${BLUE}${BOLD}To run the project, use the following commands${NC}"
 echo ""

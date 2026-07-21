@@ -39,9 +39,18 @@ When VS Code opens:
 
 ### Step 3: Configure Environment
 
-Now edit `backend/.env` and add your AI provider key:
+Generate an encryption key before saving provider credentials in the admin UI:
 
 ```bash
+cd backend
+uv run python -m eneo.cli.generate_encryption_key
+```
+
+Add the generated value and your AI provider key to `backend/.env`:
+
+```bash
+ENCRYPTION_KEY=<generated-44-character-key>
+
 # Example for OpenAI
 OPENAI_API_KEY=sk-proj-your-actual-key-here
 
