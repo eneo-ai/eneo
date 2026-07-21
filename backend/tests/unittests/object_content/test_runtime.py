@@ -26,6 +26,7 @@ from eneo.object_content.runtime import (
 from eneo.object_content.s3_object_store import (
     ObjectStoreUnavailableError,
     S3ObjectStore,
+    StoreBindingCreation,
 )
 
 if TYPE_CHECKING:
@@ -113,7 +114,19 @@ class _ReadinessStore:
     async def verify_binding(self, _binding_id: UUID) -> bool:
         return self.binding_created
 
-    async def create_binding(self, _binding_id: UUID) -> None:
+    async def prepare_binding_creation(
+        self,
+        binding_id: UUID,
+    ) -> StoreBindingCreation | None:
+        if self.binding_created:
+            return None
+        return StoreBindingCreation(
+            binding_id=binding_id,
+            body=b"test binding",
+            checksum_sha256="test checksum",
+        )
+
+    async def create_binding(self, _creation: StoreBindingCreation) -> None:
         self.binding_created = True
 
     async def close(self) -> None:

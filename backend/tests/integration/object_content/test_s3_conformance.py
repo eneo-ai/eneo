@@ -356,7 +356,7 @@ async def test_store_process_restart_preserves_bytes_and_readiness_recovers(
 
 
 @pytest.mark.asyncio
-async def test_real_store_binding_create_is_atomic_and_never_overwrites(
+async def test_real_store_binding_create_is_idempotent_for_the_same_identity(
     real_object_store: RealObjectStore,
 ) -> None:
     settings = real_object_store.settings
@@ -366,14 +366,48 @@ async def test_real_store_binding_create_is_atomic_and_never_overwrites(
     try:
         await _clear_deployment_namespace(real_object_store, client)
 
+        first = await real_object_store.store.prepare_binding_creation(binding_id)
+        second = await real_object_store.store.prepare_binding_creation(binding_id)
+        assert first is not None
+        assert second is not None
         await asyncio.gather(
-            real_object_store.store.create_binding(binding_id),
-            real_object_store.store.create_binding(binding_id),
+            real_object_store.store.create_binding(first),
+            real_object_store.store.create_binding(second),
         )
         assert await real_object_store.store.verify_binding(binding_id)
 
         with pytest.raises(ObjectStoreBindingError, match="another database"):
-            await real_object_store.store.create_binding(uuid4())
+            await real_object_store.store.prepare_binding_creation(uuid4())
+    finally:
+        client.delete_object(Bucket=settings.bucket, Key=marker_key)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_real_store_binding_rejects_foreign_identity_created_after_preflight(
+    real_object_store: RealObjectStore,
+) -> None:
+    settings = real_object_store.settings
+    marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
+    client = _raw_client(real_object_store)
+    first_binding = uuid4()
+    foreign_binding = uuid4()
+    try:
+        await _clear_deployment_namespace(real_object_store, client)
+        first_creation = await real_object_store.store.prepare_binding_creation(
+            first_binding
+        )
+        foreign_creation = await real_object_store.store.prepare_binding_creation(
+            foreign_binding
+        )
+        assert first_creation is not None
+        assert foreign_creation is not None
+
+        await real_object_store.store.create_binding(foreign_creation)
+
+        with pytest.raises(ObjectStoreBindingError, match="another database"):
+            await real_object_store.store.create_binding(first_creation)
+        assert await real_object_store.store.verify_binding(foreign_binding)
     finally:
         client.delete_object(Bucket=settings.bucket, Key=marker_key)
         client.close()

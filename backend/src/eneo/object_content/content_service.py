@@ -121,26 +121,9 @@ class ObjectContentService:
                     "Object-content marker creation has an ambiguous prior outcome"
                 )
             try:
-                async with self._database.session() as session, session.begin():
-                    await ObjectContentReconciliationRepository(
-                        session
-                    ).mark_store_binding_creation_started(
-                        deployment_id=binding.deployment_id,
-                        binding_id=binding.binding_id,
-                        claim_id=claim_id,
-                    )
-            except ObjectContentConfigurationError:
-                raise
-            except ObjectContentBusyError as error:
-                raise ObjectContentUnavailableError(
-                    "Object-content storage binding claim changed"
-                ) from error
-            except (OSError, SQLAlchemyError) as error:
-                raise ObjectContentUnavailableError(
-                    "Unable to claim object-content marker creation"
-                ) from error
-            try:
-                await self._store.create_binding(binding.binding_id)
+                creation = await self._store.prepare_binding_creation(
+                    binding.binding_id
+                )
             except ObjectStoreBindingError as error:
                 raise ObjectContentConfigurationError(
                     "Object-content storage does not match PostgreSQL"
@@ -149,6 +132,36 @@ class ObjectContentService:
                 raise ObjectContentUnavailableError(
                     "Durable object content is temporarily unavailable"
                 ) from error
+            if creation is not None:
+                try:
+                    async with self._database.session() as session, session.begin():
+                        await ObjectContentReconciliationRepository(
+                            session
+                        ).mark_store_binding_creation_started(
+                            deployment_id=binding.deployment_id,
+                            binding_id=binding.binding_id,
+                            claim_id=claim_id,
+                        )
+                except ObjectContentConfigurationError:
+                    raise
+                except ObjectContentBusyError as error:
+                    raise ObjectContentUnavailableError(
+                        "Object-content storage binding claim changed"
+                    ) from error
+                except (OSError, SQLAlchemyError) as error:
+                    raise ObjectContentUnavailableError(
+                        "Unable to claim object-content marker creation"
+                    ) from error
+                try:
+                    await self._store.create_binding(creation)
+                except ObjectStoreBindingError as error:
+                    raise ObjectContentConfigurationError(
+                        "Object-content storage does not match PostgreSQL"
+                    ) from error
+                except ObjectStoreUnavailableError as error:
+                    raise ObjectContentUnavailableError(
+                        "Durable object content is temporarily unavailable"
+                    ) from error
 
         try:
             async with self._database.session() as session, session.begin():

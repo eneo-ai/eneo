@@ -51,6 +51,7 @@ audit_source() {
     source_directory="$work_directory/source"
     trap 'rm -rf "$work_directory"' RETURN
     mkdir -p "$source_directory" "$output_directory"
+    output_directory="$(cd "$output_directory" && pwd -P)"
 
     curl --fail --location --silent --show-error \
         "https://github.com/seaweedfs/seaweedfs/archive/${SOURCE_COMMIT}.tar.gz" \

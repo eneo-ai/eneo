@@ -62,6 +62,13 @@ class ObjectStoreBindingError(ObjectStoreError):
 
 
 @dataclass(frozen=True, slots=True)
+class StoreBindingCreation:
+    binding_id: UUID
+    body: bytes
+    checksum_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectHead:
     size_bytes: int
     media_type: str
@@ -288,23 +295,34 @@ class S3ObjectStore:
             )
         return True
 
-    async def create_binding(self, binding_id: UUID) -> None:
-        """Create this database's marker without replacing any existing marker."""
+    async def prepare_binding_creation(
+        self,
+        binding_id: UUID,
+    ) -> StoreBindingCreation | None:
+        """Finish read-only pairing checks before creation becomes ambiguous."""
         if await self.verify_binding(binding_id):
-            return
+            return None
 
         await self._require_empty_content_namespace()
         expected = _BINDING_PREAMBLE + binding_id.bytes
         checksum = base64.b64encode(sha256(expected).digest()).decode()
+        return StoreBindingCreation(
+            binding_id=binding_id,
+            body=expected,
+            checksum_sha256=checksum,
+        )
+
+    async def create_binding(self, creation: StoreBindingCreation) -> None:
+        """Create a preflighted marker without replacing an existing marker."""
         try:
             await asyncio.to_thread(
                 self._readiness_client.put_object,
                 Bucket=self._settings.bucket,
                 Key=self._binding_key,
-                Body=expected,
-                ContentLength=len(expected),
+                Body=creation.body,
+                ContentLength=len(creation.body),
                 ContentType=_BINDING_MEDIA_TYPE,
-                ChecksumSHA256=checksum,
+                ChecksumSHA256=creation.checksum_sha256,
                 IfNoneMatch="*",
             )
         except ClientError as error:
@@ -317,7 +335,7 @@ class S3ObjectStore:
                 "Object content storage binding failed"
             ) from error
 
-        if not await self.verify_binding(binding_id):
+        if not await self.verify_binding(creation.binding_id):
             raise ObjectStoreBindingError(
                 "Object content storage binding marker was not persisted"
             )

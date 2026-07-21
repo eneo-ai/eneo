@@ -645,10 +645,12 @@ async def test_binding_create_is_atomic_and_idempotent_across_replicas() -> None
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
     binding_id = uuid4()
 
-    await asyncio.gather(
-        store.create_binding(binding_id),
-        store.create_binding(binding_id),
-    )
+    first = await store.prepare_binding_creation(binding_id)
+    second = await store.prepare_binding_creation(binding_id)
+    assert first is not None
+    assert second is not None
+
+    await asyncio.gather(store.create_binding(first), store.create_binding(second))
     assert await store.verify_binding(binding_id)
 
     assert client.put_calls == 2
@@ -660,10 +662,12 @@ async def test_binding_never_overwrites_a_foreign_database_identity() -> None:
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
     first_binding = uuid4()
 
-    await store.create_binding(first_binding)
+    creation = await store.prepare_binding_creation(first_binding)
+    assert creation is not None
+    await store.create_binding(creation)
 
     with pytest.raises(ObjectStoreBindingError, match="another database"):
-        await store.create_binding(uuid4())
+        await store.prepare_binding_creation(uuid4())
 
 
 @pytest.mark.asyncio
@@ -682,7 +686,7 @@ async def test_unpaired_nonempty_namespace_is_never_adopted() -> None:
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))
 
     with pytest.raises(ObjectStoreBindingError, match="already contains"):
-        await store.create_binding(uuid4())
+        await store.prepare_binding_creation(uuid4())
 
     assert client.put_calls == 0
 

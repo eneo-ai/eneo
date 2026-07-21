@@ -2,7 +2,7 @@ import asyncio
 import base64
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -34,6 +34,7 @@ from eneo.object_content.content import (
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
 )
+from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
@@ -41,7 +42,11 @@ from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
 )
-from eneo.object_content.s3_object_store import S3ObjectStore, new_object_key
+from eneo.object_content.s3_object_store import (
+    ObjectStoreUnavailableError,
+    S3ObjectStore,
+    new_object_key,
+)
 from tests.integration.object_content.conftest import (
     POSTGRES_13_IMAGE,
     RealObjectStore,
@@ -88,6 +93,57 @@ async def _clear_deployment_namespace(
         Bucket=real_store.settings.bucket,
         Key=f"v1/.eneo-bindings/{real_store.settings.deployment_id.hex}",
     )
+
+
+@pytest.mark.asyncio
+async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = real_object_store.settings
+    marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
+    client = _raw_client(real_object_store)
+    store = S3ObjectStore(settings)
+    service = ObjectContentService(settings, store, object_content_database)
+    original_preflight = store._require_empty_content_namespace
+    preflight_calls = 0
+
+    async def fail_first_preflight() -> None:
+        nonlocal preflight_calls
+        preflight_calls += 1
+        if preflight_calls == 1:
+            raise ObjectStoreUnavailableError("injected namespace read outage")
+        await original_preflight()
+
+    monkeypatch.setattr(
+        store,
+        "_require_empty_content_namespace",
+        fail_first_preflight,
+    )
+
+    try:
+        await _clear_deployment_namespace(real_object_store, client)
+
+        with pytest.raises(ObjectContentUnavailableError):
+            await service.check_ready()
+
+        async with object_content_database.session() as session, session.begin():
+            state = await session.get(ObjectContentReconciliationState, 1)
+            assert state is not None
+            assert state.store_binding_create_started_at is None
+            state.store_binding_claim_until = datetime.now(UTC) - timedelta(seconds=1)
+
+        await service.check_ready()
+
+        async with object_content_database.session() as session, session.begin():
+            state = await session.get(ObjectContentReconciliationState, 1)
+            assert state is not None
+            assert state.store_binding_confirmed_at is not None
+    finally:
+        await store.close()
+        client.delete_object(Bucket=settings.bucket, Key=marker_key)
+        client.close()
 
 
 @pytest.mark.asyncio
@@ -461,7 +517,11 @@ async def test_binding_establishment_recovers_both_crash_windows(
                     binding_id=binding.binding_id,
                     claim_id=claim_id,
                 )
-            await real_object_store.store.create_binding(binding.binding_id)
+            creation = await real_object_store.store.prepare_binding_creation(
+                binding.binding_id
+            )
+            assert creation is not None
+            await real_object_store.store.create_binding(creation)
 
         async with object_content_database.session() as session, session.begin():
             await session.execute(
