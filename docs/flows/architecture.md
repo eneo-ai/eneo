@@ -74,8 +74,9 @@ Use this journey for public API, SDK, and frontend changes:
    from `FlowAssembler.to_runtime_public`. See
    `backend/src/eneo/flows/api/flow_authoring_router.py:445` and
    `backend/src/eneo/flows/api/flow_assembler.py:85`.
-   This consumer projection currently lives in the authoring router file, so do
-   not assume runtime-consumer routes all live under `flow_run_execution_router.py`.
+   This consumer projection currently lives in the authoring router file. Run
+   routes are feature-owned by the lifecycle, review, rerun, steps, and evidence
+   routers registered through `flow_run_router.py`.
 2. Load `GET /api/v1/flows/{id}/run-contract/`. This is the canonical runtime
    input contract. The endpoint describes form fields, runtime input steps,
    upload limits, review steps, final output, and template readiness. See
@@ -91,14 +92,14 @@ Use this journey for public API, SDK, and frontend changes:
    `backend/src/eneo/flows/application/flow_run_service.py:227`.
 5. Poll run status and step output. The router documents polling and terminal
    status capability semantics. See
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:89` and
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:414`.
+   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:80` and
+   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:207`.
 6. If a run pauses at `awaiting_review`, use the active checkpoint endpoint, then
    edit, approve, reject, or resume through the checkpoint paths. See
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:198`,
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:704`,
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:800`, and
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:947`.
+   `backend/src/eneo/flows/api/flow_run_review_router.py:73`,
+   `backend/src/eneo/flows/api/flow_run_review_router.py:401`,
+   `backend/src/eneo/flows/api/flow_run_review_router.py:471`, and
+   `backend/src/eneo/flows/api/flow_run_review_router.py:709`.
 7. Download artifacts or evidence through the run artifact/evidence endpoints.
    Artifact content may return gone after retention purges file content. See
    `backend/src/eneo/flows/api/flow_run_evidence_router.py:67` and
@@ -196,7 +197,8 @@ The run lifecycle is database-first:
    `backend/src/eneo/flows/application/flow_run_service.py:374`.
 2. The router commits before dispatching the worker task, so Celery starts from
    committed run state. See
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:458`.
+   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:275` and
+   `backend/src/eneo/flows/api/flow_api_common.py:47`.
 3. The Celery task resolves the principal from `flow_runs.principal_type`,
    `principal_user_id`, or `principal_api_key_id`, then constructs the executor.
    See `backend/src/eneo/flows/runtime/tasks.py:81`.
@@ -423,7 +425,7 @@ Review and rerun are separate runtime features:
    `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py:28`.
 2. Review checkpoint API docs tell clients to render from immutable checkpoint
    step snapshots rather than mutable draft definitions. See
-   `backend/src/eneo/flows/api/flow_run_execution_router.py:198`.
+   `backend/src/eneo/flows/api/flow_run_review_router.py:73`.
 3. `FlowRunRerunService` owns step rerun acceptance, invalidation graph logic,
    input validation, request fingerprinting, and idempotent replay. See
    `backend/src/eneo/flows/application/flow_run_rerun_service.py:52` and
@@ -453,19 +455,21 @@ Backend contract owners:
 | Published runtime projection | `FlowAssembler.to_runtime_public` and `flow_authoring_router.py`    | `frontend/packages/eneo-js/src/endpoints/flows.js` published/runtime helpers     |
 | Run contract                 | `FlowRunContractService` and `flow_upload_router.py`                | `frontend/apps/web/src/lib/features/flows/flowRunContract.ts`                    |
 | Runtime file uploads         | `flow_upload_router.py` and file upload service                     | `FlowRunDialog.svelte` side effects plus `FlowRunFileInputState.svelte.ts` state |
-| Run lifecycle and polling    | `flow_run_execution_router.py`, `FlowRunService`, `FlowRunExecutor` | Flow run progress/history components and generated SDK types                     |
-| Review checkpoints           | `FlowRunReviewCheckpointService` and review checkpoint routes       | `FlowRunReviewCheckpointPanel.svelte` and `flowRuntimeErrorMapping.ts`           |
+| Run lifecycle and polling    | `flow_run_lifecycle_router.py`, `FlowRunService`, `FlowRunExecutor` | Flow run progress/history components and generated SDK types                     |
+| Review checkpoints           | `flow_run_review_router.py` and `FlowRunReviewCheckpointService`    | `FlowRunReviewCheckpointPanel.svelte` and `flowRuntimeErrorMapping.ts`           |
+| Step rerun                   | `flow_run_rerun_router.py` and `FlowRunRerunService`                | Generated SDK rerun request and response types                                   |
 | Evidence/artifact export     | `FlowRunEvidenceService` and evidence router                        | `FlowRunEvidence.svelte`, evidence actions, and SDK evidence/artifact helpers    |
 
 API rules:
 
 1. Public errors go through `GeneralError` response metadata and Flow API error
-   helpers. See `backend/src/eneo/flows/api/flow_api_common.py:49` and
-   `backend/src/eneo/flows/api/flow_api_common.py:90`.
+   helpers. Shared run forbidden-response metadata lives in the same owner. See
+   `backend/src/eneo/flows/api/flow_api_common.py:24` and
+   `backend/src/eneo/flows/api/flow_api_common.py:57`.
 2. Scope and published-flow requirements belong in `enforce_flow_scope`,
    `resolve_flow_access_context`, and `flow_access_policy.py`. See
-   `backend/src/eneo/flows/api/flow_api_common.py:128` and
-   `backend/src/eneo/flows/api/flow_api_common.py:191`.
+   `backend/src/eneo/flows/api/flow_access_context.py` and
+   `backend/src/eneo/flows/flow_access_policy.py`.
 3. Frontend runtime input payload construction belongs in `flowRunContract.ts`,
    not in Svelte components. Components should consume the generated contract
    and call these helpers. See

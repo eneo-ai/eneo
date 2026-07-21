@@ -411,8 +411,20 @@ REVIEWER_ROUTES: tuple[ReviewerRoute, ...] = (
         proof="Prove OpenAPI shape, FlowApiErrorCode mapping, and docs parity.",
         source_refs=(
             _source(
-                "Run execution router",
-                "backend/src/eneo/flows/api/flow_run_execution_router.py",
+                "Run router aggregate",
+                "backend/src/eneo/flows/api/flow_run_router.py",
+            ),
+            _source(
+                "Run lifecycle router",
+                "backend/src/eneo/flows/api/flow_run_lifecycle_router.py",
+            ),
+            _source(
+                "Run review router",
+                "backend/src/eneo/flows/api/flow_run_review_router.py",
+            ),
+            _source(
+                "Run rerun router",
+                "backend/src/eneo/flows/api/flow_run_rerun_router.py",
             ),
             _source(
                 "API design standard",

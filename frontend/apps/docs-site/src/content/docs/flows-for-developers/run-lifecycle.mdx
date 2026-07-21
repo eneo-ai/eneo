@@ -209,7 +209,7 @@ sequenceDiagram
 
 </div>
 
-- `backend/src/eneo/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.
+- `backend/src/eneo/flows/api/flow_run_lifecycle_router.py` parses the create request and schedules dispatch after commit.
 - `backend/src/eneo/flows/application/flow_run_service.py` creates the run and binds validated runtime inputs.
 - `backend/src/eneo/flows/application/flow_dispatch.py` owns due-attempt claim, broker send, and durable acceptance or failure recording. Broker delivery remains at-least-once: the bounded recovery clock stays armed until the repository's status-and-revision compare-and-set claims the run, so duplicate deliveries are harmless.
 - `backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.
@@ -311,7 +311,10 @@ sequenceDiagram
 | Source                                                                     | Guarded lifecycle role                                                                                                                                     |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `backend/src/eneo/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states.                             |
-| `backend/src/eneo/flows/api/flow_run_execution_router.py`                  | Run API adapter: HTTP request parsing, authorization, response assembly, and dispatch scheduling.                                                          |
+| `backend/src/eneo/flows/api/flow_run_router.py`                            | Run router aggregate: feature-router registration for lifecycle, review, rerun, steps, and evidence.                                                       |
+| `backend/src/eneo/flows/api/flow_run_lifecycle_router.py`                  | Run lifecycle API adapter: status capabilities, create, list, get, cancel, and redispatch HTTP adaptation.                                                 |
+| `backend/src/eneo/flows/api/flow_run_review_router.py`                     | Run review API adapter: active, edit, approve, reject, and resume review checkpoint HTTP adaptation.                                                       |
+| `backend/src/eneo/flows/api/flow_run_rerun_router.py`                      | Run rerun API adapter: step-rerun HTTP adaptation and dispatch scheduling.                                                                                 |
 | `backend/src/eneo/flows/application/flow_run_service.py`                   | Run service: run creation, input normalization, and relational runtime-file binding.                                                                       |
 | `backend/src/eneo/flows/application/flow_dispatch.py`                      | Dispatch coordinator: due-attempt claim orchestration, broker send, and durable acceptance or failure recording.                                           |
 | `backend/src/eneo/flows/application/flow_run_recovery_policy.py`           | Dispatch recovery policy: bounded dispatch attempts, retry delays, and stale-running thresholds.                                                           |

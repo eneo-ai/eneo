@@ -17,7 +17,11 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
-from eneo.flows.api import flow_run_execution_router
+from eneo.flows.api import (
+    flow_run_lifecycle_router,
+    flow_run_rerun_router,
+    flow_run_review_router,
+)
 from eneo.flows.domain.flow import FlowStepResult
 from eneo.flows.enums import FlowRunReviewCheckpointState, FlowStepResultStatus
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -766,7 +770,7 @@ async def test_service_key_evidence_permission_matrix(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -874,7 +878,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
         dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _record_dispatch,
     )
@@ -1129,7 +1133,7 @@ async def test_flow_run_create_concurrency_limit_preserves_creation_side_effects
         dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _record_dispatch,
     )
@@ -1216,7 +1220,7 @@ async def test_flow_run_public_projects_text_artifact_and_outbound_results(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -1326,7 +1330,7 @@ async def test_flow_run_public_projects_file_backed_text_overflow(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -1418,7 +1422,7 @@ async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -1561,7 +1565,7 @@ async def test_flow_run_poll_sanitizes_corrupt_persisted_error_json(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -1669,7 +1673,7 @@ async def test_flow_run_create_rejects_runtime_transcription_cache_key(
         dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _record_dispatch,
     )
@@ -1710,7 +1714,7 @@ async def test_flow_run_create_rejects_unknown_fields_before_dispatch(
         dispatch_requests.append((run_id, tenant_id, expected_revision))
 
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _record_dispatch,
     )
@@ -1785,7 +1789,7 @@ async def test_flow_run_create_rejects_missing_required_runtime_step_inputs(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -1997,7 +2001,7 @@ async def test_flow_runtime_file_delete_rejects_attached_run_input(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2059,7 +2063,12 @@ async def test_flow_runtime_file_delete_rejects_attached_rerun_input(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    monkeypatch.setattr(
+        flow_run_rerun_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2113,7 +2122,7 @@ async def test_flow_runtime_file_delete_removes_unselected_post_run_upload(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2201,7 +2210,7 @@ async def test_flow_runtime_file_delete_hides_other_principal_attached_file(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2273,7 +2282,7 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2340,7 +2349,12 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    monkeypatch.setattr(
+        flow_run_review_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )
@@ -2510,7 +2524,12 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    monkeypatch.setattr(
+        flow_run_review_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch_flow_run_recoverably_after_commit,
     )

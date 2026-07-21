@@ -100,10 +100,13 @@ def test_flow_api_router_modules_export_only_router() -> None:
         "eneo.flows.api.flow_authoring_router",
         "eneo.flows.api.flow_definition_router",
         "eneo.flows.api.flow_router",
-        "eneo.flows.api.flow_run_execution_router",
+        "eneo.flows.api.flow_run_lifecycle_router",
+        "eneo.flows.api.flow_run_rerun_router",
+        "eneo.flows.api.flow_run_review_router",
         "eneo.flows.api.flow_upload_router",
     }
     assert expected_sentinels <= set(router_module_names)
+    assert "eneo.flows.api.flow_run_execution_router" not in router_module_names
 
     invalid_exports = {}
     for module_name in router_module_names:
@@ -125,6 +128,21 @@ def test_flow_definition_router_exports_only_aggregate_router() -> None:
         and inspect.iscoroutinefunction(getattr(module, name))
     ]
 
+    assert public_coroutine_names == []
+
+
+def test_flow_run_router_exports_only_aggregate_router() -> None:
+    module = importlib.import_module("eneo.flows.api.flow_run_router")
+
+    public_coroutine_names = [
+        name
+        for name in dir(module)
+        if not name.startswith("_")
+        and name != "router"
+        and inspect.iscoroutinefunction(getattr(module, name))
+    ]
+
+    assert module.__all__ == ["router"]
     assert public_coroutine_names == []
 
 

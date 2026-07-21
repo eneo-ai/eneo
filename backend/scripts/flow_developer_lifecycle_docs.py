@@ -64,9 +64,24 @@ SOURCE_MODULES: tuple[SourceModule, ...] = (
         owns="run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states",
     ),
     SourceModule(
-        label="Run API adapter",
-        path="backend/src/eneo/flows/api/flow_run_execution_router.py",
-        owns="HTTP request parsing, authorization, response assembly, and dispatch scheduling",
+        label="Run router aggregate",
+        path="backend/src/eneo/flows/api/flow_run_router.py",
+        owns="feature-router registration for lifecycle, review, rerun, steps, and evidence",
+    ),
+    SourceModule(
+        label="Run lifecycle API adapter",
+        path="backend/src/eneo/flows/api/flow_run_lifecycle_router.py",
+        owns="status capabilities, create, list, get, cancel, and redispatch HTTP adaptation",
+    ),
+    SourceModule(
+        label="Run review API adapter",
+        path="backend/src/eneo/flows/api/flow_run_review_router.py",
+        owns="active, edit, approve, reject, and resume review checkpoint HTTP adaptation",
+    ),
+    SourceModule(
+        label="Run rerun API adapter",
+        path="backend/src/eneo/flows/api/flow_run_rerun_router.py",
+        owns="step-rerun HTTP adaptation and dispatch scheduling",
     ),
     SourceModule(
         label="Run service",
@@ -554,7 +569,7 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
                 "  Executor->>Terminalizer: terminalize completed, failed, or cancelled",
             ),
             owner_notes=(
-                "`backend/src/eneo/flows/api/flow_run_execution_router.py` parses the request and schedules dispatch after commit.",
+                "`backend/src/eneo/flows/api/flow_run_lifecycle_router.py` parses the create request and schedules dispatch after commit.",
                 "`backend/src/eneo/flows/application/flow_run_service.py` creates the run and binds validated runtime inputs.",
                 "`backend/src/eneo/flows/application/flow_dispatch.py` owns due-attempt claim, broker send, and durable acceptance or failure recording. Broker delivery remains at-least-once: the bounded recovery clock stays armed until the repository's status-and-revision compare-and-set claims the run, so duplicate deliveries are harmless.",
                 "`backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.",

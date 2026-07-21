@@ -26,7 +26,7 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows import FlowRepository, FlowVersionRepository
-from eneo.flows.api import flow_run_execution_router
+from eneo.flows.api import flow_run_lifecycle_router
 from eneo.flows.application.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
 )
@@ -951,7 +951,7 @@ async def test_evidence_response_accepts_redacted_service_key_credential_id(
         _ = (run_id, tenant_id, expected_revision)
 
     monkeypatch.setattr(
-        flow_run_execution_router,
+        flow_run_lifecycle_router,
         "dispatch_flow_run_recoverably_after_commit",
         _noop_dispatch,
     )

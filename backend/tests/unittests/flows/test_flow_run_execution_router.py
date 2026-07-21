@@ -18,7 +18,8 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
-from eneo.flows.api import flow_run_execution_router as router_module
+from eneo.flows.api import flow_run_lifecycle_router as lifecycle_router_module
+from eneo.flows.api import flow_run_review_router as review_router_module
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowFinalOutputContractPublic,
@@ -27,15 +28,15 @@ from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointResumeRequest,
     FlowRunStepRerunRequest,
 )
-from eneo.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_lifecycle_router import (
     cancel_flow_run,
     create_flow_run,
     get_flow_run,
     list_flow_runs,
     redispatch_flow_run,
-    rerun_flow_run_step,
-    resume_flow_run_review_checkpoint,
 )
+from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
+from eneo.flows.api.flow_run_review_router import resume_flow_run_review_checkpoint
 from eneo.flows.api.flow_run_steps_router import (
     get_flow_graph,
     list_flow_run_steps,
@@ -409,7 +410,7 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
     container.user.return_value = user
     _enable_space_access(container)
     monkeypatch.setattr(
-        router_module,
+        review_router_module,
         "_present_review_checkpoint",
         AsyncMock(return_value=checkpoint_public),
     )
@@ -916,7 +917,7 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
 
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
-        router_module,
+        lifecycle_router_module,
         "dispatch_flow_run_recoverably_after_commit",
         dispatch,
     )
@@ -988,7 +989,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
 
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
-        router_module,
+        lifecycle_router_module,
         "dispatch_flow_run_recoverably_after_commit",
         dispatch,
     )
@@ -1038,7 +1039,7 @@ async def test_redispatch_flow_run_translates_dispatch_error(monkeypatch):
 
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
-        router_module,
+        lifecycle_router_module,
         "dispatch_flow_run_recoverably_after_commit",
         dispatch,
     )

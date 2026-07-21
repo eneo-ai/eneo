@@ -11,7 +11,7 @@ import pytest
 
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
-from eneo.flows.api import flow_run_execution_router as router_module
+from eneo.flows.api import flow_run_review_router as router_module
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointApproveRequest,
@@ -19,7 +19,7 @@ from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
 )
-from eneo.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_review_router import (
     approve_flow_run_review_checkpoint,
     edit_flow_run_review_checkpoint,
     reject_flow_run_review_checkpoint,

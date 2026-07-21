@@ -49,14 +49,14 @@ from eneo.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from eneo.flows.api.flow_run_evidence_router import get_flow_run_evidence
-from eneo.flows.api.flow_run_execution_router import (
+from eneo.flows.api.flow_run_lifecycle_router import (
     cancel_flow_run,
     create_flow_run,
     get_flow_run,
     list_flow_runs,
     redispatch_flow_run,
-    rerun_flow_run_step,
 )
+from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
 from eneo.flows.application.flow_run_service import (
     FlowRunPageWithResultFilesAndTokenUsage,
