@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Annotated, Literal, TypeAlias, cast
 from uuid import UUID
@@ -10,6 +11,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
     ValidationError,
     WithJsonSchema,
     computed_field,
@@ -247,6 +249,25 @@ class FlowRunError(BaseModel):
         description="Small, API-safe context for diagnostics and UI guidance.",
     )
 
+    @model_validator(mode="wrap")
+    @classmethod
+    def _validate_public_retryability(
+        cls,
+        value: object,
+        handler: ModelWrapValidatorHandler[FlowRunError],
+    ) -> FlowRunError:
+        if not isinstance(value, Mapping) or "retryable" not in value:
+            return handler(value)
+
+        public_fields = cast(Mapping[object, object], value)
+        retryable = public_fields["retryable"]
+        fields = dict(public_fields)
+        del fields["retryable"]
+        error = handler(fields)
+        if type(retryable) is bool and retryable is error.retryable:
+            return error
+        return handler(value)
+
     @computed_field(
         description=(
             "Whether a consumer may safely submit a new logical run after "
@@ -292,6 +313,11 @@ def parse_flow_run_error(value: object) -> FlowRunError | None:
         return None
     if isinstance(value, FlowRunError):
         return value
+    if isinstance(value, Mapping) and "retryable" in value:
+        return FlowRunError(
+            code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
+            message=_INVALID_PERSISTED_ERROR_MESSAGE,
+        )
     try:
         return FlowRunError.model_validate(value)
     except ValidationError:

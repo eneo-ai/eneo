@@ -32,16 +32,19 @@ from eneo.flows.api.flow_run_steps_router import (
     list_flow_run_steps,
 )
 from eneo.flows.application.flow_run_service import FlowRunStepResultWithFiles
-from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
+    FlowRunLifecycleSource,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
 )
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_redaction import redact_payload
 from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
@@ -240,6 +243,98 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         container.audit_service.return_value.log_async.await_args.kwargs["action"]
         == ActionType.FLOW_EVIDENCE_VIEWED
     )
+
+
+@pytest.mark.asyncio
+async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    secret = "worker-secret-token"
+    run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
+        update={
+            "status": FlowRunStatus.FAILED,
+            "error": FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_FAILURE,
+                code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                message=f"Authorization: Bearer {secret}",
+            ),
+        }
+    )
+    redacted_run = cast(dict[str, object], redact_payload(run.model_dump(mode="json")))
+    evidence = {
+        "run": redacted_run,
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "result_files": [],
+        "rerun_operations": [],
+        "rerun_invalidated_steps": [],
+        "review_checkpoints": [],
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v2",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "definition_snapshot": {"steps": []},
+            "steps": [],
+            "security": {
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        run=redacted_run,
+        final_output=None,
+        result_files=evidence["result_files"],
+        to_dict=lambda: evidence,
+    )
+    container.flow_run_evidence_service.return_value = run_service
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await get_flow_run_evidence(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.run.status is FlowRunStatus.FAILED
+    assert response.run.error is not None
+    assert response.run.error.code is FlowApiErrorCode.RUN_WORKER_STALLED
+    assert response.run.error.retryable is False
+    assert response.run.error.message == "Authorization: Bearer [REDACTED]"
+    assert secret not in response.run.error.message
 
 
 @pytest.mark.asyncio

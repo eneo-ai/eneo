@@ -80,6 +80,29 @@ def test_flow_run_error_exposes_retryability_without_changing_persisted_dump() -
     assert "retryable" not in (dump_flow_run_error(error) or {})
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        FlowApiErrorCode.RUN_WORKER_STALLED,
+    ],
+)
+def test_flow_run_error_accepts_only_matching_public_retryability(
+    code: FlowApiErrorCode,
+) -> None:
+    error = FlowRunError(code=code, message="Terminal run error.")
+    payload = error.model_dump(mode="json")
+
+    assert FlowRunError.model_validate(payload) == error
+
+    for retryable in (not error.retryable, 0, 1, "true", "false"):
+        with pytest.raises(ValidationError):
+            FlowRunError.model_validate({**payload, "retryable": retryable})
+
+    with pytest.raises(ValidationError):
+        FlowRunError.model_validate({**payload, "secret_token": "must not leak"})
+
+
 def test_dispatch_and_terminal_retryability_have_distinct_public_semantics() -> None:
     dispatch_error = FlowRunDispatchError.from_kind(
         FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
@@ -198,6 +221,24 @@ def _assert_corrupt_run_error(error: FlowRunError | None) -> None:
             },
             "injected a derived field",
         ),
+        (
+            {
+                "schema_version": 1,
+                "code": FlowApiErrorCode.RUN_WORKER_STALLED.value,
+                "message": "Stored payload included matching false retryability.",
+                "retryable": False,
+            },
+            "matching false retryability",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": FlowApiErrorCode.RUN_DISPATCH_FAILED.value,
+                "message": "Stored payload included matching true retryability.",
+                "retryable": True,
+            },
+            "matching true retryability",
+        ),
     ],
 )
 def test_parse_flow_run_error_sanitizes_corrupt_persisted_values(
@@ -280,19 +321,25 @@ def test_flow_run_read_model_sanitizes_corrupt_persisted_error_json() -> None:
 
 def test_flow_run_error_requires_cataloged_code() -> None:
     with pytest.raises(ValidationError):
-        FlowRunError(
-            code="Invalid Code With Spaces",
-            message="Invalid error code.",
-            source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        FlowRunError.model_validate(
+            {
+                "code": "Invalid Code With Spaces",
+                "message": "Invalid error code.",
+                "source": FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                "retryable": False,
+            }
         )
 
 
 def test_flow_run_error_requires_terminal_code() -> None:
     with pytest.raises(ValidationError):
-        FlowRunError(
-            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
-            message="Request-time code cannot be used as a terminal run error.",
-            source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        FlowRunError.model_validate(
+            {
+                "code": FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+                "message": "Request-time code cannot be used as a terminal run error.",
+                "source": FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                "retryable": False,
+            }
         )
 
 
