@@ -20,13 +20,13 @@ from eneo.database.tables.flow_tables import (
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_BACKLOG_GRACE_SECONDS,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_stale_running_reconcile_after_seconds,
     flow_stale_running_unhealthy_after_seconds,
-)
-from eneo.flows.application.flow_webhook_delivery_policy import (
-    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
 )
 from eneo.flows.enums import (
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,

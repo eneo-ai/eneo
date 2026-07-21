@@ -23,9 +23,6 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
-    start_flow_dispatch_epoch,
-)
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -38,6 +35,9 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
+    start_flow_dispatch_epoch,
 )
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,

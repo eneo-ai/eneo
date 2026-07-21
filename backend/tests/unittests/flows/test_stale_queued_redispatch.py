@@ -16,12 +16,12 @@ from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchInvalidRequest,
     dispatch_flow_run_recoverably_after_commit,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
+from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     flow_dispatch_retry_delay_seconds,
     start_flow_dispatch_epoch,
 )
-from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.flow_run_dispatch_request import (
     FlowRunUserDispatchRequest,
     build_flow_run_dispatch_request,

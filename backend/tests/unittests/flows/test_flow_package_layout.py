@@ -115,6 +115,11 @@ def test_runtime_contracts_are_owned_by_domain_without_a_compatibility_module() 
     assert not (FLOW_ROOT / "runtime" / "models.py").exists()
 
 
+def test_recovery_policy_is_owned_by_domain_without_a_compatibility_module() -> None:
+    assert (FLOW_ROOT / "domain" / "flow_run_recovery_policy.py").is_file()
+    assert not (FLOW_ROOT / "application" / "flow_run_recovery_policy.py").exists()
+
+
 def test_run_contract_schemas_are_owned_by_api_without_a_compatibility_module() -> None:
     assert (FLOW_ROOT / "api" / "flow_run_contract_models.py").is_file()
     assert not (FLOW_ROOT / "flow_run_contract_models.py").exists()

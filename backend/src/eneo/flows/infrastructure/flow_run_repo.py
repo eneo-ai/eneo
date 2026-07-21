@@ -22,12 +22,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileType
-from eneo.flows.application.flow_run_recovery_policy import (
-    FLOW_DISPATCH_MAX_ATTEMPTS,
-    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
-    flow_dispatch_retry_delay_seconds,
-    start_flow_dispatch_epoch,
-)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -41,6 +35,12 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    flow_dispatch_retry_delay_seconds,
+    start_flow_dispatch_epoch,
 )
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,

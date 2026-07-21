@@ -28,15 +28,34 @@ assert arq_worker.WorkerSettings.functions
     )
 
 
-def test_flow_recovery_policy_import_keeps_runtime_principal_lazy() -> None:
+def test_user_and_config_import_cleanly_in_either_order() -> None:
+    _run_python_import_probe(
+        """
+import eneo.users.user
+import eneo.main.config
+"""
+    )
+    _run_python_import_probe(
+        """
+import eneo.main.config
+import eneo.users.user
+"""
+    )
+
+
+def test_flow_recovery_policy_import_keeps_domain_models_and_principal_lazy() -> None:
     _run_python_import_probe(
         """
 import sys
 
-import eneo.flows.application.flow_run_recovery_policy
+import eneo.flows.domain.flow_run_recovery_policy
 
 eager_imports = {
-    name for name in ("eneo.flows.principal", "eneo.users.user")
+    name for name in (
+        "eneo.flows.domain.flow",
+        "eneo.flows.principal",
+        "eneo.users.user",
+    )
     if name in sys.modules
 }
 if eager_imports:

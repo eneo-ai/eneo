@@ -95,7 +95,7 @@ SOURCE_MODULES: tuple[SourceModule, ...] = (
     ),
     SourceModule(
         label="Dispatch recovery policy",
-        path="backend/src/eneo/flows/application/flow_run_recovery_policy.py",
+        path="backend/src/eneo/flows/domain/flow_run_recovery_policy.py",
         owns="bounded dispatch attempts, retry delays, and stale-running thresholds",
     ),
     SourceModule(

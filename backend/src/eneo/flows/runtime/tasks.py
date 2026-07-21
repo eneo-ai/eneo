@@ -24,14 +24,14 @@ from eneo.flows.application.flow_dispatch import (
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
-    flow_stale_running_reconcile_after_seconds,
-)
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
 )
 from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow_run_recovery_policy import (
+    flow_stale_running_reconcile_after_seconds,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_document_limits import resolve_flow_document_render_limits

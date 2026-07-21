@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from httpx import AsyncClient
 
 from eneo.database.tables.flow_tables import FlowRunAuditOutbox
-from eneo.flows.application.flow_run_recovery_policy import (
+from eneo.flows.domain.flow_run_recovery_policy import (
     flow_stale_running_reconcile_after_seconds,
 )
 from eneo.flows.enums import FlowRunLifecycleSource

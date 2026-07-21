@@ -17,6 +17,10 @@ Public Flow run Pydantic schemas are canonically owned by
 `eneo.flows.api.flow_run_contract_models`; no compatibility module remains at the
 Flow package root.
 
+Dispatch recovery timing and attempt limits are domain invariants canonically
+owned by `eneo.flows.domain.flow_run_recovery_policy`; there is no compatibility
+module at `eneo.flows.application.flow_run_recovery_policy`.
+
 Allowed target homes:
 
 - `api`: HTTP adapters, API schemas, OpenAPI-facing errors, and presenters.

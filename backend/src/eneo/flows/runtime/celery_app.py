@@ -13,13 +13,13 @@ from eneo.database.database import sessionmanager
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
     flow_task_hard_timeout_seconds,
-)
-from eneo.flows.application.flow_webhook_delivery_policy import (
-    FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
 )
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_RECONCILE_INTERVAL_SECONDS,

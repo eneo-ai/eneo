@@ -19,9 +19,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.flows import FlowRepository, FlowVersionRepository
-from eneo.flows.application.flow_run_recovery_policy import (
-    FLOW_DISPATCH_MAX_ATTEMPTS,
-)
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
@@ -33,6 +30,9 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import (

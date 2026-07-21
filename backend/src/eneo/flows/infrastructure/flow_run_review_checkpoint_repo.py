@@ -24,9 +24,6 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowStepResults,
 )
-from eneo.flows.application.flow_run_recovery_policy import (
-    start_flow_dispatch_epoch,
-)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -37,6 +34,9 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
+    start_flow_dispatch_epoch,
 )
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,

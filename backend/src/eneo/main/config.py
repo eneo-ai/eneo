@@ -679,7 +679,7 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        from eneo.flows.application.flow_run_recovery_policy import (
+        from eneo.flows.domain.flow_run_recovery_policy import (
             flow_task_hard_timeout_seconds,
         )
 
