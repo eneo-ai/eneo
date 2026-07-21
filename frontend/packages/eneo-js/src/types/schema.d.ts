@@ -8784,11 +8784,7 @@ export interface components {
      * @enum {string}
      */
     AIBuilderOutputMode:
-      | "pass_through"
-      | "compose_text"
-      | "transcribe_only"
-      | "template_fill"
-      | "render_verbatim";
+      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
     /**
      * AIBuilderPlanEditContext
      * @description Structured intent for revising an already proposed AI Builder plan.
@@ -9585,11 +9581,7 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      | "exact_secret"
-      | "key_suffix"
-      | "name_or_description"
-      | "owner"
-      | "creator";
+      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -11075,11 +11067,7 @@ export interface components {
      * @enum {string}
      */
     BuilderTurnState:
-      | "open"
-      | "processing"
-      | "committed"
-      | "failed_before_provider"
-      | "provider_outcome_unknown";
+      "open" | "processing" | "committed" | "failed_before_provider" | "provider_outcome_unknown";
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -13009,10 +12997,7 @@ export interface components {
        * @enum {string}
        */
       provenance_persisted_version_status:
-        | "not_tracked"
-        | "tracked"
-        | "corrupt"
-        | "retention_purged";
+        "not_tracked" | "tracked" | "corrupt" | "retention_purged";
       /** Content Hash */
       content_hash: string;
       /**
@@ -14706,8 +14691,7 @@ export interface components {
       model_kind: components["schemas"]["FlowPackageModelKind"];
       matching_preferences: components["schemas"]["FlowPackageModelMatchingPreferences"];
       completion_constraints?:
-        | components["schemas"]["FlowPackageCompletionModelConstraints"]
-        | null;
+        components["schemas"]["FlowPackageCompletionModelConstraints"] | null;
       /** Eligible Candidate Count */
       eligible_candidate_count: number;
       policy_status: components["schemas"]["FlowPackagePolicyStatus"];
@@ -16021,9 +16005,7 @@ export interface components {
      * @enum {string}
      */
     FlowRunDispatchErrorKind:
-      | "invalid_request"
-      | "execution_backend_failure"
-      | "invalid_persisted_error";
+      "invalid_request" | "execution_backend_failure" | "invalid_persisted_error";
     /**
      * FlowRunError
      * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
@@ -17403,8 +17385,7 @@ export interface components {
       } | null;
       /** @description Root-step runtime file override recorded at rerun acceptance time. Null means files were inherited from the predecessor attempt. */
       root_step_input_override?:
-        | components["schemas"]["FlowRunRerunStepInputOverridePublic"]
-        | null;
+        components["schemas"]["FlowRunRerunStepInputOverridePublic"] | null;
       /**
        * Root Step Input Override Requested
        * @description True when the rerun request explicitly replaced or cleared root step runtime files; false when the root attempt inherits files from its predecessor.
@@ -17414,8 +17395,7 @@ export interface components {
       /** Requested By User Id */
       requested_by_user_id?: string | null;
       requested_by_service_principal?:
-        | components["schemas"]["FlowServicePrincipalActorPublic"]
-        | null;
+        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       /** @description Stable machine-readable rerun failure code. */
       failure_code?:
         | (
@@ -17757,8 +17737,7 @@ export interface components {
       /** Decided By User Id */
       decided_by_user_id?: string | null;
       decided_by_service_principal?:
-        | components["schemas"]["FlowServicePrincipalActorPublic"]
-        | null;
+        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -17893,8 +17872,7 @@ export interface components {
       /** Decided By User Id */
       decided_by_user_id?: string | null;
       decided_by_service_principal?:
-        | components["schemas"]["FlowServicePrincipalActorPublic"]
-        | null;
+        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -18034,13 +18012,7 @@ export interface components {
      * @enum {string}
      */
     FlowRunReviewCheckpointState:
-      | "awaiting_review"
-      | "edited"
-      | "approved"
-      | "rejected"
-      | "resumed"
-      | "cancelled"
-      | "expired";
+      "awaiting_review" | "edited" | "approved" | "rejected" | "resumed" | "cancelled" | "expired";
     /**
      * FlowRunStatus
      * @enum {string}
@@ -20522,11 +20494,7 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      | "text-field"
-      | "text-upload"
-      | "audio-upload"
-      | "audio-recorder"
-      | "image-upload";
+      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -32085,8 +32053,7 @@ export interface operations {
         };
         content: {
           "application/json":
-            | components["schemas"]["FlowClassificationRetentionPolicyPublic"]
-            | null;
+            components["schemas"]["FlowClassificationRetentionPolicyPublic"] | null;
         };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
@@ -32946,8 +32913,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -33373,8 +33339,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
