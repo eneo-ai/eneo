@@ -1,7 +1,7 @@
 {
   "version": 1,
   "program": "eneo-flows-and-builder-9-of-10",
-  "updated_at": "2026-07-21T16:30:55+02:00",
+  "updated_at": "2026-07-21T16:38:00+02:00",
   "orchestration": {
     "owner": "hermes-default-profile",
     "status": "active",
@@ -198,11 +198,71 @@
     ]
   },
   "focus": {
-    "roadmap_slice": "M4.5",
-    "execution_slice": "M4.5a",
-    "summary": "Exact preserved-candidate replay and validation"
+    "roadmap_slice": "M4.2",
+    "execution_slice": "M4.2",
+    "summary": "Delete the pass-through FlowFactory and make repositories own ORM projection"
   },
-  "active_work": [],
+  "active_work": [
+    {
+      "id": "H001-m4-2",
+      "status": "running",
+      "roadmap_slice": "M4.2",
+      "execution_slice": "M4.2",
+      "worker": "hermes-delegate",
+      "base_commit": "8d297bd5b51f211106e82275dde87b6f1068520f",
+      "worktree": "/Users/cimen/eneo/eneo-flows-clean-worktrees/H001-m4-2",
+      "collision_domains": [
+        "flow-repository-construction",
+        "flow-orm-domain-projection",
+        "backend-container-wiring"
+      ],
+      "acceptance": "FlowFactory module/export/provider and injection disappear; repositories directly validate ORM rows; rerun override mapping stays in rerun repository; focused tests and strict Pyright pass; one conventional local commit; never push.",
+      "stop_conditions": [
+        "touch outside leased_files",
+        "protected dirt overlap",
+        "unexpected API/generated/migration change",
+        "pre-existing test failure that prevents proving the slice"
+      ],
+      "started_at": "2026-07-21T16:34:05+02:00",
+      "lease_expanded_at": "2026-07-21T16:38:00+02:00",
+      "lease_expansion_reason": "Deleting a Flow root module must converge the import-linter source list and generated package-layout documentation/guards.",
+      "allowed_files": [
+        "backend/src/eneo/flows/flow_factory.py",
+        "backend/src/eneo/flows/__init__.py",
+        "backend/src/eneo/main/container/container.py",
+        "backend/src/eneo/flows/infrastructure/flow_repo.py",
+        "backend/src/eneo/flows/infrastructure/flow_version_repo.py",
+        "backend/src/eneo/flows/infrastructure/flow_run_repo.py",
+        "backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py",
+        "backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py",
+        "backend/tests/unittests/flows/test_flow_repo.py",
+        "backend/tests/unittests/flows/test_flow_run_rerun_repo.py",
+        "backend/tests/unittests/flows/test_flow_run_repo.py",
+        "backend/tests/unittests/flows/test_flow_run_review_checkpoint_repo.py",
+        "backend/tests/integration/flows/test_flow_version_repository.py",
+        "backend/tests/integration/flows/test_flow_retention_envelope.py",
+        "backend/tests/integration/flows/test_flow_runtime_worker_contract.py",
+        "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py",
+        "backend/tests/integration/flows/test_flow_audit_outbox_delivery.py",
+        "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py",
+        "backend/tests/integration/flows/test_flow_run_repository.py",
+        "backend/tests/integration/flows/test_flow_repository.py",
+        "backend/tests/integration/flows/test_flow_evidence_api_contracts.py",
+        "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py",
+        "backend/tests/integration/flows/test_flow_runtime_health.py",
+        "backend/tests/integration/flows/test_flow_run_rerun_repository.py",
+        "backend/tests/integration/flows/test_flow_retention_barriers.py",
+        "backend/tests/integration/flows/test_flow_terminalization_contract.py",
+        "backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py",
+        "backend/.importlinter",
+        "backend/tests/unittests/flows/ai_builder/test_importlinter_boundary.py",
+        "backend/tests/unittests/flows/test_flow_package_layout.py",
+        "backend/tests/unittests/flows/test_flow_docs_site_contract.py",
+        "docs/flows/package-layout.md",
+        "frontend/apps/docs-site/src/content/docs/flows-for-developers/how-built.mdx"
+      ]
+    }
+  ],
   "blockers": [
     {
       "id": "m4-5a-pyright-hook-environment",
