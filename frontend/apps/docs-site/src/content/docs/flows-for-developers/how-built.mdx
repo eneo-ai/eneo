@@ -30,7 +30,7 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 
 | Contract                                                 | Type        | Source                                | Forbidden                           | Ignored edges                                                           |
 | -------------------------------------------------------- | ----------- | ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| `Flows engine must not import AI Builder`                | `forbidden` | 78 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
+| `Flows engine must not import AI Builder`                | `forbidden` | 73 Flow engine root entries           | `eneo.flows.ai_builder`             | `eneo.flows.api.flow_router -> eneo.flows.ai_builder.ai_builder_router` |
 | `FCM must not import AI Builder`                         | `forbidden` | `eneo.flows.flow_capability_manifest` | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package application must not import AI Builder`    | `forbidden` | `eneo.flow_packages.application`      | `eneo.flows.ai_builder`             | none                                                                    |
 | `Flow package domain must not import AI Builder`         | `forbidden` | `eneo.flow_packages.domain`           | `eneo.flows.ai_builder`             | none                                                                    |
@@ -114,21 +114,16 @@ This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-deve
 </details>
 
 <details>
-<summary><code>application</code> (11 entries)</summary>
+<summary><code>application</code> (6 entries)</summary>
 
-| Entry                               | Kind     | Owns / start here                                             |
-| ----------------------------------- | -------- | ------------------------------------------------------------- |
-| `flow_access_policy`                | `module` | Access policy supports use-case authorization decisions.      |
-| `flow_run_contract_service`         | `module` | Run-contract assembly is an application use case.             |
-| `flow_run_evidence`                 | `module` | Evidence assembly spans runtime records into consumer output. |
-| `flow_run_evidence_bundle`          | `module` | Evidence bundle shape supports evidence assembly.             |
-| `flow_run_evidence_export_manifest` | `module` | Export manifest belongs with evidence export assembly.        |
-| `flow_run_evidence_export_summary`  | `module` | Export summaries belong with evidence export assembly.        |
-| `flow_run_export_json`              | `module` | Evidence JSON export is application-level presentation.       |
-| `flow_run_rerun_request`            | `module` | Rerun request normalization belongs with the rerun use case.  |
-| `flow_run_step_inputs`              | `module` | Step-input resolution is run-creation/rerun orchestration.    |
-| `flow_runtime_file_service`         | `module` | Runtime-file operations are application use cases.            |
-| `flow_template_asset_service`       | `module` | Template asset operations are application use cases.          |
+| Entry                         | Kind     | Owns / start here                                            |
+| ----------------------------- | -------- | ------------------------------------------------------------ |
+| `flow_access_policy`          | `module` | Access policy supports use-case authorization decisions.     |
+| `flow_run_contract_service`   | `module` | Run-contract assembly is an application use case.            |
+| `flow_run_rerun_request`      | `module` | Rerun request normalization belongs with the rerun use case. |
+| `flow_run_step_inputs`        | `module` | Step-input resolution is run-creation/rerun orchestration.   |
+| `flow_runtime_file_service`   | `module` | Runtime-file operations are application use cases.           |
+| `flow_template_asset_service` | `module` | Template asset operations are application use cases.         |
 
 </details>
 

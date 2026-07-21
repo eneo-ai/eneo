@@ -73,11 +73,6 @@ provenance value instead of creating another omission model.
 | flow_run_contract_service | module | application | Run-contract assembly is an application use case. |
 | flow_run_dispatch_request | module | runtime | Dispatch payload is a worker/runtime command. |
 | flow_run_error | module | domain | Run error payloads are Flow domain contracts. |
-| flow_run_evidence | module | application | Evidence assembly spans runtime records into consumer output. |
-| flow_run_evidence_bundle | module | application | Evidence bundle shape supports evidence assembly. |
-| flow_run_evidence_export_manifest | module | application | Export manifest belongs with evidence export assembly. |
-| flow_run_evidence_export_summary | module | application | Export summaries belong with evidence export assembly. |
-| flow_run_export_json | module | application | Evidence JSON export is application-level presentation. |
 | flow_run_input_envelope | module | domain | Run input envelope is a typed Flow contract. |
 | flow_run_input_payload | module | domain | Run input payload is a typed Flow contract. |
 | flow_run_payload_validation | module | domain | Payload validation enforces Flow contract invariants. |

@@ -18,6 +18,9 @@ from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
 from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.application.flow_run_evidence_export_manifest import (
+    EvidenceReviewCheckpointSummary,
+)
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
@@ -29,9 +32,6 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
 from eneo.flows.flow_review_policy import FlowStepReviewMode
-from eneo.flows.flow_run_evidence_export_manifest import (
-    EvidenceReviewCheckpointSummary,
-)
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.exceptions import (
     UnauthorizedException,

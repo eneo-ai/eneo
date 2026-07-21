@@ -15,7 +15,7 @@ FLOW_DEVELOPER_ARCHITECTURE_DOCS_GENERATOR = (
     BACKEND_ROOT / "scripts" / "flow_developer_architecture_docs.py"
 )
 
-EXPECTED_ROOT_MODULES = 72
+EXPECTED_ROOT_MODULES = 67
 EXPECTED_ROOT_PACKAGES = 7
 
 
@@ -118,6 +118,22 @@ def test_runtime_contracts_are_owned_by_domain_without_a_compatibility_module() 
 def test_run_contract_schemas_are_owned_by_api_without_a_compatibility_module() -> None:
     assert (FLOW_ROOT / "api" / "flow_run_contract_models.py").is_file()
     assert not (FLOW_ROOT / "flow_run_contract_models.py").exists()
+
+
+def test_evidence_modules_are_owned_by_application_without_compatibility_modules() -> (
+    None
+):
+    evidence_modules = (
+        "flow_run_evidence.py",
+        "flow_run_evidence_bundle.py",
+        "flow_run_evidence_export_manifest.py",
+        "flow_run_evidence_export_summary.py",
+        "flow_run_export_json.py",
+    )
+
+    for module_name in evidence_modules:
+        assert (FLOW_ROOT / "application" / module_name).is_file()
+        assert not (FLOW_ROOT / module_name).exists()
 
 
 def test_flow_domain_does_not_import_outer_flow_layers() -> None:
