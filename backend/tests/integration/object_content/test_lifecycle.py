@@ -796,10 +796,9 @@ async def test_concurrent_hold_and_final_detach_have_one_serialized_winner(
             assert content.state == ContentState.DELETE_PENDING.value
 
 
-@pytest.mark.asyncio
-async def test_opposite_detach_order_deadlock_rolls_back_and_retry_converges(
+async def _cross_reference_available_contents(
     object_content_database: DatabaseSessionManager,
-) -> None:
+) -> tuple[_OwnedContent, _OwnedContent]:
     first = await _available_content(object_content_database)
     second = await _available_content(object_content_database)
     async with object_content_database.session() as session, session.begin():
@@ -820,86 +819,14 @@ async def test_opposite_detach_order_deadlock_rolls_back_and_retry_converges(
             ]
         )
         await session.flush()
+    return first, second
 
-    first_locked = asyncio.Event()
-    second_locked = asyncio.Event()
 
-    async def detach_in_order(
-        first_file_id: UUID,
-        first_variant: str,
-        second_file_id: UUID,
-        second_variant: str,
-        own_lock: asyncio.Event,
-        peer_lock: asyncio.Event,
-    ) -> Exception | None:
-        try:
-            async with object_content_database.session() as session, session.begin():
-                await session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
-                await session.execute(text("SET LOCAL lock_timeout = '5s'"))
-                await session.execute(
-                    delete(FileContentReferences).where(
-                        FileContentReferences.file_id == first_file_id,
-                        FileContentReferences.variant == first_variant,
-                    )
-                )
-                own_lock.set()
-                await asyncio.wait_for(peer_lock.wait(), timeout=5)
-                await session.execute(
-                    delete(FileContentReferences).where(
-                        FileContentReferences.file_id == second_file_id,
-                        FileContentReferences.variant == second_variant,
-                    )
-                )
-        except Exception as error:
-            return error
-        return None
-
-    first_result, second_result = await asyncio.gather(
-        detach_in_order(
-            first.file_id,
-            "original",
-            first.file_id,
-            "preview",
-            first_locked,
-            second_locked,
-        ),
-        detach_in_order(
-            second.file_id,
-            "original",
-            second.file_id,
-            "preview",
-            second_locked,
-            first_locked,
-        ),
-    )
-    errors = tuple(
-        error for error in (first_result, second_result) if error is not None
-    )
-    assert len(errors) == 1
-    assert isinstance(errors[0], DBAPIError)
-    assert getattr(errors[0].orig, "sqlstate", None) == "40P01"
-
-    # The deadlock loser rolled its complete transaction back. A new
-    # authorization-boundary attempt deletes remaining references in stable
-    # content order and converges without partial counter changes.
-    async with object_content_database.session() as session, session.begin():
-        remaining = (
-            await session.execute(
-                select(
-                    FileContentReferences.file_id,
-                    FileContentReferences.variant,
-                    FileContentReferences.content_id,
-                ).order_by(FileContentReferences.content_id)
-            )
-        ).all()
-        for file_id, variant, _content_id in remaining:
-            await session.execute(
-                delete(FileContentReferences).where(
-                    FileContentReferences.file_id == file_id,
-                    FileContentReferences.variant == variant,
-                )
-            )
-
+async def _assert_cross_references_fully_detached(
+    object_content_database: DatabaseSessionManager,
+    first: _OwnedContent,
+    second: _OwnedContent,
+) -> None:
     async with object_content_database.session() as session, session.begin():
         contents = (
             await session.scalars(
@@ -916,3 +843,62 @@ async def test_opposite_detach_order_deadlock_rolls_back_and_retry_converges(
         assert {content.state for content in contents} == {
             ContentState.DELETE_PENDING.value
         }
+
+
+@pytest.mark.asyncio
+async def test_opposite_order_reference_detaches_both_complete(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    first, second = await _cross_reference_available_contents(object_content_database)
+
+    start = asyncio.Event()
+
+    async def detach(file_id: UUID) -> Exception | None:
+        try:
+            async with object_content_database.session() as session, session.begin():
+                await session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
+                await session.execute(text("SET LOCAL lock_timeout = '5s'"))
+                await start.wait()
+                await session.execute(
+                    delete(FileContentReferences).where(
+                        FileContentReferences.file_id == file_id,
+                    )
+                )
+        except Exception as error:
+            return error
+        return None
+
+    first_task = asyncio.create_task(detach(first.file_id))
+    second_task = asyncio.create_task(detach(second.file_id))
+    start.set()
+    assert await asyncio.gather(first_task, second_task) == [None, None]
+    await _assert_cross_references_fully_detached(
+        object_content_database, first, second
+    )
+
+
+@pytest.mark.asyncio
+async def test_opposite_order_parent_cascades_both_complete(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    first, second = await _cross_reference_available_contents(object_content_database)
+    start = asyncio.Event()
+
+    async def delete_owner(file_id: UUID) -> Exception | None:
+        try:
+            async with object_content_database.session() as session, session.begin():
+                await session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
+                await session.execute(text("SET LOCAL lock_timeout = '5s'"))
+                await start.wait()
+                await session.execute(delete(Files).where(Files.id == file_id))
+        except Exception as error:
+            return error
+        return None
+
+    first_task = asyncio.create_task(delete_owner(first.file_id))
+    second_task = asyncio.create_task(delete_owner(second.file_id))
+    start.set()
+    assert await asyncio.gather(first_task, second_task) == [None, None]
+    await _assert_cross_references_fully_detached(
+        object_content_database, first, second
+    )

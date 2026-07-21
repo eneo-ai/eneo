@@ -785,153 +785,208 @@ def _create_trigger_functions() -> None:
     """)
 
     op.execute("""
-        CREATE FUNCTION object_content_reference_fence() RETURNS trigger
+        CREATE FUNCTION object_content_reference_identity_fence() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_TABLE_NAME = 'file_content_references'
+                AND (NEW.file_id, NEW.content_id, NEW.variant, NEW.ordinal)
+                    IS DISTINCT FROM
+                    (OLD.file_id, OLD.content_id, OLD.variant, OLD.ordinal) THEN
+                RAISE EXCEPTION 'object content reference identity is immutable';
+            ELSIF TG_TABLE_NAME = 'info_blob_content_references'
+                AND (NEW.info_blob_id, NEW.content_id, NEW.variant)
+                    IS DISTINCT FROM
+                    (OLD.info_blob_id, OLD.content_id, OLD.variant) THEN
+                RAISE EXCEPTION 'object content reference identity is immutable';
+            ELSIF TG_TABLE_NAME = 'icon_content_references'
+                AND (NEW.icon_id, NEW.content_id, NEW.variant)
+                    IS DISTINCT FROM
+                    (OLD.icon_id, OLD.content_id, OLD.variant) THEN
+                RAISE EXCEPTION 'object content reference identity is immutable';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+    """)
+
+    op.execute("""
+        CREATE FUNCTION object_content_reference_insert_fence() RETURNS trigger
         LANGUAGE plpgsql AS $$
         DECLARE
             content object_contents%ROWTYPE;
-            next_reference_count integer;
-            has_blocker boolean;
             expected_access_class text;
-            owner_tenant_id uuid;
+            owner_missing boolean;
+            reference_delta integer;
             target_content_id uuid;
+            tenant_mismatch boolean;
         BEGIN
-            IF TG_OP = 'UPDATE' THEN
-                IF TG_TABLE_NAME = 'file_content_references'
-                    AND (NEW.file_id, NEW.content_id, NEW.variant, NEW.ordinal)
-                        IS DISTINCT FROM
-                        (OLD.file_id, OLD.content_id, OLD.variant, OLD.ordinal) THEN
-                    RAISE EXCEPTION 'object content reference identity is immutable';
-                ELSIF TG_TABLE_NAME = 'info_blob_content_references'
-                    AND (NEW.info_blob_id, NEW.content_id, NEW.variant)
-                        IS DISTINCT FROM
-                        (OLD.info_blob_id, OLD.content_id, OLD.variant) THEN
-                    RAISE EXCEPTION 'object content reference identity is immutable';
-                ELSIF TG_TABLE_NAME = 'icon_content_references'
-                    AND (NEW.icon_id, NEW.content_id, NEW.variant)
-                        IS DISTINCT FROM
-                        (OLD.icon_id, OLD.content_id, OLD.variant) THEN
-                    RAISE EXCEPTION 'object content reference identity is immutable';
+            expected_access_class := CASE
+                WHEN TG_TABLE_NAME = 'icon_content_references'
+                    THEN 'public_immutable'
+                ELSE 'private_resource'
+            END;
+
+            FOR target_content_id IN
+                SELECT DISTINCT content_id
+                FROM new_references
+                ORDER BY content_id
+            LOOP
+                SELECT * INTO content
+                FROM object_contents
+                WHERE id = target_content_id
+                FOR UPDATE;
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION 'referenced object content does not exist';
                 END IF;
-                RETURN NEW;
-            END IF;
 
-            target_content_id := CASE WHEN TG_OP = 'INSERT'
-                THEN NEW.content_id ELSE OLD.content_id END;
+                IF TG_TABLE_NAME = 'file_content_references' THEN
+                    SELECT
+                        count(*)::integer,
+                        bool_or(owner.id IS NULL),
+                        bool_or(owner.tenant_id IS DISTINCT FROM content.tenant_id)
+                    INTO reference_delta, owner_missing, tenant_mismatch
+                    FROM new_references AS reference
+                    LEFT JOIN files AS owner ON owner.id = reference.file_id
+                    WHERE reference.content_id = target_content_id;
+                ELSIF TG_TABLE_NAME = 'info_blob_content_references' THEN
+                    SELECT
+                        count(*)::integer,
+                        bool_or(owner.id IS NULL),
+                        bool_or(owner.tenant_id IS DISTINCT FROM content.tenant_id)
+                    INTO reference_delta, owner_missing, tenant_mismatch
+                    FROM new_references AS reference
+                    LEFT JOIN info_blobs AS owner
+                        ON owner.id = reference.info_blob_id
+                    WHERE reference.content_id = target_content_id;
+                ELSE
+                    SELECT
+                        count(*)::integer,
+                        bool_or(owner.id IS NULL),
+                        bool_or(owner.tenant_id IS DISTINCT FROM content.tenant_id)
+                    INTO reference_delta, owner_missing, tenant_mismatch
+                    FROM new_references AS reference
+                    LEFT JOIN icons AS owner ON owner.id = reference.icon_id
+                    WHERE reference.content_id = target_content_id;
+                END IF;
 
-            IF TG_OP = 'INSERT' AND TG_TABLE_NAME = 'file_content_references' THEN
-                SELECT tenant_id INTO owner_tenant_id
-                FROM files WHERE id = NEW.file_id
-                FOR KEY SHARE;
-            ELSIF TG_OP = 'INSERT'
-                AND TG_TABLE_NAME = 'info_blob_content_references' THEN
-                SELECT tenant_id INTO owner_tenant_id
-                FROM info_blobs WHERE id = NEW.info_blob_id
-                FOR KEY SHARE;
-            ELSIF TG_OP = 'INSERT'
-                AND TG_TABLE_NAME = 'icon_content_references' THEN
-                SELECT tenant_id INTO owner_tenant_id
-                FROM icons WHERE id = NEW.icon_id
-                FOR KEY SHARE;
-            END IF;
-
-            IF TG_OP = 'INSERT' AND owner_tenant_id IS NULL THEN
-                RAISE EXCEPTION 'object content reference owner does not exist';
-            END IF;
-
-            IF TG_TABLE_NAME = 'icon_content_references' THEN
-                expected_access_class := 'public_immutable';
-            ELSE
-                expected_access_class := 'private_resource';
-            END IF;
-
-            SELECT * INTO content
-            FROM object_contents
-            WHERE id = target_content_id
-            FOR UPDATE;
-            IF NOT FOUND THEN
-                RAISE EXCEPTION 'referenced object content does not exist';
-            END IF;
-
-            IF TG_OP = 'INSERT' AND content.tenant_id <> owner_tenant_id THEN
-                RAISE EXCEPTION 'object content reference tenant mismatch';
-            END IF;
-
-            IF TG_OP = 'INSERT' THEN
+                IF owner_missing THEN
+                    RAISE EXCEPTION 'object content reference owner does not exist';
+                END IF;
+                IF tenant_mismatch THEN
+                    RAISE EXCEPTION 'object content reference tenant mismatch';
+                END IF;
                 IF content.access_class <> expected_access_class THEN
                     RAISE EXCEPTION 'object content access class mismatch';
                 END IF;
                 IF content.delete_requested_at IS NOT NULL THEN
-                    RAISE EXCEPTION 'object content with delete intent cannot be attached';
+                    RAISE EXCEPTION
+                        'object content with delete intent cannot be attached';
                 END IF;
                 IF content.state = 'pending' THEN
                     IF content.reference_count <> 0
+                        OR reference_delta <> 1
                         OR content.creation_transaction_id <> txid_current() THEN
                         RAISE EXCEPTION
                             'pending content may only receive its first reference in its creation transaction';
                     END IF;
                 ELSIF content.state <> 'available' THEN
-                    RAISE EXCEPTION 'only available object content can receive a later reference';
+                    RAISE EXCEPTION
+                        'only available object content can receive a later reference';
                 END IF;
 
                 UPDATE object_contents
-                SET reference_count = reference_count + 1,
+                SET reference_count = reference_count + reference_delta,
                     reference_audited_at = NULL,
                     updated_at = now()
                 WHERE id = content.id;
-                RETURN NEW;
-            END IF;
+            END LOOP;
+            RETURN NULL;
+        END;
+        $$
+    """)
 
-            next_reference_count := content.reference_count - 1;
-            IF next_reference_count < 0 THEN
-                RAISE EXCEPTION 'object content reference count underflow';
-            END IF;
+    op.execute("""
+        CREATE FUNCTION object_content_reference_delete_fence() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        DECLARE
+            content object_contents%ROWTYPE;
+            has_blocker boolean;
+            next_reference_count integer;
+            reference_delta integer;
+            target_content_id uuid;
+        BEGIN
+            FOR target_content_id IN
+                SELECT DISTINCT content_id
+                FROM old_references
+                ORDER BY content_id
+            LOOP
+                SELECT * INTO content
+                FROM object_contents
+                WHERE id = target_content_id
+                FOR UPDATE;
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION 'referenced object content does not exist';
+                END IF;
 
-            IF next_reference_count > 0 THEN
-                UPDATE object_contents
-                SET reference_count = next_reference_count,
-                    reference_audited_at = NULL,
-                    updated_at = now()
-                WHERE id = content.id;
-            ELSIF content.state = 'pending' THEN
-                UPDATE object_contents
-                SET reference_count = 0,
-                    reference_audited_at = NULL,
-                    state = 'failed',
-                    failure_code = 'owner_detached',
-                    failure_detail = 'initial owner detached before availability',
-                    delete_requested_at = COALESCE(delete_requested_at, now()),
-                    next_attempt_at = now(),
-                    updated_at = now()
-                WHERE id = content.id;
-            ELSIF content.state = 'available' THEN
-                SELECT
-                    COALESCE(content.minimum_retain_until > now(), false)
-                    OR EXISTS (
-                        SELECT 1 FROM object_content_holds
-                        WHERE content_id = content.id
-                          AND released_at IS NULL
-                          AND (expires_at IS NULL OR expires_at > now())
-                    )
-                INTO has_blocker;
-                UPDATE object_contents
-                SET reference_count = 0,
-                    reference_audited_at = NULL,
-                    state = CASE WHEN has_blocker THEN 'retained'
-                                 ELSE 'delete_pending' END,
-                    delete_requested_at = COALESCE(delete_requested_at, now()),
-                    next_attempt_at = CASE WHEN has_blocker THEN NULL ELSE now() END,
-                    updated_at = now()
-                WHERE id = content.id;
-            ELSE
-                UPDATE object_contents
-                SET reference_count = 0,
-                    reference_audited_at = NULL,
-                    delete_requested_at = COALESCE(delete_requested_at, now()),
-                    next_attempt_at = now(),
-                    updated_at = now()
-                WHERE id = content.id;
-            END IF;
-            RETURN OLD;
+                SELECT count(*)::integer INTO reference_delta
+                FROM old_references
+                WHERE content_id = target_content_id;
+                next_reference_count := content.reference_count - reference_delta;
+                IF next_reference_count < 0 THEN
+                    RAISE EXCEPTION 'object content reference count underflow';
+                END IF;
+
+                IF next_reference_count > 0 THEN
+                    UPDATE object_contents
+                    SET reference_count = next_reference_count,
+                        reference_audited_at = NULL,
+                        updated_at = now()
+                    WHERE id = content.id;
+                ELSIF content.state = 'pending' THEN
+                    UPDATE object_contents
+                    SET reference_count = 0,
+                        reference_audited_at = NULL,
+                        state = 'failed',
+                        failure_code = 'owner_detached',
+                        failure_detail =
+                            'initial owner detached before availability',
+                        delete_requested_at = COALESCE(delete_requested_at, now()),
+                        next_attempt_at = now(),
+                        updated_at = now()
+                    WHERE id = content.id;
+                ELSIF content.state = 'available' THEN
+                    SELECT
+                        COALESCE(content.minimum_retain_until > now(), false)
+                        OR EXISTS (
+                            SELECT 1 FROM object_content_holds
+                            WHERE content_id = content.id
+                              AND released_at IS NULL
+                              AND (expires_at IS NULL OR expires_at > now())
+                        )
+                    INTO has_blocker;
+                    UPDATE object_contents
+                    SET reference_count = 0,
+                        reference_audited_at = NULL,
+                        state = CASE WHEN has_blocker THEN 'retained'
+                                     ELSE 'delete_pending' END,
+                        delete_requested_at =
+                            COALESCE(delete_requested_at, now()),
+                        next_attempt_at =
+                            CASE WHEN has_blocker THEN NULL ELSE now() END,
+                        updated_at = now()
+                    WHERE id = content.id;
+                ELSE
+                    UPDATE object_contents
+                    SET reference_count = 0,
+                        reference_audited_at = NULL,
+                        delete_requested_at =
+                            COALESCE(delete_requested_at, now()),
+                        next_attempt_at = now(),
+                        updated_at = now()
+                    WHERE id = content.id;
+                END IF;
+            END LOOP;
+            RETURN NULL;
         END;
         $$
     """)
@@ -1092,9 +1147,24 @@ def _create_triggers() -> None:
         "icon_content_references",
     ):
         op.execute(f"""
-            CREATE TRIGGER {table}_reference_fence
-            BEFORE INSERT OR UPDATE OR DELETE ON {table}
-            FOR EACH ROW EXECUTE FUNCTION object_content_reference_fence()
+            CREATE TRIGGER {table}_reference_identity_fence
+            BEFORE UPDATE ON {table}
+            FOR EACH ROW
+            EXECUTE FUNCTION object_content_reference_identity_fence()
+        """)
+        op.execute(f"""
+            CREATE TRIGGER {table}_reference_insert_fence
+            AFTER INSERT ON {table}
+            REFERENCING NEW TABLE AS new_references
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION object_content_reference_insert_fence()
+        """)
+        op.execute(f"""
+            CREATE TRIGGER {table}_reference_delete_fence
+            AFTER DELETE ON {table}
+            REFERENCING OLD TABLE AS old_references
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION object_content_reference_delete_fence()
         """)
     op.execute("""
         CREATE TRIGGER object_content_holds_delete_fence
@@ -1128,7 +1198,11 @@ def downgrade() -> None:
         "info_blob_content_references",
         "icon_content_references",
     ):
-        op.execute(f"DROP TRIGGER IF EXISTS {table}_reference_fence ON {table}")
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_reference_delete_fence ON {table}")
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_reference_insert_fence ON {table}")
+        op.execute(
+            f"DROP TRIGGER IF EXISTS {table}_reference_identity_fence ON {table}"
+        )
     op.execute(
         "DROP TRIGGER IF EXISTS object_contents_90_audit_transition ON object_contents"
     )
@@ -1145,7 +1219,9 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS object_content_pending_owner_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_hold_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_hold_guard_delete()")
-    op.execute("DROP FUNCTION IF EXISTS object_content_reference_fence()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_reference_delete_fence()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_reference_insert_fence()")
+    op.execute("DROP FUNCTION IF EXISTS object_content_reference_identity_fence()")
     op.execute("DROP FUNCTION IF EXISTS object_content_guard_update()")
     op.execute("DROP FUNCTION IF EXISTS object_content_guard_delete()")
 
