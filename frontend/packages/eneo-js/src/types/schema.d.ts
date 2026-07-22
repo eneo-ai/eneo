@@ -4587,11 +4587,19 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Redispatch due queued run
-     * @description Attempt to dispatch a queued run whose durable next-at clock is due.
+     * Redispatch or redrive a queued run
+     * @description Request dispatch for a queued run whose durable next-at clock is due. If the
+     *         bounded budget ended after broker acceptance or without a durable rejection receipt,
+     *         the run remains queued.
+     *         Send its observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to
+     *         rearm exactly that exhausted epoch. A retried request cannot rearm a later epoch.
+     *         The audit record and any budget reset commit together before broker I/O; disabled or
+     *         failed auditing prevents the redrive.
      *
      *         Returns the refreshed run payload together with `redispatched_count`, which indicates
-     *         whether dispatch was re-triggered for this request.
+     *         whether dispatch was accepted for this request. A zero count means either another
+     *         actor or worker already converged the run, or broker acceptance was outcome-unknown;
+     *         poll the returned run because bounded server recovery remains authoritative.
      *
      *         Service-key principals may redispatch only their own queued runs in v1.
      */
@@ -13699,6 +13707,8 @@ export interface components {
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
       | "flow_run_concurrency_limit_reached"
+      | "flow_run_redispatch_conflict"
+      | "flow_run_redispatch_audit_unavailable"
       | "flow_run_invalid_step_inputs"
       | "flow_run_unknown_step_input"
       | "flow_run_step_input_max_files_exceeded"
@@ -16244,7 +16254,7 @@ export interface components {
       dispatch_next_attempt_at?: string | null;
       /**
        * Dispatched At
-       * @description Timestamp when the broker last accepted this dispatch epoch.
+       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
       /**
@@ -17541,7 +17551,7 @@ export interface components {
       dispatch_next_attempt_at?: string | null;
       /**
        * Dispatched At
-       * @description Timestamp when the broker last accepted this dispatch epoch.
+       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
       /**
@@ -17590,6 +17600,19 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * FlowRunRedispatchRequest
+     * @example {
+     *       "expected_dispatch_exhausted_at": "2026-07-22T08:30:00Z"
+     *     }
+     */
+    FlowRunRedispatchRequest: {
+      /**
+       * Expected Dispatch Exhausted At
+       * @description Dispatch-exhaustion timestamp observed on the run. Send this value when redriving accepted-delivery exhaustion so a retried request cannot rearm a later exhausted dispatch epoch. Omit it for ordinary due queued redispatch.
+       */
+      expected_dispatch_exhausted_at?: string | null;
     };
     /**
      * FlowRunRedispatchResponse
@@ -18988,6 +19011,7 @@ export interface components {
      */
     FlowRuntimeHealthFlag:
       | "STALE_QUEUED_RUNS"
+      | "ACCEPTED_DISPATCH_EXHAUSTED"
       | "STALE_RUNNING_RUNS"
       | "STALE_RUNNING_RECONCILER_LAG"
       | "EXPIRED_REVIEW_CHECKPOINTS"
@@ -19304,6 +19328,17 @@ export interface components {
       oldest_stale_queued_age_seconds?: number | null;
       /** Oldest Stale Running Age Seconds */
       oldest_stale_running_age_seconds?: number | null;
+      /**
+       * Accepted Dispatch Exhausted Count
+       * @description Queued runs whose bounded dispatch epoch is exhausted and whose latest delivery was broker-accepted or has no durable rejection receipt. Any positive count makes Flow runtime health UNHEALTHY; inspect broker and worker health, then use the run redispatch endpoint with the observed dispatch-exhaustion timestamp when no delayed delivery claims the run.
+       * @default 0
+       */
+      accepted_dispatch_exhausted_count?: number;
+      /**
+       * Oldest Accepted Dispatch Exhausted Age Seconds
+       * @description Whole seconds since the oldest matching run's dispatch_exhausted_at; null when accepted-or-outcome-unknown dispatch exhaustion is absent.
+       */
+      oldest_accepted_dispatch_exhausted_age_seconds?: number | null;
     };
     /** FlowRuntimeUploadPolicyPublic */
     FlowRuntimeUploadPolicyPublic: {
@@ -45242,14 +45277,18 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
-        /** @description Identifier of the flow that owns the stale queued run. */
+        /** @description Identifier of the flow that owns the queued run. */
         id: string;
-        /** @description Identifier of the queued run to dispatch if it is due. */
+        /** @description Identifier of the queued run to dispatch when due or redrive after accepted-or-outcome-unknown dispatch exhaustion. */
         run_id: string;
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FlowRunRedispatchRequest"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -45295,8 +45334,26 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description The accepted dispatch-exhaustion generation changed or the request omitted its generation timestamp. Refresh the run and retry with the current `dispatch_exhausted_at`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit logging is unavailable, so redispatch was not armed. */
+      503: {
         headers: {
           [name: string]: unknown;
         };

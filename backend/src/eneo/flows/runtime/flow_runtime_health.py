@@ -51,6 +51,7 @@ class FlowRuntimeHealthStatus(str, Enum):
 
 class FlowRuntimeHealthFlag(str, Enum):
     STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
+    ACCEPTED_DISPATCH_EXHAUSTED = "ACCEPTED_DISPATCH_EXHAUSTED"
     STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
     STALE_RUNNING_RECONCILER_LAG = "STALE_RUNNING_RECONCILER_LAG"
     EXPIRED_REVIEW_CHECKPOINTS = "EXPIRED_REVIEW_CHECKPOINTS"
@@ -89,6 +90,8 @@ class FlowRuntimeHealthSnapshot:
     stale_running_count: int = 0
     oldest_stale_queued_pending_since: datetime | None = None
     oldest_stale_running_updated_at: datetime | None = None
+    accepted_dispatch_exhausted_count: int = 0
+    oldest_accepted_dispatch_exhausted_at: datetime | None = None
     expired_review_checkpoint_count: int = 0
     oldest_expired_review_checkpoint_expires_at: datetime | None = None
     terminal_runs_with_open_attempts_count: int = 0
@@ -124,6 +127,23 @@ class FlowRuntimeRunSummary(BaseModel):
     stale_running_count: int = 0
     oldest_stale_queued_age_seconds: int | None = None
     oldest_stale_running_age_seconds: int | None = None
+    accepted_dispatch_exhausted_count: int = Field(
+        default=0,
+        description=(
+            "Queued runs whose bounded dispatch epoch is exhausted and whose latest "
+            "delivery was broker-accepted or has no durable rejection receipt. Any "
+            "positive count makes Flow runtime health UNHEALTHY; inspect broker and "
+            "worker health, then use the run redispatch endpoint with the observed "
+            "dispatch-exhaustion timestamp when no delayed delivery claims the run."
+        ),
+    )
+    oldest_accepted_dispatch_exhausted_age_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Whole seconds since the oldest matching run's dispatch_exhausted_at; "
+            "null when accepted-or-outcome-unknown dispatch exhaustion is absent."
+        ),
+    )
 
 
 class FlowRuntimeReviewSummary(BaseModel):
@@ -235,6 +255,9 @@ async def load_flow_runtime_health_snapshot(
         status=FlowRunStatus.RUNNING,
         stale_before=stale_running_before,
     )
+    accepted_dispatch_exhausted = await _load_accepted_dispatch_exhausted_summary(
+        session=session
+    )
     expired_review_checkpoints = await _load_expired_review_checkpoint_summary(
         session=session,
         expires_before=now,
@@ -267,6 +290,10 @@ async def load_flow_runtime_health_snapshot(
         stale_running_count=stale_running.count,
         oldest_stale_queued_pending_since=stale_queued.oldest_anchor_at,
         oldest_stale_running_updated_at=stale_running.oldest_anchor_at,
+        accepted_dispatch_exhausted_count=accepted_dispatch_exhausted.count,
+        oldest_accepted_dispatch_exhausted_at=(
+            accepted_dispatch_exhausted.oldest_anchor_at
+        ),
         expired_review_checkpoint_count=expired_review_checkpoints.count,
         oldest_expired_review_checkpoint_expires_at=(
             expired_review_checkpoints.oldest_expires_at
@@ -311,6 +338,9 @@ def classify_flow_runtime_health(
 ) -> FlowRuntimeHealthResponse:
     stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_pending_since)
     stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_updated_at)
+    accepted_dispatch_exhausted_age = _age_seconds(
+        now, snapshot.oldest_accepted_dispatch_exhausted_at
+    )
     expired_review_checkpoint_age = _age_seconds(
         now,
         snapshot.oldest_expired_review_checkpoint_expires_at,
@@ -367,6 +397,12 @@ def classify_flow_runtime_health(
             stale_running_count=snapshot.stale_running_count,
             oldest_stale_queued_age_seconds=stale_queued_age,
             oldest_stale_running_age_seconds=stale_running_age,
+            accepted_dispatch_exhausted_count=(
+                snapshot.accepted_dispatch_exhausted_count
+            ),
+            oldest_accepted_dispatch_exhausted_age_seconds=(
+                accepted_dispatch_exhausted_age
+            ),
         ),
         review=FlowRuntimeReviewSummary(
             expired_checkpoint_count=snapshot.expired_review_checkpoint_count,
@@ -513,6 +549,32 @@ async def _load_stale_run_summary(
     return _RunSummary(
         count=int(count or 0),
         oldest_anchor_at=_normalize_datetime(oldest_anchor_at),
+    )
+
+
+async def _load_accepted_dispatch_exhausted_summary(
+    *, session: AsyncSession
+) -> _RunSummary:
+    count, oldest_exhausted_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(),
+                sa.func.min(FlowRuns.dispatch_exhausted_at),
+            )
+            .select_from(FlowRuns)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(
+                sa.or_(
+                    FlowRuns.dispatched_at.is_not(None),
+                    FlowRuns.dispatch_last_error.is_(None),
+                )
+            )
+            .where(FlowRuns.dispatch_exhausted_at.is_not(None))
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_anchor_at=_normalize_datetime(oldest_exhausted_at),
     )
 
 
@@ -740,6 +802,8 @@ def _flow_runtime_health_flags(
     flags: list[FlowRuntimeHealthFlag] = []
     if snapshot.stale_queued_count > 0:
         flags.append(FlowRuntimeHealthFlag.STALE_QUEUED_RUNS)
+    if snapshot.accepted_dispatch_exhausted_count > 0:
+        flags.append(FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED)
     if snapshot.stale_running_count > 0:
         if (
             stale_running_age_seconds is not None
@@ -782,6 +846,7 @@ def _flow_runtime_health_status(
     if not probe.db_query_ok:
         return FlowRuntimeHealthStatus.UNKNOWN
     unhealthy_flags = {
+        FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,
@@ -800,7 +865,7 @@ def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
         FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
         FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has accepted dispatch exhaustion, stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

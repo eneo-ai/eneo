@@ -447,6 +447,27 @@ describe("flows templates endpoint", () => {
     });
   });
 
+  it("sends the observed dispatch-exhaustion epoch when redriving a run", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ run: { status: "queued" }, redispatched_count: 1 }))
+    );
+    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
+
+    await flows.runs.redispatch({
+      id: "run-1",
+      flowId: "flow-1",
+      expected_dispatch_exhausted_at: "2026-07-22T08:30:00Z"
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/redispatch/"
+    );
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expected_dispatch_exhausted_at: "2026-07-22T08:30:00Z"
+    });
+  });
+
   it("serializes existing create and review-resume idempotency headers", async () => {
     let requestCount = 0;
     const fetch = vi.fn(async () => {

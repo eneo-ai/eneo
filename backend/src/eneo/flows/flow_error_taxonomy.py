@@ -160,6 +160,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Back off and retry after another run reaches a terminal status.",
         user_action="Wait for another run to finish, then try again.",
     ),
+    FlowApiErrorCode.RUN_REDISPATCH_CONFLICT: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The accepted dispatch-exhaustion generation is missing or changed.",
+        consumer_action="Refresh the run and retry with its current dispatch_exhausted_at value.",
+        user_action="Refresh the run before requesting redispatch again.",
+    ),
+    FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="Required audit logging was unavailable, so the redispatch was not armed.",
+        consumer_action="Retry later with the same observed dispatch_exhausted_at value.",
+        user_action="Wait and try redispatch again later.",
+    ),
     FlowApiErrorCode.RUN_INVALID_STEP_INPUTS: _entry(
         category="Run input",
         surfaced_through="API error response",

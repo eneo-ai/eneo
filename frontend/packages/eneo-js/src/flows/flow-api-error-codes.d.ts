@@ -12,6 +12,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED: "flow_run_top_level_file_ids_not_supported";
   RUN_IDEMPOTENCY_CONFLICT: "flow_run_idempotency_conflict";
   RUN_CONCURRENCY_LIMIT_REACHED: "flow_run_concurrency_limit_reached";
+  RUN_REDISPATCH_CONFLICT: "flow_run_redispatch_conflict";
+  RUN_REDISPATCH_AUDIT_UNAVAILABLE: "flow_run_redispatch_audit_unavailable";
   RUN_INVALID_STEP_INPUTS: "flow_run_invalid_step_inputs";
   RUN_UNKNOWN_STEP_INPUT: "flow_run_unknown_step_input";
   RUN_STEP_INPUT_MAX_FILES_EXCEEDED: "flow_run_step_input_max_files_exceeded";
@@ -157,6 +159,8 @@ export type FlowApiErrorCode =
   | "flow_run_top_level_file_ids_not_supported"
   | "flow_run_idempotency_conflict"
   | "flow_run_concurrency_limit_reached"
+  | "flow_run_redispatch_conflict"
+  | "flow_run_redispatch_audit_unavailable"
   | "flow_run_invalid_step_inputs"
   | "flow_run_unknown_step_input"
   | "flow_run_step_input_max_files_exceeded"

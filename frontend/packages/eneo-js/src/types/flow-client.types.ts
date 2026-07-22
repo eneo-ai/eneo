@@ -24,6 +24,11 @@ flows.runs.create({
   step_inputs: { "step-1": { file_ids: ["file-1"] } }
 });
 flows.runs.list({ flowId: "flow-1", status: ["completed", "running"] });
+flows.runs.redispatch({
+  id: "run-1",
+  flowId: "flow-1",
+  expected_dispatch_exhausted_at: "2026-07-22T08:30:00Z"
+});
 
 // @ts-expect-error list requires a space id.
 flows.list({ limit: 25 });

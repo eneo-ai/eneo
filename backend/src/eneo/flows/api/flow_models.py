@@ -885,7 +885,11 @@ class FlowRunPublic(BaseModel):
     )
     dispatched_at: datetime | None = Field(
         default=None,
-        description="Timestamp when the broker last accepted this dispatch epoch.",
+        description=(
+            "Timestamp when this dispatch epoch first became possibly accepted: either "
+            "the broker confirmed acceptance or a later claim proved an earlier "
+            "attempt ended without a durable rejection receipt."
+        ),
     )
     dispatch_exhausted_at: datetime | None = Field(
         default=None,
@@ -1215,6 +1219,25 @@ class FlowRunStepPublic(BaseModel):
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunRedispatchRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"expected_dispatch_exhausted_at": "2026-07-22T08:30:00Z"}
+        },
+    )
+
+    expected_dispatch_exhausted_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Dispatch-exhaustion timestamp observed on the run. Send this value when "
+            "redriving accepted-delivery exhaustion so a retried request cannot rearm "
+            "a later exhausted dispatch epoch. Omit it for ordinary due queued "
+            "redispatch."
+        ),
+    )
 
 
 class FlowRunRedispatchResponse(BaseModel):

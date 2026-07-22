@@ -1,5 +1,29 @@
 # Flows Operations Runbook
 
+## Accepted Flow Dispatch Exhaustion
+
+A queued run with `dispatch_exhausted_at` set remains queued when at least one
+delivery was broker-accepted or the process stopped before it could persist the
+broker receipt. A delayed delivery may still claim it. `GET /api/healthz/flows` reports
+`ACCEPTED_DISPATCH_EXHAUSTED`, an `UNHEALTHY` status, the affected count, and
+the oldest age. This is distinct from never-accepted exhaustion, which remains
+a terminal `failed` run with the sanitized `flow_dispatch_failed` error.
+
+First verify worker and broker health and check whether a delayed worker claims
+the run. If every accepted delivery was lost, an authorized run owner may call
+`POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` with the observed
+`dispatch_exhausted_at` in `expected_dispatch_exhausted_at`. For an accepted
+exhausted run, that audited action atomically rearms exactly that epoch and
+attempts its first dispatch. Concurrent or retried requests cannot rearm a later
+exhausted epoch; automatic maintenance never resets the budget. Confirm
+`redispatched_count: 1`, then poll the run. A zero count means either another
+actor or worker already converged the run or broker acceptance was
+outcome-unknown; poll the returned run because bounded server recovery remains
+authoritative. The existing
+`flow_run_redispatched` audit action records every authorized request and
+whether that request rearmed an exhausted epoch. Never clear exhaustion fields
+with SQL.
+
 ## Lifecycle Audit Outbox Dead Letters
 
 Flow terminal and review transitions write a durable lifecycle-audit outbox.

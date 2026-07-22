@@ -14,6 +14,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.flows.api.flow_models import (
     FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE,
+    FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
 )
 from eneo.flows.api.flow_run_status_capability_models import (
@@ -2230,6 +2231,38 @@ def test_openapi_flow_run_public_exposes_strict_dispatch_lifecycle(
     assert redispatch_run["dispatch_last_attempt_at"] is not None
     assert redispatch_run["dispatched_at"] is not None
     assert redispatch_run["dispatch_next_attempt_at"] is not None
+
+    request_schema = schemas.get("FlowRunRedispatchRequest", {})
+    assert request_schema.get("additionalProperties") is False
+    assert request_schema.get("required", []) == []
+    expected_exhaustion = request_schema.get("properties", {}).get(
+        "expected_dispatch_exhausted_at", {}
+    )
+    assert "retried request cannot rearm" in expected_exhaustion.get("description", "")
+    assert FlowRunRedispatchRequest().expected_dispatch_exhausted_at is None
+
+    redispatch_operation = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
+        "post",
+    )
+    conflict_examples = _error_example_values(
+        redispatch_operation,
+        status_code="409",
+    )
+    assert conflict_examples[FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value][
+        "code"
+    ] == (FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value)
+    audit_unavailable_examples = _error_example_values(
+        redispatch_operation,
+        status_code="503",
+    )
+    assert (
+        audit_unavailable_examples[
+            FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value
+        ]["code"]
+        == FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value
+    )
 
 
 def test_openapi_flow_run_public_does_not_expose_legacy_user_mirror(

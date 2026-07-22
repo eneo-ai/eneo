@@ -303,6 +303,9 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             .values(
                 dispatch_pending_since=now
                 - timedelta(seconds=policy.stale_queued_after_seconds + 5),
+                dispatched_at=None,
+                dispatch_last_error=None,
+                dispatch_exhausted_at=now - timedelta(minutes=1),
                 updated_at=now,
             )
         )
@@ -382,8 +385,11 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
         policy.stale_queued_after_seconds + 5
     )
     assert response.runs.stale_running_count == 1
+    assert response.runs.accepted_dispatch_exhausted_count == 1
+    assert response.runs.oldest_accepted_dispatch_exhausted_age_seconds == 60
     assert response.status_flags == [
         FlowRuntimeHealthFlag.STALE_QUEUED_RUNS,
+        FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
         FlowRuntimeHealthFlag.TERMINAL_RUNS_WITH_OPEN_ATTEMPTS,

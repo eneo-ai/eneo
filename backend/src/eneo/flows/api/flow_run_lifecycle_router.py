@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Body,
     Depends,
     Header,
     Path,
@@ -17,9 +18,7 @@ from fastapi.responses import JSONResponse
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.audit.domain.entity_types import EntityType
-from eneo.audit.domain.outcome import Outcome
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
@@ -35,6 +34,7 @@ from eneo.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunDetailPublic,
     FlowRunPublic,
+    FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
 )
 from eneo.flows.api.flow_run_status_capability_models import (
@@ -50,8 +50,10 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
+    FlowRunDispatchExhaustionGenerationConflictError,
     FlowRunDispatchFailed,
     dispatch_flow_run_recoverably_after_commit,
+    redrive_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
@@ -59,7 +61,7 @@ from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes, InternalServerException
+from eneo.main.exceptions import ConflictException, ErrorCodes, InternalServerException
 from eneo.main.models import GeneralError, OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
@@ -582,12 +584,20 @@ async def cancel_flow_run(
     response_model=FlowRunRedispatchResponse,
     status_code=status.HTTP_200_OK,
     operation_id="redispatch_flow_run",
-    summary="Redispatch due queued run",
+    summary="Redispatch or redrive a queued run",
     description="""
-    Attempt to dispatch a queued run whose durable next-at clock is due.
+    Request dispatch for a queued run whose durable next-at clock is due. If the
+    bounded budget ended after broker acceptance or without a durable rejection receipt,
+    the run remains queued.
+    Send its observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to
+    rearm exactly that exhausted epoch. A retried request cannot rearm a later epoch.
+    The audit record and any budget reset commit together before broker I/O; disabled or
+    failed auditing prevents the redrive.
 
     Returns the refreshed run payload together with `redispatched_count`, which indicates
-    whether dispatch was re-triggered for this request.
+    whether dispatch was accepted for this request. A zero count means either another
+    actor or worker already converged the run, or broker acceptance was outcome-unknown;
+    poll the returned run because bounded server recovery remains authoritative.
 
     Service-key principals may redispatch only their own queued runs in v1.
     """,
@@ -605,18 +615,66 @@ async def cancel_flow_run(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        409: error_response(
+            description=(
+                "The accepted dispatch-exhaustion generation changed or the request "
+                "omitted its generation timestamp. Refresh the run and retry with the "
+                "current `dispatch_exhausted_at`."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value: {
+                    "summary": "Dispatch exhaustion generation changed",
+                    "value": {
+                        "message": (
+                            "Flow run dispatch exhaustion changed; refresh the run "
+                            "before retrying."
+                        ),
+                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                        "code": FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value,
+                        "context": {"run_id": "00000000-0000-4000-8000-000000000101"},
+                    },
+                }
+            },
+        ),
+        503: error_response(
+            description=(
+                "Required audit logging is unavailable, so redispatch was not armed."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value: {
+                    "summary": "Required redispatch audit unavailable",
+                    "value": {
+                        "message": "Redispatch audit logging is unavailable.",
+                        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+                        "code": (
+                            FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value
+                        ),
+                        "context": {"audit_required": True},
+                    },
+                }
+            },
+        ),
     },
 )
 async def redispatch_flow_run(
     id: Annotated[
-        UUID, Path(description="Identifier of the flow that owns the stale queued run.")
+        UUID,
+        Path(description="Identifier of the flow that owns the queued run."),
     ],
     run_id: Annotated[
         UUID,
-        Path(description="Identifier of the queued run to dispatch if it is due."),
+        Path(
+            description=(
+                "Identifier of the queued run to dispatch when due or redrive after "
+                "accepted-or-outcome-unknown dispatch exhaustion."
+            )
+        ),
     ],
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
+    payload: FlowRunRedispatchRequest = Body(  # pyright: ignore[reportCallInDefaultInitializer]
+        default_factory=FlowRunRedispatchRequest
+    ),
 ):
     await flow_access_context.enforce_flow_scope(
         request,
@@ -629,43 +687,28 @@ async def redispatch_flow_run(
     actor_kwargs = audit_actor_kwargs(user)
     run_service = container.flow_run_service()
     run = await run_service.get_run(run_id=run_id, flow_id=id)
-    dispatch_result = await dispatch_flow_run_recoverably_after_commit(
-        run_id=run.id,
-        tenant_id=run.tenant_id,
-        expected_revision=run.revision,
-    )
-    if isinstance(dispatch_result, FlowRunDispatchFailed):
-        failed_run = dispatch_result.run
-        await container.audit_service().log_async(
-            tenant_id=user.tenant_id,
+    try:
+        dispatch_result = await redrive_flow_run_recoverably_after_commit(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            expected_revision=run.revision,
             actor_id=actor_kwargs["actor_id"],
             actor_type=actor_kwargs["actor_type"],
             actor_api_key_id=actor_kwargs["actor_api_key_id"],
-            action=ActionType.FLOW_RUN_REDISPATCHED,
-            entity_type=EntityType.FLOW_RUN,
-            entity_id=failed_run.id,
-            description=f"Redispatch failed for flow run {failed_run.id}",
-            metadata=AuditMetadata.standard(actor=user, target=failed_run),
-            outcome=Outcome.FAILURE,
-            error_message=("Flow run dispatch failed; retry state was recorded.")[
-                :MAX_ERROR_MESSAGE_LENGTH
-            ],
+            audit_metadata=AuditMetadata.standard(actor=user, target=run),
+            expected_dispatch_exhausted_at=payload.expected_dispatch_exhausted_at,
         )
+    except FlowRunDispatchExhaustionGenerationConflictError as exc:
+        raise ConflictException(
+            "Flow run dispatch exhaustion changed; refresh the run before retrying.",
+            code=FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value,
+            context={"run_id": str(run.id)},
+        ) from exc
+    if isinstance(dispatch_result, FlowRunDispatchFailed):
         raise InternalServerException from None
 
     run = dispatch_result.run
     redispatched_count = int(isinstance(dispatch_result, FlowRunDispatchAccepted))
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=actor_kwargs["actor_id"],
-        actor_type=actor_kwargs["actor_type"],
-        actor_api_key_id=actor_kwargs["actor_api_key_id"],
-        action=ActionType.FLOW_RUN_REDISPATCHED,
-        entity_type=EntityType.FLOW_RUN,
-        entity_id=run.id,
-        description=f"Redispatch requested for flow run {run.id} (dispatch_count={redispatched_count})",
-        metadata=AuditMetadata.standard(actor=user, target=run),
-    )
     completed_run_view = (
         await run_service.enrich_run_with_result_files_and_token_usage(run=run)
         if run.status is FlowRunStatus.COMPLETED

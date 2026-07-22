@@ -53,6 +53,7 @@ import type {
   FlowRunEvidenceExport,
   FlowRunEvidenceWithTypedSteps,
   FlowRunOutputPayload,
+  FlowRunRedispatchRequest,
   FlowRunRedispatchResult,
   FlowRunRerunInvalidatedStep,
   FlowRunRerunOperation,
@@ -162,6 +163,7 @@ type PublicFlowLaunchAliasSmoke = {
   FlowRunEvidenceExport: FlowRunEvidenceExport;
   FlowRunEvidenceWithTypedSteps: FlowRunEvidenceWithTypedSteps;
   FlowRunOutputPayload: FlowRunOutputPayload;
+  FlowRunRedispatchRequest: FlowRunRedispatchRequest;
   FlowRunRedispatchResult: FlowRunRedispatchResult;
   FlowRunRerunInvalidatedStep: FlowRunRerunInvalidatedStep;
   FlowRunRerunOperation: FlowRunRerunOperation;
@@ -434,6 +436,9 @@ const validFlowRunError: FlowRunError = {
   code: "flow_step_execution_failed",
   message: "Step execution failed.",
   retryable: false
+};
+const validFlowRunRedispatchRequest: FlowRunRedispatchRequest = {
+  expected_dispatch_exhausted_at: "2026-07-22T08:30:00Z"
 };
 const validFlowRunRedispatchResult: FlowRunRedispatchResult = {
   run: validFlowRun,
@@ -863,6 +868,7 @@ void describeFlowRunResult(validArtifactResult);
 void describeFlowRunResult(validOutboundResult);
 void validFlowRunTokenUsage;
 void validFlowRunError;
+void validFlowRunRedispatchRequest;
 void validFlowRunRedispatchResult;
 void validCreateFlowRunResponse;
 void validGetFlowRunResponse;

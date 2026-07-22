@@ -571,7 +571,7 @@ def _golden_paths() -> tuple[GoldenPath, ...]:
             owner_notes=(
                 "`backend/src/eneo/flows/api/flow_run_lifecycle_router.py` parses the create request and schedules dispatch after commit.",
                 "`backend/src/eneo/flows/application/flow_run_service.py` creates the run and binds validated runtime inputs.",
-                "`backend/src/eneo/flows/application/flow_dispatch.py` owns due-attempt claim, broker send, and durable acceptance or failure recording. Broker delivery remains at-least-once: the bounded recovery clock stays armed until the repository's status-and-revision compare-and-set claims the run, so duplicate deliveries are harmless.",
+                "`backend/src/eneo/flows/application/flow_dispatch.py` owns due-attempt claim, broker send, durable acceptance or failure recording, and explicit redrive. Broker delivery remains at-least-once: the bounded recovery clock stays armed until the repository's status-and-revision compare-and-set claims the run, so duplicate deliveries are harmless. Exhaustion after broker acceptance or an interrupted acceptance receipt remains queued for a late worker; an audited redispatch request can rearm the caller-observed exhausted epoch when no delivery claims it, and a retried request cannot reset a later epoch. Only exhaustion with durable backend rejections becomes failed.",
                 "`backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.",
                 "`backend/src/eneo/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.",
                 "`backend/src/eneo/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.",

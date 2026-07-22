@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
@@ -87,6 +88,11 @@ class PreseedStep(TypedDict):
     step_id: UUID
     assistant_id: UUID
     step_order: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunDispatchRedriveGenerationConflict:
+    current_dispatch_exhausted_at: datetime | None
 
 
 def _current_step_attempt_pairs_by_result_id(
@@ -429,6 +435,18 @@ class FlowRunRepository:
             stmt.values(
                 dispatch_attempt_count=FlowRuns.dispatch_attempt_count + 1,
                 dispatch_last_attempt_at=now,
+                dispatch_last_error=None,
+                dispatched_at=sa.case(
+                    (
+                        sa.and_(
+                            FlowRuns.dispatch_attempt_count > 0,
+                            FlowRuns.dispatch_last_error.is_(None),
+                            FlowRuns.dispatched_at.is_(None),
+                        ),
+                        now,
+                    ),
+                    else_=FlowRuns.dispatched_at,
+                ),
                 dispatch_next_attempt_at=now
                 + timedelta(seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS),
                 updated_at=FlowRuns.updated_at,
@@ -466,6 +484,71 @@ class FlowRunRepository:
             return None
         return FlowRun.model_validate(exhausted)
 
+    async def rearm_exhausted_accepted_dispatch_for_redrive(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_dispatch_exhausted_at: datetime | None,
+        now: datetime,
+    ) -> FlowRun | FlowRunDispatchRedriveGenerationConflict | None:
+        """Start a fresh bounded epoch for accepted or outcome-unknown exhaustion."""
+
+        row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.revision == expected_revision)
+            .with_for_update()
+        )
+        if row is None:
+            return None
+        if row.status != FlowRunStatus.QUEUED.value:
+            return None
+        current_dispatch_exhausted_at = row.dispatch_exhausted_at
+        if (
+            expected_dispatch_exhausted_at is not None
+            and expected_dispatch_exhausted_at != current_dispatch_exhausted_at
+        ):
+            return FlowRunDispatchRedriveGenerationConflict(
+                current_dispatch_exhausted_at=current_dispatch_exhausted_at
+            )
+        accepted_or_outcome_unknown_exhaustion = (
+            current_dispatch_exhausted_at is not None
+            and (row.dispatched_at is not None or row.dispatch_last_error is None)
+        )
+        if not accepted_or_outcome_unknown_exhaustion:
+            return None
+        assert current_dispatch_exhausted_at is not None
+        if expected_dispatch_exhausted_at != current_dispatch_exhausted_at:
+            return FlowRunDispatchRedriveGenerationConflict(
+                current_dispatch_exhausted_at=current_dispatch_exhausted_at
+            )
+
+        rearmed = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(
+                sa.or_(
+                    FlowRuns.dispatched_at.is_not(None),
+                    FlowRuns.dispatch_last_error.is_(None),
+                )
+            )
+            .where(FlowRuns.dispatch_exhausted_at == expected_dispatch_exhausted_at)
+            .values(
+                **start_flow_dispatch_epoch(now),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if rearmed is None:
+            return None
+        return FlowRun.model_validate(rearmed)
+
     async def record_dispatch_accepted(
         self,
         *,
@@ -484,7 +567,7 @@ class FlowRunRepository:
             .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
             .where(FlowRuns.dispatch_exhausted_at.is_(None))
             .values(
-                dispatched_at=now,
+                dispatched_at=sa.func.coalesce(FlowRuns.dispatched_at, now),
                 dispatch_next_attempt_at=now
                 + timedelta(
                     seconds=flow_dispatch_retry_delay_seconds(
@@ -498,6 +581,42 @@ class FlowRunRepository:
         if accepted is None:
             return None
         return FlowRun.model_validate(accepted)
+
+    async def record_dispatch_outcome_unknown(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        """Preserve a transport-ambiguous attempt without inventing a rejection."""
+
+        values: dict[str, Any] = {
+            "dispatch_last_error": None,
+            "dispatched_at": sa.func.coalesce(FlowRuns.dispatched_at, now),
+            "updated_at": FlowRuns.updated_at,
+        }
+        if expected_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS:
+            values.update(
+                dispatch_next_attempt_at=None,
+                dispatch_exhausted_at=now,
+            )
+        run = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(**values)
+            .returning(FlowRuns)
+        )
+        if run is None:
+            return None
+        return FlowRun.model_validate(run)
 
     async def record_dispatch_failure(
         self,

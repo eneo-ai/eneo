@@ -785,8 +785,8 @@ export function initFlows(client) {
       },
 
       /**
-       * Redispatch a stale queued flow run
-       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * Redispatch a stale queued flow run, optionally rearming the observed exhausted epoch.
+       * @param {{id: string, flowId: string, flow_id?: string} & import('../types/resources').FlowRunRedispatchRequest} run
        * @returns {Promise<import('../types/resources').FlowRunRedispatchResult>}
        * @throws {EneoError}
        */
@@ -794,7 +794,12 @@ export function initFlows(client) {
         const flowId = _requireFlowIdForRunRoute(run, "redispatch");
         return _fetch("/api/v1/flows/{id}/runs/{run_id}/redispatch/", {
           method: "post",
-          params: { path: { id: flowId, run_id: run.id } }
+          params: { path: { id: flowId, run_id: run.id } },
+          requestBody: {
+            "application/json": {
+              expected_dispatch_exhausted_at: run.expected_dispatch_exhausted_at
+            }
+          }
         });
       },
 

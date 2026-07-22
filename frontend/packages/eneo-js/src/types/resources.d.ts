@@ -267,6 +267,7 @@ export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"
   step_results: FlowRunStep[];
 };
 export type FlowRunEvidenceExport = components["schemas"]["FlowRunEvidenceExportResponse"];
+export type FlowRunRedispatchRequest = components["schemas"]["FlowRunRedispatchRequest"];
 export type FlowRunRedispatchResult = components["schemas"]["FlowRunRedispatchResponse"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =

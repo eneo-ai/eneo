@@ -9,6 +9,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthStatus,
     FlowRuntimeProbe,
     FlowRuntimeProbeFailure,
+    FlowRuntimeRunSummary,
     classify_flow_runtime_health,
     flow_runtime_health_probe_failure_response,
 )
@@ -57,6 +58,37 @@ def test_stale_queued_runs_degrade_health() -> None:
     assert response.status == FlowRuntimeHealthStatus.DEGRADED
     assert response.status_flags == [FlowRuntimeHealthFlag.STALE_QUEUED_RUNS]
     assert response.runs.oldest_stale_queued_age_seconds == 60
+
+
+def test_accepted_dispatch_exhaustion_is_operator_visible_and_unhealthy() -> None:
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            queued_count=1,
+            accepted_dispatch_exhausted_count=1,
+            oldest_accepted_dispatch_exhausted_at=datetime(
+                2026, 5, 2, 11, 59, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED]
+    assert "accepted dispatch exhaustion" in response.status_reason.lower()
+    assert response.runs.accepted_dispatch_exhausted_count == 1
+    assert response.runs.oldest_accepted_dispatch_exhausted_age_seconds == 60
+
+
+def test_accepted_dispatch_exhaustion_schema_explains_recovery() -> None:
+    properties = FlowRuntimeRunSummary.model_json_schema()["properties"]
+    count_description = properties["accepted_dispatch_exhausted_count"]["description"]
+    age_description = properties["oldest_accepted_dispatch_exhausted_age_seconds"][
+        "description"
+    ]
+
+    assert "broker-accepted or has no durable rejection receipt" in count_description
+    assert "UNHEALTHY" in count_description
+    assert "redispatch endpoint" in count_description
+    assert "dispatch_exhausted_at" in age_description
 
 
 def test_stale_running_runs_degrade_before_reconciler_grace_expires() -> None:

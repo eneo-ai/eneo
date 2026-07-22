@@ -746,6 +746,14 @@ and when to submit a new run.
 
 `redispatch` is for **stale queued runs**. It asks the system to try dispatching a queued run again if it appears stuck before execution started. It is not the same as creating a brand-new run.
 
+If at least one broker delivery was accepted but no worker claimed the run
+before the bounded dispatch budget ended, the run remains `queued`. A
+redispatch request is the audited recovery action that starts one fresh bounded
+dispatch epoch. Send the run's observed `dispatch_exhausted_at` as
+`expected_dispatch_exhausted_at`; a retried request cannot rearm a later
+exhausted epoch. Automatic maintenance never resets that budget. By contrast,
+exhaustion where the broker never accepted a delivery remains terminal `failed`.
+
 If no stale queued work is found, the endpoint can still return `200` with `redispatched_count: 0`. Treat that as a no-op rather than as a new execution.
 
 #### Human review checkpoints

@@ -14,8 +14,9 @@ from uuid import uuid4
 import pytest
 from fastapi import BackgroundTasks
 
+from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.outcome import Outcome
+from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api import flow_access_context as flow_access_context_module
@@ -26,6 +27,7 @@ from eneo.flows.api.flow_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
     FlowRunCreateRequest,
+    FlowRunRedispatchRequest,
     FlowRunReviewCheckpointResumeRequest,
     FlowRunStepRerunRequest,
 )
@@ -44,6 +46,7 @@ from eneo.flows.api.flow_run_steps_router import (
 )
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
+    FlowRunDispatchExhaustionGenerationConflictError,
     FlowRunDispatchFailed,
     FlowRunDispatchNotClaimed,
     dispatch_flow_run_recoverably_after_commit,
@@ -78,6 +81,7 @@ from eneo.flows.published_definition import (
 )
 from eneo.main.exceptions import (
     BadRequestException,
+    ConflictException,
     InternalServerException,
     NotFoundException,
 )
@@ -935,13 +939,6 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     run_service.get_run.side_effect = [run, refreshed]
     container.flow_run_service.return_value = run_service
     container.user.return_value = user
-    audit_service = AsyncMock()
-
-    async def log_audit(**_kwargs):
-        events.append("audit")
-
-    audit_service.log_async.side_effect = log_audit
-    container.audit_service.return_value = audit_service
 
     async def _dispatch(**_kwargs):
         events.append("dispatch")
@@ -955,7 +952,7 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
         lifecycle_router_module,
-        "dispatch_flow_run_recoverably_after_commit",
+        "redrive_flow_run_recoverably_after_commit",
         dispatch,
     )
 
@@ -964,6 +961,7 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
         run_id=run.id,
         request=SimpleNamespace(state=SimpleNamespace()),
         container=container,
+        payload=FlowRunRedispatchRequest(expected_dispatch_exhausted_at=run.created_at),
     )
 
     assert response.run.id == refreshed.id
@@ -971,7 +969,6 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     assert events == [
         "scope",
         "dispatch",
-        "audit",
     ]
     assert run_service.get_run.await_count == 1
     assert run_service.get_run.await_args_list[0].kwargs == {
@@ -982,11 +979,12 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
         run_id=run.id,
         tenant_id=run.tenant_id,
         expected_revision=run.revision,
+        actor_id=user.id,
+        actor_type=ActorType.USER,
+        actor_api_key_id=None,
+        audit_metadata=AuditMetadata.standard(actor=user, target=run),
+        expected_dispatch_exhausted_at=run.created_at,
     )
-    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
-    assert kwargs["entity_id"] == refreshed.id
-    assert kwargs["metadata"]["target"]["id"] == str(refreshed.id)
 
 
 @pytest.mark.asyncio
@@ -1027,7 +1025,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
         lifecycle_router_module,
-        "dispatch_flow_run_recoverably_after_commit",
+        "redrive_flow_run_recoverably_after_commit",
         dispatch,
     )
 
@@ -1036,6 +1034,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
         run_id=run.id,
         request=SimpleNamespace(state=SimpleNamespace()),
         container=container,
+        payload=FlowRunRedispatchRequest(),
     )
 
     assert response.run.id == run.id
@@ -1048,13 +1047,59 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
         run_id=run.id,
         tenant_id=run.tenant_id,
         expected_revision=run.revision,
+        actor_id=user.id,
+        actor_type=ActorType.USER,
+        actor_api_key_id=None,
+        audit_metadata=AuditMetadata.standard(actor=user, target=run),
+        expected_dispatch_exhausted_at=None,
     )
     run_service.enrich_run_with_result_files_and_token_usage.assert_awaited_once_with(
         run=run
     )
-    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
-    assert "dispatch_count=0" in kwargs["description"]
+
+
+@pytest.mark.asyncio
+async def test_redispatch_flow_run_translates_exhaustion_generation_conflict(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    container.flow_run_service.return_value = run_service
+    container.user.return_value = user
+    dispatch = AsyncMock(
+        side_effect=FlowRunDispatchExhaustionGenerationConflictError(
+            current_dispatch_exhausted_at=run.created_at
+        )
+    )
+
+    async def enforce_scope(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
+    monkeypatch.setattr(
+        lifecycle_router_module,
+        "redrive_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await redispatch_flow_run(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+            payload=FlowRunRedispatchRequest(),
+        )
+
+    assert exc_info.value.code == "flow_run_redispatch_conflict"
+    assert exc_info.value.context == {"run_id": str(run.id)}
+    dispatch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1077,7 +1122,7 @@ async def test_redispatch_flow_run_translates_dispatch_error(monkeypatch):
     monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce_scope)
     monkeypatch.setattr(
         lifecycle_router_module,
-        "dispatch_flow_run_recoverably_after_commit",
+        "redrive_flow_run_recoverably_after_commit",
         dispatch,
     )
 
@@ -1087,6 +1132,7 @@ async def test_redispatch_flow_run_translates_dispatch_error(monkeypatch):
             run_id=run.id,
             request=SimpleNamespace(state=SimpleNamespace()),
             container=container,
+            payload=FlowRunRedispatchRequest(),
         )
 
     assert exc_info.value.__cause__ is None
@@ -1094,15 +1140,12 @@ async def test_redispatch_flow_run_translates_dispatch_error(monkeypatch):
         run_id=run.id,
         tenant_id=run.tenant_id,
         expected_revision=run.revision,
+        actor_id=user.id,
+        actor_type=ActorType.USER,
+        actor_api_key_id=None,
+        audit_metadata=AuditMetadata.standard(actor=user, target=run),
+        expected_dispatch_exhausted_at=None,
     )
-    kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert kwargs["action"] == ActionType.FLOW_RUN_REDISPATCHED
-    assert kwargs["entity_id"] == run.id
-    assert kwargs["outcome"] == Outcome.FAILURE
-    assert kwargs["error_message"] == (
-        "Flow run dispatch failed; retry state was recorded."
-    )
-    assert "secret" not in kwargs["error_message"]
 
 
 @pytest.mark.asyncio
@@ -1130,6 +1173,7 @@ async def test_redispatch_flow_run_checks_scope_before_service_or_backend(monkey
             run_id=run_id,
             request=SimpleNamespace(state=SimpleNamespace()),
             container=container,
+            payload=FlowRunRedispatchRequest(),
         )
 
     assert events == ["scope"]

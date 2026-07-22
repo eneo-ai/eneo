@@ -9,12 +9,17 @@ import pytest
 from pydantic import ValidationError
 
 import eneo.flows.application.flow_dispatch as flow_dispatch_module
+from eneo.audit.domain.actor_types import ActorType
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
     FlowRunDispatchExhausted,
+    FlowRunDispatchExhaustionGenerationConflictError,
     FlowRunDispatchFailed,
     FlowRunDispatchInvalidRequest,
+    FlowRunDispatchNotClaimed,
+    FlowRunDispatchOutcomeUnknown,
     dispatch_flow_run_recoverably_after_commit,
+    redrive_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
@@ -22,6 +27,8 @@ from eneo.flows.domain.flow_run_recovery_policy import (
     flow_dispatch_retry_delay_seconds,
     start_flow_dispatch_epoch,
 )
+from eneo.flows.execution_backend import FlowExecutionDispatchRejected
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_dispatch_request import (
     FlowRunUserDispatchRequest,
     build_flow_run_dispatch_request,
@@ -30,6 +37,10 @@ from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunDispatchErrorKind,
 )
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunDispatchRedriveGenerationConflict,
+)
+from eneo.main.exceptions import AuditLoggingUnavailableException
 from tests.unittests.flows.test_flow_router import _run
 
 
@@ -116,6 +127,7 @@ def _install_dispatch_dependencies(
     backend,
     terminalizer,
     events: list[str],
+    audit_service: MagicMock | None = None,
 ) -> None:
     session = _DispatchSession(events)
 
@@ -136,12 +148,192 @@ def _install_dispatch_dependencies(
         def flow_run_terminalizer(self):
             return terminalizer
 
+        def audit_service(self):
+            return audit_service
+
     monkeypatch.setattr(
         flow_dispatch_module.sessionmanager,
         "session",
         lambda: _SessionContext(),
     )
     monkeypatch.setattr(flow_dispatch_module, "Container", lambda session: _Container())
+
+
+@pytest.mark.asyncio
+async def test_manual_redrive_commits_audit_with_rearm_before_dispatch(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    run_repo = MagicMock()
+
+    async def _rearm(**_kwargs):
+        events.append("rearm")
+        return run
+
+    run_repo.rearm_exhausted_accepted_dispatch_for_redrive = AsyncMock(
+        side_effect=_rearm
+    )
+    audit_service = MagicMock()
+
+    async def _audit(**_kwargs):
+        events.append("audit")
+        return object()
+
+    audit_service.log = AsyncMock(side_effect=_audit)
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=MagicMock(),
+        terminalizer=MagicMock(),
+        events=events,
+        audit_service=audit_service,
+    )
+
+    async def _dispatch(**_kwargs):
+        events.append("dispatch")
+        return FlowRunDispatchNotClaimed(run=run)
+
+    dispatch = AsyncMock(side_effect=_dispatch)
+    monkeypatch.setattr(
+        flow_dispatch_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+
+    metadata = {"target": {"id": str(run.id)}}
+    result = await redrive_flow_run_recoverably_after_commit(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+        actor_id=run.principal_user_id,
+        actor_type=ActorType.USER,
+        actor_api_key_id=None,
+        audit_metadata=metadata,
+        expected_dispatch_exhausted_at=run.created_at,
+    )
+
+    assert isinstance(result, FlowRunDispatchNotClaimed)
+    assert events == [
+        "transaction_enter",
+        "rearm",
+        "audit",
+        "transaction_exit",
+        "dispatch",
+    ]
+    audit_kwargs = audit_service.log.await_args.kwargs
+    assert audit_kwargs["metadata"] == {
+        **metadata,
+        "accepted_exhaustion_rearmed": True,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_outcome", ["disabled", "error"])
+async def test_manual_redrive_rolls_back_and_skips_dispatch_when_audit_is_unavailable(
+    monkeypatch,
+    audit_outcome: str,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    run_repo = MagicMock()
+    run_repo.rearm_exhausted_accepted_dispatch_for_redrive = AsyncMock(return_value=run)
+    audit_service = MagicMock()
+    audit_service.log = (
+        AsyncMock(return_value=None)
+        if audit_outcome == "disabled"
+        else AsyncMock(side_effect=RuntimeError("audit write failed"))
+    )
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=MagicMock(),
+        terminalizer=MagicMock(),
+        events=events,
+        audit_service=audit_service,
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        flow_dispatch_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await redrive_flow_run_recoverably_after_commit(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            expected_revision=run.revision,
+            actor_id=run.principal_user_id,
+            actor_type=ActorType.USER,
+            actor_api_key_id=None,
+            audit_metadata={"target": {"id": str(run.id)}},
+            expected_dispatch_exhausted_at=run.created_at,
+        )
+
+    assert exc_info.value.code == (
+        FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value
+    )
+    assert exc_info.value.context == {"audit_required": True}
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("generation_case", ["missing", "stale"])
+async def test_manual_redrive_rejects_missing_or_stale_exhaustion_generation_without_audit(
+    monkeypatch,
+    generation_case: str,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    current_exhausted_at = run.created_at + timedelta(minutes=1)
+    expected_dispatch_exhausted_at = (
+        None if generation_case == "missing" else run.created_at
+    )
+    run_repo = MagicMock()
+
+    async def _conflict(**_kwargs):
+        events.append("rearm")
+        return FlowRunDispatchRedriveGenerationConflict(
+            current_dispatch_exhausted_at=current_exhausted_at
+        )
+
+    run_repo.rearm_exhausted_accepted_dispatch_for_redrive = AsyncMock(
+        side_effect=_conflict
+    )
+    audit_service = MagicMock()
+    audit_service.log = AsyncMock()
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=MagicMock(),
+        terminalizer=MagicMock(),
+        events=events,
+        audit_service=audit_service,
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        flow_dispatch_module,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+
+    with pytest.raises(FlowRunDispatchExhaustionGenerationConflictError) as exc_info:
+        await redrive_flow_run_recoverably_after_commit(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            expected_revision=run.revision,
+            actor_id=run.principal_user_id,
+            actor_type=ActorType.USER,
+            actor_api_key_id=None,
+            audit_metadata={"target": {"id": str(run.id)}},
+            expected_dispatch_exhausted_at=expected_dispatch_exhausted_at,
+        )
+
+    assert exc_info.value.current_dispatch_exhausted_at == current_exhausted_at
+    assert events == ["transaction_enter", "rearm", "transaction_exit"]
+    audit_service.log.assert_not_awaited()
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -218,7 +410,7 @@ async def test_dispatch_coordinator_commits_claim_before_broker_and_records_acce
 
 
 @pytest.mark.asyncio
-async def test_dispatch_coordinator_persists_safe_failure_without_raw_cause(
+async def test_dispatch_coordinator_persists_certified_rejection_without_raw_cause(
     monkeypatch,
     caplog,
 ) -> None:
@@ -237,7 +429,7 @@ async def test_dispatch_coordinator_persists_safe_failure_without_raw_cause(
     run_repo.record_dispatch_failure = AsyncMock(side_effect=_record_failure)
     backend = MagicMock()
     backend.dispatch = AsyncMock(
-        side_effect=RuntimeError("postgresql://credential@broker")
+        side_effect=FlowExecutionDispatchRejected("postgresql://credential@broker")
     )
     terminalizer = MagicMock()
     terminalizer.terminalize_run = AsyncMock()
@@ -319,7 +511,7 @@ async def test_dispatch_coordinator_terminalizes_invalid_principal_once(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_coordinator_terminalizes_known_final_failure_once(
+async def test_dispatch_coordinator_terminalizes_certified_final_rejection_once(
     monkeypatch,
 ) -> None:
     events: list[str] = []
@@ -332,7 +524,9 @@ async def test_dispatch_coordinator_terminalizes_known_final_failure_once(
     run_repo.claim_queued_run_for_dispatch = AsyncMock(return_value=claimed)
     run_repo.record_dispatch_failure = AsyncMock(return_value=exhausted)
     backend = MagicMock()
-    backend.dispatch = AsyncMock(side_effect=RuntimeError("broker unavailable"))
+    backend.dispatch = AsyncMock(
+        side_effect=FlowExecutionDispatchRejected("broker rejected dispatch")
+    )
     terminalizer = MagicMock()
     terminalizer.terminalize_run = AsyncMock(
         return_value=SimpleNamespace(run=terminal_run)
@@ -357,12 +551,68 @@ async def test_dispatch_coordinator_terminalizes_known_final_failure_once(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_coordinator_keeps_final_ambiguous_exception_queued_and_exhausted(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    claimed = run.model_copy(
+        update={"dispatch_attempt_count": FLOW_DISPATCH_MAX_ATTEMPTS}
+    )
+    exhausted = claimed.model_copy(
+        update={
+            "status": FlowRunStatus.QUEUED,
+            "dispatch_last_error": None,
+            "dispatch_next_attempt_at": None,
+            "dispatch_exhausted_at": run.created_at,
+        }
+    )
+    run_repo = MagicMock()
+    run_repo.mark_dispatch_exhausted_if_due = AsyncMock(return_value=None)
+    run_repo.claim_queued_run_for_dispatch = AsyncMock(return_value=claimed)
+    run_repo.record_dispatch_outcome_unknown = AsyncMock(return_value=exhausted)
+    run_repo.record_dispatch_failure = AsyncMock()
+    backend = MagicMock()
+    backend.dispatch = AsyncMock(side_effect=RuntimeError("transport outcome unknown"))
+    terminalizer = MagicMock()
+    terminalizer.terminalize_run = AsyncMock()
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=backend,
+        terminalizer=terminalizer,
+        events=events,
+    )
+
+    result = await dispatch_flow_run_recoverably_after_commit(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+    )
+
+    assert isinstance(result, FlowRunDispatchOutcomeUnknown)
+    assert result.run.status == FlowRunStatus.QUEUED
+    assert result.run.dispatch_last_error is None
+    assert result.run.dispatch_next_attempt_at is None
+    assert result.run.dispatch_exhausted_at is not None
+    run_repo.record_dispatch_outcome_unknown.assert_awaited_once()
+    run_repo.record_dispatch_failure.assert_not_awaited()
+    terminalizer.terminalize_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_coordinator_terminalizes_due_exhausted_epoch_once(
     monkeypatch,
 ) -> None:
     events: list[str] = []
     run = _run(flow_id=uuid4(), tenant_id=uuid4()).model_copy(
-        update={"dispatch_attempt_count": FLOW_DISPATCH_MAX_ATTEMPTS}
+        update={
+            "status": FlowRunStatus.QUEUED,
+            "dispatch_attempt_count": FLOW_DISPATCH_MAX_ATTEMPTS,
+            "dispatch_last_error": FlowRunDispatchError.from_kind(
+                FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+            ),
+        }
     )
     exhausted = run.model_copy(update={"dispatch_exhausted_at": run.created_at})
     terminal_run = exhausted.model_copy(update={"status": FlowRunStatus.FAILED})
@@ -392,6 +642,96 @@ async def test_dispatch_coordinator_terminalizes_due_exhausted_epoch_once(
     assert isinstance(result, FlowRunDispatchExhausted)
     assert result.run.status == FlowRunStatus.FAILED
     terminalizer.terminalize_run.assert_awaited_once()
+    terminal_error = terminalizer.terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code == FlowApiErrorCode.RUN_DISPATCH_FAILED
+    assert terminal_error.message == (
+        "flow_dispatch_failed: Flow run dispatch exhausted its bounded attempts."
+    )
+    run_repo.claim_queued_run_for_dispatch.assert_not_awaited()
+    backend.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_coordinator_keeps_accepted_due_exhaustion_queued(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    accepted = run.model_copy(
+        update={
+            "status": FlowRunStatus.QUEUED,
+            "dispatch_attempt_count": FLOW_DISPATCH_MAX_ATTEMPTS,
+            "dispatched_at": run.created_at,
+        }
+    )
+    exhausted = accepted.model_copy(update={"dispatch_exhausted_at": run.created_at})
+    run_repo = MagicMock()
+    run_repo.mark_dispatch_exhausted_if_due = AsyncMock(return_value=exhausted)
+    run_repo.claim_queued_run_for_dispatch = AsyncMock()
+    backend = MagicMock()
+    backend.dispatch = AsyncMock()
+    terminalizer = MagicMock()
+    terminalizer.terminalize_run = AsyncMock()
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=backend,
+        terminalizer=terminalizer,
+        events=events,
+    )
+
+    result = await dispatch_flow_run_recoverably_after_commit(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+    )
+
+    assert isinstance(result, FlowRunDispatchExhausted)
+    assert result.run.status == FlowRunStatus.QUEUED
+    assert result.run.dispatch_exhausted_at is not None
+    terminalizer.terminalize_run.assert_not_awaited()
+    run_repo.claim_queued_run_for_dispatch.assert_not_awaited()
+    backend.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_coordinator_keeps_outcome_unknown_exhaustion_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    run = _run(flow_id=uuid4(), tenant_id=uuid4())
+    exhausted = run.model_copy(
+        update={
+            "status": FlowRunStatus.QUEUED,
+            "dispatch_attempt_count": FLOW_DISPATCH_MAX_ATTEMPTS,
+            "dispatch_exhausted_at": run.created_at,
+            "dispatch_last_error": None,
+        }
+    )
+    run_repo = MagicMock()
+    run_repo.mark_dispatch_exhausted_if_due = AsyncMock(return_value=exhausted)
+    run_repo.claim_queued_run_for_dispatch = AsyncMock()
+    backend = MagicMock()
+    backend.dispatch = AsyncMock()
+    terminalizer = MagicMock()
+    terminalizer.terminalize_run = AsyncMock()
+    _install_dispatch_dependencies(
+        monkeypatch,
+        run_repo=run_repo,
+        backend=backend,
+        terminalizer=terminalizer,
+        events=events,
+    )
+
+    result = await dispatch_flow_run_recoverably_after_commit(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        expected_revision=run.revision,
+    )
+
+    assert isinstance(result, FlowRunDispatchExhausted)
+    assert result.run.status == FlowRunStatus.QUEUED
+    terminalizer.terminalize_run.assert_not_awaited()
     run_repo.claim_queued_run_for_dispatch.assert_not_awaited()
     backend.dispatch.assert_not_awaited()
 

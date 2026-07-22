@@ -315,7 +315,7 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "Reuse the same `Idempotency-Key` only for the same create-run payload.",
             "Send `expected_flow_version` from the run contract so edited published versions do not surprise clients.",
             "Call `runtime_paths.cancel_run_template` when the user intentionally abandons a non-terminal run.",
-            "Call `runtime_paths.redispatch_run_template` only for stale queued recovery; `redispatched_count: 0` means no dispatch was needed.",
+            "Call `runtime_paths.redispatch_run_template` only for stale queued recovery. For accepted or outcome-unknown exhaustion, send the observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to rearm that epoch. A zero `redispatched_count` means no broker acceptance was confirmed; poll the returned run.",
             "Back off polling when `status_capabilities.should_poll` is false.",
             "Use run and step polling as the source of truth for status changes.",
         ),

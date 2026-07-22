@@ -243,10 +243,14 @@
     }
   }
 
-  async function redispatchRun(runId: string) {
-    redispatchingRunId = runId;
+  async function redispatchRun(run: FlowRun) {
+    redispatchingRunId = run.id;
     try {
-      const result = await eneo.flows.runs.redispatch({ id: runId, flowId: flow.id });
+      const result = await eneo.flows.runs.redispatch({
+        id: run.id,
+        flowId: flow.id,
+        expected_dispatch_exhausted_at: run.dispatch_exhausted_at
+      });
       if (getRedispatchToastKind(result?.redispatched_count) === "success") {
         toast.success(m.flow_run_redispatch_requested());
       } else {
@@ -586,7 +590,7 @@
                         variant="outline"
                         size="sm"
                         disabled={redispatchingRunId === run.id}
-                        onclick={() => void redispatchRun(run.id)}
+                        onclick={() => void redispatchRun(run)}
                       >
                         {redispatchingRunId === run.id
                           ? m.flow_run_redispatching()
@@ -706,7 +710,7 @@
                     size="sm"
                     class="flex-1"
                     disabled={redispatchingRunId === run.id}
-                    onclick={() => void redispatchRun(run.id)}
+                    onclick={() => void redispatchRun(run)}
                   >
                     {redispatchingRunId === run.id
                       ? m.flow_run_redispatching()

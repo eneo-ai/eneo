@@ -44,7 +44,10 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunDispatchRedriveGenerationConflict,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
@@ -3150,6 +3153,47 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         assert [item.id for item in oldest_only] == [due_second.id]
         assert [item.id for item in run_scoped] == [due_first.id]
 
+        ambiguous_retry = await _create_run(flow=second_flow, case="ambiguous-retry")
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == ambiguous_retry.id)
+            .values(
+                dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS - 1,
+                dispatch_last_attempt_at=now - timedelta(minutes=1),
+                dispatch_last_error=None,
+                dispatch_next_attempt_at=now,
+                dispatched_at=None,
+            )
+        )
+        final_ambiguous_claim = await run_repo.claim_queued_run_for_dispatch(
+            run_id=ambiguous_retry.id,
+            tenant_id=ambiguous_retry.tenant_id,
+            expected_revision=ambiguous_retry.revision,
+            now=now,
+        )
+        assert final_ambiguous_claim is not None
+        assert (
+            final_ambiguous_claim.dispatch_attempt_count == FLOW_DISPATCH_MAX_ATTEMPTS
+        )
+        assert final_ambiguous_claim.dispatch_last_error is None
+        assert final_ambiguous_claim.dispatched_at == now
+
+        ambiguous_then_rejected = await run_repo.record_dispatch_failure(
+            run_id=final_ambiguous_claim.id,
+            tenant_id=final_ambiguous_claim.tenant_id,
+            expected_revision=final_ambiguous_claim.revision,
+            expected_attempt_count=final_ambiguous_claim.dispatch_attempt_count,
+            error=FlowRunDispatchError.from_kind(
+                FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+            ),
+            now=now + timedelta(seconds=1),
+        )
+        assert ambiguous_then_rejected is not None
+        assert ambiguous_then_rejected.dispatch_exhausted_at == now + timedelta(
+            seconds=1
+        )
+        assert ambiguous_then_rejected.dispatched_at == now
+
         wrong_revision_claim = await run_repo.claim_queued_run_for_dispatch(
             run_id=due_first.id,
             tenant_id=admin_user.tenant_id,
@@ -3209,6 +3253,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
             now=second_attempt_at,
         )
         assert second_attempt is not None
+        assert second_attempt.dispatch_last_error is None
         accepted_at = second_attempt_at + timedelta(seconds=1)
         accepted = await run_repo.record_dispatch_accepted(
             run_id=second_attempt.id,
@@ -3220,7 +3265,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         assert accepted is not None
         assert accepted.dispatch_attempt_count == 2
         assert accepted.dispatch_last_attempt_at == second_attempt_at
-        assert accepted.dispatch_last_error == safe_error
+        assert accepted.dispatch_last_error is None
         assert accepted.dispatch_next_attempt_at == accepted_at + timedelta(seconds=120)
         assert accepted.dispatched_at == accepted_at
         assert accepted.dispatch_pending_since == first_pending_since
@@ -3233,6 +3278,37 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
             now=now,
         )
         assert unknown_outcome_claim is not None
+        unknown_outcome = await run_repo.record_dispatch_outcome_unknown(
+            run_id=unknown_outcome_claim.id,
+            tenant_id=unknown_outcome_claim.tenant_id,
+            expected_revision=unknown_outcome_claim.revision,
+            expected_attempt_count=unknown_outcome_claim.dispatch_attempt_count,
+            now=now + timedelta(seconds=1),
+        )
+        assert unknown_outcome is not None
+        assert unknown_outcome.status == FlowRunStatus.QUEUED
+        assert unknown_outcome.dispatch_last_error is None
+        assert unknown_outcome.dispatched_at == now + timedelta(seconds=1)
+        assert unknown_outcome.dispatch_next_attempt_at == now + timedelta(seconds=30)
+        assert unknown_outcome.dispatch_exhausted_at is None
+
+        accepted_after_unknown_claim = await run_repo.claim_queued_run_for_dispatch(
+            run_id=unknown_outcome.id,
+            tenant_id=unknown_outcome.tenant_id,
+            expected_revision=unknown_outcome.revision,
+            now=now + timedelta(seconds=31),
+        )
+        assert accepted_after_unknown_claim is not None
+        accepted_after_unknown = await run_repo.record_dispatch_accepted(
+            run_id=accepted_after_unknown_claim.id,
+            tenant_id=accepted_after_unknown_claim.tenant_id,
+            expected_revision=accepted_after_unknown_claim.revision,
+            expected_attempt_count=accepted_after_unknown_claim.dispatch_attempt_count,
+            now=now + timedelta(seconds=32),
+        )
+        assert accepted_after_unknown is not None
+        assert accepted_after_unknown.dispatched_at == now + timedelta(seconds=1)
+
         assert not await run_repo.mark_running_if_claimable(
             run_id=due_second.id,
             tenant_id=due_second.tenant_id,
@@ -3254,6 +3330,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
             .where(FlowRuns.id == not_due.id)
             .values(
                 dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS,
+                dispatch_last_error=safe_error.model_dump(mode="json"),
                 dispatch_next_attempt_at=now,
             )
         )
@@ -3267,3 +3344,99 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         assert exhausted.dispatch_attempt_count == FLOW_DISPATCH_MAX_ATTEMPTS
         assert exhausted.dispatch_next_attempt_at is None
         assert exhausted.dispatch_exhausted_at == now
+
+        never_accepted_redrive = (
+            await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+                run_id=exhausted.id,
+                tenant_id=exhausted.tenant_id,
+                expected_revision=exhausted.revision,
+                expected_dispatch_exhausted_at=exhausted.dispatch_exhausted_at,
+                now=now + timedelta(seconds=1),
+            )
+        )
+        assert never_accepted_redrive is None
+
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == exhausted.id)
+            .values(dispatched_at=now - timedelta(minutes=1))
+        )
+        missing_generation = (
+            await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+                run_id=exhausted.id,
+                tenant_id=exhausted.tenant_id,
+                expected_revision=exhausted.revision,
+                expected_dispatch_exhausted_at=None,
+                now=now + timedelta(seconds=1),
+            )
+        )
+        assert missing_generation == FlowRunDispatchRedriveGenerationConflict(
+            current_dispatch_exhausted_at=exhausted.dispatch_exhausted_at
+        )
+
+        redrive_at = now + timedelta(seconds=2)
+        rearmed = await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+            run_id=exhausted.id,
+            tenant_id=exhausted.tenant_id,
+            expected_revision=exhausted.revision,
+            expected_dispatch_exhausted_at=exhausted.dispatch_exhausted_at,
+            now=redrive_at,
+        )
+        assert rearmed is not None
+        assert rearmed.status == FlowRunStatus.QUEUED
+        assert rearmed.dispatch_pending_since == redrive_at
+        assert rearmed.dispatch_attempt_count == 0
+        assert rearmed.dispatch_last_attempt_at is None
+        assert rearmed.dispatch_last_error is None
+        assert rearmed.dispatch_next_attempt_at == redrive_at
+        assert rearmed.dispatch_exhausted_at is None
+        assert rearmed.dispatched_at is None
+
+        stale_retry_during_rearmed_epoch = (
+            await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+                run_id=exhausted.id,
+                tenant_id=exhausted.tenant_id,
+                expected_revision=exhausted.revision,
+                expected_dispatch_exhausted_at=exhausted.dispatch_exhausted_at,
+                now=redrive_at + timedelta(seconds=1),
+            )
+        )
+        assert stale_retry_during_rearmed_epoch == (
+            FlowRunDispatchRedriveGenerationConflict(current_dispatch_exhausted_at=None)
+        )
+
+        later_exhausted_at = redrive_at + timedelta(minutes=1)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == exhausted.id)
+            .values(
+                dispatch_attempt_count=FLOW_DISPATCH_MAX_ATTEMPTS,
+                dispatch_next_attempt_at=None,
+                dispatched_at=redrive_at,
+                dispatch_exhausted_at=later_exhausted_at,
+            )
+        )
+        stale_redrive = await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+            run_id=exhausted.id,
+            tenant_id=exhausted.tenant_id,
+            expected_revision=exhausted.revision,
+            expected_dispatch_exhausted_at=exhausted.dispatch_exhausted_at,
+            now=later_exhausted_at + timedelta(seconds=1),
+        )
+        assert stale_redrive == FlowRunDispatchRedriveGenerationConflict(
+            current_dispatch_exhausted_at=later_exhausted_at
+        )
+
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == exhausted.id)
+            .values(status=FlowRunStatus.RUNNING.value)
+        )
+        converged = await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
+            run_id=exhausted.id,
+            tenant_id=exhausted.tenant_id,
+            expected_revision=exhausted.revision,
+            expected_dispatch_exhausted_at=exhausted.dispatch_exhausted_at,
+            now=later_exhausted_at + timedelta(seconds=2),
+        )
+        assert converged is None
