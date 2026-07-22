@@ -147,7 +147,7 @@
                   {m.skills_library_availability_switch_label()}
                 </label>
                 <p id="skill-availability-description" class="text-muted-foreground mt-1 text-sm">
-                  {data.skill.is_active
+                  {availabilityChecked
                     ? m.skills_library_active_explanation()
                     : m.skills_library_inactive_explanation()}
                 </p>
@@ -156,6 +156,7 @@
                 id="skill-availability"
                 checked={availabilityChecked}
                 disabled={!canEdit || statusSaving}
+                aria-label={m.skills_library_availability_switch_label()}
                 aria-describedby="skill-availability-description"
                 onCheckedChange={setActive}
               />

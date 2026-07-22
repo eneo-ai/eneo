@@ -169,6 +169,45 @@ test("restore copies a selected revision through its scoped action route", async
     }
   ]);
 });
+
+test("organisation restore sends the revision reviewed by the administrator", async () => {
+  const calls = [];
+  const response = { revision: { id: "revision-4" }, created: true };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return response;
+    }
+  });
+
+  const result = await skills.organization.restoreRevision({
+    skillId: "skill-1",
+    sourceRevisionId: "revision-2",
+    reviewed_current_revision_id: "revision-3"
+  });
+
+  assert.equal(result, response);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
+      request: {
+        method: "post",
+        params: {
+          path: {
+            skill_id: "skill-1",
+            source_revision_id: "revision-2"
+          }
+        },
+        requestBody: {
+          "application/json": {
+            reviewed_current_revision_id: "revision-3"
+          }
+        }
+      }
+    }
+  ]);
+});
+
 test("organisation publication sends the reviewed revision", async () => {
   const calls = [];
   const response = { id: "skill-1", publication_state: "published" };

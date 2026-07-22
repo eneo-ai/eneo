@@ -25,6 +25,7 @@ from eneo.skills.presentation.skill_models import (
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
+    SkillRevisionRestoreRequest,
     SkillRevisionSummaryPublic,
 )
 
@@ -244,16 +245,18 @@ async def create_organization_skill_revision(
     "/organization/{skill_id}/revisions/{source_revision_id}/restore/",
     response_model=SkillRevisionRestorePublic,
     description="Restore historical content as the next immutable revision.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def restore_organization_skill_revision(
     skill_id: UUID,
     source_revision_id: UUID,
+    payload: SkillRevisionRestoreRequest,
     container: _ContainerWithUser,
 ) -> SkillRevisionRestorePublic:
     outcome = await container.organization_skill_service().restore_revision(
         skill_id=skill_id,
         source_revision_id=source_revision_id,
+        reviewed_current_revision_id=payload.reviewed_current_revision_id,
     )
     revision = outcome.change.revision
     if outcome.change.created:

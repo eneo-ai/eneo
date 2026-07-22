@@ -169,7 +169,7 @@ describe("Skill detail page", () => {
     });
 
     const availability = page.getByRole("switch", {
-      name: "Tillgänglig för nya kopplingar"
+      name: m.skills_library_availability_switch_label()
     });
     await expect.element(availability).toBeChecked();
     await availability.click();
@@ -180,7 +180,7 @@ describe("Skill detail page", () => {
       is_active: false
     });
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));
-    await expect.element(page.getByText(/befintliga kopplingar.*fortsätter/i)).toBeVisible();
+    await expect.element(page.getByText(m.skills_library_inactive_explanation())).toBeVisible();
   });
 
   test("restores the availability switch when the update fails", async () => {
@@ -212,7 +212,7 @@ describe("Skill detail page", () => {
     });
 
     const availability = page.getByRole("switch", {
-      name: "Tillgänglig för nya kopplingar"
+      name: m.skills_library_availability_switch_label()
     });
     await availability.click();
 

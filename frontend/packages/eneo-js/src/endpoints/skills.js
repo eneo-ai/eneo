@@ -280,11 +280,11 @@ export function initSkills(client) {
 
       /**
        * Restore historical content as the next immutable revision.
-       * @param {{skillId: string, sourceRevisionId: string}} params
+       * @param {{skillId: string, sourceRevisionId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/">} params
        * @returns {Promise<SkillRevisionRestorePublic>}
        * @throws {EneoError}
        */
-      restoreRevision: async ({ skillId, sourceRevisionId }) => {
+      restoreRevision: async ({ skillId, sourceRevisionId, ...restore }) => {
         return await client.fetch(
           "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
           {
@@ -294,7 +294,8 @@ export function initSkills(client) {
                 skill_id: skillId,
                 source_revision_id: sourceRevisionId
               }
-            }
+            },
+            requestBody: { "application/json": restore }
           }
         );
       },

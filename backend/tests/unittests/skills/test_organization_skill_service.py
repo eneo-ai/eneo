@@ -9,6 +9,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
+    SkillRevisionConflictException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
@@ -318,6 +319,7 @@ async def test_organisation_history_rejects_invalid_cursors(cursor: str):
 async def test_restore_copies_tenant_history_into_the_next_revision():
     organization = _organization()
     skill = SimpleNamespace(id=uuid4())
+    reviewed_current_revision_id = uuid4()
     source = _revision(skill_id=skill.id, revision_number=1)
     restored = _revision(skill_id=skill.id, revision_number=3)
     change = SkillRevisionChange(
@@ -339,6 +341,7 @@ async def test_restore_copies_tenant_history_into_the_next_revision():
     result = await service.restore_revision(
         skill_id=skill.id,
         source_revision_id=source.id,
+        reviewed_current_revision_id=reviewed_current_revision_id,
     )
 
     assert result.source_revision is source
@@ -350,7 +353,32 @@ async def test_restore_copies_tenant_history_into_the_next_revision():
         instructions=source.instructions,
         content_digest=source.content_digest,
         created_by_user_id=service.user.id,
+        expected_current_revision_id=reviewed_current_revision_id,
     )
+
+
+async def test_restore_rejects_a_revision_that_changed_after_review():
+    organization = _organization()
+    skill = SimpleNamespace(id=uuid4(), current_revision=SimpleNamespace(id=uuid4()))
+    source = _revision(skill_id=skill.id, revision_number=1)
+    repo = AsyncMock()
+    repo.get_organization_for_tenant.return_value = skill
+    repo.get_revision.return_value = source
+    repo.create_revision.side_effect = SkillRevisionConflictError
+    service = _service(
+        organization=organization,
+        permissions={Permission.ADMIN},
+        repo=repo,
+    )
+
+    with pytest.raises(
+        SkillRevisionConflictException, match="changed after you reviewed"
+    ):
+        await service.restore_revision(
+            skill_id=skill.id,
+            source_revision_id=source.id,
+            reviewed_current_revision_id=skill.current_revision.id,
+        )
 
 
 async def test_manage_permission_does_not_grant_publication():

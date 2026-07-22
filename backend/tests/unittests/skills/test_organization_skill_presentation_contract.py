@@ -30,6 +30,7 @@ from eneo.skills.presentation.skill_assembler import SkillAssembler
 from eneo.skills.presentation.skill_models import (
     SkillPublishRequest,
     SkillRevisionCreateRequest,
+    SkillRevisionRestoreRequest,
 )
 
 
@@ -304,10 +305,19 @@ async def test_revision_restored_audit_uses_persisted_post_mutation_state():
     await restore_organization_skill_revision(
         skill_id=before.id,
         source_revision_id=before.current_revision.id,
+        payload=SkillRevisionRestoreRequest(
+            reviewed_current_revision_id=before.current_revision.id
+        ),
         container=_audit_container(
             service=service,
             audit_service=audit_service,
         ),
+    )
+
+    service.restore_revision.assert_awaited_once_with(
+        skill_id=before.id,
+        source_revision_id=before.current_revision.id,
+        reviewed_current_revision_id=before.current_revision.id,
     )
 
     extra = audit_service.log_async.await_args.kwargs["metadata"]["extra"]

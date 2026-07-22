@@ -91,12 +91,18 @@
     });
   }
 
-  async function restoreRevision(sourceRevisionId: string) {
+  async function restoreRevision(sourceRevisionId: string, reviewedCurrentRevisionId: string) {
     const skill = managedSkill();
     return data.eneo.skills.organization.restoreRevision({
       skillId: skill.id,
-      sourceRevisionId
+      sourceRevisionId,
+      reviewed_current_revision_id: reviewedCurrentRevisionId
     });
+  }
+
+  async function loadCurrentRevision() {
+    const skill = await data.eneo.skills.organization.get({ skillId: managedSkill().id });
+    return skill.current_revision;
   }
 
   async function refreshAfterRestore(outcome: SkillRevisionRestorePublic) {
@@ -378,6 +384,7 @@
               onLoadMore={loadMoreRevisions}
               onView={getRevision}
               onRestore={restoreRevision}
+              onLoadCurrent={loadCurrentRevision}
               onAnnounce={announceRestore}
               onRestored={refreshAfterRestore}
             />
