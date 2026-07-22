@@ -49,6 +49,7 @@ from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
+from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
 from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
@@ -1071,6 +1072,75 @@ async def complete_step_execution(
     diagnostics.extend(rag_diagnostics)
     if rag_metadata is not None:
         rag_metadata["query_derivation"] = rag_query_derivation.to_metadata()
+        if step.retrieval_policy is not None:
+            rag_metadata["retrieval_policy"] = step.retrieval_policy.model_dump(
+                mode="json"
+            )
+    if (
+        rag_query_derivation.input_truncated
+        and isinstance(rag_metadata, dict)
+        and rag_metadata.get("attempted") is True
+    ):
+        diagnostics.append(
+            StepDiagnostic(
+                code="rag_retrieval_query_truncated",
+                message=(
+                    f"Step {step.step_order}: knowledge retrieval query was truncated "
+                    f"to {RAG_RETRIEVAL_QUERY_CHAR_LIMIT} characters."
+                ),
+                severity="warning",
+            )
+        )
+
+    retrieval_status = (
+        rag_metadata.get("status") if isinstance(rag_metadata, dict) else None
+    )
+    fail_closed_reason = (
+        "query_truncated"
+        if rag_query_derivation.input_truncated
+        and isinstance(rag_metadata, dict)
+        and rag_metadata.get("attempted") is True
+        else retrieval_status
+    )
+    if (
+        step.retrieval_policy is not None
+        and step.retrieval_policy.mode == "fail_closed"
+        and (
+            fail_closed_reason == "query_truncated"
+            or fail_closed_reason in RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
+        )
+    ):
+        diagnostics.append(
+            StepDiagnostic(
+                code="rag_retrieval_fail_closed",
+                message=(
+                    f"Step {step.step_order}: fail-closed knowledge retrieval policy "
+                    f"stopped this completion call after '{fail_closed_reason}'; "
+                    "provider I/O for this call was not started."
+                ),
+                severity="error",
+            )
+        )
+        failed_input_payload = dict(prepared.input_payload_for_result)
+        failed_input_payload["rag"] = rag_metadata
+        failed_input_payload["diagnostics"] = [
+            {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "severity": diagnostic.severity,
+            }
+            for diagnostic in diagnostics
+        ]
+        raise attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: required knowledge retrieval ended with "
+                f"'{fail_closed_reason}'; provider I/O for this completion call "
+                "was not started.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            ),
+            input_payload_for_result=failed_input_payload,
+            effective_prompt=prepared.effective_prompt,
+        )
 
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs

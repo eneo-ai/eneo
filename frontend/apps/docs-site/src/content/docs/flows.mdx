@@ -314,6 +314,38 @@ When a step uses knowledge, the runtime records RAG provenance in the step-attem
 - prompt-context inclusion summaries
 - citation sidecar data when citation mode is active
 
+An attempted lookup that finds no chunks is reported as `status = no_chunks`,
+with the `rag_retrieval_no_chunks` step diagnostic. This is different from a
+skipped lookup, a timeout, or a retrieval error. If the runtime has to shorten a
+long retrieval query, it adds `rag_retrieval_query_truncated` and records only the
+derivation strategy, truncation flag, and bounded query length; the diagnostic
+does not copy the query text.
+
+The default behavior is best effort: the step still calls its completion model
+without knowledge chunks after `no_chunks`, `timeout`, or `error`. To require
+knowledge retrieval for a step, publish this versioned output configuration:
+
+```json
+{
+  "retrieval_policy": {
+    "version": 1,
+    "mode": "fail_closed"
+  }
+}
+```
+
+Fail-closed mode stops the affected completion call before completion-model I/O
+when the retrieval service or knowledge is unavailable, the retrieval input is
+blank, the bounded query is truncated, or retrieval ends in `no_chunks`,
+`timeout`, or `error`. Earlier calls in multi-source or per-item execution may
+already have completed. The failed step and attempt retain the bounded RAG status
+and diagnostics, so operators can distinguish a no-match result from dependency
+failure. Use `{"version": 1, "mode": "best_effort"}` to state the default
+explicitly. Retrieval policy is supported only for the retrieval-plus-completion
+`pass_through` and `http_post` output modes. For `http_post`, fail-closed
+retrieval prevents both the delegated completion-model call and creation of the
+outbound delivery intent.
+
 ### Citation mode
 
 A step can enable `output_config.citation_mode = inline_inref_sidecar`.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from enum import Enum
 from typing import Any, cast
 
@@ -17,9 +18,11 @@ from eneo.flows.citation_sidecar import (
     resolve_citation_mode,
 )
 from eneo.flows.domain.flow import (
+    FLOW_STEP_RETRIEVAL_POLICY_KEY,
     FlowPersistedJsonObject,
     FlowRuntimeInputConfig,
     FlowStep,
+    parse_flow_step_retrieval_policy,
 )
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
@@ -236,6 +239,11 @@ def collect_step_graph_issues(
         _capture_flow_step_validation(
             issues,
             FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_retrieval_policy(step),
+        )
+        _capture_flow_step_validation(
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
             lambda: _validate_citation_mode(step),
         )
         if step.input_source == "http_get":
@@ -265,7 +273,16 @@ def collect_step_graph_issues(
                     issues,
                     FlowGraphIssueCode.FLOW_STEP_INVALID,
                     step_order=step.step_order,
-                    validate=lambda: validate_http_output_config(step=step),
+                    validate=lambda: validate_http_output_config(
+                        step=replace(
+                            step,
+                            output_config={
+                                key: value
+                                for key, value in (step.output_config or {}).items()
+                                if key != FLOW_STEP_RETRIEVAL_POLICY_KEY
+                            },
+                        )
+                    ),
                 )
         transcribe_only_error = transcribe_only_violation(
             step_order=step.step_order,
@@ -674,6 +691,19 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
             str(exc),
             code=exc.code,
             context=exc.context,
+            step_order=step.step_order,
+        ) from exc
+
+
+def _validate_retrieval_policy(step: FlowStepValidationView) -> None:
+    try:
+        parse_flow_step_retrieval_policy(
+            step.output_config,
+            output_mode=FlowOutputMode(step.output_mode),
+        )
+    except ValueError as exc:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {exc}",
             step_order=step.step_order,
         ) from exc
 

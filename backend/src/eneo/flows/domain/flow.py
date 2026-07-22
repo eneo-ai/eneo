@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -47,6 +48,64 @@ from eneo.flows.flow_run_error import (
 # strict serializer boundary. Tighten fields one by one at those chokepoints.
 FlowPersistedJsonObject: TypeAlias = dict[str, Any]
 RuntimeInputExecutionMode: TypeAlias = Literal["single_call", "per_source"]
+FlowStepRetrievalPolicyMode: TypeAlias = Literal["best_effort", "fail_closed"]
+FLOW_STEP_RETRIEVAL_POLICY_KEY = "retrieval_policy"
+FLOW_RETRIEVAL_COMPLETION_OUTPUT_MODES: frozenset[FlowOutputMode] = frozenset(
+    {FlowOutputMode.PASS_THROUGH, FlowOutputMode.HTTP_POST}
+)
+
+
+def flow_output_mode_uses_retrieval_completion(
+    output_mode: FlowOutputMode | str,
+) -> bool:
+    """Whether the runtime handler retrieves knowledge before completion I/O."""
+
+    try:
+        mode = FlowOutputMode(output_mode)
+    except ValueError:
+        return False
+    return mode in FLOW_RETRIEVAL_COMPLETION_OUTPUT_MODES
+
+
+class FlowStepRetrievalPolicy(BaseModel):
+    """Versioned policy embedded in the existing per-step output config JSON."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    version: Literal[1]
+    mode: FlowStepRetrievalPolicyMode
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _validate_version_is_integer(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("version must be the integer 1.")
+        return value
+
+
+def parse_flow_step_retrieval_policy(
+    output_config: object,
+    *,
+    output_mode: FlowOutputMode | str | None = None,
+) -> FlowStepRetrievalPolicy | None:
+    if not isinstance(output_config, Mapping):
+        return None
+    raw_output_config = cast(Mapping[object, object], output_config)
+    if FLOW_STEP_RETRIEVAL_POLICY_KEY not in raw_output_config:
+        return None
+    raw_policy: object = raw_output_config[FLOW_STEP_RETRIEVAL_POLICY_KEY]
+    try:
+        policy = FlowStepRetrievalPolicy.model_validate(raw_policy)
+    except ValidationError as exc:
+        raise ValueError("output_config.retrieval_policy is invalid.") from exc
+    if output_mode is not None and not flow_output_mode_uses_retrieval_completion(
+        output_mode
+    ):
+        raise ValueError(
+            "output_config.retrieval_policy is supported only for "
+            "retrieval-plus-completion output modes ('pass_through', 'http_post')."
+        )
+    return policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +158,14 @@ class FlowStep(BaseModel):
             raise ValueError("timeout_seconds must be an integer.")
         if value <= 0:
             raise ValueError("timeout_seconds must be greater than zero.")
+        return value
+
+    @field_validator("output_config")
+    @classmethod
+    def _validate_retrieval_policy(
+        cls, value: FlowPersistedJsonObject | None
+    ) -> FlowPersistedJsonObject | None:
+        parse_flow_step_retrieval_policy(value)
         return value
 
 

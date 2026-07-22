@@ -677,7 +677,7 @@ def test_normalize_debug_step_uses_rag_metadata():
     assert step["rag"]["tracking"]["retrieval_tracked"] is True
 
 
-def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
+def test_build_debug_export_preserves_degraded_rag_metadata_from_step_results():
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -724,7 +724,33 @@ def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
         step_id=uuid4(),
         step_order=1,
         assistant_id=uuid4(),
-        input_payload_json={"rag": {"status": "success", "chunks_retrieved": 3}},
+        input_payload_json={
+            "rag": {
+                "status": "no_chunks",
+                "chunks_retrieved": 0,
+                "query_derivation": {
+                    "strategy": "input_text",
+                    "input_truncated": True,
+                    "query_length": 2048,
+                },
+                "retrieval_policy": {"version": 1, "mode": "best_effort"},
+            },
+            "diagnostics": [
+                {
+                    "code": "rag_retrieval_no_chunks",
+                    "message": "Step 1: knowledge retrieval returned no chunks.",
+                    "severity": "warning",
+                },
+                {
+                    "code": "rag_retrieval_query_truncated",
+                    "message": (
+                        "Step 1: knowledge retrieval query was truncated to 2048 "
+                        "characters."
+                    ),
+                    "severity": "warning",
+                },
+            ],
+        },
         effective_prompt=None,
         output_payload_json=None,
         model_parameters_json=None,
@@ -737,10 +763,30 @@ def test_build_debug_export_reads_rag_metadata_from_typed_step_results():
     )
 
     export = build_debug_export(run=run, version=version, step_results=[result])
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[],
+    ).to_dict()
 
+    assert result.input_payload_json is not None
+    assert (
+        evidence["step_results"][0]["input_payload_json"]["diagnostics"]
+        == (result.input_payload_json["diagnostics"])
+    )
     assert export["definition"]["steps_count"] == 1
-    assert export["steps"][0]["rag"]["status"] == "success"
-    assert export["steps"][0]["rag"]["chunks_retrieved"] == 3
+    assert export["steps"][0]["rag"]["status"] == "no_chunks"
+    assert export["steps"][0]["rag"]["chunks_retrieved"] == 0
+    assert export["steps"][0]["rag"]["query_derivation"] == {
+        "strategy": "input_text",
+        "input_truncated": True,
+        "query_length": 2048,
+    }
+    assert export["steps"][0]["rag"]["retrieval_policy"] == {
+        "version": 1,
+        "mode": "best_effort",
+    }
     assert export["steps"][0]["rag"]["tracking"]["retrieval_tracked"] is True
 
 

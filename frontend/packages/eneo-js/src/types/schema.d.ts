@@ -19710,9 +19710,28 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Output Config */
-      output_config?: {
-        [key: string]: unknown;
-      } | null;
+      output_config?:
+        | ({
+            /**
+             * FlowStepRetrievalPolicy
+             * @description Versioned policy embedded in the existing per-step output config JSON.
+             */
+            retrieval_policy?: {
+              /**
+               * Version
+               * @constant
+               */
+              version: 1;
+              /**
+               * Mode
+               * @enum {string}
+               */
+              mode: "best_effort" | "fail_closed";
+            };
+          } & {
+            [key: string]: unknown;
+          })
+        | null;
       /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
       review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
     };
@@ -19875,9 +19894,28 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Output Config */
-      output_config?: {
-        [key: string]: unknown;
-      } | null;
+      output_config?:
+        | ({
+            /**
+             * FlowStepRetrievalPolicy
+             * @description Versioned policy embedded in the existing per-step output config JSON.
+             */
+            retrieval_policy?: {
+              /**
+               * Version
+               * @constant
+               */
+              version: 1;
+              /**
+               * Mode
+               * @enum {string}
+               */
+              mode: "best_effort" | "fail_closed";
+            };
+          } & {
+            [key: string]: unknown;
+          })
+        | null;
       /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
       review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
       /**

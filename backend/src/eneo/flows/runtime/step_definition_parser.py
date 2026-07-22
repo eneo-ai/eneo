@@ -12,7 +12,11 @@ from eneo.database.tables.flow_tables import (
 from eneo.flows.assistant_execution_snapshot import (
     validate_assistant_execution_snapshot,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowStepRetrievalPolicy,
+    parse_flow_step_retrieval_policy,
+)
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowOutputMode
@@ -89,6 +93,7 @@ class _StepOutputFields:
     output_config: FlowPersistedJsonObject | None
     output_contract: FlowPersistedJsonObject | None
     output_classification_override: int | None
+    retrieval_policy: FlowStepRetrievalPolicy | None
 
 
 @dataclass(frozen=True)
@@ -416,6 +421,13 @@ def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
         output_mode=output_mode,
         output_type=output_type,
     )
+    try:
+        retrieval_policy = parse_flow_step_retrieval_policy(
+            raw_output_config,
+            output_mode=output_mode,
+        )
+    except ValueError as exc:
+        raise BadRequestException(str(exc)) from exc
     output_classification_override_raw = item.get("output_classification_override")
     output_classification_override = (
         output_classification_override_raw
@@ -428,6 +440,7 @@ def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
         output_config=raw_output_config,
         output_contract=_optional_json_object(item.get("output_contract")),
         output_classification_override=output_classification_override,
+        retrieval_policy=retrieval_policy,
     )
 
 
@@ -619,6 +632,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 input_contract=input_fields.input_contract,
                 assistant_snapshot=optional_fields.assistant_snapshot,
                 review_policy=review_policy,
+                retrieval_policy=output_fields.retrieval_policy,
                 timeout_seconds=optional_fields.timeout_seconds,
             )
         )

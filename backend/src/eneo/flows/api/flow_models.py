@@ -5,7 +5,15 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 from pydantic.config import JsonDict
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -56,7 +64,11 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
-from eneo.flows.domain.flow import FlowRunRetentionProjection
+from eneo.flows.domain.flow import (
+    FlowRunRetentionProjection,
+    FlowStepRetrievalPolicy,
+    parse_flow_step_retrieval_policy,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -117,6 +129,26 @@ FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
 FlowDataRetentionDays: TypeAlias = Annotated[
     int,
     Field(strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS),
+]
+
+
+def _validate_flow_step_output_config(value: object) -> object:
+    parse_flow_step_retrieval_policy(value)
+    return value
+
+
+FlowStepOutputConfigRequest: TypeAlias = Annotated[
+    dict[str, Any],
+    BeforeValidator(_validate_flow_step_output_config),
+    WithJsonSchema(
+        {
+            "type": "object",
+            "properties": {
+                "retrieval_policy": FlowStepRetrievalPolicy.model_json_schema()
+            },
+            "additionalProperties": True,
+        }
+    ),
 ]
 
 
@@ -518,7 +550,7 @@ class FlowStepCreateRequest(BaseModel):
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
     input_config: dict[str, Any] | None = None
-    output_config: dict[str, Any] | None = None
+    output_config: FlowStepOutputConfigRequest | None = None
     review_policy: FlowStepReviewPolicy | None = Field(
         default=None,
         description=FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
@@ -534,6 +566,14 @@ class FlowStepCreateRequest(BaseModel):
         if value <= 0:
             raise ValueError("timeout_seconds must be greater than zero.")
         return value
+
+    @model_validator(mode="after")
+    def _validate_retrieval_policy_output_mode(self) -> Self:
+        parse_flow_step_retrieval_policy(
+            self.output_config,
+            output_mode=self.output_mode,
+        )
+        return self
 
 
 class FlowStepUpdateRequest(FlowStepCreateRequest):

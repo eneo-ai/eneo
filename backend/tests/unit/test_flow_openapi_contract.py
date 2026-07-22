@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 from fastapi.routing import APIRoute
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
@@ -16,6 +17,7 @@ from eneo.flows.api.flow_models import (
     FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
+    FlowStepCreateRequest,
 )
 from eneo.flows.api.flow_run_status_capability_models import (
     flow_run_status_capabilities_public,
@@ -1633,6 +1635,46 @@ def test_openapi_flow_step_review_policy_documents_authoring_contract(
     assert "`view` pauses the run" in mode_description
     assert "replace the output used by downstream steps" in mode_description
     assert "14 days" in expiry_description
+
+
+def test_flow_step_retrieval_policy_is_typed_at_request_and_openapi_boundary(
+    openapi_spec: dict,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        FlowStepCreateRequest.model_validate(
+            {
+                "assistant_id": "00000000-0000-0000-0000-000000000001",
+                "step_order": 1,
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_mode": "http_post",
+                "output_type": "text",
+                "output_config": {
+                    "url": "https://example.test/delivery",
+                    "retrieval_policy": {"version": "1", "mode": "fail_closed"},
+                },
+            }
+        )
+
+    assert any(error["loc"] == ("output_config",) for error in exc_info.value.errors())
+
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    for request_schema_name in ("FlowStepCreateRequest", "FlowStepUpdateRequest"):
+        output_config = schemas[request_schema_name]["properties"]["output_config"]
+        object_schema = next(
+            option
+            for option in output_config["anyOf"]
+            if isinstance(option, dict) and option.get("type") == "object"
+        )
+        assert object_schema["additionalProperties"] is True
+        retrieval_policy = object_schema["properties"]["retrieval_policy"]
+        assert retrieval_policy["additionalProperties"] is False
+        assert set(retrieval_policy["required"]) == {"version", "mode"}
+        assert retrieval_policy["properties"]["version"]["const"] == 1
+        assert set(retrieval_policy["properties"]["mode"]["enum"]) == {
+            "best_effort",
+            "fail_closed",
+        }
 
 
 def test_openapi_flow_step_update_uses_step_update_request_schema(

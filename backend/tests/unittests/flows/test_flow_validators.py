@@ -92,6 +92,77 @@ def test_validate_steps_rejects_unsupported_enum_values():
         validate_steps([_step(input_type="banana")])
 
 
+@pytest.mark.parametrize(
+    "raw_policy",
+    [
+        None,
+        {},
+        {"version": "1", "mode": "fail_closed"},
+        {"version": True, "mode": "fail_closed"},
+        {"version": 2, "mode": "fail_closed"},
+        {"version": 1, "mode": "unknown"},
+        {"version": 1, "mode": "fail_closed", "unexpected": True},
+    ],
+)
+def test_validate_steps_rejects_invalid_retrieval_policy(raw_policy: object) -> None:
+    _assert_validate_steps_rejects(
+        [_step(output_config={"retrieval_policy": raw_policy})],
+        expected_type=FlowStepValidationError,
+        match="retrieval_policy is invalid",
+        step_order=1,
+    )
+
+
+@pytest.mark.parametrize("output_mode", ["pass_through", "http_post"])
+def test_validate_steps_accepts_retrieval_policy_for_retrieval_completion_modes(
+    output_mode: str,
+) -> None:
+    output_config: dict[str, object] = {
+        "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+    }
+    if output_mode == "http_post":
+        output_config.update(
+            {
+                "url": "https://example.test/hook",
+                "auth": {"mode": "none"},
+            }
+        )
+    validate_steps([_step(output_mode=output_mode, output_config=output_config)])
+
+
+@pytest.mark.parametrize(
+    "output_mode",
+    ["compose_text", "transcribe_only", "template_fill", "render_verbatim"],
+)
+def test_validate_steps_rejects_retrieval_policy_for_non_retrieval_mode(
+    output_mode: str,
+) -> None:
+    output_config: dict[str, object] = {
+        "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+    }
+    output_type = "json"
+    if output_mode == "template_fill":
+        output_config.update(
+            {
+                "bindings": {},
+                "template_asset_id": str(uuid4()),
+            }
+        )
+        output_type = "docx"
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                output_mode=output_mode,
+                output_type=output_type,
+                output_config=output_config,
+            )
+        ],
+        expected_type=FlowStepValidationError,
+        match="supported only for retrieval-plus-completion output modes",
+        step_order=1,
+    )
+
+
 def test_validate_steps_fail_fast_rejects_duplicate_step_order() -> None:
     _assert_validate_steps_rejects(
         [_step(1), _step(1)],

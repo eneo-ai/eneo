@@ -34,6 +34,7 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
+    FlowStepRetrievalPolicy,
     RerunStepInputOverride,
 )
 from eneo.flows.domain.flow import (
@@ -4668,12 +4669,20 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
 
 
 @pytest.mark.asyncio
-async def test_execute_step_derives_bounded_rag_query_from_step_description(user):
+@pytest.mark.parametrize(
+    "retrieval_policy",
+    [None, FlowStepRetrievalPolicy(version=1, mode="fail_closed")],
+)
+async def test_execute_step_derives_bounded_rag_query_from_step_description(
+    user,
+    retrieval_policy: FlowStepRetrievalPolicy | None,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = replace(
         _step_for_execute_step(),
         user_description="Identify procurement risks and cite policy context.",
+        retrieval_policy=retrieval_policy,
     )
     state = RunExecutionState(
         completed_by_order={},
@@ -4710,6 +4719,21 @@ async def test_execute_step_derives_bounded_rag_query_from_step_description(user
         return_value=SimpleNamespace(chunks=[chunk], no_duplicate_chunks=[chunk])
     )
 
+    if retrieval_policy is not None:
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+        assistant.get_response.assert_not_awaited()
+        assert "query_truncated" in str(exc_info.value)
+        assert "this completion call" in str(exc_info.value)
+        failed_payload = exc_info.value.input_payload_json
+        assert isinstance(failed_payload, dict)
+        assert failed_payload["rag"]["status"] == "success"
+        assert {item["code"] for item in failed_payload["diagnostics"]} >= {
+            "rag_retrieval_query_truncated",
+            "rag_retrieval_fail_closed",
+        }
+        return
+
     output = (
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
     ).output
@@ -4727,6 +4751,12 @@ async def test_execute_step_derives_bounded_rag_query_from_step_description(user
         "input_truncated": True,
         "query_length": len(query),
     }
+    assert output.rag_metadata["status"] == "success"
+    assert [
+        diagnostic.code
+        for diagnostic in output.diagnostics
+        if diagnostic.code.startswith("rag_retrieval_")
+    ] == ["rag_retrieval_query_truncated"]
 
 
 @pytest.mark.asyncio
@@ -4774,6 +4804,180 @@ async def test_execute_step_derives_bounded_rag_query_from_long_input_without_de
         "input_truncated": True,
         "query_length": 2048,
     }
+    assert any(
+        diagnostic.code == "rag_retrieval_query_truncated"
+        for diagnostic in output.diagnostics
+    )
+    assert any(
+        diagnostic.code == "rag_retrieval_no_chunks"
+        for diagnostic in output.diagnostics
+    )
+    assert output.rag_metadata["status"] == "no_chunks"
+
+
+@pytest.mark.asyncio
+async def test_execute_step_zero_chunks_explicit_best_effort_calls_provider_without_context(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = replace(
+        _step_for_execute_step(),
+        retrieval_policy=FlowStepRetrievalPolicy(version=1, mode="best_effort"),
+    )
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        )
+    )
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.references_service = AsyncMock()
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=[], no_duplicate_chunks=[])
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assistant.get_response.assert_awaited_once()
+    assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
+    assert output.rag_metadata is not None
+    assert output.rag_metadata["status"] == "no_chunks"
+    assert output.rag_metadata["retrieval_policy"] == {
+        "version": 1,
+        "mode": "best_effort",
+    }
+    assert any(item.code == "rag_retrieval_no_chunks" for item in output.diagnostics)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("retrieval_outcome", "expected_status", "expected_diagnostic"),
+    [
+        ("no_chunks", "no_chunks", "rag_retrieval_no_chunks"),
+        ("timeout", "timeout", "rag_retrieval_timeout"),
+        ("error", "error", "rag_retrieval_failed"),
+        ("no_service", "skipped_no_service", None),
+        ("no_knowledge", "skipped_no_knowledge", None),
+        ("no_input", "skipped_no_input", None),
+    ],
+)
+@pytest.mark.parametrize("output_mode", ["pass_through", "http_post"])
+async def test_execute_step_fail_closed_retrieval_outcomes_fail_before_provider_io(
+    user,
+    retrieval_outcome: str,
+    expected_status: str,
+    expected_diagnostic: str | None,
+    output_mode: str,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = replace(
+        _step_for_execute_step(),
+        output_mode=output_mode,
+        retrieval_policy=FlowStepRetrievalPolicy(version=1, mode="fail_closed"),
+    )
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    assistant = _assistant_for_execute_step(
+        has_knowledge=retrieval_outcome != "no_knowledge"
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="" if retrieval_outcome == "no_input" else "hello",
+            source_text="hello",
+            input_source="flow_input",
+        )
+    )
+    executor.references_service = (
+        None if retrieval_outcome == "no_service" else AsyncMock()
+    )
+    executor.webhook_delivery_repo.insert_pending_delivery = AsyncMock()
+    if retrieval_outcome == "no_chunks":
+        assert executor.references_service is not None
+        executor.references_service.get_references = AsyncMock(
+            return_value=SimpleNamespace(chunks=[], no_duplicate_chunks=[])
+        )
+    elif retrieval_outcome == "timeout":
+        assert executor.references_service is not None
+        executor.references_service.get_references = AsyncMock(
+            side_effect=asyncio.TimeoutError()
+        )
+    elif retrieval_outcome == "error":
+        assert executor.references_service is not None
+        executor.references_service.get_references = AsyncMock(
+            side_effect=RuntimeError("retrieval unavailable")
+        )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assistant.get_response.assert_not_awaited()
+    executor.webhook_delivery_repo.insert_pending_delivery.assert_not_awaited()
+    assert exc_info.value.code == "typed_io_validation_failed"
+    failed_payload = exc_info.value.input_payload_json
+    assert isinstance(failed_payload, dict)
+    assert failed_payload["rag"]["status"] == expected_status
+    if expected_diagnostic is not None:
+        assert expected_diagnostic in {
+            item["code"] for item in failed_payload["diagnostics"]
+        }
+    assert "rag_retrieval_fail_closed" in {
+        item["code"] for item in failed_payload["diagnostics"]
+    }
+    assert "this completion call" in str(exc_info.value)
+
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._rollback = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._commit = AsyncMock()
+    claimed = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    ).model_copy(update={"step_order": step.step_order})
+
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=failed_payload,
+        state=state,
+    )
+
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
+    assert saved_result.status == FlowStepResultStatus.FAILED
+    assert saved_result.input_payload_json["rag"]["status"] == expected_status
+    assert "rag_retrieval_fail_closed" in {
+        item["code"] for item in saved_result.input_payload_json["diagnostics"]
+    }
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["input_payload_json"] == saved_result.input_payload_json
+    assert finish_kwargs["provenance_json"]["attempt_start"]
 
 
 @pytest.mark.asyncio

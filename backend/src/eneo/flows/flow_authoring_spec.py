@@ -9,7 +9,10 @@ from typing import Self, cast
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    parse_flow_step_retrieval_policy,
+)
 from eneo.flows.enums import (
     AIBuilderInputSource as InputSource,
 )
@@ -142,6 +145,14 @@ class StepSpec(BaseModel):
                 **value,
                 "question": question.strip(),
             }
+        return value
+
+    @field_validator("output_config")
+    @classmethod
+    def validate_retrieval_policy(
+        cls, value: FlowPersistedJsonObject | None
+    ) -> FlowPersistedJsonObject | None:
+        parse_flow_step_retrieval_policy(value)
         return value
 
 

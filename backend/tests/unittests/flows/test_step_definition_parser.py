@@ -624,3 +624,80 @@ def test_parse_runtime_steps_defaults_typed_fields():
     assert steps[0].output_contract is None
     assert steps[0].input_type == "text"
     assert steps[0].input_contract is None
+    assert steps[0].retrieval_policy is None
+
+
+@pytest.mark.parametrize("output_mode", ["pass_through", "http_post"])
+def test_parse_runtime_steps_parses_versioned_retrieval_policy(
+    output_mode: str,
+) -> None:
+    steps = parse_runtime_steps(
+        _definition(
+            _step_snapshot(
+                output_mode=output_mode,
+                output_config={
+                    "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+                },
+            )
+        )
+    )
+
+    assert steps[0].retrieval_policy is not None
+    assert steps[0].retrieval_policy.version == 1
+    assert steps[0].retrieval_policy.mode == "fail_closed"
+
+
+@pytest.mark.parametrize(
+    "output_mode",
+    ["compose_text", "transcribe_only", "template_fill", "render_verbatim"],
+)
+def test_parse_runtime_steps_rejects_retrieval_policy_for_non_retrieval_mode(
+    output_mode: str,
+) -> None:
+    output_config: dict[str, object] = {
+        "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+    }
+    output_type = "text"
+    if output_mode == "template_fill":
+        output_config.update(
+            {
+                "bindings": {},
+                "template_asset_id": str(uuid4()),
+            }
+        )
+        output_type = "docx"
+    with pytest.raises(
+        BadRequestException,
+        match="supported only for retrieval-plus-completion output modes",
+    ):
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    output_mode=output_mode,
+                    output_type=output_type,
+                    output_config=output_config,
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_policy",
+    [
+        None,
+        "fail_closed",
+        {},
+        {"version": "1", "mode": "fail_closed"},
+        {"version": True, "mode": "fail_closed"},
+        {"version": 2, "mode": "fail_closed"},
+        {"version": 1, "mode": "unknown"},
+        {"version": 1, "mode": "fail_closed", "unexpected": True},
+    ],
+)
+def test_parse_runtime_steps_rejects_invalid_retrieval_policy(
+    raw_policy: object,
+) -> None:
+    with pytest.raises(BadRequestException, match="retrieval_policy is invalid"):
+        parse_runtime_steps(
+            _definition(_step_snapshot(output_config={"retrieval_policy": raw_policy}))
+        )

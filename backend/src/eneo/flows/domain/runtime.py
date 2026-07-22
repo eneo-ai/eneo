@@ -5,7 +5,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.flow import (
+    FlowStepResult,
+    FlowStepRetrievalPolicy,
+    flow_output_mode_uses_retrieval_completion,
+)
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
@@ -60,11 +64,12 @@ class RuntimeStep:
     existing_step_ref: str | None = None
     assistant_snapshot: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = None
+    retrieval_policy: FlowStepRetrievalPolicy | None = None
     timeout_seconds: int | None = None
 
     @property
     def may_call_completion_provider(self) -> bool:
-        return self.output_mode in {"pass_through", "http_post"}
+        return flow_output_mode_uses_retrieval_completion(self.output_mode)
 
 
 @dataclass(frozen=True)

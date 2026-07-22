@@ -297,6 +297,34 @@ different model settings. See
 `backend/src/eneo/flows/runtime/step_execution_runtime.py::_typed_context_window_error`
 and `backend/src/eneo/flows/flow_api_error_code.py::FlowApiErrorCode`.
 
+### Degraded knowledge retrieval
+
+`rag_retrieval.py` is the canonical owner of retrieval outcomes. An attempted
+lookup that returns no chunks has status `no_chunks`, distinct from a successful
+non-empty result, a skipped lookup, a timeout, or an exception. The runtime emits
+bounded diagnostics without copying the retrieval query: `rag_retrieval_no_chunks`
+for an empty result and `rag_retrieval_query_truncated` when query derivation had
+to cap input at 2,048 characters. The complete query remains absent from those
+diagnostics; `rag.query_derivation` records only the strategy, truncation flag,
+and bounded query length.
+
+`output_config.retrieval_policy` is valid only for the retrieval-plus-completion
+handlers: `pass_through` and `http_post` (whose handler delegates completion
+before it creates an outbound delivery intent). Those steps remain best-effort
+when the policy is omitted or is
+`{"version": 1, "mode": "best_effort"}`. With
+`{"version": 1, "mode": "fail_closed"}`, missing retrieval service or knowledge,
+blank retrieval input, query truncation, `no_chunks`, `timeout`, and `error` stop
+the affected completion call before its provider I/O. In multi-source or
+per-item execution, earlier calls may already have completed. The failed step
+result and attempt input payload retain the bounded RAG metadata and diagnostics
+before the run is terminalized;
+completed best-effort steps retain the same fields and the attempt provenance
+guard projection. Debug and evidence normalization preserve additive RAG fields.
+This reuses the published step `output_config`, step-result/attempt persistence,
+and evidence owners; it adds no setting, query, lock, migration, or background
+process.
+
 ## Step Behavior And Output Format
 
 Flows separate the two axes that used to drift together:

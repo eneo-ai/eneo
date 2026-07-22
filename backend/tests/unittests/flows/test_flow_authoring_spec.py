@@ -168,6 +168,39 @@ def test_step_spec_rejects_malformed_source_refs() -> None:
         _step(input_bindings={"source_refs": [{"step_ref": "step_a"}]})
 
 
+def test_step_spec_accepts_versioned_retrieval_policy_in_output_config() -> None:
+    step = _step(
+        output_config={"retrieval_policy": {"version": 1, "mode": "fail_closed"}}
+    )
+
+    assert step.output_config == {
+        "retrieval_policy": {"version": 1, "mode": "fail_closed"}
+    }
+
+
+@pytest.mark.parametrize(
+    "raw_policy",
+    [
+        None,
+        {},
+        {"version": "1", "mode": "fail_closed"},
+        {"version": True, "mode": "fail_closed"},
+        {"version": 2, "mode": "fail_closed"},
+        {"version": 1, "mode": "unknown"},
+        {"version": 1, "mode": "fail_closed", "unexpected": True},
+    ],
+)
+def test_step_spec_rejects_invalid_retrieval_policy(raw_policy: object) -> None:
+    with pytest.raises(ValidationError, match="retrieval_policy is invalid"):
+        _step(output_config={"retrieval_policy": raw_policy})
+
+
+def test_step_spec_without_retrieval_policy_preserves_best_effort_default() -> None:
+    step = _step(output_config={"citation_mode": "off"})
+
+    assert step.output_config == {"citation_mode": "off"}
+
+
 def test_source_refs_forward_references_fail_authoring_validation_path() -> None:
     steps = [
         _step(plan_step_ref="step_a"),
@@ -207,6 +240,7 @@ def _step(
     input_source: InputSource = InputSource.FLOW_INPUT,
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     model_ref: str | None = None,
+    output_config: FlowPersistedJsonObject | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_step_ref,
@@ -218,6 +252,7 @@ def _step(
         input_source=input_source,
         output_mode=output_mode,
         input_bindings=input_bindings,
+        output_config=output_config,
     )
 
 

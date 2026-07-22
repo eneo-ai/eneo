@@ -7,7 +7,12 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
+from eneo.flows.runtime.rag_retrieval import (
+    RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
+    RAG_RETRIEVAL_STATUSES,
+    RagRetrievalDeps,
+    retrieve_rag_chunks,
+)
 
 
 def _assistant(*, has_knowledge: bool) -> SimpleNamespace:
@@ -158,3 +163,53 @@ async def test_retrieve_rag_chunks_timeout_sets_timeout_metadata_and_diagnostic(
     assert diagnostics[0].code == "rag_retrieval_timeout"
     wait_for.assert_awaited_once()
     logger.warning.assert_called_once()
+
+
+def test_rag_retrieval_status_family_is_closed_and_complete() -> None:
+    assert RAG_RETRIEVAL_STATUSES == frozenset(
+        {
+            "skipped_no_service",
+            "skipped_no_knowledge",
+            "skipped_no_input",
+            "skipped_transcribe_only",
+            "success",
+            "no_chunks",
+            "timeout",
+            "error",
+        }
+    )
+    assert RAG_RETRIEVAL_FAIL_CLOSED_STATUSES == RAG_RETRIEVAL_STATUSES - {
+        "success",
+        "skipped_transcribe_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rag_chunks_records_zero_chunks_as_explicit_diagnostic() -> None:
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=[], no_duplicate_chunks=[])
+    )
+
+    chunks, metadata, diagnostics = await retrieve_rag_chunks(
+        assistant=_assistant(has_knowledge=True),
+        question="hello",
+        run_id=uuid4(),
+        step_order=3,
+        deps=RagRetrievalDeps(
+            references_service=references_service,
+            rag_retrieval_timeout_seconds=30,
+            rag_max_reference_sources=25,
+            rag_max_chunks_per_source=5,
+            logger=MagicMock(),
+        ),
+    )
+
+    assert chunks == []
+    assert metadata["status"] == "no_chunks"
+    assert metadata["attempted"] is True
+    assert metadata["chunks_retrieved"] == 0
+    assert metadata["error_code"] is None
+    assert [(item.code, item.severity) for item in diagnostics] == [
+        ("rag_retrieval_no_chunks", "warning")
+    ]

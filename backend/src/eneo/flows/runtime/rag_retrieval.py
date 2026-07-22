@@ -4,7 +4,16 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Literal,
+    TypeAlias,
+    cast,
+    get_args,
+)
 from uuid import UUID
 
 from eneo.flows.domain.runtime import StepDiagnostic
@@ -15,6 +24,26 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
+
+
+RagRetrievalStatus: TypeAlias = Literal[
+    "skipped_no_service",
+    "skipped_no_knowledge",
+    "skipped_no_input",
+    "skipped_transcribe_only",
+    "success",
+    "no_chunks",
+    "timeout",
+    "error",
+]
+RAG_RETRIEVAL_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
+    cast(tuple[RagRetrievalStatus, ...], get_args(RagRetrievalStatus))
+)
+RAG_RETRIEVAL_FAIL_CLOSED_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
+    status
+    for status in RAG_RETRIEVAL_STATUSES
+    if status not in {"success", "skipped_transcribe_only"}
+)
 
 
 @dataclass(frozen=True)
@@ -141,7 +170,7 @@ async def retrieve_rag_chunks(
             max_chunks_per_source=deps.rag_max_chunks_per_source,
             snippet_chars=200,
         )
-        rag_metadata["status"] = "success"
+        rag_metadata["status"] = "success" if info_blob_chunks else "no_chunks"
         rag_metadata["retrieval_duration_ms"] = int(
             (time.monotonic() - retrieval_started) * 1000
         )
@@ -153,6 +182,16 @@ async def retrieve_rag_chunks(
         rag_metadata["source_ids_short"] = [source_id[:8] for source_id in source_ids]
         rag_metadata["references"] = references
         rag_metadata["references_truncated"] = references_truncated
+        if not info_blob_chunks:
+            rag_diagnostics.append(
+                StepDiagnostic(
+                    code="rag_retrieval_no_chunks",
+                    message=(
+                        f"Step {step_order}: knowledge retrieval returned no chunks."
+                    ),
+                    severity="warning",
+                )
+            )
     except asyncio.TimeoutError:
         rag_metadata["status"] = "timeout"
         rag_metadata["error_code"] = "rag_retrieval_timeout"
@@ -182,7 +221,7 @@ async def retrieve_rag_chunks(
         rag_diagnostics.append(
             StepDiagnostic(
                 code="rag_retrieval_failed",
-                message="RAG retrieval failed; continuing without knowledge chunks.",
+                message="RAG retrieval failed.",
             )
         )
         deps.logger.warning(
