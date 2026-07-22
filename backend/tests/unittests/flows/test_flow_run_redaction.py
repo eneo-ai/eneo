@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
@@ -72,6 +74,31 @@ def test_redact_string_redacts_secrets_in_nested_url_query_values() -> None:
     assert "user:pass" not in redacted
     assert "secret-value" not in redacted
     assert "request_id=case-123" in redacted
+
+
+def test_redact_string_fails_closed_for_excessively_nested_url_values() -> None:
+    nested_url = "https://receiver.example/cb?token=secret-value"
+    for _ in range(1_100):
+        nested_url = f"https://gateway.example/hook?redirect={nested_url}"
+
+    redacted = redact_string(nested_url, key="message")
+    decoded = redacted
+    for _ in range(10):
+        decoded = unquote(decoded)
+
+    assert "secret-value" not in decoded
+    assert "[REDACTED]" in decoded
+
+
+def test_redact_payload_preserves_non_url_domain_code_and_state() -> None:
+    payload = {
+        "code": "business-code",
+        "state": "completed",
+        "token_count": "17",
+        "secret_label": "customer-visible label",
+    }
+
+    assert redact_payload(payload) == payload
 
 
 def test_webhook_error_sanitizer_reuses_canonical_url_redaction() -> None:

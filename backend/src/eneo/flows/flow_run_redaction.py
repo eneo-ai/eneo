@@ -7,6 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _REDACTED_VALUE = "[REDACTED]"
 REDACTION_POLICY_VERSION = "flow-evidence-redaction.v3"
+_MAX_NESTED_URL_REDACTION_DEPTH = 8
+_SENSITIVE_URL_QUERY_EXACT_KEYS = {"code", "state"}
 _SENSITIVE_EXACT_KEYS = {
     "authorization",
     "api_key",
@@ -16,7 +18,6 @@ _SENSITIVE_EXACT_KEYS = {
     "secret",
     "cookie",
     "cookies",
-    "code",
     "credential",
     "credentials",
     "bearer",
@@ -34,7 +35,6 @@ _SENSITIVE_EXACT_KEYS = {
     "secret_key",
     "signature",
     "signed_url",
-    "state",
 }
 _SENSITIVE_SUFFIXES = (
     "_token",
@@ -82,8 +82,6 @@ def is_sensitive_key(key: str | None) -> bool:
     normalized_key = _normalize_key(key)
     if not normalized_key:
         return False
-    if "token" in normalized_key or "secret" in normalized_key:
-        return True
     if normalized_key in _SENSITIVE_EXACT_KEYS:
         return True
     if any(normalized_key.endswith(suffix) for suffix in _SENSITIVE_SUFFIXES):
@@ -115,6 +113,13 @@ def is_sensitive_key(key: str | None) -> bool:
 
 
 def redact_url_secrets(value: str) -> str:
+    return _redact_url_secrets(value, nested_depth=0)
+
+
+def _redact_url_secrets(value: str, *, nested_depth: int) -> str:
+    if nested_depth > _MAX_NESTED_URL_REDACTION_DEPTH:
+        return _REDACTED_VALUE
+
     try:
         parsed = urlsplit(value)
         if not parsed.scheme or not parsed.netloc:
@@ -133,10 +138,20 @@ def redact_url_secrets(value: str) -> str:
 
         redacted_query: list[tuple[str, str]] = []
         for key, item_value in parse_qsl(parsed.query, keep_blank_values=True):
-            if is_sensitive_key(key):
+            if _is_sensitive_url_query_key(key):
                 redacted_query.append((key, _REDACTED_VALUE))
+            elif "://" in item_value:
+                redacted_query.append(
+                    (
+                        key,
+                        _redact_url_secrets(
+                            item_value,
+                            nested_depth=nested_depth + 1,
+                        ),
+                    )
+                )
             else:
-                redacted_query.append((key, redact_url_secrets(item_value)))
+                redacted_query.append((key, item_value))
 
         return urlunsplit(
             (
@@ -149,6 +164,16 @@ def redact_url_secrets(value: str) -> str:
         )
     except ValueError:
         return _REDACTED_VALUE
+
+
+def _is_sensitive_url_query_key(key: str) -> bool:
+    normalized_key = _normalize_key(key)
+    return (
+        normalized_key in _SENSITIVE_URL_QUERY_EXACT_KEYS
+        or "token" in normalized_key
+        or "secret" in normalized_key
+        or is_sensitive_key(key)
+    )
 
 
 def _redact_embedded_url(match: re.Match[str]) -> str:
