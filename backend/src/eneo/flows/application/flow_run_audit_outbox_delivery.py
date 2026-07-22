@@ -225,7 +225,7 @@ class FlowRunAuditOutboxDeliveryService:
                     "flow_id": str(transition.flow_id),
                     "flow_run_id": str(transition.flow_run_id),
                     "outbox_id": str(transition.outbox_id),
-                    "reason": reason,
+                    "reason": redact_string(reason, key=None),
                     "prior_delivery_attempts": transition.previous_delivery_attempts,
                     "prior_dead_lettered_at": (
                         transition.previous_dead_lettered_at.isoformat()

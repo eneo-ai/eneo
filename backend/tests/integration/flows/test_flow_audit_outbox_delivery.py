@@ -387,7 +387,7 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
         result = await delivery_service.redrive_dead_lettered(
             outbox_id=outbox_id,
             expected_dead_lettered_at=dead_lettered_at,
-            reason="Audit storage recovered.",
+            reason="Audit storage recovered; password=operator-secret",
             now=redriven_at,
         )
 
@@ -454,7 +454,7 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
         "flow_id": str(flow_id),
         "flow_run_id": str(run_id),
         "outbox_id": str(outbox_id),
-        "reason": "Audit storage recovered.",
+        "reason": "Audit storage recovered; password=[REDACTED]",
         "prior_delivery_attempts": 5,
         "prior_dead_lettered_at": dead_lettered_at.isoformat(),
         "prior_delivery_last_error": (

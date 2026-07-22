@@ -53,7 +53,7 @@ _SENSITIVE_SUFFIXES = (
 _BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     r"""
-    (?<![a-z0-9_.-])
+    (?<![a-z0-9_.?&-])
     (?P<key_quote>["']?)
     (?P<key>
         [a-z0-9_.-]*
@@ -80,7 +80,7 @@ _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
         |
         '(?:\\.|[^'\\])*'
         |
-        (?:(?:basic|bearer|digest|token)\s+)?[^\s,;}&\]]+
+        (?:(?:basic|bearer|digest|token)\s+)?[^\s]+
     )
     """,
     flags=re.IGNORECASE | re.VERBOSE,

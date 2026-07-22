@@ -50,6 +50,7 @@ def test_redact_url_secrets_removes_credentials_and_sensitive_query_values():
 def test_redact_string_redacts_sensitive_assignments_in_diagnostics() -> None:
     cases = (
         ("request failed password=alpha123", ("alpha123",)),
+        ("request failed password=left,right;tail", ("left", "right", "tail")),
         ("request failed api_key=beta456", ("beta456",)),
         ("params={'password': 'gamma789'}", ("gamma789",)),
         ('payload={"client_secret": "delta012"}', ("delta012",)),

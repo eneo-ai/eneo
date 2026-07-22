@@ -394,6 +394,22 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Show retention-aware messaging and avoid retry loops for purged content.",
         user_action="The artifact content is no longer available.",
     ),
+    FlowApiErrorCode.AUDIT_OUTBOX_DELIVERY_NOT_FOUND: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The requested lifecycle audit delivery no longer exists.",
+        consumer_action=(
+            "List dead letters again and verify the environment before retrying."
+        ),
+        user_action="Ask an operator to refresh the dead-letter list.",
+    ),
+    FlowApiErrorCode.AUDIT_OUTBOX_REDRIVE_CONFLICT: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The lifecycle audit delivery state or dead-letter generation changed.",
+        consumer_action="List dead letters again and use the latest generation token.",
+        user_action="Ask an operator to refresh and verify the delivery state.",
+    ),
     FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH: _entry(
         category="Published definition",
         surfaced_through="API response and run error payload",
