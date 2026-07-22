@@ -382,6 +382,8 @@ class AIBuilderPlanLifecycle:
         expected_revision: int | None = None,
     ) -> ApplyResultResponse:
         plan, session = await self._lock_session_then_plan(plan_id)
+        if session.target_kind == TargetKind.EDIT and plan.status == PlanStatus.APPLIED:
+            return await self._replay_applied_edit_result(session=session, plan=plan)
         self._require_actionable_session(session=session, plan=plan)
         self._require_plan_status(
             plan=plan,
@@ -392,6 +394,34 @@ class AIBuilderPlanLifecycle:
             plan=plan,
             session=session,
             expected_revision=expected_revision,
+        )
+
+    async def _replay_applied_edit_result(
+        self,
+        *,
+        session: BuilderSession,
+        plan: BuilderPlan,
+    ) -> ApplyResultResponse:
+        flow_id = session.flow_id
+        if flow_id is None:
+            raise AIBuilderBadRequestException(
+                "Edit session has no flow_id.",
+                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            )
+        edit = _edit_approval_for_apply(session=session, plan=plan)
+        flow = await self.flow_service.get_flow(flow_id)
+        return ApplyResultResponse(
+            flow_id=flow_id,
+            flow_name=flow.name,
+            steps_created=sum(
+                change.kind == "added" for change in edit.diff.step_changes
+            ),
+            steps_updated=sum(
+                change.kind == "modified" for change in edit.diff.step_changes
+            ),
+            steps_removed=sum(
+                change.kind == "removed" for change in edit.diff.step_changes
+            ),
         )
 
     async def _apply_approved_plan(

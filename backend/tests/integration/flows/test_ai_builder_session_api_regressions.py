@@ -6637,7 +6637,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_edit_mode_output_only_change_updates_description_and_preserves_assistant(
+async def test_ai_builder_api_edit_apply_replays_committed_output_change_once(
     client,
     bearer_token,
     completion_model_factory,
@@ -6744,25 +6744,47 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
     )
     assert approve_response.status_code == 200, approve_response.text
 
-    apply_response = await client.post(
+    first_apply_response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{plan_id}/apply",
         json={"expected_revision": flow_revision},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
-    assert apply_response.status_code == 200, apply_response.text
+    assert first_apply_response.status_code == 200, first_apply_response.text
+    assert first_apply_response.json()["steps_created"] == 0
+    assert first_apply_response.json()["steps_updated"] == 1
+    assert first_apply_response.json()["steps_removed"] == 0
 
     async with db_container() as container:
         flow_service = container.flow_service()
-        updated = await flow_service.get_flow(flow_id)
-        updated_snapshots = await flow_service.get_flow_assistant_snapshots(updated)
+        after_first_apply = await flow_service.get_flow(flow_id)
+        after_first_snapshots = await flow_service.get_flow_assistant_snapshots(
+            after_first_apply
+        )
 
-    assert updated.steps[0].output_type == "docx"
-    assert updated.description == (
+    replay_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+        json={"expected_revision": flow_revision},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert replay_response.status_code == 200, replay_response.text
+    assert replay_response.json() == first_apply_response.json()
+
+    async with db_container() as container:
+        after_replay = await container.flow_service().get_flow(flow_id)
+
+    assert after_first_apply.draft_revision == flow_revision + 1
+    assert after_replay.draft_revision == after_first_apply.draft_revision
+    assert after_replay.description == after_first_apply.description
+    assert len(after_replay.steps) == len(after_first_apply.steps) == 1
+    assert after_replay.steps[0].output_type == after_first_apply.steps[0].output_type
+    assert after_first_apply.steps[0].output_type == "docx"
+    assert after_first_apply.description == (
         "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
         "svenskt beslutsunderlag i DOCX-format."
     )
-    assert updated_snapshots[updated.steps[0].assistant_id].instructions == (
-        "Skriv ett kort beslutsunderlag i textformat."
+    assert (
+        after_first_snapshots[after_first_apply.steps[0].assistant_id].instructions
+        == "Skriv ett kort beslutsunderlag i textformat."
     )
 
 

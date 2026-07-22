@@ -432,6 +432,73 @@ class TestAIBuilderPlanLifecycle:
         repo.get_plan.assert_not_called()
 
     @pytest.mark.anyio
+    async def test_apply_plan_replays_applied_edit_from_persisted_diff_without_side_effects(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+            status=SessionStatus.APPLIED,
+        )
+        edit = FlowBuilderEditApproval(
+            base_flow_revision=1,
+            diff=FlowEditDiff(
+                step_changes=[
+                    StepChange(kind="added", step_name="Added"),
+                    StepChange(kind="modified", step_name="Modified A"),
+                    StepChange(kind="unchanged", step_name="Unchanged"),
+                    StepChange(kind="modified", step_name="Modified B"),
+                    StepChange(kind="removed", step_name="Removed"),
+                ]
+            ),
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=PlanStatus.APPLIED,
+            edit=edit,
+        )
+        session.latest_plan_id = plan.id
+        repo.get_plan.return_value = plan
+        repo.get_plan_for_update.return_value = plan
+        repo.get_session_for_update.return_value = session
+        flow_service = AsyncMock()
+        flow_service.get_flow.return_value = SimpleNamespace(
+            id=flow_id,
+            name="Committed flow",
+        )
+        authoring_service = _make_authoring_service(flow_id=flow_id)
+        space_service = _make_space_service()
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=space_service,
+            authoring_service=authoring_service,
+        )
+
+        result = await lifecycle.apply_plan(
+            plan_id=plan.id,
+            expected_revision=edit.base_flow_revision,
+        )
+
+        assert result.flow_id == flow_id
+        assert result.flow_name == "Committed flow"
+        assert result.steps_created == 1
+        assert result.steps_updated == 2
+        assert result.steps_removed == 1
+        flow_service.get_flow.assert_awaited_once_with(flow_id)
+        space_service.get_space.assert_not_awaited()
+        authoring_service.prepare.assert_not_awaited()
+        authoring_service.apply_prepared.assert_not_awaited()
+        repo.mark_plan_applied.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_apply_plan_passes_manual_description_override_to_compile(
         self,
     ):
