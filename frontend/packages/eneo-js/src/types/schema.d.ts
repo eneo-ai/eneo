@@ -6440,7 +6440,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 149 actions with their enabled status for the modal UI.
+     * @description Retrieve all 150 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -9201,6 +9201,7 @@ export interface components {
       | "flow_evidence_exported_json"
       | "flow_package_exported"
       | "flow_package_draft_installed"
+      | "flow_package_import_failed"
       | "flow_run_review_checkpoint_opened"
       | "flow_run_review_checkpoint_edited"
       | "flow_run_review_checkpoint_approved"
@@ -10864,7 +10865,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 65,
+     *           "action_count": 66,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [

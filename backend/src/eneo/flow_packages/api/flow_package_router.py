@@ -18,6 +18,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -90,6 +91,12 @@ from eneo.spaces.space import Space
 
 ENEO_PACKAGE_MEDIA_TYPE = "application/vnd.eneo.package+zip"
 MAX_PACKAGE_BASE64_CHARS = ((MAX_PACKAGE_UPLOAD_BYTES + 2) // 3) * 4
+FLOW_NAME_COLLISION_CONSTRAINT = "uq_flows_space_id_name_active"
+FLOW_IMPORT_NAME_COLLISION_CODE = "flow_import_name_collision"
+FLOW_IMPORT_NAME_COLLISION_MESSAGE = (
+    "A Flow with this name already exists in the target space."
+)
+
 
 tenant_router = APIRouter()
 space_router = APIRouter()
@@ -101,6 +108,11 @@ class _FlowImportAuditTarget:
     id: UUID
     name: str
     space_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class _FailedFlowImportAuditTarget:
+    id: UUID
 
 
 PackageUpload = Annotated[
@@ -364,38 +376,47 @@ async def import_flow_package_as_draft(
                 flow_service=container.flow_service(),
                 space_id=id,
             )
+    except IntegrityError as exc:
+        if not _is_flow_name_collision(exc):
+            raise
+        failure = FlowPackageImportFailurePayload(
+            code=FLOW_IMPORT_NAME_COLLISION_CODE,
+            message=FLOW_IMPORT_NAME_COLLISION_MESSAGE,
+            context={},
+        )
     except (
         BadRequestException,
         FlowPackageValidationError,
         FlowResourceBindingResolutionError,
     ) as exc:
         failure = _flow_package_import_failure_payload(exc)
-        await _record_failed_flow_package_import(
+    else:
+        import_id = await _record_successful_flow_package_import(
             import_repo=import_repo,
             container=container,
             space_id=id,
-            envelope=envelope,
+            result=install_result,
             import_plan=import_plan,
-            selection=failure_selection,
-            failure=failure,
+            selection=command.selection,
         )
-        return _flow_package_import_error_response(failure, request)
+        await _log_flow_package_import(
+            container=container,
+            space_id=id,
+            result=install_result,
+            import_id=import_id,
+        )
+        return _flow_package_import_public(import_id=import_id, result=install_result)
 
-    import_id = await _record_successful_flow_package_import(
+    await _record_failed_flow_package_import(
         import_repo=import_repo,
         container=container,
         space_id=id,
-        result=install_result,
+        envelope=envelope,
         import_plan=import_plan,
-        selection=command.selection,
+        selection=failure_selection,
+        failure=failure,
     )
-    await _log_flow_package_import(
-        container=container,
-        space_id=id,
-        result=install_result,
-        import_id=import_id,
-    )
-    return _flow_package_import_public(import_id=import_id, result=install_result)
+    return _flow_package_import_error_response(failure, request)
 
 
 def _flow_package_import_public(
@@ -614,7 +635,7 @@ async def _record_failed_flow_package_import(
     failure: FlowPackageImportFailurePayload,
 ) -> UUID:
     user = container.user()
-    return await import_repo.create_failed(
+    import_id = await import_repo.create_failed(
         tenant_id=user.tenant_id,
         space_id=space_id,
         created_by_user_id=user.id,
@@ -625,6 +646,39 @@ async def _record_failed_flow_package_import(
         selection=selection,
         failure=failure,
     )
+    await container.audit_service().log(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_PACKAGE_IMPORT_FAILED,
+        entity_type=EntityType.SPACE,
+        entity_id=space_id,
+        description="Flow package import failed",
+        required=True,
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=_FailedFlowImportAuditTarget(id=space_id),
+            extra={
+                "import_id": str(import_id),
+                "space_id": str(space_id),
+                "package_id": envelope.manifest.package_id,
+                "package_version": envelope.manifest.package_version,
+                "content_checksum": envelope.content_checksum,
+                "failure_code": failure.code,
+            },
+        ),
+    )
+    return import_id
+
+
+def _is_flow_name_collision(exc: IntegrityError) -> bool:
+    origin = exc.orig
+    diagnostic = getattr(origin, "diag", None)
+    constraint_name = getattr(diagnostic, "constraint_name", None)
+    if constraint_name is None:
+        constraint_name = getattr(origin, "constraint_name", None)
+    if constraint_name is not None:
+        return constraint_name == FLOW_NAME_COLLISION_CONSTRAINT
+    return FLOW_NAME_COLLISION_CONSTRAINT in str(origin)
 
 
 def _flow_package_import_failure_payload(

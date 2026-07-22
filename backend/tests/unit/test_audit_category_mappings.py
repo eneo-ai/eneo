@@ -94,6 +94,7 @@ class TestCategoryMappings:
             ActionType.FLOW_CREATED,
             ActionType.FLOW_RUN_CREATED,
             ActionType.FLOW_RUN_RERUN_REQUESTED,
+            ActionType.FLOW_PACKAGE_IMPORT_FAILED,
         ]
 
         for action_type in user_action_types:

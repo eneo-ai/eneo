@@ -5151,6 +5151,8 @@
   "audit_action_flow_package_exported_description": "A flow package was exported.",
   "audit_action_flow_package_draft_installed": "Flow Package Draft Installed",
   "audit_action_flow_package_draft_installed_description": "A draft flow package was installed.",
+  "audit_action_flow_package_import_failed": "Flow Package Import Failed",
+  "audit_action_flow_package_import_failed_description": "A flow package import failed.",
   "audit_action_flow_run_review_checkpoint_opened": "Flow Review Checkpoint Opened",
   "audit_action_flow_run_review_checkpoint_opened_description": "A flow run reached a review checkpoint.",
   "audit_action_flow_run_review_checkpoint_edited": "Flow Review Checkpoint Edited",

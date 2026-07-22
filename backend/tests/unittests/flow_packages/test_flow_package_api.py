@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
 from eneo.audit.domain.action_types import ActionType
@@ -659,6 +660,191 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
     assert captured_failure[0].code == error.code
     assert captured_selection[0].selected_bindings == [canonical_binding]
     assert fake_session.nested_transactions == ["rolled_back"]
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_name_collision_returns_safe_receipt_and_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    import_id = UUID("99999999-9999-4999-8999-999999999999")
+    captured_failure: list[FlowPackageImportFailurePayload] = []
+    fake_session = _FakeSession()
+    audit_service = _FakeAuditService()
+
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=uuid4()),
+    )
+
+    class FlowNameCollision(Exception):
+        constraint_name = "uq_flows_space_id_name_active"
+
+    class FakeInstallService:
+        async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
+            raise IntegrityError(
+                "INSERT INTO flows ...",
+                {},
+                FlowNameCollision("duplicate key contains private database details"),
+            )
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            assert session is fake_session
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def get_successful_retry(self, **kwargs: object) -> None:
+            return None
+
+        async def create_failed(
+            self,
+            *,
+            failure: FlowPackageImportFailurePayload,
+            **kwargs: object,
+        ) -> UUID:
+            captured_failure.append(failure)
+            assert kwargs["space_id"] == target_space_id
+            return import_id
+
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageInstallService", FakeInstallService
+    )
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageImportRepository", FakeImportRepo
+    )
+
+    response = await flow_package_router.import_flow_package_as_draft(
+        id=target_space_id,
+        import_request=_import_request(_selected_model_binding()),
+        request=cast(
+            Request,
+            SimpleNamespace(headers={"x-request-id": "package-import-request"}),
+        ),
+        container=cast(
+            Container,
+            _FakeContainer(
+                audit_service=audit_service,
+                session=fake_session,
+            ),
+        ),
+    )
+
+    assert isinstance(response, flow_package_router.JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body)
+    error = GeneralError.model_validate(payload)
+    assert error.code == "flow_import_name_collision"
+    assert error.message == "A Flow with this name already exists in the target space."
+    assert error.context is None
+    assert error.request_id == "package-import-request"
+    assert "private database details" not in response.body.decode()
+    assert captured_failure == [
+        FlowPackageImportFailurePayload(
+            code="flow_import_name_collision",
+            message="A Flow with this name already exists in the target space.",
+            context={},
+        )
+    ]
+    assert fake_session.nested_transactions == ["rolled_back"]
+    assert len(audit_service.persisted_events) == 1
+    event = audit_service.persisted_events[0]
+    assert event["action"] is ActionType.FLOW_PACKAGE_IMPORT_FAILED
+    assert event["entity_type"] is EntityType.SPACE
+    assert event["entity_id"] == target_space_id
+    assert event["description"] == "Flow package import failed"
+    assert event["metadata"] == {
+        "actor": {
+            "type": "user",
+            "id": str(_FakeUser.id),
+            "name": _FakeUser.username,
+            "email": _FakeUser.email,
+        },
+        "target": {"id": str(target_space_id), "name": None},
+        "extra": {
+            "import_id": str(import_id),
+            "space_id": str(target_space_id),
+            "package_id": "se.demo.flow",
+            "package_version": "1.0.0",
+            "content_checksum": reader.read_flow_package(
+                _package_bytes()
+            ).content_checksum,
+            "failure_code": "flow_import_name_collision",
+        },
+    }
+
+
+@pytest.mark.anyio
+async def test_import_flow_package_reraises_unrelated_integrity_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_space_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    fake_session = _FakeSession()
+    audit_service = _FakeAuditService()
+    failed_receipts: list[FlowPackageImportFailurePayload] = []
+
+    _patch_import_access(
+        monkeypatch,
+        target_space_id=target_space_id,
+        space=_FakeSpace(default_transcription_model_id=uuid4()),
+    )
+
+    class UnrelatedIntegrityFailure(Exception):
+        constraint_name = "fk_flow_steps_flow_tenant"
+
+    class FakeInstallService:
+        async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
+            raise IntegrityError(
+                "INSERT INTO flow_steps ...",
+                {},
+                UnrelatedIntegrityFailure("unrelated private database details"),
+            )
+
+    class FakeImportRepo:
+        def __init__(self, session: object) -> None:
+            assert session is fake_session
+
+        async def acquire_space_import_lock(self, **kwargs: object) -> None:
+            return None
+
+        async def get_successful_retry(self, **kwargs: object) -> None:
+            return None
+
+        async def create_failed(
+            self,
+            *,
+            failure: FlowPackageImportFailurePayload,
+            **kwargs: object,
+        ) -> UUID:
+            failed_receipts.append(failure)
+            return uuid4()
+
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageInstallService", FakeInstallService
+    )
+    monkeypatch.setattr(
+        flow_package_router, "FlowPackageImportRepository", FakeImportRepo
+    )
+
+    with pytest.raises(IntegrityError, match="unrelated private database details"):
+        await flow_package_router.import_flow_package_as_draft(
+            id=target_space_id,
+            import_request=_import_request(_selected_model_binding()),
+            request=_request(),
+            container=cast(
+                Container,
+                _FakeContainer(
+                    audit_service=audit_service,
+                    session=fake_session,
+                ),
+            ),
+        )
+
+    assert fake_session.nested_transactions == ["rolled_back"]
+    assert failed_receipts == []
+    assert audit_service.persisted_events == []
 
 
 @pytest.mark.anyio

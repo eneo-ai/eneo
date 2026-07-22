@@ -106,6 +106,7 @@ CATEGORY_MAPPINGS = {
     # with evidence exports rather than ordinary authoring changes.
     ActionType.FLOW_PACKAGE_EXPORTED.value: "audit_access",
     ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value: "user_actions",
+    ActionType.FLOW_PACKAGE_IMPORT_FAILED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED.value: "user_actions",
     ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED.value: "user_actions",

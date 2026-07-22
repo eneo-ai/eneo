@@ -31,6 +31,7 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowSteps,
 )
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flow_packages.api import flow_package_router
 from eneo.flow_packages.api.flow_package_models import (
@@ -86,6 +87,7 @@ from eneo.flows.application.flow_authoring_command import (
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
+from eneo.flows.application.flow_service import FlowService
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -695,6 +697,117 @@ async def test_flow_package_import_route_persists_failed_install_record(
             "context": {"slot_ref": "model.structured"},
         }
         assert retry is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_name_collision_persists_failed_receipt_and_audit_until_space_delete(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-collision-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package collision {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        session.add(
+            Flows(
+                name="Route Import Demo",
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                created_by_user_id=admin_user.id,
+                owner_user_id=admin_user.id,
+            )
+        )
+        await session.flush()
+
+        async def stale_flow_name_read(*args: object, **kwargs: object) -> list[object]:
+            return []
+
+        monkeypatch.setattr(FlowService, "list_flows", stale_flow_name_read)
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+        )
+
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=_import_request(_package_base64()),
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        failed_receipt = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.space_id == space.id,
+                FlowPackageImports.status == FlowPackageImportStatus.FAILED.value,
+            )
+        )
+        audit_record = await session.scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_IMPORT_FAILED.value,
+                AuditLogTable.entity_id == space.id,
+            )
+        )
+        flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+        )
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
+        assert json.loads(response.body)["code"] == "flow_import_name_collision"
+        assert failed_receipt is not None
+        assert failed_receipt.flow_id is None
+        assert failed_receipt.failure_json == {
+            "code": "flow_import_name_collision",
+            "message": "A Flow with this name already exists in the target space.",
+            "context": {},
+        }
+        assert flow_count == 1
+        assert audit_record is not None
+        assert audit_record.log_metadata["extra"] == {
+            "import_id": str(failed_receipt.id),
+            "space_id": str(space.id),
+            "package_id": "se.demo.route-import",
+            "package_version": "1.0.0",
+            "content_checksum": failed_receipt.content_checksum,
+            "failure_code": "flow_import_name_collision",
+        }
+
+        failed_receipt_id = failed_receipt.id
+        audit_record_id = audit_record.id
+        await session.execute(sa.delete(Spaces).where(Spaces.id == space.id))
+        await session.flush()
+
+        assert (
+            await session.scalar(
+                sa.select(FlowPackageImports).where(
+                    FlowPackageImports.id == failed_receipt_id
+                )
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                sa.select(AuditLogTable).where(AuditLogTable.id == audit_record_id)
+            )
+            is not None
+        )
 
 
 @pytest.mark.asyncio

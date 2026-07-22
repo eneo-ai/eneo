@@ -118,6 +118,7 @@ class AuditService:
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
+        required: bool = False,
         # Pass `user` to derive actor fields via audit_actor_for. Service-key
         # callers write actor_api_key_id instead of FK-invalid audit_log.actor_id.
         # Sysadmin paths without a user keep using actor_type=SYSTEM explicitly.
@@ -155,10 +156,10 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if action should be logged based on configuration
-        should_log = await self._should_log_action(tenant_id, action)
-        if not should_log:
-            return None
+        if not required:
+            should_log = await self._should_log_action(tenant_id, action)
+            if not should_log:
+                return None
 
         if user is not None:
             from eneo.authentication.auth_models import audit_actor_for

@@ -5151,6 +5151,8 @@
   "audit_action_flow_package_exported_description": "Ett flödespaket exporterades.",
   "audit_action_flow_package_draft_installed": "Utkast till flödespaket installerat",
   "audit_action_flow_package_draft_installed_description": "Ett utkast till flödespaket installerades.",
+  "audit_action_flow_package_import_failed": "Import av flödespaket misslyckades",
+  "audit_action_flow_package_import_failed_description": "Ett flödespaket kunde inte importeras.",
   "audit_action_flow_run_review_checkpoint_opened": "Granskningspunkt för flöde öppnad",
   "audit_action_flow_run_review_checkpoint_opened_description": "En flödeskörning nådde en granskningspunkt.",
   "audit_action_flow_run_review_checkpoint_edited": "Granskningspunkt för flöde redigerad",

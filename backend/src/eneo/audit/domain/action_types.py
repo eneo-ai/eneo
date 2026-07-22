@@ -109,6 +109,7 @@ class ActionType(str, Enum):
     FLOW_EVIDENCE_EXPORTED_JSON = "flow_evidence_exported_json"
     FLOW_PACKAGE_EXPORTED = "flow_package_exported"
     FLOW_PACKAGE_DRAFT_INSTALLED = "flow_package_draft_installed"
+    FLOW_PACKAGE_IMPORT_FAILED = "flow_package_import_failed"
     FLOW_RUN_REVIEW_CHECKPOINT_OPENED = "flow_run_review_checkpoint_opened"
     FLOW_RUN_REVIEW_CHECKPOINT_EDITED = "flow_run_review_checkpoint_edited"
     FLOW_RUN_REVIEW_CHECKPOINT_APPROVED = "flow_run_review_checkpoint_approved"
