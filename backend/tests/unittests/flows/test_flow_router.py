@@ -23,6 +23,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.domain.flow import (
     Flow,
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunRetentionContributors,
     FlowRunRetentionOff,
@@ -187,11 +188,11 @@ def _result_file(*, run: FlowRun, step_result_id=None) -> FlowRunStepResultFile:
     )
 
 
-def _evidence_export_payload(run: FlowRun) -> dict:
+def _evidence_export_payload(
+    run: FlowRun, *, actor_user_id: UUID
+) -> FlowPersistedJsonObject:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
-    actor_user_id = run.principal_user_id
-    assert actor_user_id is not None
     review_checkpoint_summary = EvidenceReviewCheckpointSummary(
         count=0,
         by_state={state: 0 for state in FlowRunReviewCheckpointState},

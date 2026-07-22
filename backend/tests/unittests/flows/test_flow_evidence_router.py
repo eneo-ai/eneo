@@ -730,7 +730,9 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
     events: list[str] = []
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = _evidence_export_payload(run)
+    caller_user_id = uuid4()
+    assert caller_user_id != run.principal_user_id
+    export_payload = _evidence_export_payload(run, actor_user_id=caller_user_id)
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
@@ -904,7 +906,7 @@ async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unav
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = _evidence_export_payload(run)
+    export_payload = _evidence_export_payload(run, actor_user_id=uuid4())
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
@@ -966,7 +968,7 @@ async def test_export_flow_run_evidence_passes_raw_detail_and_reason(monkeypatch
     container = MagicMock()
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
-    export_payload = _evidence_export_payload(run)
+    export_payload = _evidence_export_payload(run, actor_user_id=uuid4())
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     run_service.export_evidence_json.return_value = export_payload
