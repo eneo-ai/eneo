@@ -63,7 +63,9 @@ Recommended consumer path:
    - Send `expected_flow_version`, `input_payload_json`, and
      `step_inputs[step_id].file_ids`.
 5. `GET /api/v1/flows/{id}/runs/{run_id}/`
-   - Poll run status.
+   - Poll run status. For `outbound_http` delivery, inspect
+     `webhook_deliveries` for each step attempt's persisted `pending`,
+     `delivered`, or `dead_lettered` state and charged `delivery_attempts` count.
 6. `GET /api/v1/flows/{id}/runs/{run_id}/steps/`
    - Inspect per-step progress and outputs.
 7. If the run reaches `awaiting_review`, use the review checkpoint endpoints.
@@ -224,6 +226,12 @@ The run contract exposes the terminal delivery mode:
 - `payload` for text or JSON results returned as run payload.
 - `artifact` for generated PDF or DOCX output.
 - `outbound_http` for HTTP delivery.
+
+Outbound HTTP delivery is at least once. The run detail and evidence view/export
+expose a secret-free `webhook_deliveries` projection ordered by step and attempt.
+It includes lifecycle timestamps and charged attempt counts, but never authored
+URLs, headers, request bodies, idempotency keys, claim/lease data, or free-form
+transport errors.
 
 Completed payload delivery uses a closed result discriminator. `inline_text`
 contains exact complete text. When text exceeds inline storage,

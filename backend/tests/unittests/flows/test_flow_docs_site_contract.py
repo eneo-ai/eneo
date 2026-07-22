@@ -3300,6 +3300,7 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
         "status": "awaiting_review",
         "dispatch_next_attempt_at": None,
         "started_at": "2026-03-17T10:05:02Z",
+        "webhook_deliveries": [],
         "updated_at": "2026-03-17T10:05:30Z",
     }
     for stale_text in ("Review draft answer", "Draft answer.", "Edited answer."):
@@ -3542,7 +3543,7 @@ def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v9`" in evidence_export
+    assert "`flow-evidence-export.v10`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export

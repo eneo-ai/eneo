@@ -1010,6 +1010,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "updated_at": "2026-03-20T12:00:05Z",
                 }
             ],
+            "webhook_deliveries": [],
             "debug_export": {
                 "schema_version": "eneo.flow.debug-export.v2",
                 "generated_at": "2026-03-20T12:05:00Z",

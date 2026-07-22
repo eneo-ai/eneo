@@ -1446,6 +1446,7 @@ class Container(containers.DeclarativeContainer):
         runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
         access_policy=flow_run_access_policy,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
     )
     flow_run_evidence_service = providers.Factory(
         FlowRunEvidenceService,
@@ -1457,6 +1458,7 @@ class Container(containers.DeclarativeContainer):
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
         access_policy=flow_run_access_policy,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
     )
     flow_run_rerun_service = providers.Factory(
         FlowRunRerunService,

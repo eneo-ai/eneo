@@ -21,12 +21,14 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
+    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
     FlowVersions,
@@ -467,6 +469,31 @@ async def _seed_flow_run_contract_data(
         await session.flush()
 
         session.add(
+            FlowRunWebhookDeliveries(
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step.id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key="evidence-contract-delivery",
+                payload_ref="flow_run_step_results.output_payload_json",
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
+                delivery_attempts=2,
+                next_delivery_at=None,
+                claimed_at=None,
+                claim_expires_at=None,
+                claim_token=None,
+                delivered_at=finished_at,
+                dead_lettered_at=None,
+                delivery_last_error="Authorization: Bearer webhook-secret",
+                created_at=started_at,
+                updated_at=finished_at,
+            )
+        )
+        await session.flush()
+
+        session.add(
             FlowRunStepInputFiles(
                 flow_run_id=run.id,
                 flow_id=flow.id,
@@ -669,6 +696,55 @@ async def _seed_trace_view_flow_run_contract_data(
         include_review_checkpoint_lineage=include_review_checkpoint_lineage,
     )
     return seeded, trace_user, trace_token
+
+
+async def _replace_flow_definition_with_outbound_http_snapshot(
+    *,
+    db_container,
+    seeded: dict[str, str],
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        step_result = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == UUID(seeded["run_id"])
+            )
+        )
+        assert step_result is not None
+        definition_json = build_published_definition_json(
+            flow_id=UUID(seeded["flow_id"]),
+            name="Webhook evidence flow",
+            description=None,
+            metadata_json=None,
+            steps=[
+                {
+                    "step_id": str(step_result.step_id),
+                    "step_order": step_result.step_order,
+                    "assistant_id": str(step_result.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "http_post",
+                    "output_type": "json",
+                    "output_contract": {"type": "object"},
+                    "output_config": {
+                        "url": "https://example.org/hook?token=top-secret",
+                        "headers": {
+                            "Authorization": "Bearer super-secret",
+                            "X-Api-Key": "super-secret",
+                        },
+                    },
+                }
+            ],
+        )
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(FlowVersions.flow_id == UUID(seeded["flow_id"]))
+            .where(FlowVersions.version == 1)
+            .values(
+                definition_json=definition_json,
+                definition_checksum=published_definition_checksum(definition_json),
+            )
+        )
 
 
 def _attempt_retention_marker_payload(
@@ -1153,6 +1229,118 @@ async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("delivery_status", "delivery_attempts"),
+    [
+        (FlowOutboxDeliveryStatus.PENDING, 2),
+        (FlowOutboxDeliveryStatus.DELIVERED, 1),
+        (FlowOutboxDeliveryStatus.DEAD_LETTERED, 5),
+    ],
+)
+async def test_outbound_http_delivery_lifecycle_is_identical_across_public_views(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    delivery_status: FlowOutboxDeliveryStatus,
+    delivery_attempts: int,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    await _replace_flow_definition_with_outbound_http_snapshot(
+        db_container=db_container,
+        seeded=seeded,
+    )
+
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.flow_run_id == UUID(seeded["run_id"]))
+            .values(
+                delivery_status=delivery_status.value,
+                delivery_attempts=delivery_attempts,
+                next_delivery_at=(
+                    now + timedelta(seconds=30)
+                    if delivery_status is FlowOutboxDeliveryStatus.PENDING
+                    else None
+                ),
+                delivered_at=(
+                    now
+                    if delivery_status is FlowOutboxDeliveryStatus.DELIVERED
+                    else None
+                ),
+                dead_lettered_at=(
+                    now
+                    if delivery_status is FlowOutboxDeliveryStatus.DEAD_LETTERED
+                    else None
+                ),
+            )
+        )
+
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_detail_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/",
+        headers=headers,
+    )
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers=headers,
+    )
+    export_path = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
+    )
+    redacted_response = await client.get(f"{export_path}?format=json", headers=headers)
+    raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=delivery-lifecycle-audit",
+        headers=headers,
+    )
+
+    assert run_detail_response.status_code == 200, run_detail_response.text
+    assert evidence_response.status_code == 200, evidence_response.text
+    assert redacted_response.status_code == 200, redacted_response.text
+    assert raw_response.status_code == 200, raw_response.text
+    expected = run_detail_response.json()["webhook_deliveries"]
+    assert len(expected) == 1
+    assert expected[0]["delivery_status"] == delivery_status.value
+    assert expected[0]["delivery_attempts"] == delivery_attempts
+    assert evidence_response.json()["webhook_deliveries"] == expected
+    normalized_expected = {
+        key: (
+            value.replace("Z", "+00:00")
+            if key.endswith("_at") and isinstance(value, str)
+            else value
+        )
+        for key, value in expected[0].items()
+    }
+    for export_response in (redacted_response, raw_response):
+        export_deliveries = export_response.json()["bundle"]["webhook_deliveries"]
+        assert len(export_deliveries) == 1
+        normalized_export = {
+            key: (
+                value.replace("Z", "+00:00")
+                if key.endswith("_at") and isinstance(value, str)
+                else value
+            )
+            for key, value in export_deliveries[0].items()
+        }
+        assert normalized_export == normalized_expected
+    assert "top-secret" not in json.dumps(expected)
+    assert "super-secret" not in json.dumps(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     client,
     db_container,
@@ -1170,6 +1358,11 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
         assistant_factory=assistant_factory,
         admin_user=admin_user,
         include_rerun_lineage=True,
+    )
+
+    await _replace_flow_definition_with_outbound_http_snapshot(
+        db_container=db_container,
+        seeded=seeded,
     )
 
     export_path = (
@@ -1191,11 +1384,21 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
         f"{export_path}?format=json",
         headers={"Authorization": f"Bearer {trace_token}"},
     )
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+    run_detail_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
 
     assert redacted_response.status_code == 200, redacted_response.text
     assert raw_response.status_code == 200, raw_response.text
     assert repeated_raw_response.status_code == 200
     assert repeated_redacted_response.status_code == 200
+    assert evidence_response.status_code == 200, evidence_response.text
+    assert run_detail_response.status_code == 200, run_detail_response.text
     redacted_payload = redacted_response.json()
     raw_payload = raw_response.json()
     repeated_raw_payload = repeated_raw_response.json()
@@ -1210,6 +1413,34 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     )
     assert raw_payload["content_hash"] == repeated_raw_payload["content_hash"]
     assert set(raw_bundle.keys()) == set(redacted_bundle.keys())
+    assert raw_bundle["webhook_deliveries"] == redacted_bundle["webhook_deliveries"]
+    delivery = cast(dict[str, Any], raw_bundle["webhook_deliveries"][0])
+    evidence_payload = cast(dict[str, Any], cast(Any, evidence_response).json())
+    evidence_delivery = cast(dict[str, Any], evidence_payload["webhook_deliveries"][0])
+    run_detail_payload = cast(dict[str, Any], cast(Any, run_detail_response).json())
+    run_detail_delivery = cast(
+        dict[str, Any], run_detail_payload["webhook_deliveries"][0]
+    )
+    assert set(delivery) == set(evidence_delivery) == set(run_detail_delivery)
+    for field_name, exported_value in delivery.items():
+        if field_name.endswith("_at") and exported_value is not None:
+            assert datetime.fromisoformat(exported_value) == datetime.fromisoformat(
+                evidence_delivery[field_name]
+            )
+            assert datetime.fromisoformat(exported_value) == datetime.fromisoformat(
+                run_detail_delivery[field_name]
+            )
+        else:
+            assert exported_value == evidence_delivery[field_name]
+            assert exported_value == run_detail_delivery[field_name]
+    assert delivery["delivery_status"] == "delivered"
+    assert delivery["delivery_attempts"] == 2
+    assert "idempotency_key" not in delivery
+    assert "payload_ref" not in delivery
+    assert "delivery_last_error" not in delivery
+    assert "claim_token" not in delivery
+    assert "claimed_at" not in delivery
+    assert "claim_expires_at" not in delivery
     for section_name in ("rerun_operations", "rerun_invalidated_steps"):
         assert len(raw_bundle[section_name]) == len(redacted_bundle[section_name])
         assert set(raw_bundle[section_name][0].keys()) == set(

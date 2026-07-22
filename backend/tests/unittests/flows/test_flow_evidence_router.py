@@ -193,6 +193,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         "rerun_operations": [],
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -305,6 +306,7 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
         "rerun_operations": [],
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -396,6 +398,7 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         "rerun_operations": [],
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -529,6 +532,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
                 "updated_at": "2026-03-20T12:00:00Z",
             }
         ],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -668,6 +672,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
         "rerun_operations": [],
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -816,6 +821,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         "rerun_operations": [],
         "rerun_invalidated_steps": [],
         "review_checkpoints": [],
+        "webhook_deliveries": [],
         "debug_export": {
             "schema_version": "eneo.flow.debug-export.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),

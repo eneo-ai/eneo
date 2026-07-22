@@ -71,6 +71,9 @@ from eneo.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
     FlowRunRerunRepository,
 )
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
@@ -114,6 +117,12 @@ def _flow_run_rerun_repo() -> AsyncMock:
     return repo
 
 
+def _webhook_delivery_repo() -> AsyncMock:
+    repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
+    repo.list_run_delivery_statuses.return_value = []
+    return repo
+
+
 def _flow_run_service(
     *,
     user,
@@ -126,6 +135,7 @@ def _flow_run_service(
     flow_run_terminalizer=None,
     settings_service=None,
     access_policy=None,
+    webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
     max_concurrent_runs=None,
 ) -> FlowRunService:
     resolved_file_repo = _file_repo() if file_repo is _FILE_REPO_UNSET else file_repo
@@ -150,6 +160,8 @@ def _flow_run_service(
         flow_run_terminalizer=resolved_terminalizer,
         settings_service=settings_service,
         access_policy=resolved_access_policy,
+        webhook_delivery_repo=webhook_delivery_repo
+        or AsyncMock(spec=FlowRunWebhookDeliveryRepository),
         max_concurrent_runs=max_concurrent_runs,
     )
 
@@ -1966,6 +1978,39 @@ async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
 
 
 @pytest.mark.asyncio
+async def test_get_run_detail_includes_tenant_scoped_webhook_deliveries(user):
+    flow_run_repo = AsyncMock()
+    webhook_delivery_repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
+    flow = _flow(user)
+    run = _run(user=user, flow_id=flow.id)
+    delivery = SimpleNamespace(id=uuid4(), delivery_status="pending")
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.list_token_usage_for_runs.return_value = {}
+    webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        webhook_delivery_repo=webhook_delivery_repo,
+    )
+
+    detail = await service.get_run_detail_with_result_files_and_token_usage(
+        flow_id=flow.id,
+        run_id=run.id,
+    )
+
+    assert detail.run == run
+    assert detail.webhook_deliveries == (delivery,)
+    webhook_delivery_repo.list_run_delivery_statuses.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_runs_bulk_loads_each_historical_completed_version_once(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -2190,6 +2235,7 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
@@ -2243,6 +2289,7 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -2287,6 +2334,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="redacted")
@@ -2338,6 +2386,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=service_user,
             flow_repo=flow_repo,
@@ -2375,6 +2424,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2420,6 +2470,7 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="redacted")
@@ -2458,6 +2509,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2504,6 +2556,7 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2537,6 +2590,7 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2573,6 +2627,7 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -3006,6 +3061,7 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -3049,6 +3105,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -3095,6 +3152,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -3150,6 +3208,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=_access_policy(
             user=trace_user,
             flow_repo=flow_repo,
@@ -3834,6 +3893,7 @@ async def test_get_evidence_redacts_sensitive_values(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3980,6 +4040,7 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -4068,6 +4129,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -4119,6 +4181,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=access_policy,
     )
 
@@ -4136,7 +4199,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v9"
+        assert export["schema_version"] == "flow-evidence-export.v10"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]
@@ -4203,6 +4266,7 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=access_policy,
     )
 
@@ -4264,6 +4328,7 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -4323,6 +4388,7 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -4372,6 +4438,7 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -4572,6 +4639,7 @@ def _artifact_service(user, *, file_repo, result_file=None, run=None):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        webhook_delivery_repo=_webhook_delivery_repo(),
     ), run
 
 

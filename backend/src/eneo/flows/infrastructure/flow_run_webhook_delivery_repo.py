@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -29,6 +30,23 @@ class FlowRunWebhookDeliveryRow:
     delivery_attempts: int
     claim_token: UUID
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunWebhookDeliveryRead:
+    """Tenant-scoped, secret-free delivery lifecycle projection for public reads."""
+
+    id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    delivery_status: FlowOutboxDeliveryStatus
+    delivery_attempts: int
+    next_delivery_at: datetime | None
+    delivered_at: datetime | None
+    dead_lettered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class FlowRunWebhookDeliveryRepository:
@@ -72,6 +90,55 @@ class FlowRunWebhookDeliveryRepository:
         if existing_id is None:
             raise RuntimeError("Webhook delivery insert did not return an id.")
         return existing_id
+
+    async def list_run_delivery_statuses(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowRunWebhookDeliveryRead]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.id,
+                    FlowRunWebhookDeliveries.step_id,
+                    FlowRunWebhookDeliveries.step_order,
+                    FlowRunWebhookDeliveries.attempt_no,
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.next_delivery_at,
+                    FlowRunWebhookDeliveries.delivered_at,
+                    FlowRunWebhookDeliveries.dead_lettered_at,
+                    FlowRunWebhookDeliveries.created_at,
+                    FlowRunWebhookDeliveries.updated_at,
+                )
+                .where(FlowRunWebhookDeliveries.flow_run_id == run_id)
+                .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
+                .order_by(
+                    FlowRunWebhookDeliveries.step_order.asc(),
+                    FlowRunWebhookDeliveries.attempt_no.asc(),
+                    FlowRunWebhookDeliveries.id.asc(),
+                )
+            )
+        ).tuples()
+        return [
+            FlowRunWebhookDeliveryRead(
+                id=row.id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                attempt_no=row.attempt_no,
+                delivery_status=FlowOutboxDeliveryStatus(
+                    cast(str, row.delivery_status)
+                ),
+                delivery_attempts=row.delivery_attempts,
+                next_delivery_at=row.next_delivery_at,
+                delivered_at=row.delivered_at,
+                dead_lettered_at=row.dead_lettered_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
 
     async def claim_due_delivery_rows(
         self,

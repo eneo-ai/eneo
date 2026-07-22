@@ -21,6 +21,9 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     published_definition_checksum,
@@ -72,6 +75,7 @@ def _flow_run_service(
         runtime_upload_repo=runtime_upload_repo,
         file_repo=resolved_file_repo,
         flow_run_terminalizer=AsyncMock(),
+        webhook_delivery_repo=AsyncMock(spec=FlowRunWebhookDeliveryRepository),
         access_policy=FlowRunAccessPolicy(
             user=user,
             flow_repo=flow_repo,

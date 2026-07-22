@@ -407,6 +407,83 @@ def _delivery_service(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_webhook_delivery_public_projection_is_tenant_scoped_and_ordered(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        flow, run, webhook_step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            prior_output_payload={"text": "prepared"},
+        )
+        first_step = flow.steps[0]
+        assert flow.id is not None
+        assert first_step.id is not None
+        assert webhook_step.id is not None
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        second_delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(
+                run_id=run.id,
+                step_id=webhook_step.id,
+                step_order=webhook_step.step_order,
+            ),
+        )
+        await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(
+                run_id=run.id,
+                step_id=first_step.id,
+                step_order=first_step.step_order,
+            ),
+        )
+        delivered_at = datetime.now(timezone.utc)
+        await session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.id == second_delivery_id)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
+                delivery_attempts=2,
+                next_delivery_at=None,
+                delivered_at=delivered_at,
+            )
+        )
+
+        deliveries = await webhook_repo.list_run_delivery_statuses(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        other_tenant_deliveries = await webhook_repo.list_run_delivery_statuses(
+            run_id=run.id,
+            tenant_id=uuid4(),
+        )
+
+    assert [(item.step_order, item.attempt_no) for item in deliveries] == [
+        (1, 1),
+        (2, 1),
+    ]
+    assert deliveries[1].delivery_status is FlowOutboxDeliveryStatus.DELIVERED
+    assert deliveries[1].delivery_attempts == 2
+    assert deliveries[1].delivered_at == delivered_at
+    assert other_tenant_deliveries == []
+    assert not hasattr(deliveries[1], "idempotency_key")
+    assert not hasattr(deliveries[1], "payload_ref")
+    assert not hasattr(deliveries[1], "delivery_last_error")
+    assert not hasattr(deliveries[1], "claim_token")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconciler(
     setup_database,
     completion_model_factory,

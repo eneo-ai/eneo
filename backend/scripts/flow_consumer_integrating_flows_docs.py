@@ -440,6 +440,7 @@ FLOW_RUN_AWAITING_REVIEW_RESPONSE_EXAMPLE: dict[str, object] = {
     "status": "awaiting_review",
     "dispatch_next_attempt_at": None,
     "started_at": "2026-03-17T10:05:02Z",
+    "webhook_deliveries": [],
     "updated_at": "2026-03-17T10:05:30Z",
 }
 
@@ -602,7 +603,9 @@ WORKED_EXAMPLE_HOPS: tuple[WorkedExampleHop, ...] = (
         request_intro="Poll the run until it is terminal or reaches `awaiting_review`.",
         request_language="text",
         request_body="GET /api/v1/flows/{id}/runs/{run_id}/",
-        response_intro="When review is needed, the run status tells the UI to open the review flow.",
+        response_intro=(
+            "The run reports review state and secret-free outbound delivery progress."
+        ),
         response_json=FLOW_RUN_AWAITING_REVIEW_RESPONSE_EXAMPLE,
     ),
     WorkedExampleHop(

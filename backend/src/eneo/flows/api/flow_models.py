@@ -270,6 +270,20 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:05:00Z",
 }
 
+FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
+    "id": "00000000-0000-0000-0000-000000000601",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "attempt_no": 1,
+    "delivery_status": "delivered",
+    "delivery_attempts": 1,
+    "next_delivery_at": None,
+    "delivered_at": "2026-03-17T10:05:31Z",
+    "dead_lettered_at": None,
+    "created_at": "2026-03-17T10:05:30Z",
+    "updated_at": "2026-03-17T10:05:31Z",
+}
+
 FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
     **FLOW_RUN_PUBLIC_EXAMPLE,
     "dispatch_attempt_count": 1,
@@ -910,6 +924,43 @@ class FlowRunPublic(BaseModel):
     job_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunWebhookDeliveryPublic(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE},
+    )
+
+    id: UUID
+    step_id: UUID
+    step_order: int = Field(ge=1)
+    attempt_no: int = Field(ge=1)
+    delivery_status: Literal["pending", "delivered", "dead_lettered"]
+    delivery_attempts: int = Field(
+        ge=0,
+        description="Persisted delivery attempts charged when the sender claims work.",
+    )
+    next_delivery_at: datetime | None = None
+    delivered_at: datetime | None = None
+    dead_lettered_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunDetailPublic(FlowRunPublic):
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                **FLOW_RUN_PUBLIC_EXAMPLE,
+                "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+            }
+        },
+    )
+
+    webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
 
 
 class FlowRunReviewCheckpointPublic(BaseModel):
@@ -1838,6 +1889,7 @@ class FlowRunEvidenceResponse(BaseModel):
                 "rerun_operations": [],
                 "rerun_invalidated_steps": [],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
+                "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
                 "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
             }
         }
@@ -1852,6 +1904,7 @@ class FlowRunEvidenceResponse(BaseModel):
     rerun_operations: list[FlowRunRerunOperationPublic]
     rerun_invalidated_steps: list[FlowRunRerunInvalidatedStepPublic]
     review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
+    webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
     debug_export: FlowRunDebugExport
 
 
@@ -1859,11 +1912,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v9",
+                "schema_version": "flow-evidence-export.v10",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v9",
+                    "schema_version": "flow-evidence-export.v10",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -2233,13 +2286,14 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "step_attempts": [],
                     "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                     "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
+                    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
                     "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
                 },
             }
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v9"]
+    schema_version: Literal["flow-evidence-export.v10"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

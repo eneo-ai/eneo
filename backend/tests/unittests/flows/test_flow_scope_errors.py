@@ -525,8 +525,13 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
             has_more=False,
         )
     )
-    run_service.get_run_with_result_files_and_token_usage.return_value = (
-        SimpleNamespace(run=run, result_files=(), token_usage=None)
+    run_service.get_run_detail_with_result_files_and_token_usage.return_value = (
+        SimpleNamespace(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            webhook_deliveries=(),
+        )
     )
     run_service.list_step_results.return_value = []
     container.flow_run_service.return_value = run_service
@@ -572,7 +577,7 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
         message="API key space scope does not match requested flow.",
     )
     run_service.list_runs_with_result_files_and_token_usage.assert_not_awaited()
-    run_service.get_run_with_result_files_and_token_usage.assert_not_awaited()
+    run_service.get_run_detail_with_result_files_and_token_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio

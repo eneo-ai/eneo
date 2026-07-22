@@ -17,6 +17,7 @@ from fastapi import BackgroundTasks
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api import flow_run_lifecycle_router as lifecycle_router_module
 from eneo.flows.api import flow_run_review_router as review_router_module
@@ -49,6 +50,7 @@ from eneo.flows.application.flow_dispatch import (
 )
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
+    FlowRunDetailView,
     FlowRunPageWithResultFilesAndTokenUsage,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndTokenUsage,
@@ -67,6 +69,9 @@ from eneo.flows.enums import (
     FlowStepResultStatus,
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+)
 from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     parse_published_definition,
@@ -725,6 +730,20 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         update={"status": FlowRunStatus.QUEUED}
     )
     result_file = _result_file(run=run)
+    delivery_now = datetime.now(timezone.utc)
+    webhook_delivery = FlowRunWebhookDeliveryRead(
+        id=uuid4(),
+        step_id=uuid4(),
+        step_order=2,
+        attempt_no=1,
+        delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED,
+        delivery_attempts=5,
+        next_delivery_at=None,
+        delivered_at=None,
+        dead_lettered_at=delivery_now,
+        created_at=delivery_now,
+        updated_at=delivery_now,
+    )
     run_service = AsyncMock()
     run_service.list_runs_with_result_files_and_token_usage.return_value = (
         FlowRunPageWithResultFilesAndTokenUsage(
@@ -738,11 +757,12 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
             has_more=False,
         )
     )
-    run_service.get_run_with_result_files_and_token_usage.return_value = (
-        FlowRunWithResultFilesAndTokenUsage(
+    run_service.get_run_detail_with_result_files_and_token_usage.return_value = (
+        FlowRunDetailView(
             run=run,
             result_files=(result_file,),
             token_usage=None,
+            webhook_deliveries=(webhook_delivery,),
         )
     )
     run_service.list_step_results_with_files.return_value = ()
@@ -784,13 +804,30 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     assert list_response["items"][0].result_files == [result_file]
     assert get_response.id == run.id
     assert get_response.result_files == [result_file]
+    assert len(get_response.webhook_deliveries) == 1
+    public_delivery = get_response.webhook_deliveries[0]
+    assert public_delivery.delivery_status == "dead_lettered"
+    assert public_delivery.delivery_attempts == 5
+    assert set(public_delivery.model_dump()) == {
+        "id",
+        "step_id",
+        "step_order",
+        "attempt_no",
+        "delivery_status",
+        "delivery_attempts",
+        "next_delivery_at",
+        "delivered_at",
+        "dead_lettered_at",
+        "created_at",
+        "updated_at",
+    }
     assert step_response == []
     # get_flow is called once per endpoint (3 total) via enforce_flow_scope space check
     assert flow_service.get_flow.await_count == 3
     run_service.list_runs_with_result_files_and_token_usage.assert_awaited_once_with(
         flow_id=flow_id, statuses=None, limit=20, offset=2
     )
-    run_service.get_run_with_result_files_and_token_usage.assert_awaited_once_with(
+    run_service.get_run_detail_with_result_files_and_token_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
     )
     run_service.list_runs.assert_not_awaited()

@@ -1104,11 +1104,18 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v9`. Its required
+The JSON response uses manifest schema `flow-evidence-export.v10`. Its required
 `actor` identifies the caller that performed the export, not the run owner.
 Branch on `actor.type`: a user actor contains only `user_id`, while a
 `service_key` actor contains only `key_id`. Both actor variants reject additional
-fields. The content hash continues to cover only the exported `bundle`, so audit
+fields.
+
+Run detail and evidence responses expose `webhook_deliveries` for
+`outbound_http` runs. Entries are ordered by step and logical attempt and report
+the persisted `pending`, `delivered`, or `dead_lettered` state plus the charged
+`delivery_attempts` count. Raw and redacted evidence exports carry the same
+secret-free delivery metadata; URLs, headers, bodies, idempotency keys,
+claim/lease details, and free-form transport errors are never included. The content hash continues to cover only the exported `bundle`, so audit
 metadata such as the actor does not change the hash.
 
 ```js

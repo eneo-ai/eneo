@@ -441,7 +441,10 @@ const validFlowRunRedispatchResult: FlowRunRedispatchResult = {
 };
 
 const validCreateFlowRunResponse: CreateFlowRunResponse = validFlowRun;
-const validGetFlowRunResponse: GetFlowRunResponse = validFlowRun;
+const validGetFlowRunResponse: GetFlowRunResponse = {
+  ...validFlowRun,
+  webhook_deliveries: []
+};
 const validCreateFlowRunHeaders: CreateFlowRunHeaders = {
   "Idempotency-Key": "flow-run:client-request-1"
 };
@@ -590,6 +593,7 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
   rerun_operations: [validRerunOperation],
   rerun_invalidated_steps: [validRerunInvalidatedStep],
   review_checkpoints: [validReviewCheckpointEvidence],
+  webhook_deliveries: [],
   debug_export: {
     schema_version: "eneo.flow.debug-export.v2",
     generated_at: isoTimestamp,
@@ -617,11 +621,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v9",
+  schema_version: "flow-evidence-export.v10",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v9",
+    schema_version: "flow-evidence-export.v10",
     app_version: "DEV",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",

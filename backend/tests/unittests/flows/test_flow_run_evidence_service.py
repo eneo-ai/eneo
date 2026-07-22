@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -14,11 +15,16 @@ from test_flow_run_service import (
     _version,
 )
 
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.published_definition import published_definition_checksum
 from eneo.main.exceptions import UnauthorizedException
 
@@ -28,6 +34,91 @@ def _flow_run_rerun_repo() -> AsyncMock:
     repo.list_rerun_operations_for_run.return_value = []
     repo.list_rerun_invalidated_steps_for_run.return_value = []
     return repo
+
+
+def _webhook_delivery_repo() -> AsyncMock:
+    repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
+    repo.list_run_delivery_statuses.return_value = []
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = _flow_run_rerun_repo()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    webhook_delivery_repo = _webhook_delivery_repo()
+    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
+    flow = _flow(user=user)
+    run = _run(user=user, flow_id=flow.id)
+    access_policy.load_run.return_value = run
+    now = datetime.now(timezone.utc)
+    delivery = FlowRunWebhookDeliveryRead(
+        id=uuid4(),
+        step_id=uuid4(),
+        step_order=2,
+        attempt_no=1,
+        delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED,
+        delivery_attempts=5,
+        next_delivery_at=None,
+        delivered_at=None,
+        dead_lettered_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
+    service = FlowRunEvidenceService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=webhook_delivery_repo,
+        access_policy=access_policy,
+    )
+
+    redacted = await service.export_evidence_json(run_id=run.id)
+    raw = await service.export_evidence_json(
+        run_id=run.id,
+        detail="raw",
+        export_reason="delivery-audit",
+    )
+
+    expected = {
+        "id": str(delivery.id),
+        "step_id": str(delivery.step_id),
+        "step_order": 2,
+        "attempt_no": 1,
+        "delivery_status": "dead_lettered",
+        "delivery_attempts": 5,
+        "next_delivery_at": None,
+        "delivered_at": None,
+        "dead_lettered_at": now.isoformat(),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    assert redacted["bundle"]["webhook_deliveries"] == [expected]
+    assert raw["bundle"]["webhook_deliveries"] == [expected]
+    assert "idempotency_key" not in expected
+    assert "payload_ref" not in expected
+    assert "delivery_last_error" not in expected
+    assert "claim_token" not in expected
+    webhook_delivery_repo.list_run_delivery_statuses.assert_awaited_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -55,6 +146,7 @@ async def test_get_evidence_loads_run_through_access_policy(user):
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -94,6 +186,7 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -163,6 +256,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -201,6 +295,7 @@ async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
     run = _run(user=user, flow_id=uuid4())
 
@@ -252,6 +347,7 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
         access_policy=access_policy,
     )
 

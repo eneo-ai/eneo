@@ -10,11 +10,13 @@ from pydantic import ValidationError
 from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
 from eneo.flows.api.flow_models import (
     FlowPublic,
+    FlowRunDetailPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStepPublic,
     FlowRunStepRerunResponse,
     FlowRunTokenUsagePublic,
+    FlowRunWebhookDeliveryPublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
     FlowStepDiagnosticPublic,
@@ -57,6 +59,9 @@ from eneo.flows.http_transport import (
     HttpAuthoredConfig,
     is_authored_config,
     redact_authored_config,
+)
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,6 +162,31 @@ class FlowAssembler:
                 ),
                 "result_files": list(result_files),
                 "token_usage": public_token_usage,
+            }
+        )
+
+    def to_run_detail_public(
+        self,
+        run: FlowRun,
+        *,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+        token_usage: FlowRunTokenUsage | None = None,
+        final_output: FlowFinalOutputContractPublic | None = None,
+        webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
+    ) -> FlowRunDetailPublic:
+        run_payload = self.to_run_public(
+            run,
+            result_files=result_files,
+            token_usage=token_usage,
+            final_output=final_output,
+        ).model_dump()
+        return FlowRunDetailPublic.model_validate(
+            {
+                **run_payload,
+                "webhook_deliveries": [
+                    FlowRunWebhookDeliveryPublic.model_validate(delivery)
+                    for delivery in webhook_deliveries
+                ],
             }
         )
 

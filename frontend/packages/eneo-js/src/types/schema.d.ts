@@ -12985,7 +12985,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v9";
+      schema_version: "flow-evidence-export.v10";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -16001,6 +16001,147 @@ export interface components {
       attempts?: components["schemas"]["FlowRunDebugAttempt"][];
     };
     /**
+     * FlowRunDetailPublic
+     * @example {
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_attempt_count": 0,
+     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "input_payload_json": {
+     *         "employee_name": "Alex Example"
+     *       },
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "result_files": [],
+     *       "revision": 1,
+     *       "status": "queued",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:00Z",
+     *       "webhook_deliveries": [
+     *         {
+     *           "attempt_no": 1,
+     *           "created_at": "2026-03-17T10:05:30Z",
+     *           "delivered_at": "2026-03-17T10:05:31Z",
+     *           "delivery_attempts": 1,
+     *           "delivery_status": "delivered",
+     *           "id": "00000000-0000-0000-0000-000000000601",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "updated_at": "2026-03-17T10:05:31Z"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRunDetailPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Trace Id
+       * Format: uuid
+       */
+      trace_id: string;
+      /**
+       * Revision
+       * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
+       */
+      revision: number;
+      status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Dispatch Pending Since
+       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
+       */
+      dispatch_pending_since?: string | null;
+      /**
+       * Dispatch Attempt Count
+       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
+       */
+      dispatch_attempt_count: number;
+      /**
+       * Dispatch Last Attempt At
+       * @description Timestamp of the latest claimed broker dispatch attempt.
+       */
+      dispatch_last_attempt_at?: string | null;
+      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
+      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
+      /**
+       * Dispatch Next Attempt At
+       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
+       */
+      dispatch_next_attempt_at?: string | null;
+      /**
+       * Dispatched At
+       * @description Timestamp when the broker last accepted this dispatch epoch.
+       */
+      dispatched_at?: string | null;
+      /**
+       * Dispatch Exhausted At
+       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
+       */
+      dispatch_exhausted_at?: string | null;
+      /** Cancelled At */
+      cancelled_at?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Result
+       * @description Typed successful final result. Null while the run is incomplete or when it ended without a successful final result.
+       */
+      result?:
+        | (
+            | components["schemas"]["FlowRunInlineTextResultPublic"]
+            | components["schemas"]["FlowRunFileBackedTextResultPublic"]
+            | components["schemas"]["FlowRunStructuredResultPublic"]
+            | components["schemas"]["FlowRunArtifactResultPublic"]
+            | components["schemas"]["FlowRunOutboundHttpResultPublic"]
+          )
+        | null;
+      /** Result Files */
+      result_files?: components["schemas"]["FlowRunStepResultFile"][];
+      /** @description Aggregated provider-reported token usage for model attempts in this run. Null when the run has not produced token-metered model usage. */
+      token_usage?: components["schemas"]["FlowRunTokenUsagePublic"] | null;
+      /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      error?: components["schemas"]["FlowRunError"] | null;
+      /** Job Id */
+      job_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Webhook Deliveries */
+      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
+    };
+    /**
      * FlowRunDispatchError
      * @description Small secret-free diagnosis for the current dispatch epoch.
      */
@@ -16386,6 +16527,19 @@ export interface components {
      *             "tenant_id": "00000000-0000-0000-0000-000000000010",
      *             "updated_at": "2026-03-17T10:05:30Z"
      *           }
+     *         ],
+     *         "webhook_deliveries": [
+     *           {
+     *             "attempt_no": 1,
+     *             "created_at": "2026-03-17T10:05:30Z",
+     *             "delivered_at": "2026-03-17T10:05:31Z",
+     *             "delivery_attempts": 1,
+     *             "delivery_status": "delivered",
+     *             "id": "00000000-0000-0000-0000-000000000601",
+     *             "step_id": "00000000-0000-0000-0000-000000000101",
+     *             "step_order": 1,
+     *             "updated_at": "2026-03-17T10:05:31Z"
+     *           }
      *         ]
      *       },
      *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
@@ -16461,7 +16615,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v9",
+     *         "schema_version": "flow-evidence-export.v10",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -16481,7 +16635,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v9",
+     *       "schema_version": "flow-evidence-export.v10",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -16799,7 +16953,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v9";
+      schema_version: "flow-evidence-export.v10";
       /**
        * Generated At
        * Format: date-time
@@ -17048,6 +17202,19 @@ export interface components {
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
+     *       ],
+     *       "webhook_deliveries": [
+     *         {
+     *           "attempt_no": 1,
+     *           "created_at": "2026-03-17T10:05:30Z",
+     *           "delivered_at": "2026-03-17T10:05:31Z",
+     *           "delivery_attempts": 1,
+     *           "delivery_status": "delivered",
+     *           "id": "00000000-0000-0000-0000-000000000601",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "updated_at": "2026-03-17T10:05:31Z"
+     *         }
      *       ]
      *     }
      */
@@ -17070,6 +17237,8 @@ export interface components {
       rerun_invalidated_steps: components["schemas"]["FlowRunRerunInvalidatedStepPublic"][];
       /** Review Checkpoints */
       review_checkpoints: components["schemas"]["FlowRunReviewCheckpointEvidencePublic"][];
+      /** Webhook Deliveries */
+      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
       debug_export: components["schemas"]["FlowRunDebugExport"];
     };
     /** FlowRunFileBackedTextResultPublic */
@@ -18562,6 +18731,62 @@ export interface components {
        * @description Total provider-reported tokens consumed by the run.
        */
       num_tokens_total: number;
+    };
+    /**
+     * FlowRunWebhookDeliveryPublic
+     * @example {
+     *       "attempt_no": 1,
+     *       "created_at": "2026-03-17T10:05:30Z",
+     *       "delivered_at": "2026-03-17T10:05:31Z",
+     *       "delivery_attempts": 1,
+     *       "delivery_status": "delivered",
+     *       "id": "00000000-0000-0000-0000-000000000601",
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T10:05:31Z"
+     *     }
+     */
+    FlowRunWebhookDeliveryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      /**
+       * Delivery Status
+       * @enum {string}
+       */
+      delivery_status: "pending" | "delivered" | "dead_lettered";
+      /**
+       * Delivery Attempts
+       * @description Persisted delivery attempts charged when the sender claims work.
+       */
+      delivery_attempts: number;
+      /** Next Delivery At */
+      next_delivery_at?: string | null;
+      /** Delivered At */
+      delivered_at?: string | null;
+      /** Dead Lettered At */
+      dead_lettered_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** FlowRuntimeAuditOutboxSummary */
     FlowRuntimeAuditOutboxSummary: {
@@ -44721,7 +44946,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["FlowRunPublic"];
+          "application/json": components["schemas"]["FlowRunDetailPublic"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */

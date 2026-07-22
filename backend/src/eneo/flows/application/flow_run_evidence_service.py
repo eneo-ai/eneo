@@ -28,6 +28,9 @@ from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.exceptions import (
@@ -54,6 +57,7 @@ class FlowRunEvidenceService:
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
         file_repo: FileRepository,
+        webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
         access_policy: FlowRunAccessPolicy | None = None,
     ):
         self.user = user
@@ -62,6 +66,7 @@ class FlowRunEvidenceService:
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
+        self.webhook_delivery_repo = webhook_delivery_repo
         self.access_policy = access_policy or FlowRunAccessPolicy(
             user=user,
             flow_repo=flow_repo,
@@ -246,6 +251,12 @@ class FlowRunEvidenceService:
                 tenant_id=self.user.tenant_id,
             ),
         )
+        webhook_deliveries = (
+            await self.webhook_delivery_repo.list_run_delivery_statuses(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
         runtime_input_file_metadata_by_step_result_id = {}
         if step_results:
             runtime_input_file_metadata_by_step_result_id = await self.flow_run_repo.list_current_step_input_file_metadata_by_step_result_id(
@@ -262,6 +273,7 @@ class FlowRunEvidenceService:
             rerun_operations=rerun_operations,
             rerun_invalidated_steps=rerun_invalidated_steps,
             review_checkpoints=review_checkpoints,
+            webhook_deliveries=webhook_deliveries,
             runtime_input_file_metadata_by_step_result_id=(
                 runtime_input_file_metadata_by_step_result_id
             ),

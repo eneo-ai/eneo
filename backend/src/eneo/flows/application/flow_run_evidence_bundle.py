@@ -27,6 +27,9 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+)
 from eneo.flows.published_definition import (
     PublishedDefinitionIntegrity,
     PublishedDefinitionIntegrityStatus,
@@ -67,6 +70,7 @@ class EvidenceBundle:
     rerun_operations: Sequence[FlowRunRerunOperation]
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
     review_checkpoints: Sequence[FlowRunReviewCheckpoint]
+    webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead]
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     runtime_input_file_metadata_by_step_result_id: Mapping[
         UUID, Sequence[FlowRunStepInputFileMetadata]
@@ -116,6 +120,9 @@ class EvidenceBundle:
                     _dump_review_checkpoint_record(item)
                     for item in self.review_checkpoints
                 ],
+                "webhook_deliveries": [
+                    _dump_webhook_delivery(item) for item in self.webhook_deliveries
+                ],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=tuple(provenance_parse_results),
@@ -137,6 +144,7 @@ class RedactedEvidenceBundle:
     rerun_operations: tuple[dict[str, Any], ...]
     rerun_invalidated_steps: tuple[dict[str, Any], ...]
     review_checkpoints: tuple[dict[str, Any], ...]
+    webhook_deliveries: tuple[dict[str, Any], ...]
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
@@ -156,6 +164,7 @@ class RedactedEvidenceBundle:
                     dict(item) for item in self.rerun_invalidated_steps
                 ],
                 "review_checkpoints": [dict(item) for item in self.review_checkpoints],
+                "webhook_deliveries": [dict(item) for item in self.webhook_deliveries],
                 "debug_export": dict(self.debug_export),
             },
             provenance_parse_results=self.provenance_parse_results,
@@ -175,6 +184,7 @@ def build_evidence_bundle(
     rerun_operations: Sequence[FlowRunRerunOperation] = (),
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
+    webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
     | None = None,
     runtime_input_file_metadata_by_step_result_id: Mapping[
@@ -218,6 +228,7 @@ def build_evidence_bundle(
         rerun_operations=tuple(rerun_operations),
         rerun_invalidated_steps=tuple(rerun_invalidated_steps),
         review_checkpoints=tuple(review_checkpoints),
+        webhook_deliveries=tuple(webhook_deliveries),
         runtime_input_file_ids_by_step_result_id=(
             resolved_runtime_input_file_ids_by_step_result_id
         ),
@@ -343,6 +354,9 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         rerun_operations=rerun_operation_section.records,
         rerun_invalidated_steps=rerun_invalidated_step_section.records,
         review_checkpoints=review_checkpoint_section.records,
+        webhook_deliveries=tuple(
+            _dump_webhook_delivery(item) for item in bundle.webhook_deliveries
+        ),
         debug_export=debug_export,
         masked_paths=tuple(
             dict.fromkeys(
@@ -468,6 +482,32 @@ def _dump_review_checkpoint_record(item: FlowRunReviewCheckpoint) -> dict[str, A
     )
     dumped["resume_key_present"] = item.resume_idempotency_key is not None
     return dumped
+
+
+def _dump_webhook_delivery(item: FlowRunWebhookDeliveryRead) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "step_id": str(item.step_id),
+        "step_order": item.step_order,
+        "attempt_no": item.attempt_no,
+        "delivery_status": item.delivery_status.value,
+        "delivery_attempts": item.delivery_attempts,
+        "next_delivery_at": (
+            item.next_delivery_at.isoformat()
+            if item.next_delivery_at is not None
+            else None
+        ),
+        "delivered_at": (
+            item.delivered_at.isoformat() if item.delivered_at is not None else None
+        ),
+        "dead_lettered_at": (
+            item.dead_lettered_at.isoformat()
+            if item.dead_lettered_at is not None
+            else None
+        ),
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
 
 
 def _review_checkpoint_decision(item: FlowRunReviewCheckpoint) -> str | None:

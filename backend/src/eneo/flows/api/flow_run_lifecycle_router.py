@@ -33,6 +33,7 @@ from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
+    FlowRunDetailPublic,
     FlowRunPublic,
     FlowRunRedispatchResponse,
 )
@@ -466,7 +467,7 @@ async def list_flow_runs(
 
 @router.get(
     FLOW_RUN_PATH,
-    response_model=FlowRunPublic,
+    response_model=FlowRunDetailPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run",
     summary="Get flow run",
@@ -503,15 +504,16 @@ async def get_flow_run(
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    run_view = await run_service.get_run_with_result_files_and_token_usage(
+    run_view = await run_service.get_run_detail_with_result_files_and_token_usage(
         run_id=run_id,
         flow_id=id,
     )
-    return FlowAssembler().to_run_public(
+    return FlowAssembler().to_run_detail_public(
         run_view.run,
         result_files=run_view.result_files,
         token_usage=run_view.token_usage,
         final_output=run_view.final_output,
+        webhook_deliveries=run_view.webhook_deliveries,
     )
 
 

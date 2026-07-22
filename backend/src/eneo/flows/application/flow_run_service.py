@@ -67,6 +67,10 @@ from eneo.flows.infrastructure.flow_run_repo import (
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import (
@@ -104,6 +108,11 @@ class FlowRunWithResultFilesAndTokenUsage:
     result_files: Sequence[FlowRunStepResultFile]
     token_usage: FlowRunTokenUsage | None
     final_output: FlowFinalOutputContractPublic | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunDetailView(FlowRunWithResultFilesAndTokenUsage):
+    webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +179,7 @@ class FlowRunService:
         file_repo: FileRepository,
         flow_run_terminalizer: FlowRunTerminalizer,
         access_policy: FlowRunAccessPolicy,
+        webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
         settings_service: SettingService | None = None,
         max_concurrent_runs: int | None = None,
     ):
@@ -182,6 +192,7 @@ class FlowRunService:
         self.runtime_upload_repo = runtime_upload_repo
         self.settings_service = settings_service
         self.access_policy = access_policy
+        self.webhook_delivery_repo = webhook_delivery_repo
         self.max_concurrent_runs = (
             max_concurrent_runs
             if max_concurrent_runs is not None
@@ -588,6 +599,30 @@ class FlowRunService:
     ) -> FlowRunWithResultFilesAndTokenUsage:
         run = await self.get_run(run_id=run_id, flow_id=flow_id)
         return await self.enrich_run_with_result_files_and_token_usage(run=run)
+
+    async def get_run_detail_with_result_files_and_token_usage(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+    ) -> FlowRunDetailView:
+        run_view = await self.get_run_with_result_files_and_token_usage(
+            flow_id=flow_id,
+            run_id=run_id,
+        )
+        webhook_deliveries = (
+            await self.webhook_delivery_repo.list_run_delivery_statuses(
+                run_id=run_view.run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        return FlowRunDetailView(
+            run=run_view.run,
+            result_files=run_view.result_files,
+            token_usage=run_view.token_usage,
+            final_output=run_view.final_output,
+            webhook_deliveries=tuple(webhook_deliveries),
+        )
 
     async def enrich_run_with_result_files_and_token_usage(
         self,

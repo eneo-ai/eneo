@@ -239,7 +239,7 @@ Request:
 GET /api/v1/flows/{id}/runs/{run_id}/
 ```
 
-When review is needed, the run status tells the UI to open the review flow.
+The run reports review state and secret-free outbound delivery progress.
 
 Response:
 
@@ -272,7 +272,8 @@ Response:
   "error": null,
   "job_id": "00000000-0000-0000-0000-000000000401",
   "created_at": "2026-03-17T10:05:00Z",
-  "updated_at": "2026-03-17T10:05:30Z"
+  "updated_at": "2026-03-17T10:05:30Z",
+  "webhook_deliveries": []
 }
 ```
 
