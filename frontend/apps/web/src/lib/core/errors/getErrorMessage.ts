@@ -49,7 +49,10 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
 
   // --- Model lifecycle ---
-  9039: () => m.eneo_error_9039() // MODEL_IN_USE
+  9039: () => m.eneo_error_9039(), // MODEL_IN_USE
+
+  // --- Concurrent changes ---
+  9043: () => m.eneo_error_9043() // SKILL_REVISION_CONFLICT
 };
 
 /**

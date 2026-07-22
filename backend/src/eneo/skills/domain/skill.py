@@ -159,6 +159,13 @@ class SkillCatalogPage:
 
 
 @dataclass(frozen=True)
+class SkillRevisionRestore:
+    skill: Skill
+    source_revision: SkillRevision
+    change: SkillRevisionChange
+
+
+@dataclass(frozen=True)
 class SkillStatusChange:
     skill: Skill
     changed: bool
@@ -170,6 +177,10 @@ class SkillHasBindingsError(Exception):
 
 
 class SkillHasActiveAppRunsError(Exception):
+    pass
+
+
+class SkillRevisionConflictError(Exception):
     pass
 
 

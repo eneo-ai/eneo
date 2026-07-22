@@ -68,3 +68,78 @@ async def test_identical_revision_returns_ok_and_changed_revision_returns_create
     )
     assert changed_history.status_code == 200, changed_history.text
     assert changed_history.json()["total_count"] == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_restore_rejects_a_revision_that_changed_after_preview(
+    client, admin_token
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    space_response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"skill-restore-conflict-{uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    assert space_response.status_code == 201, space_response.text
+    space_id = space_response.json()["id"]
+
+    create_response = await client.post(
+        f"/api/v1/spaces/{space_id}/skills/",
+        json={
+            "slug": "restore-conflict",
+            "display_name": "Restore conflict",
+            "description": "Initial content",
+            "instructions": "Initial instructions",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    skill = create_response.json()
+    skill_id = skill["id"]
+    source_revision_id = skill["current_revision_id"]
+
+    reviewed_response = await client.post(
+        f"/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/",
+        json={
+            "display_name": "Restore conflict",
+            "description": "Reviewed content",
+            "instructions": "Reviewed instructions",
+        },
+        headers=headers,
+    )
+    assert reviewed_response.status_code == 201, reviewed_response.text
+    reviewed_current_revision_id = reviewed_response.json()["id"]
+
+    concurrent_response = await client.post(
+        f"/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/",
+        json={
+            "display_name": "Restore conflict",
+            "description": "Concurrent content",
+            "instructions": "Concurrent instructions",
+        },
+        headers=headers,
+    )
+    assert concurrent_response.status_code == 201, concurrent_response.text
+    concurrent_revision_id = concurrent_response.json()["id"]
+
+    restore_response = await client.post(
+        f"/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/"
+        f"{source_revision_id}/restore/",
+        json={"reviewed_current_revision_id": reviewed_current_revision_id},
+        headers=headers,
+    )
+
+    assert restore_response.status_code == 409, restore_response.text
+    current_response = await client.get(
+        f"/api/v1/spaces/{space_id}/skills/{skill_id}/",
+        headers=headers,
+    )
+    history_response = await client.get(
+        f"/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/",
+        headers=headers,
+    )
+    assert current_response.status_code == 200, current_response.text
+    assert current_response.json()["current_revision_id"] == concurrent_revision_id
+    assert history_response.status_code == 200, history_response.text
+    assert history_response.json()["total_count"] == 3

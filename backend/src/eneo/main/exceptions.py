@@ -65,6 +65,7 @@ class ErrorCodes(int, Enum):
     PROVIDER_REJECTED_REQUEST = 9041
     # Deployment configuration errors
     ENCRYPTION_NOT_CONFIGURED = 9042
+    SKILL_REVISION_CONFLICT = 9043
 
 
 class NotFoundException(Exception):
@@ -326,6 +327,10 @@ class NameCollisionException(Exception):
     pass
 
 
+class SkillRevisionConflictException(Exception):
+    pass
+
+
 class UserNotCreatedInEneoError(Exception):
     pass
 
@@ -466,6 +471,11 @@ EXCEPTION_MAP = {
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    SkillRevisionConflictException: (
+        409,
+        None,
+        ErrorCodes.SKILL_REVISION_CONFLICT,
+    ),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),

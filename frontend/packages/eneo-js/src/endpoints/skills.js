@@ -1,6 +1,7 @@
 /** @typedef {import('../client/client').EneoError} EneoError */
 /** @typedef {import('../types/resources').SkillPublic} SkillPublic */
 /** @typedef {import('../types/resources').SkillRevisionPublic} SkillRevisionPublic */
+/** @typedef {import('../types/resources').SkillRevisionRestorePublic} SkillRevisionRestorePublic */
 /** @typedef {import('../types/resources').SkillRevisionSummaryPage} SkillRevisionSummaryPage */
 /** @typedef {import('../types/resources').SkillSparse} SkillSparse */
 /** @typedef {import('../types/resources').SkillBindingSummary} SkillBindingSummary */
@@ -104,6 +105,30 @@ export function initSkills(client) {
         params: { path: { space_id: spaceId, skill_id: skillId } },
         requestBody: { "application/json": revision }
       });
+    },
+
+    /**
+     * Copy one historical revision into the next immutable revision.
+     * Existing revision-pinned bindings remain unchanged.
+     * @param {{spaceId: string, skillId: string} & {sourceRevisionId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/">} params
+     * @returns {Promise<SkillRevisionRestorePublic>}
+     * @throws {EneoError}
+     */
+    restoreRevision: async ({ spaceId, skillId, sourceRevisionId, ...restore }) => {
+      return await client.fetch(
+        "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/",
+        {
+          method: "post",
+          params: {
+            path: {
+              space_id: spaceId,
+              skill_id: skillId,
+              source_revision_id: sourceRevisionId
+            }
+          },
+          requestBody: { "application/json": restore }
+        }
+      );
     },
 
     /**

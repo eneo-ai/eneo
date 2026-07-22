@@ -67,6 +67,7 @@ class SkillRepo(Protocol):
         instructions: str,
         content_digest: str,
         created_by_user_id: UUID,
+        expected_current_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None: ...
 
     async def set_active(

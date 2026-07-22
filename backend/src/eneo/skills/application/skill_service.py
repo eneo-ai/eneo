@@ -9,6 +9,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
+    SkillRevisionConflictException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission, validate_permission
@@ -25,7 +26,9 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionConflictError,
     SkillRevisionPage,
+    SkillRevisionRestore,
     SkillStatusChange,
     compose_skill_instructions,
     create_content_digest,
@@ -261,6 +264,52 @@ class SkillService:
         if revision is None:
             raise NotFoundException()
         return revision
+
+    async def restore_revision(
+        self,
+        *,
+        space_id: UUID,
+        skill_id: UUID,
+        source_revision_id: UUID,
+        reviewed_current_revision_id: UUID,
+    ) -> SkillRevisionRestore:
+        skill = await self.get_skill(skill_id=skill_id)
+        if skill.space_id != space_id:
+            raise NotFoundException()
+        space = await self._space(skill.space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_skills():
+            raise UnauthorizedException(
+                "You do not have permission to restore this Skill"
+            )
+        source_revision = await self.repo.get_revision(
+            skill_id=skill.id,
+            revision_id=source_revision_id,
+        )
+        if source_revision is None:
+            raise NotFoundException()
+        try:
+            change = await self.repo.create_revision(
+                skill_id=skill.id,
+                display_name=source_revision.display_name,
+                description=source_revision.description,
+                instructions=source_revision.instructions,
+                content_digest=source_revision.content_digest,
+                created_by_user_id=self.user.id,
+                expected_current_revision_id=reviewed_current_revision_id,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "This Skill changed after you reviewed it. Compare the latest "
+                "revision before restoring again."
+            ) from error
+        if change is None:
+            raise NotFoundException()
+        return SkillRevisionRestore(
+            skill=skill,
+            source_revision=source_revision,
+            change=change,
+        )
 
     async def set_active(self, *, skill_id: UUID, is_active: bool) -> SkillStatusChange:
         skill = await self.get_skill(skill_id=skill_id)

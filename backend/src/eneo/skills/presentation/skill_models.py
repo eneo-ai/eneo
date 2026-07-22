@@ -24,6 +24,10 @@ class SkillRevisionCreateRequest(SkillContentInput):
     pass
 
 
+class SkillRevisionRestoreRequest(BaseModel):
+    reviewed_current_revision_id: UUID
+
+
 class SkillActiveUpdateRequest(BaseModel):
     is_active: bool
 
@@ -46,6 +50,13 @@ class SkillRevisionSummaryPublic(BaseModel):
     revision_number: int
     display_name: str
     created_at: datetime
+
+
+class SkillRevisionRestorePublic(BaseModel):
+    revision: SkillRevisionPublic
+    created: bool
+    restored_from_revision_id: UUID
+    restored_from_revision_number: int
 
 
 class SkillSparse(BaseModel):
