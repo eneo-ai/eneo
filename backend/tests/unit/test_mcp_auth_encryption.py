@@ -281,10 +281,30 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = True
         server.tools = []
+        server.forward_identity = True
+        server.tool_catalog_max_count = 73
+        server.tool_catalog_max_bytes = 7 * 1024 * 1024
+        server.tool_definition_max_bytes = 96 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)
         assert dto.has_credentials is True
+        assert dto.tool_catalog_max_count == 73
+        assert dto.tool_catalog_max_bytes == 7 * 1024 * 1024
+        assert dto.tool_definition_max_bytes == 96 * 1024
+
+        unrelated_edit = MCPServerUpdate(
+            description="Updated description",
+            tool_catalog_max_count=dto.tool_catalog_max_count,
+            tool_catalog_max_bytes=dto.tool_catalog_max_bytes,
+            tool_definition_max_bytes=dto.tool_definition_max_bytes,
+        )
+        assert unrelated_edit.model_dump(exclude_unset=True) == {
+            "description": "Updated description",
+            "tool_catalog_max_count": 73,
+            "tool_catalog_max_bytes": 7 * 1024 * 1024,
+            "tool_definition_max_bytes": 96 * 1024,
+        }
 
     def test_settings_assembler_without_credentials(self):
         from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
@@ -304,6 +324,10 @@ class TestAssemblerHasCredentials:
         server.security_classification = None
         server.is_enabled = False
         server.tools = []
+        server.forward_identity = False
+        server.tool_catalog_max_count = 256
+        server.tool_catalog_max_bytes = 16 * 1024 * 1024
+        server.tool_definition_max_bytes = 64 * 1024
 
         assembler = MCPServerSettingsAssembler()
         dto = assembler.from_domain_to_model(server)

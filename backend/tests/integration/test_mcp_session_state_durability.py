@@ -9,7 +9,10 @@ from eneo.database.tables.chat_session_mcp_state_table import ChatSessionMcpStat
 from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServerTool,
+    MCPToolCatalogStagingTimeout,
+)
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerToolMapper,
 )
@@ -275,6 +278,243 @@ async def test_concurrent_runtime_discovery_stages_one_pending_tool(
         assert tools[0].description is None
         assert tools[0].pending_description in {"first", "second"}
         assert tools[0].requires_approval is True
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_staging_completes_inside_read_only_request_transaction(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"tool-request-lifecycle-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+
+    outer_session = sessionmanager.create_session()
+    try:
+        await outer_session.begin()
+        await outer_session.scalar(
+            sa.select(MCPServers.id).where(MCPServers.id == server_id)
+        )
+        repo = MCPServerToolRepoImpl(outer_session, MCPServerToolMapper())
+        staged = await asyncio.wait_for(
+            repo.stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="observed-in-request",
+                        title=None,
+                        description="Observed while the request transaction is open",
+                        input_schema={"type": "object"},
+                    )
+                ]
+            ),
+            timeout=0.5,
+        )
+        assert [tool.name for tool in staged] == ["observed-in-request"]
+        await outer_session.rollback()
+    finally:
+        await outer_session.close()
+
+    try:
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert [tool.name for tool in tools] == ["observed-in-request"]
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_staging_times_out_behind_conflicting_request_lock(
+    setup_database: None,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eneo.mcp_servers.infrastructure.repo_impl import (
+        mcp_server_tool_repo_impl as repo_module,
+    )
+
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"tool-request-lock-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+
+    monkeypatch.setattr(repo_module, "MCP_TOOL_CATALOG_STAGE_TIMEOUT_SECONDS", 0.1)
+    outer_session = sessionmanager.create_session()
+    try:
+        await outer_session.begin()
+        await outer_session.scalar(
+            sa.select(MCPServers.id).where(MCPServers.id == server_id).with_for_update()
+        )
+        repo = MCPServerToolRepoImpl(outer_session, MCPServerToolMapper())
+        with pytest.raises(MCPToolCatalogStagingTimeout):
+            await repo.stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="blocked-observation",
+                        title=None,
+                        description="Must not be partially written",
+                        input_schema={"type": "object"},
+                    )
+                ]
+            )
+        await outer_session.rollback()
+    finally:
+        await outer_session.close()
+
+    try:
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert tools == []
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_discovery_rejects_disjoint_catalog_beyond_persisted_limit(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"tool-union-count-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+            tool_catalog_max_count=2,
+            tool_catalog_max_bytes=1024 * 1024,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+
+    def observation(name: str) -> MCPServerTool:
+        return MCPServerTool.pending_discovery(
+            mcp_server_id=server_id,
+            name=name,
+            title=None,
+            description=f"Contract for {name}",
+            input_schema={"type": "object", "properties": {}},
+        )
+
+    try:
+        async with sessionmanager.session() as first_session, first_session.begin():
+            repo = MCPServerToolRepoImpl(first_session, MCPServerToolMapper())
+            await repo.stage_observed([observation("first"), observation("second")])
+
+        async with sessionmanager.session() as rejected_session:
+            async with rejected_session.begin():
+                repo = MCPServerToolRepoImpl(rejected_session, MCPServerToolMapper())
+                with pytest.raises(ValueError, match="persisted tool catalog"):
+                    await repo.stage_observed([observation("third")])
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert [tool.name for tool in tools] == ["first", "second"]
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_disjoint_catalogs_cannot_exceed_persisted_byte_limit(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"tool-union-bytes-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+            tool_catalog_max_count=10,
+            tool_catalog_max_bytes=4096,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+
+    async def stage(name: str) -> list[MCPServerTool]:
+        async with sessionmanager.session() as session, session.begin():
+            return await MCPServerToolRepoImpl(
+                session, MCPServerToolMapper()
+            ).stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name=name,
+                        title=None,
+                        description="x" * 3000,
+                        input_schema={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+
+    try:
+        results = await asyncio.gather(
+            stage("catalog-a"), stage("catalog-b"), return_exceptions=True
+        )
+        assert sum(isinstance(result, list) for result in results) == 1
+        assert (
+            sum(
+                isinstance(result, ValueError)
+                and "persisted tool catalog" in str(result)
+                for result in results
+            )
+            == 1
+        )
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert len(tools) == 1
+        assert tools[0].name in {"catalog-a", "catalog-b"}
+        assert len(tools[0].pending_description or "") == 3000
     finally:
         async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
             await cleanup_session.execute(

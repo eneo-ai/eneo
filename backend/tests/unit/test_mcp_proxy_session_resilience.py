@@ -646,6 +646,28 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
 
 
 @pytest.mark.asyncio
+async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={"ordinary": [{"name": "shared"}]},
+    )
+    server = _make_identity_scoped_server()
+    tool_repo = AsyncMock()
+    tool_repo.stage_observed.side_effect = RuntimeError("database unavailable")
+    proxy = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_tools_for_llm() == []
+
+
+@pytest.mark.asyncio
 async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

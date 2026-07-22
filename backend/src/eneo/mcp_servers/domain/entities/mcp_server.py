@@ -21,6 +21,14 @@ MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES = 64 * 1024
 MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 
 
+class MCPToolCatalogLimitExceeded(ValueError):
+    """A projected persisted tool catalog exceeds its server safety policy."""
+
+
+class MCPToolCatalogStagingTimeout(RuntimeError):
+    """A runtime catalog observation could not acquire its bounded DB window."""
+
+
 class MCPServerTool(Entity):
     """Domain entity for MCP server tool."""
 

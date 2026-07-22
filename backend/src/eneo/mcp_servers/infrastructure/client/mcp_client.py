@@ -30,6 +30,7 @@ MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
 MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
 MCP_TERMINATE_TIMEOUT_SECONDS = 5.0
+MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES = 64 * 1024
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
@@ -47,6 +48,133 @@ MCPStreams = tuple[
 
 class _SessionIdTransport(Protocol):
     session_id: str | None
+
+
+class _BoundedToolListStream(httpx.AsyncByteStream):
+    """Stop a tools/list body before the MCP SDK can decode an unsafe payload."""
+
+    def __init__(
+        self,
+        stream: httpx.AsyncByteStream,
+        *,
+        max_bytes: int,
+        request_id: object,
+        content_type: str,
+        reject_immediately: bool = False,
+    ) -> None:
+        self._stream = stream
+        self._max_bytes = max_bytes
+        self._request_id = request_id
+        self._is_sse = content_type.lower().startswith("text/event-stream")
+        self._reject_immediately = reject_immediately
+
+    def _error_response(self) -> bytes:
+        message = (
+            "MCP tools/list wire response exceeds the configured "
+            f"maximum of {self._max_bytes} bytes"
+        )
+        payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": self._request_id,
+                "error": {"code": -32000, "message": message},
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if self._is_sse:
+            return b"event: message\ndata: " + payload + b"\n\n"
+        return payload
+
+    async def __aiter__(self) -> AsyncGenerator[bytes]:
+        buffered = bytearray()
+        received_bytes = 0
+        if self._reject_immediately:
+            await self._stream.aclose()
+            yield self._error_response()
+            return
+
+        async for chunk in self._stream:
+            received_bytes += len(chunk)
+            if received_bytes > self._max_bytes:
+                await self._stream.aclose()
+                yield self._error_response()
+                return
+
+            buffered.extend(chunk)
+            if self._is_sse:
+                # Hold each complete SSE event until it is known to be within
+                # the ceiling. The SDK never receives an oversized JSON event.
+                while True:
+                    lf_delimiter = buffered.find(b"\n\n")
+                    crlf_delimiter = buffered.find(b"\r\n\r\n")
+                    candidates = [
+                        (lf_delimiter, 2),
+                        (crlf_delimiter, 4),
+                    ]
+                    candidates = [
+                        candidate for candidate in candidates if candidate[0] >= 0
+                    ]
+                    if not candidates:
+                        break
+                    delimiter, delimiter_size = min(candidates)
+                    event_end = delimiter + delimiter_size
+                    yield bytes(buffered[:event_end])
+                    del buffered[:event_end]
+
+        if buffered:
+            yield bytes(buffered)
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+def _json_rpc_request_payload(request: httpx.Request) -> dict[str, object] | None:
+    try:
+        payload: object = json.loads(request.content)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return cast(dict[str, object], payload)
+
+
+async def _bound_tools_list_response(
+    response: httpx.Response, *, max_bytes: int
+) -> None:
+    """Install a streaming ceiling on tools/list responses, with or without CL."""
+    request_payload = _json_rpc_request_payload(response.request)
+    if request_payload is None or request_payload.get("method") != "tools/list":
+        return
+
+    reject_immediately = False
+    content_encoding = response.headers.get("content-encoding", "identity").lower()
+    if content_encoding not in {"", "identity"}:
+        # The stream ceiling counts bytes before HTTPX decoding. Requiring an
+        # identity body prevents a small compressed response from expanding
+        # beyond the configured bound during SDK JSON parsing.
+        reject_immediately = True
+        del response.headers["content-encoding"]
+
+    content_length = response.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_bytes = int(content_length)
+        except ValueError:
+            declared_bytes = None
+        if declared_bytes is not None and declared_bytes > max_bytes:
+            reject_immediately = True
+
+    if reject_immediately and "content-length" in response.headers:
+        del response.headers["content-length"]
+
+    if isinstance(response.stream, httpx.AsyncByteStream):
+        response.stream = _BoundedToolListStream(
+            response.stream,
+            max_bytes=max_bytes,
+            request_id=request_payload.get("id"),
+            content_type=response.headers.get("content-type", "application/json"),
+            reject_immediately=reject_immediately,
+        )
 
 
 def validate_tool_catalog(
@@ -111,9 +239,22 @@ async def _open_streamable_http_client(
     headers: dict[str, str],
     timeout_seconds: float,
     terminate_on_close: bool,
+    tool_catalog_max_bytes: int,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=MCP_SSE_READ_TIMEOUT_SECONDS)
-    async with create_mcp_http_client(headers=headers, timeout=timeout) as http_client:
+    http_headers = {"Accept-Encoding": "identity", **headers}
+    async with create_mcp_http_client(
+        headers=http_headers, timeout=timeout
+    ) as http_client:
+        wire_max_bytes = tool_catalog_max_bytes + MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES
+        # This coarse pre-decode bound measures server-encoded HTTP/SSE bytes;
+        # validate_tool_catalog later enforces the compact semantic definition
+        # budget. The fixed allowance covers JSON-RPC and SSE framing.
+
+        async def bound_tools_list(response: httpx.Response) -> None:
+            await _bound_tools_list_response(response, max_bytes=wire_max_bytes)
+
+        http_client.event_hooks["response"].append(bound_tools_list)
         async with streamable_http_client(
             url,
             http_client=http_client,
@@ -434,6 +575,7 @@ class MCPClient:
             headers=headers,
             timeout_seconds=float(self.timeout),
             terminate_on_close=False,
+            tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
         )
 
         streams = await streams_context.__aenter__()

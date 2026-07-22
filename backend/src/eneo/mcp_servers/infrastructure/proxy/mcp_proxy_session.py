@@ -445,7 +445,17 @@ class MCPProxySession:
             )
             for live_tool in live_tools
         ]
-        staged = await self._mcp_server_tool_repo.stage_observed(observations)
+        try:
+            staged = await self._mcp_server_tool_repo.stage_observed(observations)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[MCPProxy] Failed to stage live catalog from '%s': %s",
+                server.name,
+                exc,
+            )
+            return False
         if staged:
             logger.info(
                 "[MCPProxy] Staged %d user-observed definition(s) from '%s' "
