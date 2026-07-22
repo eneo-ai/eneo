@@ -1,16 +1,16 @@
 """add candidate indexes required by skill bindings
 
-Revision ID: 202607151100
-Revises: 202607071200
-Create Date: 2026-07-15 11:00:00.000000
+Revision ID: 202607221100
+Revises: 202607221000
+Create Date: 2026-07-22 11:00:00.000000
 """
 
 from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "202607151100"
-down_revision: str | None = "202607071200"
+revision: str = "202607221100"
+down_revision: str | None = "202607221000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

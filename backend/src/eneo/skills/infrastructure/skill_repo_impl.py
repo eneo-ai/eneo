@@ -2,6 +2,8 @@ from typing import TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, Apps
@@ -19,6 +21,7 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillCatalogEntry,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillRevision,
@@ -33,6 +36,8 @@ _BindingRow = TypeVar(
     AppSkillBindings,
     GovernancePolicySkillBindings,
 )
+
+_CurrentSkillRevision = aliased(SkillRevisions, name="current_skill_revision")
 
 
 class SkillRepoImpl:
@@ -76,6 +81,23 @@ class SkillRepoImpl:
                 SkillRevisions.revision_number == Skills.current_revision_number,
             ),
         )
+
+    @staticmethod
+    def _catalog_predicates(
+        *,
+        space_id: UUID,
+        query: str | None,
+    ) -> list[ColumnElement[bool]]:
+        predicates: list[ColumnElement[bool]] = [Skills.space_id == space_id]
+        if query is not None:
+            predicates.append(
+                sa.or_(
+                    Skills.slug.icontains(query, autoescape=True),
+                    SkillRevisions.display_name.icontains(query, autoescape=True),
+                    SkillRevisions.description.icontains(query, autoescape=True),
+                )
+            )
+        return predicates
 
     async def create(
         self,
@@ -125,13 +147,93 @@ class SkillRepoImpl:
             return None
         return self._to_skill(row[0], row[1])
 
-    async def list_for_space(self, *, space_id: UUID) -> list[Skill]:
-        result = await self.session.execute(
-            self._skill_query()
-            .where(Skills.space_id == space_id)
-            .order_by(SkillRevisions.display_name, Skills.slug)
+    async def list_catalog_entries(
+        self,
+        *,
+        space_id: UUID,
+        limit: int,
+        after_slug: str | None,
+        query: str | None,
+    ) -> list[SkillCatalogEntry]:
+        statement = (
+            sa.select(
+                Skills.id,
+                Skills.space_id,
+                Skills.slug,
+                Skills.is_active,
+                Skills.current_revision_number,
+                Skills.created_by_user_id,
+                Skills.created_at,
+                Skills.updated_at,
+                SkillRevisions.id.label("current_revision_id"),
+                SkillRevisions.display_name,
+                SkillRevisions.description,
+                SkillRevisions.content_digest,
+            )
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.skill_id == Skills.id,
+                    SkillRevisions.revision_number == Skills.current_revision_number,
+                ),
+            )
+            .where(*self._catalog_predicates(space_id=space_id, query=query))
+            .order_by(Skills.slug)
+            .limit(limit)
         )
-        return [self._to_skill(row[0], row[1]) for row in result.all()]
+        if after_slug is not None:
+            statement = statement.where(Skills.slug > after_slug)
+        rows = await self.session.execute(statement)
+        return [
+            SkillCatalogEntry(
+                id=skill_id,
+                space_id=row_space_id,
+                slug=slug,
+                is_active=is_active,
+                current_revision_number=current_revision_number,
+                created_by_user_id=created_by_user_id,
+                created_at=created_at,
+                updated_at=updated_at,
+                current_revision_id=current_revision_id,
+                display_name=display_name,
+                description=description,
+                content_digest=content_digest,
+            )
+            for (
+                skill_id,
+                row_space_id,
+                slug,
+                is_active,
+                current_revision_number,
+                created_by_user_id,
+                created_at,
+                updated_at,
+                current_revision_id,
+                display_name,
+                description,
+                content_digest,
+            ) in rows.tuples().all()
+        ]
+
+    async def count_catalog_entries(
+        self,
+        *,
+        space_id: UUID,
+        query: str | None,
+    ) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Skills)
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.skill_id == Skills.id,
+                    SkillRevisions.revision_number == Skills.current_revision_number,
+                ),
+            )
+            .where(*self._catalog_predicates(space_id=space_id, query=query))
+        )
+        return int(count or 0)
 
     async def get_revision(
         self, *, skill_id: UUID, revision_id: UUID
@@ -327,9 +429,14 @@ class SkillRepoImpl:
     @staticmethod
     def _resolved_query(
         binding_table: type[_BindingRow],
-    ) -> sa.Select[tuple[_BindingRow, Skills, SkillRevisions]]:
+    ) -> sa.Select[tuple[_BindingRow, Skills, SkillRevisions, UUID]]:
         return (
-            sa.select(binding_table, Skills, SkillRevisions)
+            sa.select(
+                binding_table,
+                Skills,
+                SkillRevisions,
+                _CurrentSkillRevision.id.label("current_revision_id"),
+            )
             .join(Skills, Skills.id == binding_table.skill_id)
             .join(
                 SkillRevisions,
@@ -338,17 +445,30 @@ class SkillRepoImpl:
                     SkillRevisions.id == binding_table.skill_revision_id,
                 ),
             )
+            .join(
+                _CurrentSkillRevision,
+                sa.and_(
+                    _CurrentSkillRevision.skill_id == Skills.id,
+                    _CurrentSkillRevision.revision_number
+                    == Skills.current_revision_number,
+                ),
+            )
         )
 
     @staticmethod
     def _to_resolved(
-        skill: Skills, revision: SkillRevisions, position: int
+        skill: Skills,
+        revision: SkillRevisions,
+        current_revision_id: UUID,
+        position: int,
     ) -> ResolvedSkillBinding:
         return ResolvedSkillBinding(
             skill_id=skill.id,
             skill_revision_id=revision.id,
+            current_revision_id=current_revision_id,
             slug=skill.slug,
             revision_number=revision.revision_number,
+            current_revision_number=skill.current_revision_number,
             display_name=revision.display_name,
             instructions=revision.instructions,
             content_digest=revision.content_digest,
@@ -369,8 +489,20 @@ class SkillRepoImpl:
         skill_ids = [reference.skill_id for reference in references]
         revision_ids = [reference.skill_revision_id for reference in references]
         statement = (
-            sa.select(Skills, SkillRevisions)
+            sa.select(
+                Skills,
+                SkillRevisions,
+                _CurrentSkillRevision.id.label("current_revision_id"),
+            )
             .join(SkillRevisions, SkillRevisions.skill_id == Skills.id)
+            .join(
+                _CurrentSkillRevision,
+                sa.and_(
+                    _CurrentSkillRevision.skill_id == Skills.id,
+                    _CurrentSkillRevision.revision_number
+                    == Skills.current_revision_number,
+                ),
+            )
             .where(
                 Skills.space_id == space_id,
                 Skills.id.in_(skill_ids),
@@ -384,8 +516,8 @@ class SkillRepoImpl:
             SkillBindingReference(
                 skill_id=skill.id,
                 skill_revision_id=revision.id,
-            ): (skill, revision)
-            for skill, revision in rows.all()
+            ): (skill, revision, current_revision_id)
+            for skill, revision, current_revision_id in rows.all()
         }
         return [
             self._to_resolved(*by_reference[reference], position)
@@ -441,8 +573,8 @@ class SkillRepoImpl:
             .order_by(AssistantSkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, binding.position)
-            for binding, skill, revision in rows.all()
+            self._to_resolved(skill, revision, current_revision_id, binding.position)
+            for binding, skill, revision, current_revision_id in rows.all()
         ]
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool:
@@ -490,8 +622,8 @@ class SkillRepoImpl:
             .order_by(AppSkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, binding.position)
-            for binding, skill, revision in rows.all()
+            self._to_resolved(skill, revision, current_revision_id, binding.position)
+            for binding, skill, revision, current_revision_id in rows.all()
         ]
 
     async def list_app_bindings_for_execution_plan(
@@ -504,8 +636,8 @@ class SkillRepoImpl:
             .with_for_update(read=True, of=Skills)
         )
         return [
-            self._to_resolved(skill, revision, binding.position)
-            for binding, skill, revision in rows.all()
+            self._to_resolved(skill, revision, current_revision_id, binding.position)
+            for binding, skill, revision, current_revision_id in rows.all()
         ]
 
     async def replace_app_bindings(
@@ -542,8 +674,8 @@ class SkillRepoImpl:
             .order_by(GovernancePolicySkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, binding.position)
-            for binding, skill, revision in rows.all()
+            self._to_resolved(skill, revision, current_revision_id, binding.position)
+            for binding, skill, revision, current_revision_id in rows.all()
         ]
 
     async def replace_policy_bindings(

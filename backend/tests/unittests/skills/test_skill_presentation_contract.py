@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fastapi import Response
 from fastapi.routing import APIRoute
 
 from eneo.main.exceptions import NotFoundException
@@ -12,6 +13,8 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillCatalogEntry,
+    SkillCatalogPage,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionPage,
@@ -20,6 +23,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.skills.presentation import skill_models, skill_router
 from eneo.skills.presentation.skill_assembler import (
+    SkillAssembler,
     skill_binding_audit_entries,
     skill_binding_references_from_input,
 )
@@ -31,8 +35,10 @@ def _binding(*, position: int) -> ResolvedSkillBinding:
     return ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
+        current_revision_number=position + 1,
         display_name=f"Skill {position}",
         description="Description is not audit evidence",
         instructions="Instructions are not audit evidence",
@@ -75,6 +81,24 @@ def _summary(revision: SkillRevision) -> SkillRevisionSummary:
         revision_number=revision.revision_number,
         display_name=revision.display_name,
         created_at=revision.created_at,
+    )
+
+
+def _catalog_entry(skill: Skill) -> SkillCatalogEntry:
+    revision = skill.current_revision
+    return SkillCatalogEntry(
+        id=skill.id,
+        space_id=skill.space_id,
+        slug=skill.slug,
+        is_active=skill.is_active,
+        current_revision_id=revision.id,
+        current_revision_number=skill.current_revision_number,
+        display_name=revision.display_name,
+        description=revision.description,
+        content_digest=revision.content_digest,
+        created_by_user_id=skill.created_by_user_id,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
     )
 
 
@@ -125,6 +149,15 @@ def test_skill_binding_reference_input_maps_to_named_domain_reference():
     ]
 
 
+def test_binding_summary_carries_current_revision_without_catalog_lookup():
+    binding = _binding(position=0)
+
+    summary = SkillAssembler.binding_to_summary(binding)
+
+    assert summary.current_revision_id == binding.current_revision_id
+    assert summary.current_revision_number == binding.current_revision_number
+
+
 def test_parent_binding_projection_routes_are_get_only():
     binding_paths = {
         "/spaces/{space_id}/assistants/{assistant_id}/skills/",
@@ -137,6 +170,60 @@ def test_parent_binding_projection_routes_are_get_only():
     }
 
     assert methods_by_path == {path: {"GET"} for path in binding_paths}
+
+
+def test_revision_creation_route_documents_created_and_noop_responses():
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/spaces/{space_id}/skills/{skill_id}/revisions/"
+        and route.methods == {"POST"}
+    )
+
+    assert route.status_code == 201
+    assert 200 in route.responses
+    assert route.responses[200]["model"] is skill_models.SkillRevisionPublic
+
+
+async def test_skill_catalog_route_forwards_cursor_search_and_page_limit():
+    skill = _skill()
+    entry = _catalog_entry(skill)
+    service = SimpleNamespace(
+        list_skills=AsyncMock(
+            return_value=SkillCatalogPage(
+                items=(entry,),
+                limit=2,
+                next_cursor="audited-skill",
+                total_count=3,
+            )
+        )
+    )
+    assembler = SimpleNamespace(
+        catalog_entry_to_sparse=MagicMock(
+            return_value=skill_models.SkillSparse(**entry.__dict__)
+        )
+    )
+    container, _ = _router_container(service=service, assembler=assembler)
+
+    response = await skill_router.list_skills(
+        space_id=skill.space_id,
+        limit=2,
+        cursor="alpha-skill",
+        q="  audited  ",
+        container=container,
+    )
+
+    assert [item.slug for item in response.items] == ["audited-skill"]
+    assert response.limit == 2
+    assert response.next_cursor == "audited-skill"
+    assert response.total_count == 3
+    service.list_skills.assert_awaited_once_with(
+        space_id=skill.space_id,
+        limit=2,
+        cursor="alpha-skill",
+        query="  audited  ",
+    )
 
 
 def test_duplicate_binding_mutation_contracts_are_absent():
@@ -247,6 +334,7 @@ async def test_revision_noop_result_does_not_emit_created_audit():
         revision_to_public=MagicMock(return_value=SimpleNamespace())
     )
     container, audit_service = _router_container(service=service, assembler=assembler)
+    response = Response(status_code=201)
 
     await skill_router.create_skill_revision(
         space_id=skill.space_id,
@@ -257,8 +345,10 @@ async def test_revision_noop_result_does_not_emit_created_audit():
             instructions=skill.current_revision.instructions,
         ),
         container=container,
+        response=response,
     )
 
+    assert response.status_code == 200
     audit_service.log_async.assert_not_awaited()
 
 
@@ -285,6 +375,7 @@ async def test_revision_created_audit_uses_locked_mutation_outcome():
         revision_to_public=MagicMock(return_value=SimpleNamespace())
     )
     container, audit_service = _router_container(service=service, assembler=assembler)
+    response = Response(status_code=201)
 
     await skill_router.create_skill_revision(
         space_id=before.space_id,
@@ -295,8 +386,10 @@ async def test_revision_created_audit_uses_locked_mutation_outcome():
             instructions=after.current_revision.instructions,
         ),
         container=container,
+        response=response,
     )
 
+    assert response.status_code == 201
     audit_service.log_async.assert_awaited_once()
     changes = audit_service.log_async.await_args.kwargs["metadata"]["changes"]
     assert changes["current_revision"] == {"old": 1, "new": 2}

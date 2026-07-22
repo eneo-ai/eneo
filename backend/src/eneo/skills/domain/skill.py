@@ -12,6 +12,9 @@ from eneo.main.exceptions import BadRequestException
 MAX_SKILL_SLUG_LENGTH = 64
 MAX_SKILL_DISPLAY_NAME_LENGTH = 200
 MAX_SKILL_DESCRIPTION_LENGTH = 1024
+MAX_SKILL_CATALOG_QUERY_LENGTH = 200
+MAX_SKILL_CATALOG_PAGE_LIMIT = 100
+DEFAULT_SKILL_CATALOG_PAGE_LIMIT = 25
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -130,6 +133,32 @@ class Skill:
 
 
 @dataclass(frozen=True)
+class SkillCatalogEntry:
+    """The body-free current-revision projection used by Skill catalog reads."""
+
+    id: UUID
+    space_id: UUID
+    slug: str
+    is_active: bool
+    current_revision_id: UUID
+    current_revision_number: int
+    display_name: str
+    description: str
+    content_digest: str
+    created_by_user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class SkillCatalogPage:
+    items: tuple[SkillCatalogEntry, ...]
+    limit: int
+    next_cursor: str | None
+    total_count: int
+
+
+@dataclass(frozen=True)
 class SkillStatusChange:
     skill: Skill
     changed: bool
@@ -154,8 +183,10 @@ class SkillBindingReference:
 class ResolvedSkillBinding:
     skill_id: UUID
     skill_revision_id: UUID
+    current_revision_id: UUID
     slug: str
     revision_number: int
+    current_revision_number: int
     display_name: str
     instructions: str
     content_digest: str

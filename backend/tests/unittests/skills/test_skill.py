@@ -21,8 +21,10 @@ def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
     return ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug=name.lower(),
         revision_number=1,
+        current_revision_number=1,
         display_name=name,
         instructions=f"Instructions for {name}",
         content_digest="a" * 64,
@@ -156,8 +158,10 @@ def test_composition_rejects_duplicate_skill_identity():
     duplicate = ResolvedSkillBinding(
         skill_id=binding.skill_id,
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug="payroll",
         revision_number=2,
+        current_revision_number=2,
         display_name="Payroll",
         instructions="Updated instructions",
         content_digest="b" * 64,

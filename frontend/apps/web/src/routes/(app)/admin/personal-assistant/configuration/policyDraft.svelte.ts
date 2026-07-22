@@ -19,6 +19,11 @@
  */
 
 import { invalidate } from "$app/navigation";
+import {
+  emptySkillCatalogPage,
+  type ListSkills,
+  type SkillCatalogPage
+} from "$lib/features/skills/skillCatalog";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type {
@@ -26,8 +31,7 @@ import type {
   ResourcePermission,
   SkillBindingReferenceInput,
   SkillBindingSummary,
-  SkillPublic,
-  SkillSparse
+  SkillPublic
 } from "@eneo/eneo-js";
 import type { SkillFormValue } from "$lib/features/skills/skillBindings";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
@@ -104,7 +108,7 @@ export type PolicyPageData = {
     id: string;
     skill_permissions: ResourcePermission[];
   };
-  skills: SkillSparse[];
+  skills: SkillCatalogPage;
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -132,7 +136,7 @@ export class PolicyDraft {
   #allMcpServers = $state<McpServer[]>([]);
   #organizationSpaceId = $state("");
   promptOptions = $state<PromptOption[]>([]);
-  availableSkills = $state<SkillSparse[]>([]);
+  skillCatalog = $state<SkillCatalogPage>(emptySkillCatalogPage());
   skillBindingSummaries = $state<SkillBindingSummary[]>([]);
   canUseSkills = $state(false);
   canCreateSkills = $state(false);
@@ -169,7 +173,7 @@ export class PolicyDraft {
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.#organizationSpaceId = data.organizationSpace.id;
     this.promptOptions = data.promptLibrary.items;
-    this.availableSkills = data.skills;
+    this.skillCatalog = data.skills;
     const canReadSkills = data.organizationSpace.skill_permissions.includes(READ_SKILL_PERMISSION);
     this.canUseSkills = canReadSkills;
     this.canCreateSkills =
@@ -470,6 +474,13 @@ export class PolicyDraft {
     return this.#eneo.skills.create({
       spaceId: this.#organizationSpaceId,
       ...value
+    });
+  };
+
+  listSkills: ListSkills = async (params) => {
+    return this.#eneo.skills.list({
+      spaceId: this.#organizationSpaceId,
+      ...params
     });
   };
 

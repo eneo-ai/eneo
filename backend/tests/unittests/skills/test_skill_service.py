@@ -15,6 +15,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillBindingReference,
+    SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
 )
@@ -27,11 +28,15 @@ def _binding(
     position: int = 0,
     active: bool = True,
 ) -> ResolvedSkillBinding:
+    resolved_skill_id = skill_id or uuid4()
+    resolved_revision_id = revision_id or uuid4()
     return ResolvedSkillBinding(
-        skill_id=skill_id or uuid4(),
-        skill_revision_id=revision_id or uuid4(),
+        skill_id=resolved_skill_id,
+        skill_revision_id=resolved_revision_id,
+        current_revision_id=resolved_revision_id,
         slug="payroll",
         revision_number=1,
+        current_revision_number=1,
         display_name="Payroll",
         description="Answers payroll questions",
         instructions="Use the payroll handbook.",
@@ -71,6 +76,24 @@ def _revision_summary(
         revision_number=revision_number,
         display_name=f"Payroll {revision_number}",
         created_at=datetime.now(timezone.utc),
+    )
+
+
+def _catalog_entry(*, space_id, slug: str) -> SkillCatalogEntry:
+    now = datetime.now(timezone.utc)
+    return SkillCatalogEntry(
+        id=uuid4(),
+        space_id=space_id,
+        slug=slug,
+        is_active=True,
+        current_revision_id=uuid4(),
+        current_revision_number=1,
+        display_name=slug.replace("-", " ").title(),
+        description=f"Description for {slug}",
+        content_digest="a" * 64,
+        created_by_user_id=uuid4(),
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -119,6 +142,92 @@ def _space(*, personal=False, organization=False, default_assistant=False):
         assistant=assistant,
         app=app,
     )
+
+
+async def test_skill_catalog_uses_stable_bounded_slug_pages_without_duplicates():
+    space = _space()
+    entries = [
+        _catalog_entry(space_id=space.id, slug=slug)
+        for slug in ("alpha", "beta", "charlie", "delta")
+    ]
+    repo = AsyncMock()
+    repo.list_catalog_entries.side_effect = [entries[:3], entries[2:]]
+    repo.count_catalog_entries.return_value = len(entries)
+    service = _service(space=space, repo=repo)
+
+    first = await service.list_skills(
+        space_id=space.id,
+        limit=2,
+        cursor=None,
+        query="   ",
+    )
+    second = await service.list_skills(
+        space_id=space.id,
+        limit=2,
+        cursor=first.next_cursor,
+        query=None,
+    )
+
+    assert [item.slug for item in first.items] == ["alpha", "beta"]
+    assert [item.slug for item in second.items] == ["charlie", "delta"]
+    assert len(first.items) <= first.limit == 2
+    assert len(second.items) <= second.limit == 2
+    assert first.next_cursor == "beta"
+    assert second.next_cursor is None
+    assert first.total_count == second.total_count == 4
+    assert not ({item.id for item in first.items} & {item.id for item in second.items})
+    assert repo.list_catalog_entries.await_args_list[0].kwargs == {
+        "space_id": space.id,
+        "limit": 3,
+        "after_slug": None,
+        "query": None,
+    }
+    assert repo.list_catalog_entries.await_args_list[1].kwargs == {
+        "space_id": space.id,
+        "limit": 3,
+        "after_slug": "beta",
+        "query": None,
+    }
+
+
+async def test_skill_catalog_normalizes_search_and_rejects_invalid_inputs():
+    space = _space()
+    repo = AsyncMock()
+    repo.list_catalog_entries.return_value = []
+    repo.count_catalog_entries.return_value = 0
+    service = _service(space=space, repo=repo)
+
+    await service.list_skills(
+        space_id=space.id,
+        limit=25,
+        cursor=None,
+        query="  Payroll guidance  ",
+    )
+
+    repo.list_catalog_entries.assert_awaited_once_with(
+        space_id=space.id,
+        limit=26,
+        after_slug=None,
+        query="Payroll guidance",
+    )
+    repo.count_catalog_entries.assert_awaited_once_with(
+        space_id=space.id,
+        query="Payroll guidance",
+    )
+
+    for limit, cursor, query in (
+        (0, None, None),
+        (101, None, None),
+        (25, "not a canonical cursor", None),
+        (25, None, "x" * 201),
+    ):
+        with pytest.raises(BadRequestException, match="Skill catalog"):
+            await service.list_skills(
+                space_id=space.id,
+                limit=limit,
+                cursor=cursor,
+                query=query,
+            )
 
 
 async def test_reader_can_open_skill_detail_and_bounded_revision_history():

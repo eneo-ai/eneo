@@ -1,16 +1,16 @@
 """backfill Skill use and management permissions onto existing capable roles
 
-Revision ID: 202607151300
-Revises: 202607151200
-Create Date: 2026-07-15 13:00:00.000000
+Revision ID: 202607221300
+Revises: 202607221200
+Create Date: 2026-07-22 13:00:00.000000
 """
 
 from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "202607151300"
-down_revision: str | None = "202607151200"
+revision: str = "202607221300"
+down_revision: str | None = "202607221200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

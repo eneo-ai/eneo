@@ -12,17 +12,19 @@
 export function initSkills(client) {
   return {
     /**
-     * List the Skills available in a Space.
-     * @param {{spaceId: string}} params
-     * @returns {Promise<SkillSparse[]>}
+     * List a bounded page of Skills available in a Space.
+     * @param {{spaceId: string, limit?: number, cursor?: string | null, query?: string | null}} params
+     * @returns {Promise<import('../types/resources').SkillCatalogPage>}
      * @throws {EneoError}
      */
-    list: async ({ spaceId }) => {
-      const res = await client.fetch("/api/v1/spaces/{space_id}/skills/", {
+    list: async ({ spaceId, limit, cursor, query }) => {
+      return await client.fetch("/api/v1/spaces/{space_id}/skills/", {
         method: "get",
-        params: { path: { space_id: spaceId } }
+        params: {
+          path: { space_id: spaceId },
+          query: { limit, cursor, q: query }
+        }
       });
-      return res.items;
     },
 
     /**

@@ -1,5 +1,6 @@
 import { redirect } from "@sveltejs/kit";
 import { resolve } from "$app/paths";
+import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 
 export const load = async (event) => {
   event.depends("space:skills");
@@ -19,8 +20,8 @@ export const load = async (event) => {
         .availability({ kind: "prompt_guide", target_id: event.params.assistantId })
         .catch(() => null),
       canReadSkills && supportsDirectSkills
-        ? eneo.skills.list({ spaceId: currentSpace.id })
-        : Promise.resolve([]),
+        ? eneo.skills.list({ spaceId: currentSpace.id, limit: SKILL_CATALOG_PAGE_SIZE })
+        : Promise.resolve(emptySkillCatalogPage()),
       canReadSkills && supportsDirectSkills
         ? eneo.skills.listAssistantBindings({
             spaceId: currentSpace.id,

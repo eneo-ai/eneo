@@ -10450,6 +10450,27 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[SkillSparse] */
+    CursorPaginatedResponse_SkillSparse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SkillSparse"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[UserSparse] */
     CursorPaginatedResponse_UserSparse_: {
       /**
@@ -13748,19 +13769,6 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[SkillSparse] */
-    PaginatedResponse_SkillSparse_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["SkillSparse"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
     /** PaginatedResponse[SpaceDashboard] */
     PaginatedResponse_SpaceDashboard_: {
       /**
@@ -15534,10 +15542,17 @@ export interface components {
        * Format: uuid
        */
       skill_revision_id: string;
+      /**
+       * Current Revision Id
+       * Format: uuid
+       */
+      current_revision_id: string;
       /** Slug */
       slug: string;
       /** Revision Number */
       revision_number: number;
+      /** Current Revision Number */
+      current_revision_number: number;
       /** Display Name */
       display_name: string;
       /** Description */
@@ -37950,7 +37965,11 @@ export interface operations {
   };
   list_skills_api_v1_spaces__space_id__skills__get: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        q?: string | null;
+      };
       header?: never;
       path: {
         space_id: string;
@@ -37965,7 +37984,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_SkillSparse_"];
+          "application/json": components["schemas"]["CursorPaginatedResponse_SkillSparse_"];
         };
       };
       /** @description Forbidden */
@@ -38244,6 +38263,15 @@ export interface operations {
       };
     };
     responses: {
+      /** @description The submitted content already matches the current revision. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
       /** @description Successful Response */
       201: {
         headers: {

@@ -127,8 +127,10 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
     binding = ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug="payroll",
         revision_number=3,
+        current_revision_number=3,
         display_name="Payroll",
         description="Answers payroll questions",
         instructions="Use the payroll handbook.",
@@ -163,8 +165,10 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
     binding = ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug="payroll",
         revision_number=1,
+        current_revision_number=1,
         display_name="Payroll",
         description="Answers payroll questions",
         instructions="Use the payroll handbook.",

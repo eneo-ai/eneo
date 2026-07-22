@@ -1,5 +1,6 @@
 import type { ResourcePermission } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
+import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 import { load } from "./+page";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
@@ -26,7 +27,7 @@ describe("Assistant edit loader", () => {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
           skills: {
-            list: vi.fn().mockResolvedValue([]),
+            list: vi.fn().mockResolvedValue(emptySkillCatalogPage()),
             listAssistantBindings
           }
         }
@@ -71,14 +72,14 @@ describe("Assistant edit loader", () => {
     const result = await load(event as never);
 
     expect(result.supportsDirectSkills).toBe(false);
-    expect(result.skills).toEqual([]);
+    expect(result.skills).toEqual(emptySkillCatalogPage());
     expect(result.skillBindings).toEqual([]);
     expect(list).not.toHaveBeenCalled();
     expect(listAssistantBindings).not.toHaveBeenCalled();
   });
 
   test("loads direct Skills for a shared default Assistant", async () => {
-    const skills = [{ id: "skill-1" }];
+    const skills = { ...emptySkillCatalogPage(), items: [{ id: "skill-1" }], total_count: 1 };
     const bindings = [{ skill_id: "skill-1" }];
     const list = vi.fn().mockResolvedValue(skills);
     const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
@@ -110,7 +111,10 @@ describe("Assistant edit loader", () => {
     expect(result.supportsDirectSkills).toBe(true);
     expect(result.skills).toEqual(skills);
     expect(result.skillBindings).toEqual(bindings);
-    expect(list).toHaveBeenCalledWith({ spaceId: "shared-space" });
+    expect(list).toHaveBeenCalledWith({
+      spaceId: "shared-space",
+      limit: SKILL_CATALOG_PAGE_SIZE
+    });
     expect(listAssistantBindings).toHaveBeenCalledWith({
       spaceId: "shared-space",
       assistantId: "default-assistant"

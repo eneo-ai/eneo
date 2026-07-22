@@ -7,7 +7,7 @@
   } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
   import { ArrowDown, ArrowUp, ChevronsUpDown, Info, Plus, RefreshCw, Trash2 } from "lucide-svelte";
-  import { tick } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -16,6 +16,8 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
+  import type { ListSkills, SkillCatalogPage } from "./skillCatalog";
+  import { SkillCatalogQuery } from "./skillCatalogQuery.svelte";
   import {
     appendSkillBinding,
     getAvailableSkills,
@@ -30,19 +32,21 @@
 
   type Props = {
     bindings: SkillBindingReferenceInput[];
-    availableSkills: SkillSparse[];
+    initialSkillPage: SkillCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     canEditBindings: boolean;
     canCreateSkills: boolean;
+    onListSkills: ListSkills;
     onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
   };
 
   let {
     bindings = $bindable(),
-    availableSkills,
+    initialSkillPage,
     bindingSummaries,
     canEditBindings,
     canCreateSkills,
+    onListSkills,
     onCreateSkill
   }: Props = $props();
 
@@ -56,7 +60,26 @@
   let createdSkills = $state<SkillPublic[]>([]);
   let announcement = $state("");
 
-  const catalog = $derived(mergeSkillCatalog(availableSkills, createdSkills));
+  let loadedInitialPage = untrack(() => initialSkillPage);
+  const skillCatalog = new SkillCatalogQuery(loadedInitialPage, (params) => onListSkills(params));
+  onDestroy(() => skillCatalog.dispose());
+
+  $effect(() => {
+    if (initialSkillPage === loadedInitialPage) return;
+    loadedInitialPage = initialSkillPage;
+    skillCatalog.reset(initialSkillPage);
+  });
+
+  const matchingCreatedSkills = $derived.by(() => {
+    const normalizedQuery = skillCatalog.query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return createdSkills;
+    return createdSkills.filter((skill) =>
+      `${skill.display_name} ${skill.description} ${skill.slug} ${skill.id}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery)
+    );
+  });
+  const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
   const rows = $derived(getSkillBindingRows(bindings, bindingSummaries, catalog));
 
@@ -106,11 +129,21 @@
   }
 
   function useLatestRevision(row: SkillBindingRow, index: number) {
-    if (!canEditBindings || !row.currentSkill) return;
-    bindings = upgradeSkillBinding(bindings, index, row.currentSkill);
+    if (
+      !canEditBindings ||
+      row.currentRevisionId === undefined ||
+      row.currentRevisionNumber === undefined ||
+      row.isActive !== true
+    )
+      return;
+    bindings = upgradeSkillBinding(bindings, index, {
+      id: row.reference.skill_id,
+      current_revision_id: row.currentRevisionId,
+      is_active: row.isActive
+    });
     announcement = m.skills_revision_upgraded_announcement({
       name: rowName(row),
-      revision: String(row.currentSkill.current_revision_number)
+      revision: String(row.currentRevisionNumber)
     });
     focusElement(rowId(row.reference.skill_id));
   }
@@ -159,10 +192,10 @@
                   {m.skills_inactive_binding_explanation()}
                 </span>
               {/if}
-              {#if row.hasNewerRevision && row.currentSkill}
+              {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined}
                 <Badge variant="secondary">
                   {m.skills_newer_revision_available({
-                    revision: String(row.currentSkill.current_revision_number)
+                    revision: String(row.currentRevisionNumber)
                   })}
                 </Badge>
               {/if}
@@ -170,7 +203,7 @@
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
-            {#if row.hasNewerRevision && row.currentSkill?.is_active}
+            {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined && row.isActive}
               <Button
                 type="button"
                 variant="outline"
@@ -178,7 +211,7 @@
                 disabled={!canEditBindings}
                 aria-label={m.skills_use_latest_revision_aria({
                   name: rowName(row),
-                  revision: String(row.currentSkill.current_revision_number)
+                  revision: String(row.currentRevisionNumber)
                 })}
                 onclick={() => useLatestRevision(row, index)}
               >
@@ -247,13 +280,38 @@
         align="start"
         class="w-(--bits-popover-anchor-width) min-w-[min(20rem,calc(100vw-2rem))] p-0"
       >
-        <Command.Root label={m.skills_search_existing()}>
+        <Command.Root label={m.skills_search_existing()} shouldFilter={false}>
           <Command.Input
+            value={skillCatalog.query}
             placeholder={m.skills_search_existing()}
             aria-label={m.skills_search_existing()}
+            oninput={(event) => skillCatalog.setQuery(event.currentTarget.value)}
           />
-          <Command.List aria-label={m.skills_available_group()}>
-            <Command.Empty>{m.skills_no_available()}</Command.Empty>
+          <Command.List
+            aria-label={m.skills_available_group()}
+            aria-busy={skillCatalog.loading || skillCatalog.loadingMore}
+          >
+            {#if skillCatalog.error}
+              <div class="flex flex-col items-center gap-2 px-4 py-6 text-center">
+                <p class="text-destructive text-sm" role="alert">{skillCatalog.error}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onclick={() => skillCatalog.retry()}
+                >
+                  {m.retry()}
+                </Button>
+              </div>
+            {:else if skillCatalog.loading && addExistingChoices.length === 0}
+              <p class="text-muted-foreground px-4 py-6 text-center text-sm" role="status">
+                {m.loading()}
+              </p>
+            {:else if addExistingChoices.length === 0}
+              <p class="text-muted-foreground px-4 py-6 text-center text-sm">
+                {m.skills_no_available()}
+              </p>
+            {/if}
             {#if addExistingChoices.length > 0}
               <Command.Group heading={m.skills_available_group()}>
                 {#each addExistingChoices as skill (skill.id)}
@@ -273,6 +331,25 @@
                   </Command.Item>
                 {/each}
               </Command.Group>
+            {/if}
+            {#if skillCatalog.loading && addExistingChoices.length > 0}
+              <p class="text-muted-foreground px-4 py-2 text-center text-sm" role="status">
+                {m.loading()}
+              </p>
+            {/if}
+            {#if skillCatalog.hasMore && !skillCatalog.loading}
+              <div class="border-border border-t p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  class="w-full"
+                  disabled={skillCatalog.loadingMore}
+                  onclick={() => skillCatalog.loadMore()}
+                >
+                  {skillCatalog.loadingMore ? m.loading() : m.load_more()}
+                </Button>
+              </div>
             {/if}
           </Command.List>
         </Command.Root>

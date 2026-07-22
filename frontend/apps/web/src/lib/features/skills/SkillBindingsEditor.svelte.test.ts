@@ -4,6 +4,7 @@ import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import SkillBindingsEditor from "./SkillBindingsEditor.svelte";
+import { SKILL_CATALOG_PAGE_SIZE, type SkillCatalogPage } from "./skillCatalog";
 
 function makeSkill(id: string, revision = 1, isActive = true): SkillSparse {
   return {
@@ -32,7 +33,20 @@ function makeSummary(skill: SkillSparse, revision: number, position: number): Sk
     description: skill.description,
     content_digest: `digest-${skill.id}-${revision}`,
     position,
-    is_active: skill.is_active
+    is_active: skill.is_active,
+    current_revision_id: skill.current_revision_id,
+    current_revision_number: skill.current_revision_number
+  };
+}
+
+function makePage(items: SkillSparse[], nextCursor: string | null = null): SkillCatalogPage {
+  return {
+    items,
+    count: items.length,
+    total_count: items.length,
+    limit: SKILL_CATALOG_PAGE_SIZE,
+    next_cursor: nextCursor,
+    previous_cursor: null
   };
 }
 
@@ -56,6 +70,85 @@ function makePublicSkill(id: string, displayName: string): SkillPublic {
 }
 
 describe("SkillBindingsEditor", () => {
+  test("searches and loads more from the server-owned catalog", async () => {
+    const first = makeSkill("first");
+    const second = makeSkill("second");
+    const searched = makeSkill("searched");
+    const onListSkills = vi.fn(
+      async ({ cursor, query }: { cursor?: string | null; query?: string | null }) => {
+        if (query === "payroll") return makePage([searched]);
+        if (cursor === "skill-first") return makePage([first, second]);
+        return makePage([first], "skill-first");
+      }
+    );
+
+    render(SkillBindingsEditor, {
+      bindings: [],
+      initialSkillPage: makePage([first], "skill-first"),
+      bindingSummaries: [],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListSkills,
+      onCreateSkill: vi.fn()
+    });
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await page.getByRole("button", { name: m.load_more() }).click();
+
+    expect(onListSkills).toHaveBeenCalledWith({
+      limit: SKILL_CATALOG_PAGE_SIZE,
+      cursor: "skill-first",
+      query: null
+    });
+    await expect.element(page.getByText(second.display_name, { exact: true })).toBeVisible();
+
+    await page.getByPlaceholder(m.skills_search_existing()).fill("payroll");
+    await vi.waitFor(
+      () =>
+        expect(onListSkills).toHaveBeenCalledWith({
+          limit: SKILL_CATALOG_PAGE_SIZE,
+          cursor: null,
+          query: "payroll"
+        }),
+      { timeout: 1_000 }
+    );
+    await expect.element(page.getByText(searched.display_name, { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText(first.display_name, { exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  test("upgrades a bound Skill that is outside the current catalog page", async () => {
+    const bound = makeSkill("bound", 2);
+    const summary = makeSummary(bound, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: bound.id, skill_revision_id: summary.skill_revision_id }],
+      initialSkillPage: makePage([]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListSkills: vi.fn(),
+      onCreateSkill: vi.fn()
+    });
+
+    await expect
+      .element(page.getByText(m.skills_newer_revision_available({ revision: "2" })))
+      .toBeVisible();
+    await page
+      .getByRole("button", {
+        name: m.skills_use_latest_revision_aria({ name: bound.display_name, revision: "2" })
+      })
+      .click();
+
+    await expect
+      .element(page.getByText(m.skills_revision_label({ revision: "2" }), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_newer_revision_available({ revision: "2" })))
+      .not.toBeInTheDocument();
+  });
+
   test("exposes disabled order boundaries and upgrades only after an explicit action", async () => {
     const first = makeSkill("first", 2);
     const second = makeSkill("second", 1, false);
@@ -67,10 +160,11 @@ describe("SkillBindingsEditor", () => {
         { skill_id: first.id, skill_revision_id: firstSummary.skill_revision_id },
         { skill_id: second.id, skill_revision_id: secondSummary.skill_revision_id }
       ],
-      availableSkills: [first, second],
+      initialSkillPage: makePage([first, second]),
       bindingSummaries: [firstSummary, secondSummary],
       canEditBindings: true,
       canCreateSkills: true,
+      onListSkills: vi.fn(),
       onCreateSkill: vi.fn()
     });
 
@@ -121,10 +215,11 @@ describe("SkillBindingsEditor", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(SkillBindingsEditor, {
       bindings: [],
-      availableSkills: [],
+      initialSkillPage: makePage([]),
       bindingSummaries: [],
       canEditBindings: true,
       canCreateSkills: true,
+      onListSkills: vi.fn(),
       onCreateSkill: vi.fn()
     });
 
@@ -152,10 +247,11 @@ describe("SkillBindingsEditor", () => {
 
     render(SkillBindingsEditor, {
       bindings: [],
-      availableSkills: [],
+      initialSkillPage: makePage([]),
       bindingSummaries: [],
       canEditBindings: true,
       canCreateSkills: true,
+      onListSkills: vi.fn(),
       onCreateSkill
     });
 

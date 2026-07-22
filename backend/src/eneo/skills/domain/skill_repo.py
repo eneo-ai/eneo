@@ -5,6 +5,7 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillCatalogEntry,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
@@ -27,7 +28,21 @@ class SkillRepo(Protocol):
 
     async def get(self, *, skill_id: UUID) -> Skill | None: ...
 
-    async def list_for_space(self, *, space_id: UUID) -> list[Skill]: ...
+    async def list_catalog_entries(
+        self,
+        *,
+        space_id: UUID,
+        limit: int,
+        after_slug: str | None,
+        query: str | None,
+    ) -> list[SkillCatalogEntry]: ...
+
+    async def count_catalog_entries(
+        self,
+        *,
+        space_id: UUID,
+        query: str | None,
+    ) -> int: ...
 
     async def get_revision(
         self, *, skill_id: UUID, revision_id: UUID

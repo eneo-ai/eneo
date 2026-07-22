@@ -2,6 +2,7 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
 )
@@ -70,7 +71,24 @@ class SkillAssembler:
         )
 
     @classmethod
-    def to_sparse(cls, skill: Skill) -> SkillSparse:
+    def catalog_entry_to_sparse(cls, entry: SkillCatalogEntry) -> SkillSparse:
+        return SkillSparse(
+            id=entry.id,
+            space_id=entry.space_id,
+            slug=entry.slug,
+            is_active=entry.is_active,
+            current_revision_id=entry.current_revision_id,
+            current_revision_number=entry.current_revision_number,
+            display_name=entry.display_name,
+            description=entry.description,
+            content_digest=entry.content_digest,
+            created_by_user_id=entry.created_by_user_id,
+            created_at=entry.created_at,
+            updated_at=entry.updated_at,
+        )
+
+    @staticmethod
+    def to_sparse(skill: Skill) -> SkillSparse:
         revision = skill.current_revision
         return SkillSparse(
             id=skill.id,
@@ -99,8 +117,10 @@ class SkillAssembler:
         return SkillBindingSummary(
             skill_id=binding.skill_id,
             skill_revision_id=binding.skill_revision_id,
+            current_revision_id=binding.current_revision_id,
             slug=binding.slug,
             revision_number=binding.revision_number,
+            current_revision_number=binding.current_revision_number,
             display_name=binding.display_name,
             description=binding.description,
             content_digest=binding.content_digest,

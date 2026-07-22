@@ -1,34 +1,32 @@
 <script lang="ts">
-  import type {
-    SkillBindingReferenceInput,
-    SkillBindingSummary,
-    SkillPublic,
-    SkillSparse
-  } from "@eneo/eneo-js";
+  import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
   import { BookOpenCheck, Info } from "lucide-svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
+  import type { ListSkills, SkillCatalogPage } from "$lib/features/skills/skillCatalog";
   import { m } from "$lib/paraglide/messages";
   import PolicySection from "./PolicySection.svelte";
 
   type Props = {
     skillBindings: SkillBindingReferenceInput[];
-    availableSkills: SkillSparse[];
+    initialSkillPage: SkillCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     summary: string;
     canUseSkills: boolean;
     canCreateSkills: boolean;
+    onListSkills: ListSkills;
     onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
   };
 
   let {
     skillBindings = $bindable(),
-    availableSkills,
+    initialSkillPage,
     bindingSummaries,
     summary,
     canUseSkills,
     canCreateSkills,
+    onListSkills,
     onCreateSkill
   }: Props = $props();
 </script>
@@ -52,10 +50,11 @@
 
   <SkillBindingsEditor
     bind:bindings={skillBindings}
-    {availableSkills}
+    {initialSkillPage}
     {bindingSummaries}
     canEditBindings={canUseSkills}
     {canCreateSkills}
+    {onListSkills}
     {onCreateSkill}
   />
 </PolicySection>

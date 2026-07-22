@@ -805,8 +805,10 @@ async def test_governance_skill_composes_after_enforced_prompt():
     binding = ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug="payroll",
         revision_number=4,
+        current_revision_number=4,
         display_name="Payroll",
         instructions="Use the approved payroll rules.",
         content_digest="b" * 64,

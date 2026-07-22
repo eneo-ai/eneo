@@ -295,10 +295,12 @@
           >
             <SkillBindingsEditor
               bind:bindings={$update.skill_bindings}
-              availableSkills={data.skills}
+              initialSkillPage={data.skills}
               bindingSummaries={data.skillBindings}
               canEditBindings={data.app.permissions?.includes("edit") ?? false}
               canCreateSkills={$currentSpace.hasPermission("create", "skill")}
+              onListSkills={(params) =>
+                data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
               onCreateSkill={createSkill}
             />
           </Settings.Row>

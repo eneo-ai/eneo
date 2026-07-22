@@ -1,8 +1,8 @@
 """create versioned skills, bindings, and execution provenance
 
-Revision ID: 202607151200
-Revises: 202607151100
-Create Date: 2026-07-15 12:00:00.000000
+Revision ID: 202607221200
+Revises: 202607221100
+Create Date: 2026-07-22 12:00:00.000000
 """
 
 from collections.abc import Sequence
@@ -12,8 +12,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "202607151200"
-down_revision: str | None = "202607151100"
+revision: str = "202607221200"
+down_revision: str | None = "202607221100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -356,18 +356,9 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.create_index(
-        "ix_app_runs_skill_provenance_gin",
-        "app_runs",
-        ["skill_provenance"],
-        unique=False,
-        postgresql_using="gin",
-        postgresql_ops={"skill_provenance": "jsonb_path_ops"},
-    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_app_runs_skill_provenance_gin", table_name="app_runs")
     op.drop_column("app_runs", "skill_provenance")
     op.drop_column("questions", "skill_provenance")
     op.drop_index(

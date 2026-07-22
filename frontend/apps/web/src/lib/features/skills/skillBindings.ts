@@ -15,7 +15,8 @@ export type SkillFormValue = Pick<SkillPublic, "slug"> & SkillRevisionFormValue;
 export type SkillBindingRow = {
   reference: SkillBindingReferenceInput;
   summary: SkillBindingSummary | undefined;
-  currentSkill: SkillSparse | undefined;
+  currentRevisionId: string | undefined;
+  currentRevisionNumber: number | undefined;
   displayName: string | undefined;
   description: string | undefined;
   pinnedRevision: number | undefined;
@@ -71,7 +72,7 @@ export function moveSkillBinding(
 export function upgradeSkillBinding(
   bindings: SkillBindingReferenceInput[],
   index: number,
-  currentSkill: SkillSparse
+  currentSkill: Pick<SkillSparse, "id" | "current_revision_id" | "is_active">
 ): SkillBindingReferenceInput[] {
   const binding = bindings[index];
   if (
@@ -105,27 +106,33 @@ export function getSkillBindingRows(
   const summariesByReference = new Map(
     summaries.map((summary) => [bindingKey(summary.skill_id, summary.skill_revision_id), summary])
   );
+  const summariesBySkillId = new Map(summaries.map((summary) => [summary.skill_id, summary]));
   const catalogById = new Map(catalog.map((skill) => [skill.id, skill]));
 
   return bindings.map((reference) => {
     const summary = summariesByReference.get(
       bindingKey(reference.skill_id, reference.skill_revision_id)
     );
+    const skillSummary = summariesBySkillId.get(reference.skill_id);
     const currentSkill = catalogById.get(reference.skill_id);
-    const referencesCurrentRevision =
-      currentSkill?.current_revision_id === reference.skill_revision_id;
+    const currentRevisionId =
+      skillSummary?.current_revision_id ?? currentSkill?.current_revision_id;
+    const currentRevisionNumber =
+      skillSummary?.current_revision_number ?? currentSkill?.current_revision_number;
+    const referencesCurrentRevision = currentRevisionId === reference.skill_revision_id;
 
     return {
       reference,
       summary,
-      currentSkill,
-      displayName: summary?.display_name ?? currentSkill?.display_name,
-      description: summary?.description ?? currentSkill?.description,
+      currentRevisionId,
+      currentRevisionNumber,
+      displayName:
+        summary?.display_name ?? skillSummary?.display_name ?? currentSkill?.display_name,
+      description: summary?.description ?? skillSummary?.description ?? currentSkill?.description,
       pinnedRevision:
-        summary?.revision_number ??
-        (referencesCurrentRevision ? currentSkill.current_revision_number : undefined),
-      isActive: currentSkill?.is_active ?? summary?.is_active,
-      hasNewerRevision: currentSkill !== undefined && !referencesCurrentRevision
+        summary?.revision_number ?? (referencesCurrentRevision ? currentRevisionNumber : undefined),
+      isActive: currentSkill?.is_active ?? skillSummary?.is_active,
+      hasNewerRevision: currentRevisionId !== undefined && !referencesCurrentRevision
     };
   });
 }

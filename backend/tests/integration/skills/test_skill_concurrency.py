@@ -200,6 +200,37 @@ async def test_fresh_install_owner_has_every_tenant_permission(admin_user):
     assert admin_user.permissions == set(Permission) - {Permission.EDITOR}
 
 
+async def test_binding_projection_keeps_pinned_and_current_revision_identity(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+):
+    resources = skill_concurrency_resources
+    async with db_container() as container:
+        await container.skill_service().replace_assistant_bindings(
+            space_id=resources.space_id,
+            assistant_id=resources.assistant_id,
+            references=[resources.first_reference],
+        )
+        change = await container.skill_service().create_revision(
+            skill_id=resources.first_skill_id,
+            display_name="First Skill",
+            description="First concurrency Skill",
+            instructions="Updated first instructions",
+        )
+
+    async with db_container() as container:
+        bindings = await container.skill_repo().list_assistant_bindings(
+            assistant_id=resources.assistant_id
+        )
+
+    assert len(bindings) == 1
+    binding = bindings[0]
+    assert binding.skill_revision_id == resources.first_revision_id
+    assert binding.revision_number == 1
+    assert binding.current_revision_id == change.revision.id
+    assert binding.current_revision_number == 2
+
+
 @pytest.mark.parametrize("parent_kind", ["assistant", "app"])
 @pytest.mark.parametrize("second_clears", [False, True])
 async def test_parent_binding_replacements_are_serialized(

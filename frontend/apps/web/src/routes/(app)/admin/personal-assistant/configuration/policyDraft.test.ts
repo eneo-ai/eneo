@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 import { PolicyDraft } from "./policyDraft.svelte";
 
 vi.mock("$app/navigation", () => ({
@@ -24,7 +25,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read"]
       },
-      skills: []
+      skills: emptySkillCatalogPage()
     });
 
     expect(draft.canUseSkills).toBe(true);
@@ -59,7 +60,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read", "create", "edit"]
       },
-      skills: []
+      skills: emptySkillCatalogPage()
     });
 
     draft.selectedPromptId = "prompt-2";
@@ -79,8 +80,10 @@ describe("PolicyDraft", () => {
     const first = {
       skill_id: "skill-1",
       skill_revision_id: "revision-1",
+      current_revision_id: "revision-1",
       slug: "first",
       revision_number: 1,
+      current_revision_number: 1,
       display_name: "First",
       description: "First description",
       content_digest: "digest-1",
@@ -90,8 +93,10 @@ describe("PolicyDraft", () => {
     const second = {
       skill_id: "skill-2",
       skill_revision_id: "revision-2",
+      current_revision_id: "revision-2",
       slug: "second",
       revision_number: 2,
+      current_revision_number: 2,
       display_name: "Second",
       description: "Second description",
       content_digest: "digest-2",
@@ -115,7 +120,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read", "create", "edit"]
       },
-      skills: []
+      skills: emptySkillCatalogPage()
     });
 
     draft.skillBindings = [

@@ -75,8 +75,10 @@ class SkillBindingReferenceInput(BaseModel):
 class SkillBindingSummary(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
+    current_revision_id: UUID
     slug: str
     revision_number: int
+    current_revision_number: int
     display_name: str
     description: str
     content_digest: str

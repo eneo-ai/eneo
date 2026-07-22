@@ -3,6 +3,45 @@ import test from "node:test";
 
 import { initSkills } from "./skills.js";
 
+test("Skill catalogue keeps the bounded cursor page contract", async () => {
+  const page = {
+    items: [{ id: "skill-1", slug: "payroll" }],
+    count: 1,
+    limit: 25,
+    next_cursor: "payroll",
+    previous_cursor: null,
+    total_count: 2
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.list({
+    spaceId: "space-1",
+    limit: 25,
+    cursor: "benefits",
+    query: "payroll"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{space_id}/skills/",
+      request: {
+        method: "get",
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: "benefits", q: "payroll" }
+        }
+      }
+    }
+  ]);
+});
+
 test("revision summaries use the bounded collection contract", async () => {
   const page = {
     items: [

@@ -91,8 +91,10 @@ def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt
     binding = ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
         slug="payroll",
         revision_number=2,
+        current_revision_number=2,
         display_name="Payroll",
         description="Answers payroll questions",
         instructions="Use the payroll handbook.",

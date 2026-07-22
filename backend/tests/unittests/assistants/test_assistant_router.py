@@ -471,8 +471,10 @@ def _skill_binding(*, position: int) -> ResolvedSkillBinding:
     return ResolvedSkillBinding(
         skill_id=uuid.uuid4(),
         skill_revision_id=uuid.uuid4(),
+        current_revision_id=uuid.uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
+        current_revision_number=position + 1,
         display_name=f"Skill {position}",
         description="Description must not enter parent audit evidence",
         instructions="Sensitive instructions must not enter audit evidence",

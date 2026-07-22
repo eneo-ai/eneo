@@ -13,9 +13,12 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import (
+    MAX_SKILL_CATALOG_PAGE_LIMIT,
+    MAX_SKILL_CATALOG_QUERY_LENGTH,
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillCatalogPage,
     SkillComposition,
     SkillExecutionReference,
     SkillHasActiveAppRunsError,
@@ -58,14 +61,63 @@ class SkillService:
     async def _space(self, space_id: UUID) -> "Space":
         return await self.space_service.get_space(space_id)
 
-    async def list_skills(self, *, space_id: UUID) -> list[Skill]:
+    async def list_skills(
+        self,
+        *,
+        space_id: UUID,
+        limit: int,
+        cursor: str | None,
+        query: str | None,
+    ) -> SkillCatalogPage:
         space = await self._space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_read_skills():
             raise UnauthorizedException(
                 "You do not have permission to read Skills in this Space"
             )
-        return await self.repo.list_for_space(space_id=space_id)
+        if not 1 <= limit <= MAX_SKILL_CATALOG_PAGE_LIMIT:
+            raise BadRequestException(
+                "Skill catalog limit must be between 1 and "
+                f"{MAX_SKILL_CATALOG_PAGE_LIMIT}"
+            )
+
+        after_slug = None
+        if cursor is not None:
+            try:
+                after_slug = validate_skill_slug(cursor)
+            except BadRequestException as error:
+                raise BadRequestException("Invalid Skill catalog cursor") from error
+            if after_slug != cursor:
+                raise BadRequestException("Invalid Skill catalog cursor")
+
+        normalized_query = query.strip() if query is not None else None
+        normalized_query = normalized_query or None
+        if (
+            normalized_query is not None
+            and len(normalized_query) > MAX_SKILL_CATALOG_QUERY_LENGTH
+        ):
+            raise BadRequestException(
+                "Skill catalog query cannot exceed "
+                f"{MAX_SKILL_CATALOG_QUERY_LENGTH} characters"
+            )
+
+        entries = await self.repo.list_catalog_entries(
+            space_id=space_id,
+            limit=limit + 1,
+            after_slug=after_slug,
+            query=normalized_query,
+        )
+        visible = entries[:limit]
+        next_cursor = visible[-1].slug if len(entries) > limit and visible else None
+        return SkillCatalogPage(
+            items=tuple(visible),
+            limit=limit,
+            next_cursor=next_cursor,
+            total_count=await self.repo.count_catalog_entries(
+                space_id=space_id,
+                query=normalized_query,
+            ),
+        )
 
     async def get_skill(self, *, skill_id: UUID) -> Skill:
         skill = await self.repo.get(skill_id=skill_id)

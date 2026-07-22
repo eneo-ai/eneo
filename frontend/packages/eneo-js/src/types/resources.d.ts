@@ -5,6 +5,7 @@ export type Assistant =
 
 export type AssistantSparse = Omit<components["schemas"]["AssistantSparse"], "user_id">;
 export type SkillSparse = components["schemas"]["SkillSparse"];
+export type SkillCatalogPage = components["schemas"]["CursorPaginatedResponse_SkillSparse_"];
 export type SkillPublic = components["schemas"]["SkillPublic"];
 export type SkillRevisionPublic = components["schemas"]["SkillRevisionPublic"];
 export type SkillRevisionSummaryPublic = components["schemas"]["SkillRevisionSummaryPublic"];

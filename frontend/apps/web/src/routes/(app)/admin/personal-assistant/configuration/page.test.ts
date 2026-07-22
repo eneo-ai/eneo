@@ -1,11 +1,12 @@
 import type { ResourcePermission } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
+import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 import { load } from "./+page";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
 
 function createEvent(skillPermissions: ResourcePermission[]) {
-  const skills = [{ id: "skill-1" }];
+  const skills = { ...emptySkillCatalogPage(), items: [{ id: "skill-1" }], total_count: 1 };
   const listSkills = vi.fn().mockResolvedValue(skills);
   const eneo = {
     governancePolicy: { get: vi.fn().mockResolvedValue({}) },
@@ -39,7 +40,7 @@ describe("personal assistant configuration loader", () => {
     const result = await load(event as never);
 
     expect(listSkills).not.toHaveBeenCalled();
-    expect(result.skills).toEqual([]);
+    expect(result.skills).toEqual(emptySkillCatalogPage());
     expect(event.depends).toHaveBeenCalledWith("admin:governance-policy");
   });
 
@@ -49,7 +50,10 @@ describe("personal assistant configuration loader", () => {
     const result = await load(event as never);
 
     expect(listSkills).toHaveBeenCalledOnce();
-    expect(listSkills).toHaveBeenCalledWith({ spaceId: "organization-space" });
+    expect(listSkills).toHaveBeenCalledWith({
+      spaceId: "organization-space",
+      limit: SKILL_CATALOG_PAGE_SIZE
+    });
     expect(result.skills).toEqual(skills);
   });
 });

@@ -8,9 +8,13 @@ Run in the migration-isolation lane:
 
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
 from uuid import uuid4
 
 import psycopg2
@@ -22,9 +26,11 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_SKILLS_REVISION = "202607071200"
-SKILLS_SCHEMA_REVISION = "202607151200"
-SKILLS_HEAD_REVISION = "202607151300"
+PRE_SKILLS_REVISION = "202607221000"
+SKILLS_SCHEMA_REVISION = "202607221200"
+SKILLS_PERMISSION_REVISION = "202607221300"
+SKILLS_PROVENANCE_INDEX_REVISION = "202607221400"
+SKILLS_HEAD_REVISION = SKILLS_PROVENANCE_INDEX_REVISION
 
 
 @dataclass(frozen=True)
@@ -212,6 +218,109 @@ def _insert_app(
             (app_id, tenant_id, user_id, space_id),
         )
     return app_id
+
+
+def _insert_completion_model(connection: PgConnection) -> str:
+    completion_model_id = str(uuid4())
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO completion_models (
+                id, name, nickname, max_input_tokens, max_output_tokens,
+                family, stability, hosting, reasoning, created_at, updated_at
+            )
+            VALUES (
+                %s, %s, 'Skills index test', 4096, 1024,
+                'test', 'stable', 'local', false, now(), now()
+            )
+            """,
+            (
+                completion_model_id,
+                f"skills-index-{completion_model_id[:8]}",
+            ),
+        )
+    return completion_model_id
+
+
+def _insert_app_run(
+    connection: PgConnection,
+    *,
+    tenant_id: str,
+    user_id: str,
+    app_id: str,
+    completion_model_id: str,
+    skill_id: str,
+) -> str:
+    app_run_id = str(uuid4())
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO app_runs (
+                id, input_text, tenant_id, user_id, app_id,
+                completion_model_id, skill_provenance, created_at, updated_at
+            )
+            VALUES (
+                %s, 'seed', %s, %s, %s, %s, %s::jsonb, now(), now()
+            )
+            """,
+            (
+                app_run_id,
+                tenant_id,
+                user_id,
+                app_id,
+                completion_model_id,
+                json.dumps([{"skill_id": skill_id}]),
+            ),
+        )
+    return app_run_id
+
+
+def _wait_for_concurrent_index_validation(
+    connection: PgConnection,
+    migration_thread: Thread,
+    migration_errors: Queue[BaseException],
+) -> tuple[int, str, bool, bool]:
+    deadline = time.monotonic() + 10
+    last_progress: tuple[int, str, bool, bool] | None = None
+
+    while time.monotonic() < deadline:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT progress.pid, progress.phase,
+                       index_state.indisready, index_state.indisvalid
+                FROM pg_stat_progress_create_index AS progress
+                JOIN pg_class AS index_class
+                  ON index_class.oid = progress.index_relid
+                JOIN pg_index AS index_state
+                  ON index_state.indexrelid = index_class.oid
+                WHERE index_class.relname =
+                      'ix_app_runs_skill_provenance_gin'
+                """
+            )
+            row = cursor.fetchone()
+
+        if row is not None:
+            last_progress = (int(row[0]), str(row[1]), bool(row[2]), bool(row[3]))
+            if last_progress[1:] == ("waiting for old snapshots", True, False):
+                return last_progress
+
+        if not migration_thread.is_alive():
+            try:
+                error = migration_errors.get_nowait()
+            except Empty:
+                error = None
+            raise AssertionError(
+                "Concurrent index migration completed before its write-safe "
+                f"validation phase; last progress: {last_progress}"
+            ) from error
+
+        time.sleep(0.05)
+
+    raise AssertionError(
+        "Timed out waiting for the concurrent index validation phase; "
+        f"last progress: {last_progress}"
+    )
 
 
 def _insert_policy(connection: PgConnection, tenant_id: str) -> str:
@@ -481,6 +590,137 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
         cursor.execute("SELECT to_regclass('public.skills')")
         restored_skills_table = cursor.fetchone()
     assert restored_skills_table == ("skills",)
+
+
+def test_provenance_index_build_allows_app_run_writes(
+    pre_skills_database: MigrationDatabase,
+    test_settings,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, SKILLS_PERMISSION_REVISION)
+
+    tenant_id = _insert_tenant(connection, "index")
+    user_id = _insert_user(connection, tenant_id, "index-user")
+    space_id = _insert_space(connection, tenant_id, "index-space")
+    app_id = _insert_app(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=space_id,
+    )
+    completion_model_id = _insert_completion_model(connection)
+    skill_id = str(uuid4())
+    app_run_id = _insert_app_run(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        app_id=app_id,
+        completion_model_id=completion_model_id,
+        skill_id=skill_id,
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('public.ix_app_runs_skill_provenance_gin')")
+        assert cursor.fetchone() == (None,)
+
+    connection_parameters = {
+        "host": test_settings.postgres_host,
+        "port": test_settings.postgres_port,
+        "dbname": test_settings.postgres_db,
+        "user": test_settings.postgres_user,
+        "password": test_settings.postgres_password,
+    }
+    old_snapshot = psycopg2.connect(**connection_parameters)
+    observer = psycopg2.connect(**connection_parameters)
+    writer = psycopg2.connect(**connection_parameters)
+    observer.autocommit = True
+    migration_errors: Queue[BaseException] = Queue()
+    migration_config = _alembic_config(test_settings.sync_database_url)
+
+    def upgrade_index() -> None:
+        try:
+            command.upgrade(migration_config, SKILLS_PROVENANCE_INDEX_REVISION)
+        except BaseException as error:
+            migration_errors.put(error)
+
+    migration_thread = Thread(target=upgrade_index, name="skills-index-migration")
+    migration_started = False
+    try:
+        old_snapshot.set_session(
+            isolation_level="REPEATABLE READ",
+            readonly=False,
+            autocommit=False,
+        )
+        with old_snapshot.cursor() as cursor:
+            cursor.execute(
+                "SELECT output_text FROM app_runs WHERE id = %s",
+                (app_run_id,),
+            )
+            assert cursor.fetchone() == (None,)
+
+        migration_thread.start()
+        migration_started = True
+        _wait_for_concurrent_index_validation(
+            observer,
+            migration_thread,
+            migration_errors,
+        )
+
+        with writer.cursor() as cursor:
+            cursor.execute("SET LOCAL lock_timeout = '1s'")
+            cursor.execute("SET LOCAL statement_timeout = '2s'")
+            cursor.execute(
+                """
+                UPDATE app_runs
+                SET output_text = 'written during index build'
+                WHERE id = %s
+                """,
+                (app_run_id,),
+            )
+            assert cursor.rowcount == 1
+        writer.commit()
+    finally:
+        old_snapshot.rollback()
+        if migration_started:
+            migration_thread.join(timeout=10)
+        old_snapshot.close()
+        observer.close()
+        writer.close()
+
+    assert migration_started
+    assert not migration_thread.is_alive(), "Index migration did not finish"
+    try:
+        migration_error = migration_errors.get_nowait()
+    except Empty:
+        migration_error = None
+    if migration_error is not None:
+        raise migration_error
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT index_state.indisready, index_state.indisvalid
+            FROM pg_index AS index_state
+            WHERE index_state.indexrelid =
+                  'ix_app_runs_skill_provenance_gin'::regclass
+            """
+        )
+        assert cursor.fetchone() == (True, True)
+        cursor.execute("ANALYZE app_runs")
+        cursor.execute("SET enable_seqscan = off")
+        cursor.execute(
+            """
+            EXPLAIN (COSTS OFF)
+            SELECT 1
+            FROM app_runs
+            WHERE skill_provenance @> %s::jsonb
+            """,
+            (json.dumps([{"skill_id": skill_id}]),),
+        )
+        query_plan = "\n".join(row[0] for row in cursor.fetchall())
+
+    assert "ix_app_runs_skill_provenance_gin" in query_plan
 
 
 def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(

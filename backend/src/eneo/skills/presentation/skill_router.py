@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -9,10 +9,16 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_session_auth
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
-from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
+from eneo.main.models import CursorPaginatedResponse
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.skills.domain.skill import Skill
+from eneo.skills.domain.skill import (
+    DEFAULT_SKILL_CATALOG_PAGE_LIMIT,
+    MAX_SKILL_CATALOG_PAGE_LIMIT,
+    MAX_SKILL_CATALOG_QUERY_LENGTH,
+    MAX_SKILL_SLUG_LENGTH,
+    Skill,
+)
 from eneo.skills.presentation.skill_models import (
     SkillActiveUpdateRequest,
     SkillBindingSummary,
@@ -71,15 +77,42 @@ async def _audit_skill_created(
 
 @router.get(
     "/{space_id}/skills/",
-    response_model=PaginatedResponse[SkillSparse],
+    response_model=CursorPaginatedResponse[SkillSparse],
     responses=responses.get_responses([403, 404]),
 )
 async def list_skills(
-    space_id: UUID, container: _ContainerWithUser
-) -> PaginatedResponse[SkillSparse]:
-    skills = await container.skill_service().list_skills(space_id=space_id)
+    space_id: UUID,
+    container: _ContainerWithUser,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=MAX_SKILL_CATALOG_PAGE_LIMIT),
+    ] = DEFAULT_SKILL_CATALOG_PAGE_LIMIT,
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=MAX_SKILL_SLUG_LENGTH,
+            pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        ),
+    ] = None,
+    q: Annotated[
+        str | None,
+        Query(max_length=MAX_SKILL_CATALOG_QUERY_LENGTH),
+    ] = None,
+) -> CursorPaginatedResponse[SkillSparse]:
+    page = await container.skill_service().list_skills(
+        space_id=space_id,
+        limit=limit,
+        cursor=cursor,
+        query=q,
+    )
     assembler = container.skill_assembler()
-    return PaginatedResponse(items=[assembler.to_sparse(skill) for skill in skills])
+    return CursorPaginatedResponse(
+        items=[assembler.catalog_entry_to_sparse(entry) for entry in page.items],
+        limit=page.limit,
+        next_cursor=page.next_cursor,
+        previous_cursor=None,
+        total_count=page.total_count,
+    )
 
 
 @router.post(
@@ -183,13 +216,20 @@ async def get_skill_revision(
         "Create the next immutable Skill revision; identical current content is a "
         "no-op."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses={
+        200: {
+            "model": SkillRevisionPublic,
+            "description": "The submitted content already matches the current revision.",
+        },
+        **responses.get_responses([400, 403, 404]),
+    },
 )
 async def create_skill_revision(
     space_id: UUID,
     skill_id: UUID,
     payload: SkillRevisionCreateRequest,
     container: _ContainerWithUser,
+    response: Response,
 ) -> SkillRevisionPublic:
     skill = await container.skill_service().get_skill(skill_id=skill_id)
     if skill.space_id != space_id:
@@ -201,7 +241,9 @@ async def create_skill_revision(
         instructions=payload.instructions,
     )
     revision = change.revision
-    if change.created:
+    if not change.created:
+        response.status_code = 200
+    else:
         user = container.user()
         await container.audit_service().log_async(
             tenant_id=user.tenant_id,

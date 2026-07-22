@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ResourcePermission } from "@eneo/eneo-js";
+  import type { ResourcePermission, SkillSparse } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
@@ -9,19 +9,31 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { Plus, Search, Trash2 } from "lucide-svelte";
+  import { LoaderCircle, Plus, Search, Trash2 } from "lucide-svelte";
+  import { onDestroy, untrack } from "svelte";
 
   const CREATE_SKILL_PERMISSION: ResourcePermission = "create";
   const DELETE_SKILL_PERMISSION: ResourcePermission = "delete";
 
   let { data } = $props();
 
-  let query = $state("");
-  let deleteTarget = $state<(typeof data.skills)[number] | null>(null);
+  let deleteTarget = $state<SkillSparse | null>(null);
   let deleteError = $state<string | null>(null);
   let isDeleting = $state(false);
+  let loadedInitialPage = untrack(() => data.skills);
+  const skillCatalog = new SkillCatalogQuery(loadedInitialPage, (params) =>
+    data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })
+  );
+  onDestroy(() => skillCatalog.dispose());
+
+  $effect(() => {
+    if (data.skills === loadedInitialPage) return;
+    loadedInitialPage = data.skills;
+    skillCatalog.reset(data.skills);
+  });
 
   const spaceRouteId = $derived(
     data.currentSpace.personal
@@ -32,15 +44,6 @@
   );
   const canCreate = $derived(data.currentSpace.skill_permissions.includes(CREATE_SKILL_PERMISSION));
   const canDelete = $derived(data.currentSpace.skill_permissions.includes(DELETE_SKILL_PERMISSION));
-  const filteredSkills = $derived.by(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    if (!normalizedQuery) return data.skills;
-    return data.skills.filter((skill) =>
-      `${skill.display_name} ${skill.description} ${skill.slug}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery)
-    );
-  });
 
   function formatUpdatedAt(value: string): string {
     return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
@@ -93,7 +96,7 @@
         {m.skills_library_intro()}
       </p>
 
-      {#if data.skills.length === 0}
+      {#if skillCatalog.items.length === 0 && !skillCatalog.query && !skillCatalog.loading && !skillCatalog.error}
         <div
           class="border-border bg-muted/25 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-16"
         >
@@ -116,14 +119,30 @@
             <Search aria-hidden="true" />
           </InputGroup.Addon>
           <InputGroup.Input
-            bind:value={query}
+            value={skillCatalog.query}
             type="search"
             placeholder={m.skills_library_search_placeholder()}
             aria-label={m.skills_library_search_placeholder()}
+            oninput={(event) => skillCatalog.setQuery(event.currentTarget.value)}
           />
         </InputGroup.Root>
 
-        {#if filteredSkills.length === 0}
+        {#if skillCatalog.error}
+          <div class="flex flex-col items-center gap-3 py-12 text-center">
+            <p class="text-destructive text-sm" role="alert">{skillCatalog.error}</p>
+            <Button variant="outline" size="sm" onclick={() => skillCatalog.retry()}>
+              {m.retry()}
+            </Button>
+          </div>
+        {:else if skillCatalog.loading && skillCatalog.items.length === 0}
+          <p
+            class="text-muted-foreground flex items-center justify-center gap-2 py-12 text-sm"
+            role="status"
+          >
+            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+            {m.loading()}
+          </p>
+        {:else if skillCatalog.items.length === 0}
           <p class="text-muted-foreground py-12 text-center text-sm">
             {m.skills_library_no_results()}
           </p>
@@ -143,7 +162,7 @@
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {#each filteredSkills as skill (skill.id)}
+                {#each skillCatalog.items as skill (skill.id)}
                   <Table.Row>
                     <Table.Cell class="font-medium">
                       <a
@@ -188,6 +207,22 @@
               </Table.Body>
             </Table.Root>
           </Card.Root>
+          {#if skillCatalog.loading}
+            <p class="text-muted-foreground mt-3 text-center text-sm" role="status">
+              {m.loading()}
+            </p>
+          {/if}
+          {#if skillCatalog.hasMore && !skillCatalog.loading}
+            <div class="mt-4 flex justify-center">
+              <Button
+                variant="outline"
+                disabled={skillCatalog.loadingMore}
+                onclick={() => skillCatalog.loadMore()}
+              >
+                {skillCatalog.loadingMore ? m.loading() : m.load_more()}
+              </Button>
+            </div>
+          {/if}
         {/if}
       {/if}
     </div>

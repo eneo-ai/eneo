@@ -42,7 +42,9 @@ function makeSummary(skill: SkillSparse, revision: number): SkillBindingSummary 
     description: skill.description,
     content_digest: `digest-${skill.id}-${revision}`,
     position: 0,
-    is_active: skill.is_active
+    is_active: skill.is_active,
+    current_revision_id: skill.current_revision_id,
+    current_revision_number: skill.current_revision_number
   };
 }
 
@@ -106,7 +108,23 @@ describe("Skill binding draft state", () => {
     expect(row.reference).toEqual(pinnedReference);
     expect(row.pinnedRevision).toBe(1);
     expect(row.hasNewerRevision).toBe(true);
-    expect(row.currentSkill?.current_revision_number).toBe(3);
+    expect(row.currentRevisionNumber).toBe(3);
+  });
+
+  test("keeps upgrade metadata for a bound Skill outside the current catalog page", () => {
+    const current = makeSkill("outside-page", 3);
+    const pinnedSummary = makeSummary(current, 1);
+    const pinnedReference = {
+      skill_id: current.id,
+      skill_revision_id: pinnedSummary.skill_revision_id
+    };
+
+    const [row] = getSkillBindingRows([pinnedReference], [pinnedSummary], []);
+
+    expect(row.displayName).toBe(current.display_name);
+    expect(row.currentRevisionId).toBe(current.current_revision_id);
+    expect(row.currentRevisionNumber).toBe(3);
+    expect(row.hasNewerRevision).toBe(true);
   });
 
   test("upgrades only the selected row to the latest active revision", () => {

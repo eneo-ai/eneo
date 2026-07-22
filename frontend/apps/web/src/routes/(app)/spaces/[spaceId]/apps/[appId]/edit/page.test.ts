@@ -1,5 +1,6 @@
 import type { ResourcePermission } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
+import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 import { load } from "./+page";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
@@ -8,6 +9,7 @@ describe("App edit loader", () => {
   test("loads Skill bindings for an App reader", async () => {
     const bindings = [{ skill_id: "skill-1" }];
     const listAppBindings = vi.fn().mockResolvedValue(bindings);
+    const list = vi.fn().mockResolvedValue(emptySkillCatalogPage());
     const event = {
       depends: vi.fn(),
       params: { appId: "app-1" },
@@ -19,7 +21,7 @@ describe("App edit loader", () => {
         eneo: {
           apps: { get: vi.fn().mockResolvedValue({ id: "app-1" }) },
           skills: {
-            list: vi.fn().mockResolvedValue([]),
+            list,
             listAppBindings
           }
         }
@@ -33,5 +35,9 @@ describe("App edit loader", () => {
       appId: "app-1"
     });
     expect(result.skillBindings).toEqual(bindings);
+    expect(list).toHaveBeenCalledWith({
+      spaceId: "space-1",
+      limit: SKILL_CATALOG_PAGE_SIZE
+    });
   });
 });
