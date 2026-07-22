@@ -51,7 +51,8 @@ _SENSITIVE_SUFFIXES = (
     "_signed_url",
 )
 _AUTHORIZATION_CREDENTIAL_PATTERN = re.compile(
-    r"(?i)\b(?P<scheme>basic|bearer|digest|token)\s+[^\s,;]+"
+    r"(?i)\b(?:(?P<digest>digest)\s+[^\r\n]+|"
+    r"(?P<single>basic|bearer)\s+[a-z0-9._~+/=-]+)"
 )
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     r"""
@@ -248,7 +249,7 @@ def _redact_sensitive_assignment(match: re.Match[str]) -> str:
 
 
 def _redact_authorization_credential(match: re.Match[str]) -> str:
-    return f"{match.group('scheme')} {_REDACTED_VALUE}"
+    return f"{match.group('digest') or match.group('single')} {_REDACTED_VALUE}"
 
 
 def redact_string(value: str, *, key: str | None) -> str:

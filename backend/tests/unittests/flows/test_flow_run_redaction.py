@@ -89,9 +89,14 @@ def test_redact_string_redacts_url_secrets_embedded_in_prose() -> None:
 
 
 def test_redact_string_redacts_standalone_authorization_credentials() -> None:
-    for scheme in ("Basic", "Bearer", "Digest", "Token"):
+    cases = (
+        ("Basic dXNlcjpwYXNz", "Basic"),
+        ("Bearer bearer-token-value", "Bearer"),
+        ('Digest username="operator", response="digest-secret"', "Digest"),
+    )
+    for credential, scheme in cases:
         redacted = redact_string(
-            f"Audit delivery failed with {scheme} credential-value",
+            f"Audit delivery failed with {credential}",
             key="message",
         )
 
