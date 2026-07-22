@@ -190,7 +190,7 @@ Eneo uses three distinct IDs. They are not interchangeable.
 | ID | Where it lives | Purpose |
 |---|---|---|
 | `trace_id` | Top-level log field, `X-Trace-Id` response header, OTel span context | Primary correlation ID. Links every log line and span produced by a single request. |
-| `error_id` | Response body for unhandled exceptions, log attribute on the corresponding error line | Stable 8-char identifier given to end users so support can locate the failure. |
+| `error_id` | Optional `GeneralError` response field for explicit or unhandled internal errors; log attribute on the corresponding error line | Stable 8-char identifier given to end users so support can locate the failure. |
 | `correlation_id` | Top-level log field (aliased to `trace_id`), `X-Correlation-ID` response header | Legacy alias for `trace_id` kept during the migration period. |
 
 ### Migration path for `correlation_id`
@@ -205,16 +205,19 @@ Removal of `correlation_id` and `X-Correlation-ID` is deferred until support flo
 
 ### `error_id`
 
-Unhandled exceptions produce a response body of the form:
+Explicit and unhandled internal errors use the platform `GeneralError` envelope:
 
 ```json
 {
-  "error_id": "a1b2c3d4",
-  "message": "An unexpected error occurred. Please try again or contact support with the error_id."
+  "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
+  "eneo_error_code": 9024,
+  "code": "internal_error",
+  "request_id": "req-123",
+  "error_id": "a1b2c3d4"
 }
 ```
 
-The same `error_id` appears in the log line for the originating exception. `error_id` is short (8 chars) and stable across the response and the logs so it can be quoted by an end user. Unlike `trace_id`, it does not exist on successful responses.
+The same `error_id` appears in the log line for the originating exception. `error_id` is short (8 chars) and stable across the response and the logs so it can be quoted by an end user. `request_id` is included when supplied by the caller. Unlike `trace_id`, `error_id` does not exist on successful responses.
 
 ---
 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +9,7 @@ from eneo.main.exceptions import (
     ErrorCodes,
     FileTooLargeException,
 )
+from eneo.main.models import GeneralError
 from eneo.server.exception_handlers import (
     add_exception_handlers,
     is_active_display_name_violation,
@@ -81,7 +82,9 @@ def test_active_nickname_violation_maps_to_409():
 
     response = TestClient(app).get("/collide")
     assert response.status_code == 409
-    assert response.json()["eneo_error_code"] == ErrorCodes.NAME_COLLISION
+    error = GeneralError.model_validate(response.json())
+    assert error.eneo_error_code == ErrorCodes.NAME_COLLISION
+    assert error.code == "name_collision"
 
 
 def test_file_too_large_exception_includes_structured_details():
@@ -181,10 +184,11 @@ def test_request_validation_error_returns_sanitized_general_error():
 
     assert response.status_code == 422
     body = response.json()
-    assert body["message"] == "Request validation failed."
-    assert body["eneo_error_code"] == ErrorCodes.VALIDATION_ERROR
-    assert body["code"] == "request_validation_error"
-    assert body["request_id"] == "request-validation-id"
+    error = GeneralError.model_validate(body)
+    assert error.message == "Request validation failed."
+    assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert error.request_id == "request-validation-id"
     assert "detail" not in body
 
     errors = body["details"]["errors"]
@@ -214,3 +218,57 @@ def test_main_app_request_validation_error_uses_general_error_for_non_flow_route
     assert body["request_id"] == "crawler-validation-id"
     assert body["details"]["errors"][0]["location"] == ["query", "include_all"]
     assert "not-bool" not in response.text
+
+
+async def _allow_test_origin(_origin: str) -> bool:
+    return True
+
+
+def _assert_internal_error_contract(response, *, request_id: str) -> None:
+    assert response.status_code == 500
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "internal_error"
+    assert error.eneo_error_code is ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.request_id == request_id
+    assert error.error_id is not None
+    assert len(error.error_id) == 8
+    assert response.headers["x-trace-id"]
+    assert response.headers["x-correlation-id"] == response.headers["x-trace-id"]
+    exposed = response.headers["access-control-expose-headers"].lower()
+    assert "x-trace-id" in exposed
+    assert "x-correlation-id" in exposed
+
+
+def test_explicit_http_500_uses_platform_error_envelope(monkeypatch) -> None:
+    monkeypatch.setattr("eneo.server.main.get_origin", _allow_test_origin)
+    app = get_application()
+    assert app.exception_handlers[500] is app.exception_handlers[Exception]
+
+    @app.get("/_test_explicit_500")
+    async def explicit_500() -> None:
+        raise HTTPException(status_code=500, detail="must not leak")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/_test_explicit_500",
+        headers={"Origin": "http://example.com", "X-Request-ID": "explicit-500"},
+    )
+
+    _assert_internal_error_contract(response, request_id="explicit-500")
+    assert "must not leak" not in response.text
+
+
+def test_unhandled_exception_uses_platform_error_envelope(monkeypatch) -> None:
+    monkeypatch.setattr("eneo.server.main.get_origin", _allow_test_origin)
+    app = get_application()
+
+    @app.get("/_test_unhandled_exception")
+    async def unhandled_exception() -> None:
+        raise RuntimeError("must not leak")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/_test_unhandled_exception",
+        headers={"Origin": "http://example.com", "X-Request-ID": "unhandled-500"},
+    )
+
+    _assert_internal_error_contract(response, request_id="unhandled-500")
+    assert "must not leak" not in response.text

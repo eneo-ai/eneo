@@ -20126,7 +20126,7 @@ export interface components {
        * Code
        * @description Machine-readable error code for client and LLM tool control flow. Examples on each endpoint list representative values.
        */
-      code?: string | null;
+      code: string;
       /**
        * Context
        * @description Small structured context that explains why the request failed, such as the authorization layer or conflicting field. Values are safe for API consumers to log.
@@ -20139,6 +20139,11 @@ export interface components {
        * @description Correlation id for support and server logs. Echoes `x-correlation-id` or `x-request-id` when supplied.
        */
       request_id?: string | null;
+      /**
+       * Error Id
+       * @description Short support identifier for an unexpected server error. Quote this value when asking support to locate the originating exception log.
+       */
+      error_id?: string | null;
       /**
        * Details
        * @description Optional structured diagnostics for errors that need extra machine-readable data, such as token limits or validation details.
@@ -56677,12 +56682,19 @@ export interface operations {
           "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunAuditOutboxDeadLetterResponse_"];
         };
       };
-      /** @description Unauthorized */
+      /** @description The configured super API key is required. */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Authentication required.",
+           *       "eneo_error_code": 9005,
+           *       "code": "authentication_error"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -56721,30 +56733,51 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunAuditOutboxRedriveResponse"];
         };
       };
-      /** @description Unauthorized */
+      /** @description The configured super API key is required. */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Authentication required.",
+           *       "eneo_error_code": 9005,
+           *       "code": "authentication_error"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
+      /** @description The requested audit outbox row does not exist. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Audit outbox row not found.",
+           *       "eneo_error_code": 9000,
+           *       "code": "flow_audit_outbox_delivery_not_found"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
+      /** @description The row is not dead-lettered or its dead-letter generation token is stale. */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Audit outbox row is not eligible for redrive.",
+           *       "eneo_error_code": 9041,
+           *       "code": "flow_audit_outbox_redrive_conflict"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

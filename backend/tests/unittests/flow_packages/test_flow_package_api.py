@@ -102,6 +102,7 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     UnauthorizedException,
 )
+from eneo.main.models import GeneralError
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.spaces.space import Space
 
@@ -651,12 +652,11 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
 
     assert isinstance(response, flow_package_router.JSONResponse)
     payload = json.loads(response.body)
-    assert (
-        payload["code"] == FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value
-    )
-    assert payload["message"] == "Selected model is unavailable."
-    assert payload["context"] == {"slot_ref": "model.structured"}
-    assert captured_failure[0].code == payload["code"]
+    error = GeneralError.model_validate(payload)
+    assert error.code == FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value
+    assert error.message == "Selected model is unavailable."
+    assert error.context == {"slot_ref": "model.structured"}
+    assert captured_failure[0].code == error.code
     assert captured_selection[0].selected_bindings == [canonical_binding]
     assert fake_session.nested_transactions == ["rolled_back"]
 

@@ -31,7 +31,9 @@ from eneo.flows.runtime.flow_runtime_health import (
     load_flow_runtime_health_snapshot,
 )
 from eneo.main.config import get_settings
+from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
 from eneo.scim.app import scim_app
 from eneo.server import api_documentation
@@ -406,6 +408,9 @@ def get_application():
         detail = exc.detail
         headers = exc.headers or None
 
+        if exc.status_code == 500:
+            return await _internal_server_error_response(request, exc)
+
         if exc.status_code == 422:
             return JSONResponse(
                 status_code=exc.status_code,
@@ -506,13 +511,11 @@ def get_application():
     app.openapi = custom_openapi
 
     @app.exception_handler(500)
-    async def custom_http_500_exception_handler(
+    @app.exception_handler(Exception)
+    async def _internal_server_error_response(
         request: Request, exc: Exception
     ) -> JSONResponse:
-        # Generate unique error ID for tracing
         error_id = str(uuid.uuid4())[:8]
-
-        # Log the full exception with traceback
         logger.error(
             f"Internal Server Error [error_id={error_id}]",
             extra={
@@ -524,118 +527,26 @@ def get_application():
                 "traceback": traceback.format_exc(),
             },
         )
-
-        # Build error response
-        settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
-
-        error_content: dict[str, Any] = {
-            "error": "Internal server error",
-            "error_id": error_id,
-            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
-        }
-
-        # In development mode, include more details
-        if is_dev:
-            error_content["detail"] = {
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "path": request.url.path,
-                "method": request.method,
-            }
-
-        # CORS Headers are not set on an internal server error. This is confusing, and hard to debug.
-        # Solving this like this response:
-        #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
-        response = JSONResponse(status_code=500, content=error_content)
-
-        # Attach trace_id so the client can correlate the error with backend logs
-        trace_id = current_trace_id()
-        if trace_id:
-            response.headers["X-Trace-Id"] = trace_id
-            response.headers["X-Correlation-ID"] = trace_id
-
-        origin = request.headers.get("origin")
-
-        if origin:
-            # Have the middleware do the heavy lifting for us to parse
-            # all the config, then update our response headers
-            cors = CORSMiddleware(
-                app=app,
-                allow_origins=[],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-                expose_headers=list(_CORS_EXPOSE_HEADERS),
-                callback=get_origin,
-            )
-
-            # Logic directly from Starlette's CORSMiddleware:
-            # https://github.com/encode/starlette/blob/master/starlette/middleware/cors.py#L152
-
-            response.headers.update(cors.simple_headers)
-
-            if cors.allow_all_origins and cors.allow_credentials:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-            elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin
-            ):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers.add_vary_header("Origin")
-
-        return response
-
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        """Catch-all handler for unhandled exceptions"""
-        # Generate unique error ID for tracing
-        error_id = str(uuid.uuid4())[:8]
-
-        # Log the full exception with traceback
-        logger.error(
-            f"Unhandled Exception [error_id={error_id}]",
-            extra={
-                "error_id": error_id,
-                "path": request.url.path,
-                "method": request.method,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "traceback": traceback.format_exc(),
-            },
+        response = JSONResponse(
+            status_code=500,
+            content=GeneralError(
+                message=(
+                    "An unexpected error occurred. Please try again or contact support "
+                    "with the error_id."
+                ),
+                eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+                code="internal_error",
+                request_id=extract_request_id(request),
+                error_id=error_id,
+            ).model_dump(mode="json", exclude_none=True),
         )
 
-        # Build error response
-        settings = get_settings()
-        is_dev = settings.environment in ("development", "local", "dev")
-
-        error_content: dict[str, Any] = {
-            "error": "Internal server error",
-            "error_id": error_id,
-            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
-        }
-
-        # In development mode, include more details
-        if is_dev:
-            error_content["detail"] = {
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc),
-                "path": request.url.path,
-                "method": request.method,
-            }
-
-        response = JSONResponse(status_code=500, content=error_content)
-
-        # Attach trace_id so the client can correlate the error with backend logs
         trace_id = current_trace_id()
         if trace_id:
             response.headers["X-Trace-Id"] = trace_id
             response.headers["X-Correlation-ID"] = trace_id
 
         origin = request.headers.get("origin")
-
         if origin:
             cors = CORSMiddleware(
                 app=app,
@@ -1084,8 +995,7 @@ def get_application():
 
     _registered_endpoints = (
         http_exception_handler,
-        custom_http_500_exception_handler,
-        unhandled_exception_handler,
+        _internal_server_error_response,
         get_healthz,
         flow_runtime_health,
         crawler_health,

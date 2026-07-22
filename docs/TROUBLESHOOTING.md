@@ -1090,7 +1090,7 @@ When reporting issues, include:
 5. **Trace ID (when reporting an API error)**:
    - From the browser: read the `X-Trace-Id` response header for the failing request (DevTools → Network → Response Headers). On error pages it is also available as `$page.error.traceId`.
    - From the backend: every log line emitted during the request shares the same `trace_id` top-level field; filter your log aggregator by `trace_id="<value>"`.
-   - For unhandled 500 errors, the response body also contains a short `error_id` that appears on the originating exception log line. Quoting either ID lets support locate the exact failure.
+   - For explicit or unhandled 500 errors, the `GeneralError` response body uses `code: "internal_error"` and contains a short `error_id` that appears on the originating exception log line. Quoting the trace ID, request ID, or error ID lets support locate the exact failure.
    - For the full ID contract and log schema, see [OBSERVABILITY.md](./OBSERVABILITY.md).
 
 ---

@@ -173,6 +173,12 @@ def add_exception_handlers(app: FastAPI):
                 message = _default_message_for_status(status_code)
             request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
+            raw_code = getattr(exc, "code", None)
+            public_code = (
+                raw_code
+                if isinstance(raw_code, str) and raw_code.strip()
+                else error_code.name.lower()
+            )
             raw_details = getattr(exc, "details", None)
             details: dict[str, object] | None
             if isinstance(raw_details, dict) and raw_details:
@@ -198,7 +204,7 @@ def add_exception_handlers(app: FastAPI):
                 content=GeneralError(
                     message=message,
                     eneo_error_code=error_code,
-                    code=getattr(exc, "code", None),
+                    code=public_code,
                     context=context,
                     request_id=request_id,
                     details=details,
@@ -253,6 +259,7 @@ def add_exception_handlers(app: FastAPI):
             content=GeneralError(
                 message="A model with this display name already exists.",
                 eneo_error_code=ErrorCodes.NAME_COLLISION,
+                code="name_collision",
                 request_id=request_id,
             ).model_dump(exclude_none=True),
         )

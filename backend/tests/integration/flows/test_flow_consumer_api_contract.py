@@ -1184,6 +1184,8 @@ async def test_flow_run_create_concurrency_limit_preserves_creation_side_effects
 
     assert response.status_code == 429, response.text
     assert response.headers["Retry-After"] == "60"
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "flow_run_concurrency_limit_reached"
     assert response.json() == {
         "message": "Concurrent flow run limit reached for this tenant.",
         "eneo_error_code": 9007,

@@ -21,15 +21,16 @@ Most API errors return:
 Fields:
 - `message`: human-readable explanation.
 - `eneo_error_code`: legacy numeric code used by existing SDKs.
-- `code` (optional): stable string code for programmatic handling.
+- `code`: required stable string code for programmatic handling.
 - `context` (optional): safe, non-sensitive metadata.
 - `request_id` (optional): request correlation ID for support/debugging.
+- `error_id` (optional): short support identifier present on unexpected 500 errors.
 
 ## Trace ID and error ID
 
 Independent of the response body shape, every HTTP response (including 4xx and 5xx) carries the OpenTelemetry trace ID in the `X-Trace-Id` response header (32 hex chars). The legacy `X-Correlation-ID` header is emitted in parallel as a same-value alias during the migration period. Both headers are exposed via CORS.
 
-For unhandled 500 errors, the response body additionally contains a short stable `error_id` (8 chars) that appears on the originating exception log line. `error_id` is the support-facing identifier safe to share with end users; `trace_id` is the operator-facing identifier used to correlate every log entry and span emitted during the request.
+For explicit and unhandled 500 errors, the same error envelope uses `code: "internal_error"` and additionally contains a short stable `error_id` (8 chars) that appears on the originating exception log line. `error_id` is the support-facing identifier safe to share with end users; `request_id` preserves a caller-supplied request identity, and `trace_id` is the operator-facing identifier used to correlate every log entry and span emitted during the request.
 
 See [OBSERVABILITY.md](../../../docs/OBSERVABILITY.md) for the full ID contract, log schema, and trace flow.
 

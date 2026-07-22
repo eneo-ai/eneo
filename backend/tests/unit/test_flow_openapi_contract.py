@@ -3529,6 +3529,9 @@ def test_openapi_general_error_schema_guides_client_control_flow(
     )
     properties = schema.get("properties", {})
 
+    assert "code" in schema.get("required", [])
+    assert properties["code"].get("type") == "string"
+    assert not _schema_allows_null(properties["code"])
     assert "branch on `code`" in properties["message"]["description"]
     assert "LLM tool control flow" in properties["code"]["description"]
     assert "Correlation id" in properties["request_id"]["description"]

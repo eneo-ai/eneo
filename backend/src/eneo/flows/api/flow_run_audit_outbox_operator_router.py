@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints
 
+from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxGenerationConflictError,
     FlowRunAuditOutboxNotFoundError,
@@ -12,13 +13,12 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ConflictException, NotFoundException
+from eneo.main.exceptions import ConflictException, ErrorCodes, NotFoundException
 from eneo.main.models import OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
 )
-from eneo.server.protocol import responses
 
 router = APIRouter()
 
@@ -84,7 +84,14 @@ class FlowRunAuditOutboxRedriveResponse(BaseModel):
         "of dead-lettered Flow lifecycle audit deliveries. Use each row's "
         "dead_lettered_at as the generation token for redrive."
     ),
-    responses=responses.get_responses([]),
+    responses={
+        401: error_response(
+            description="The configured super API key is required.",
+            message="Authentication required.",
+            eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+            code="authentication_error",
+        )
+    },
 )
 async def list_flow_run_audit_outbox_dead_letters(
     container: Annotated[Container, Depends(get_container())],
@@ -134,7 +141,28 @@ async def list_flow_run_audit_outbox_dead_letters(
         "the normal delivery worker performs delivery. Poll Flow runtime health and "
         "list dead letters again to verify recovery."
     ),
-    responses=responses.get_responses([404, 409]),
+    responses={
+        401: error_response(
+            description="The configured super API key is required.",
+            message="Authentication required.",
+            eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+            code="authentication_error",
+        ),
+        404: error_response(
+            description="The requested audit outbox row does not exist.",
+            message="Audit outbox row not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code=FlowApiErrorCode.AUDIT_OUTBOX_DELIVERY_NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The row is not dead-lettered or its dead-letter generation token is stale."
+            ),
+            message="Audit outbox row is not eligible for redrive.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.AUDIT_OUTBOX_REDRIVE_CONFLICT,
+        ),
+    },
 )
 async def redrive_flow_run_audit_outbox_delivery(
     outbox_id: UUID,

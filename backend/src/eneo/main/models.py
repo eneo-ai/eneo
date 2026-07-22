@@ -169,8 +169,8 @@ class GeneralError(BaseModel):
             "Prefer the string `code` field for new control flow."
         )
     )
-    code: str | None = Field(
-        default=None,
+    code: str = Field(
+        min_length=1,
         description=(
             "Machine-readable error code for client and LLM tool control flow. "
             "Examples on each endpoint list representative values."
@@ -189,6 +189,13 @@ class GeneralError(BaseModel):
         description=(
             "Correlation id for support and server logs. Echoes `x-correlation-id` "
             "or `x-request-id` when supplied."
+        ),
+    )
+    error_id: str | None = Field(
+        default=None,
+        description=(
+            "Short support identifier for an unexpected server error. Quote this value "
+            "when asking support to locate the originating exception log."
         ),
     )
     details: dict[str, Any] | None = Field(
