@@ -9,11 +9,21 @@ Tests cover:
 - P6: Tool ownership validation in space updates
 """
 
+import asyncio
+import json
+import socket
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+import uvicorn
+from fastapi import FastAPI, Request, Response
+from mcp import types as mcp_types
 from pydantic import ValidationError
+from starlette.responses import JSONResponse, StreamingResponse
 
 from eneo.main.exceptions import (
     BadRequestException,
@@ -21,6 +31,15 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
+    MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
+    MCP_TOOL_CATALOG_HARD_MAX_BYTES,
+    MCP_TOOL_CATALOG_HARD_MAX_COUNT,
+    MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    MCPServer,
+)
+from eneo.mcp_servers.infrastructure.client import mcp_client as mcp_client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -31,6 +50,39 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerUpdate,
 )
+
+
+@asynccontextmanager
+async def _serve_test_app(app: FastAPI) -> AsyncIterator[str]:
+    """Run an ASGI app over a real local TCP socket for transport tests."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(128)
+    sock.setblocking(False)
+    host, port = sock.getsockname()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            log_config=None,
+            lifespan="off",
+            access_log=False,
+            ws="none",
+        )
+    )
+    task = asyncio.create_task(server.serve(sockets=[sock]))
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise RuntimeError("test MCP server did not start")
+        yield f"http://{host}:{port}/mcp"
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, timeout=5)
+
 
 # =============================================================================
 # P1: list_tools() error propagation
@@ -75,6 +127,554 @@ class TestMCPClientListToolsErrorPropagation:
             await client.list_tools()
 
         assert "Not connected" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_tools_rejects_catalog_over_configured_limit(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = 2
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name=f"tool_{index}",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                )
+                for index in range(3)
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="exceeds the configured maximum of 2"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_list_tools_rejects_oversized_definition(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = 128
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="oversized",
+                    title=None,
+                    description="x" * 128,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                )
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="definition exceeds"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_streaming_tools_list_is_bounded_before_sdk_decoding(self):
+        app = FastAPI()
+        stream_cancelled = asyncio.Event()
+        chunks_sent = 0
+        total_chunks = 512
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            nonlocal chunks_sent
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "bounded-test", "version": "1"},
+                        },
+                    },
+                    headers={"Mcp-Session-Id": "bounded-session"},
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                prefix = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"tools":[{"name":"huge","description":"'
+                )
+
+                async def oversized_response() -> AsyncIterator[bytes]:
+                    nonlocal chunks_sent
+                    try:
+                        yield prefix
+                        for _ in range(total_chunks):
+                            chunks_sent += 1
+                            yield b"x" * 4096
+                            await asyncio.sleep(0.001)
+                        yield b'","inputSchema":{"type":"object"}}]}}'
+                    finally:
+                        stream_cancelled.set()
+
+                return StreamingResponse(
+                    oversized_response(), media_type="application/json"
+                )
+            return Response(status_code=400)
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="bounded-test",
+                http_url=url,
+                tool_catalog_max_count=10,
+                tool_catalog_max_bytes=1024 * 1024,
+                tool_definition_max_bytes=1024 * 1024,
+            )
+            async with MCPClient(server) as client:
+                with pytest.raises(MCPClientError, match="wire response exceeds"):
+                    await client.list_tools()
+
+        await asyncio.wait_for(stream_cancelled.wait(), timeout=1)
+        assert chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["initialize", "ping"])
+    async def test_control_responses_are_bounded_before_sdk_decoding(
+        self, monkeypatch: pytest.MonkeyPatch, method: str
+    ) -> None:
+        app = FastAPI()
+        chunks_sent = 0
+        total_chunks = 64
+        stream_closed = asyncio.Event()
+
+        monkeypatch.setattr(
+            mcp_client_module,
+            "MCP_INITIALIZE_RESPONSE_MAX_BYTES",
+            1024,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_client_module,
+            "MCP_PING_RESPONSE_MAX_BYTES",
+            1024,
+            raising=False,
+        )
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            nonlocal chunks_sent
+            payload = await request.json()
+            request_method = payload.get("method")
+            if request_method == "notifications/initialized":
+                return Response(status_code=202)
+            if request_method != method:
+                return Response(status_code=400)
+
+            if method == "initialize":
+                prefix = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"protocolVersion":"2025-06-18",'
+                    b'"capabilities":{"tools":{}},"serverInfo":'
+                    b'{"name":"control-test","version":"1"},"instructions":"'
+                )
+                suffix = b'"}}'
+            else:
+                prefix = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"padding":"'
+                )
+                suffix = b'"}}'
+
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal chunks_sent
+                try:
+                    yield prefix
+                    for _ in range(total_chunks):
+                        chunks_sent += 1
+                        yield b"x" * 256
+                        await asyncio.sleep(0.001)
+                    yield suffix
+                finally:
+                    stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(),
+                media_type="application/json",
+                headers={"Mcp-Session-Id": "control-session"},
+            )
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="control-test",
+                http_url=url,
+            )
+            client = MCPClient(
+                server,
+                resume_mcp_session_id="control-session" if method == "ping" else None,
+            )
+            with pytest.raises(MCPClientError, match="wire response exceeds"):
+                async with client:
+                    pass
+
+        await asyncio.wait_for(stream_closed.wait(), timeout=1)
+        assert chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    async def test_failed_catalog_cleanup_does_not_buffer_delete_body(self) -> None:
+        app = FastAPI()
+        delete_stream_closed = asyncio.Event()
+        delete_chunks_sent = 0
+        total_chunks = 512
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "cleanup-test", "version": "1"},
+                        },
+                    },
+                    headers={"Mcp-Session-Id": "cleanup-session"},
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                return Response(status_code=500)
+            return Response(status_code=400)
+
+        @app.delete("/mcp")
+        async def delete_session() -> StreamingResponse:
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal delete_chunks_sent
+                try:
+                    for _ in range(total_chunks):
+                        delete_chunks_sent += 1
+                        yield b"x" * 4096
+                        await asyncio.sleep(0.001)
+                finally:
+                    delete_stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(), media_type="application/octet-stream"
+            )
+
+        async with _serve_test_app(app) as url:
+            client = MCPClient(
+                MCPServer(tenant_id=uuid4(), name="cleanup-test", http_url=url)
+            )
+            async with client:
+                assigned_id = client.assigned_mcp_session_id
+                assert assigned_id == "cleanup-session"
+                with pytest.raises(MCPClientError, match="Failed to list tools"):
+                    await client.list_tools()
+
+            await client.terminate_protocol_session(assigned_id)
+
+        await asyncio.wait_for(delete_stream_closed.wait(), timeout=1)
+        assert delete_chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    async def test_message_less_connection_diagnostic_does_not_buffer_body(
+        self,
+    ) -> None:
+        app = FastAPI()
+        diagnostic_stream_closed = asyncio.Event()
+        diagnostic_chunks_sent = 0
+        total_chunks = 512
+
+        @app.post("/mcp")
+        async def diagnostic_endpoint() -> StreamingResponse:
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal diagnostic_chunks_sent
+                try:
+                    for _ in range(total_chunks):
+                        diagnostic_chunks_sent += 1
+                        yield b"x" * 4096
+                        await asyncio.sleep(0.001)
+                finally:
+                    diagnostic_stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(),
+                status_code=503,
+                media_type="application/octet-stream",
+            )
+
+        async with _serve_test_app(app) as url:
+            client = MCPClient(
+                MCPServer(tenant_id=uuid4(), name="diagnostic-test", http_url=url)
+            )
+            client._connect_internal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+                side_effect=Exception()
+            )
+
+            with pytest.raises(MCPClientError, match="Server error \\(HTTP 503\\)"):
+                await client.connect()
+
+        await asyncio.wait_for(diagnostic_stream_closed.wait(), timeout=1)
+        assert diagnostic_chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
+    async def test_tool_count_is_bounded_before_sdk_model_validation(
+        self, monkeypatch: pytest.MonkeyPatch, response_mode: str
+    ) -> None:
+        app = FastAPI()
+        sdk_materialized_catalog = False
+        original_model_validate = mcp_types.ListToolsResult.model_validate
+
+        def record_model_validation(
+            cls: type[mcp_types.ListToolsResult],
+            value: object,
+            *args: object,
+            **kwargs: object,
+        ) -> mcp_types.ListToolsResult:
+            nonlocal sdk_materialized_catalog
+            sdk_materialized_catalog = True
+            return original_model_validate(value, *args, **kwargs)
+
+        monkeypatch.setattr(
+            mcp_types.ListToolsResult,
+            "model_validate",
+            classmethod(record_model_validation),
+        )
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "count-test", "version": "1"},
+                        },
+                    },
+                    headers={"Mcp-Session-Id": "count-session"},
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                tools = [
+                    {
+                        "name": f"tool_{index}",
+                        "description": "small",
+                        "inputSchema": {"type": "object"},
+                    }
+                    for index in range(4)
+                ]
+                # JSON decoders retain the last duplicate object member. The
+                # guard must inspect that same result instead of accepting the
+                # earlier harmless-looking catalog.
+                body = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"tools":[]},"result":{"tools":'
+                    + json.dumps(tools, separators=(",", ":")).encode()
+                    + b"}}"
+                )
+
+                if response_mode == "json":
+                    framed_body = body
+                    media_type = "application/json"
+                else:
+                    newline = b"\n" if response_mode == "sse_lf" else b"\r\n"
+                    framed_body = (
+                        b"event: message"
+                        + newline
+                        + b"data: "
+                        + body
+                        + newline
+                        + newline
+                    )
+                    media_type = "text/event-stream"
+
+                async def streamed_response() -> AsyncIterator[bytes]:
+                    midpoint = len(framed_body) // 2
+                    yield framed_body[:midpoint]
+                    yield framed_body[midpoint:]
+
+                return StreamingResponse(streamed_response(), media_type=media_type)
+            return Response(status_code=400)
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="count-test",
+                http_url=url,
+                tool_catalog_max_count=3,
+                tool_catalog_max_bytes=1024 * 1024,
+                tool_definition_max_bytes=1024,
+            )
+            async with MCPClient(server) as client:
+                with pytest.raises(
+                    MCPClientError, match="configured maximum of 3 definitions"
+                ):
+                    await client.list_tools()
+
+        assert sdk_materialized_catalog is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
+    async def test_predecode_count_accepts_nested_and_escaped_tool_definitions(
+        self, response_mode: str
+    ) -> None:
+        app = FastAPI()
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "syntax-test", "version": "1"},
+                        },
+                    }
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                response_payload = {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "tools": [{"not": "the result catalog"}] * 8,
+                    "result": {
+                        "metadata": {"tools": [1, 2, 3, 4]},
+                        "tools": [
+                            {
+                                "name": f"tool_{index}",
+                                "description": 'escaped \\" quote ] }, comma,',
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "nested": {
+                                            "type": "array",
+                                            "items": {"type": "object"},
+                                        }
+                                    },
+                                },
+                            }
+                            for index in range(3)
+                        ],
+                    },
+                }
+                if response_mode == "json":
+                    return JSONResponse(response_payload)
+
+                body = json.dumps(response_payload, separators=(",", ":")).encode()
+                split_at = body.index(b'"tools":[') + len(b'"tools":[')
+                newline = b"\n" if response_mode == "sse_lf" else b"\r\n"
+                framed_body = (
+                    b"event: message"
+                    + newline
+                    + b"data: "
+                    + body[:split_at]
+                    + newline
+                    + b"data: "
+                    + body[split_at:]
+                    + newline
+                    + newline
+                )
+
+                async def streamed_response() -> AsyncIterator[bytes]:
+                    midpoint = len(framed_body) // 2
+                    yield framed_body[:midpoint]
+                    yield framed_body[midpoint:]
+
+                return StreamingResponse(
+                    streamed_response(), media_type="text/event-stream"
+                )
+            return Response(status_code=400)
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="syntax-test",
+                http_url=url,
+                tool_catalog_max_count=3,
+                tool_catalog_max_bytes=1024 * 1024,
+                tool_definition_max_bytes=1024,
+            )
+            async with MCPClient(server) as client:
+                tools = await client.list_tools()
+
+        assert [tool["name"] for tool in tools] == [
+            "tool_0",
+            "tool_1",
+            "tool_2",
+        ]
+
+
+class TestMCPToolCatalogPolicyValidation:
+    def test_create_uses_safe_catalog_defaults(self):
+        dto = MCPServerCreate(name="test", http_url="http://localhost:8080")
+
+        assert dto.tool_catalog_max_count == MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        assert dto.tool_catalog_max_bytes == MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        assert dto.tool_definition_max_bytes == MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+
+    def test_admin_can_raise_catalog_limit_within_safety_envelope(self):
+        dto = MCPServerCreate(
+            name="large-catalog",
+            http_url="http://localhost:8080",
+            tool_catalog_max_count=512,
+            tool_catalog_max_bytes=32 * 1024 * 1024,
+            tool_definition_max_bytes=128 * 1024,
+        )
+
+        assert dto.tool_catalog_max_count == 512
+        assert dto.tool_catalog_max_bytes == 32 * 1024 * 1024
+        assert dto.tool_definition_max_bytes == 128 * 1024
+
+    def test_create_rejects_unbounded_catalog_limit(self):
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="unsafe",
+                http_url="http://localhost:8080",
+                tool_catalog_max_count=MCP_TOOL_CATALOG_HARD_MAX_COUNT + 1,
+            )
+
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="unsafe-total-size",
+                http_url="http://localhost:8080",
+                tool_catalog_max_bytes=MCP_TOOL_CATALOG_HARD_MAX_BYTES + 1,
+            )
+
+    def test_definition_limit_uses_whole_kibibytes(self):
+        with pytest.raises(ValidationError):
+            MCPServerCreate(
+                name="ambiguous-size",
+                http_url="http://localhost:8080",
+                tool_definition_max_bytes=1500,
+            )
 
 
 # =============================================================================
@@ -401,7 +1001,7 @@ class TestMCPServerServiceTenantOwnership:
         mock_user = MagicMock()
         mock_user.tenant_id = user_tenant_id
 
-        service = MCPServerService(mock_repo, mock_tool_repo, mock_user)
+        service = MCPServerService(mock_repo, mock_tool_repo, mock_user, AsyncMock())
 
         with pytest.raises(UnauthorizedException) as exc_info:
             await service.get_tools_with_tenant_settings(uuid4())
@@ -421,7 +1021,7 @@ class TestMCPServerServiceTenantOwnership:
         mock_user = MagicMock()
         mock_user.tenant_id = uuid4()
 
-        service = MCPServerService(mock_repo, mock_tool_repo, mock_user)
+        service = MCPServerService(mock_repo, mock_tool_repo, mock_user, AsyncMock())
 
         with pytest.raises(NotFoundException):
             await service.get_tools_with_tenant_settings(uuid4())

@@ -279,16 +279,107 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
+        """Create the conversation identity in a short committed transaction.
+
+        Completion setup may create durable external state, including MCP
+        protocol sessions, before the request transaction ends. Committing the
+        parent row here makes those child writes independently durable and
+        prevents a later request rollback from orphaning remote state.
+        """
+        session_add = self._build_session_add(
+            name=name,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        async with sessionmanager.session() as session, session.begin():
+            return await SessionRepository(session).add(session_add)
+
+    def _build_session_add(
+        self,
+        *,
+        name: str,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> SessionAdd:
         user_id, api_key_id = self._principal_columns()
-        session_add = SessionAdd(
+        return SessionAdd(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with self._write_transaction():
-            return await self.session_repo.add(session_add)
+
+    def _build_question_placeholder(
+        self,
+        *,
+        question: str,
+        session_id: UUID,
+        assistant_id: UUID | None,
+        completion_model: CompletionModel | None,
+    ) -> QuestionAdd:
+        completion_model_id = completion_model.id if completion_model else None
+        completion_model_name = completion_model.name if completion_model else None
+        return QuestionAdd(
+            tenant_id=self.user.tenant_id,
+            question=question,
+            answer="",
+            num_tokens_question=safe_count_tokens(question, completion_model_name),
+            num_tokens_answer=0,
+            completion_model_id=completion_model_id,
+            session_id=session_id,
+            logging_details=None,
+            assistant_id=assistant_id,
+            tool_calls=None,
+        )
+
+    @staticmethod
+    async def _insert_question_placeholder(
+        repo: QuestionRepository,
+        question_add: QuestionAdd,
+        files: Sequence[File] | None,
+    ) -> UUID:
+        question_record = await repo.add(
+            question_add,
+            info_blob_chunks=[],
+            files=list(files or []),
+            generated_files=[],
+            web_search_results=[],
+        )
+        assert question_record is not None, (
+            "question_repo.add must return the newly inserted row"
+        )
+        return question_record.id
+
+    async def create_session_with_question_placeholder(
+        self,
+        *,
+        name: str,
+        question: str,
+        files: Sequence[File] | None = None,
+        session_assistant_id: UUID | None = None,
+        question_assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        completion_model: CompletionModel | None = None,
+    ) -> tuple[SessionInDB, UUID]:
+        """Commit a new conversation and its first user message atomically."""
+        session_add = self._build_session_add(
+            name=name,
+            assistant_id=session_assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        async with sessionmanager.session() as db_session, db_session.begin():
+            session_record = await SessionRepository(db_session).add(session_add)
+            question_add = self._build_question_placeholder(
+                question=question,
+                session_id=session_record.id,
+                assistant_id=question_assistant_id,
+                completion_model=completion_model,
+            )
+            question_id = await self._insert_question_placeholder(
+                QuestionRepository(db_session), question_add, files
+            )
+        return session_record, question_id
 
     async def create_question_placeholder(
         self,
@@ -305,45 +396,26 @@ class SessionService:
         stream finishes (normally or via abort). This guarantees the user's message is
         durably stored before any LLM token streams out.
 
-        Note: a placeholder row commits with the router's request transaction, so it
-        remains in the DB even if the LLM call later raises (rate limit, model
-        unavailable, network drop). The conversation lists endpoint will surface those
-        rows with `answer=""` — that is intentional, the row reflects what the user
-        asked.
+        The placeholder uses its own short transaction, so it remains in the DB
+        if later context construction, MCP discovery, or model preparation fails.
+        The conversation lists endpoint will surface the row with ``answer=""``;
+        that is intentional because the row records what the user asked.
 
         `num_tokens_question` is seeded with `count_tokens(question, model_name)` so
         analytics don't undercount aborted requests. The normal-completion path later
         overwrites it with the provider-reported prompt token count.
         """
-        completion_model_id = completion_model.id if completion_model else None
-        completion_model_name = completion_model.name if completion_model else None
-        initial_question_tokens = safe_count_tokens(question, completion_model_name)
-        question_add = QuestionAdd(
-            tenant_id=self.user.tenant_id,
+        question_add = self._build_question_placeholder(
             question=question,
-            answer="",
-            num_tokens_question=initial_question_tokens,
-            num_tokens_answer=0,
-            completion_model_id=completion_model_id,
             session_id=session.id,
-            logging_details=None,
             assistant_id=assistant_id,
-            tool_calls=None,
+            completion_model=completion_model,
         )
 
-        async with self._write_transaction():
-            question_record = await self.question_repo.add(
-                question_add,
-                info_blob_chunks=[],
-                files=list(files or []),
-                generated_files=[],
-                web_search_results=[],
+        async with sessionmanager.session() as db_session, db_session.begin():
+            return await self._insert_question_placeholder(
+                QuestionRepository(db_session), question_add, files
             )
-
-        assert question_record is not None, (
-            "question_repo.add must return the newly inserted row"
-        )
-        return question_record.id
 
     async def complete_question_with_answer(
         self,

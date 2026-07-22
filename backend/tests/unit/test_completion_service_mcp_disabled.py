@@ -96,6 +96,7 @@ def _service_with_mocked_proxy() -> tuple[CompletionService, MagicMock]:
     mock_proxy = MagicMock()
     mock_proxy.get_tool_count.return_value = 1
     mock_proxy.get_tools_for_llm.return_value = []
+    mock_proxy.prepare_tools_for_context = AsyncMock()
     mock_proxy.close = AsyncMock()
 
     factory = MagicMock()
@@ -133,6 +134,7 @@ async def test_disabled_mcp_server_is_filtered_before_proxy_is_built():
     servers_arg = factory.create.call_args.args[0]
     assert servers_arg == [enabled]
     assert all(server.is_enabled for server in servers_arg)
+    factory.create.return_value.prepare_tools_for_context.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

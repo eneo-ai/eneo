@@ -21,6 +21,8 @@ import sqlalchemy as sa
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session_service import persist_partial_question_answer
 
 
@@ -125,6 +127,41 @@ async def test_placeholder_persists_user_question_before_stream(
     assert row.num_tokens_question == 0
     assert row.num_tokens_answer == 0
     assert row.tenant_id == default_user.tenant_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_new_session_rolls_back_when_first_question_insert_fails(
+    db_container,
+    default_user,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async with sessionmanager.session() as count_session, count_session.begin():
+        before = await count_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Sessions)
+            .where(Sessions.user_id == default_user.id)
+        )
+
+    async def fail_question_insert(*args, **kwargs):
+        raise RuntimeError("placeholder insert failed")
+
+    monkeypatch.setattr(QuestionRepository, "add", fail_question_insert)
+    async with db_container() as container:
+        session_service = container.session_service()
+        with pytest.raises(RuntimeError, match="placeholder insert failed"):
+            await session_service.create_session_with_question_placeholder(
+                name="must-not-survive",
+                question="first question",
+            )
+
+    async with sessionmanager.session() as count_session, count_session.begin():
+        after = await count_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Sessions)
+            .where(Sessions.user_id == default_user.id)
+        )
+    assert after == before
 
 
 @pytest.mark.integration

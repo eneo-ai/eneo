@@ -10,6 +10,7 @@ from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
@@ -29,7 +30,6 @@ _POSTGRES_13_IMAGE = (
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
 )
 _PREVIOUS_REVISION = "202607071200"
-_FOUNDATION_REVISION = "202607151200"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -99,9 +99,11 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
+    head_revision = ScriptDirectory.from_config(config).get_current_head()
+    assert head_revision is not None
 
     command.upgrade(config, "head")
-    assert _current_revision(database_url) == _FOUNDATION_REVISION
+    assert _current_revision(database_url) == head_revision
 
     models = (
         ObjectContents,
@@ -160,5 +162,5 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
     assert not _table_exists(database_url, "object_content_reconciliation_state")
 
     command.upgrade(config, "head")
-    assert _current_revision(database_url) == _FOUNDATION_REVISION
+    assert _current_revision(database_url) == head_revision
     assert _table_exists(database_url, "object_contents")

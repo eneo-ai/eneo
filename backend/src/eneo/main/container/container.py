@@ -811,10 +811,12 @@ class Container(containers.DeclarativeContainer):
         CompletionService,
         context_builder=context_builder,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
         redis_client=redis_client,
+        mcp_server_tool_repo=mcp_server_tool_repo,
     )
 
     # Datastore
@@ -1138,6 +1140,7 @@ class Container(containers.DeclarativeContainer):
         state_repo=chat_session_mcp_state_repo,
         mcp_server_repo=mcp_server_repo,
         proxy_factory=mcp_proxy_session_factory,
+        user=user,
     )
     session_service = providers.Factory(
         SessionService,
@@ -1311,6 +1314,7 @@ class Container(containers.DeclarativeContainer):
         mcp_server_repo=mcp_server_repo,
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
+        mcp_state_repo=chat_session_mcp_state_repo,
         encryption_service=encryption_service,
     )
     tenant_integration_service = providers.Factory(

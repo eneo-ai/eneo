@@ -89,6 +89,9 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     session_service = AsyncMock(
         create_session=AsyncMock(return_value=session),
         create_question_placeholder=AsyncMock(return_value=uuid4()),
+        create_session_with_question_placeholder=AsyncMock(
+            return_value=(session, uuid4())
+        ),
     )
 
     service = AssistantService(
@@ -126,7 +129,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     )
     assert result.completion_model.id == TEST_MODEL_GPT4.id
     assert (
-        session_service.create_question_placeholder.await_args.kwargs[
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
             "completion_model"
         ]
         is TEST_MODEL_GPT4
@@ -263,6 +266,9 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         session_service=AsyncMock(
             create_session=AsyncMock(return_value=session),
             create_question_placeholder=AsyncMock(return_value=uuid4()),
+            create_session_with_question_placeholder=AsyncMock(
+                return_value=(session, uuid4())
+            ),
         ),
         actor_manager=MagicMock(
             get_space_actor_from_space=MagicMock(return_value=actor)
@@ -337,6 +343,9 @@ async def test_ask_respects_disabled_mcp_server_ids():
         session_service=AsyncMock(
             create_session=AsyncMock(return_value=session),
             create_question_placeholder=AsyncMock(return_value=uuid4()),
+            create_session_with_question_placeholder=AsyncMock(
+                return_value=(session, uuid4())
+            ),
         ),
         actor_manager=MagicMock(
             get_space_actor_from_space=MagicMock(return_value=actor)

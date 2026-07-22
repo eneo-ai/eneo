@@ -17,6 +17,7 @@ from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings, get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
     MCPProxySessionFactory,
@@ -35,8 +36,12 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
+        MCPServerToolRepository,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
+    from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -52,13 +57,16 @@ class CompletionService:
         self,
         context_builder: ContextBuilder,
         tenant: Optional["TenantInDB"] = None,
+        user: Optional["UserInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
+        mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
+        self.user = user
         self.config = config or SETTINGS
         if encryption_service is None:
             encryption_settings: Settings | None = (
@@ -68,6 +76,7 @@ class CompletionService:
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
+        self.mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
@@ -267,11 +276,18 @@ class CompletionService:
         # every MCP server, with no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
+            # Build the acting user/tenant identity headers once; each client
+            # forwards them only to its server when forward_identity is set.
+            identity_headers = build_identity_headers(self.user, self.tenant)
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
+                identity_headers=identity_headers,
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
             )
+            if model.supports_tool_calling:
+                await mcp_proxy.prepare_tools_for_context()
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
