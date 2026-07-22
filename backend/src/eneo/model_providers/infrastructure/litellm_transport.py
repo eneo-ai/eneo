@@ -165,7 +165,7 @@ def raise_public_litellm_error(
             INVALID_REQUEST_MESSAGE,
             capability="response_format",
             retry_without_capability_safe=retry_without_capability_safe,
-            code="provider_capability_rejected",
+            code="provider_rejected_request",
             details={
                 "reason": "provider_capability_rejected",
                 "capability": "response_format",

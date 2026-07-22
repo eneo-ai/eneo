@@ -9,7 +9,11 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import Completion, TokenUsage
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ModelKwargs,
+    TokenUsage,
+)
 from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -571,8 +575,10 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     run = _run()
     state = _state()
     step = _step(output_type="json")
-    original_kwargs = MagicMock(name="original_kwargs")
-    json_mode_kwargs = MagicMock(name="json_mode_kwargs")
+    original_kwargs = ModelKwargs(
+        temperature=0.2,
+        response_format={"type": "stored_provider_format"},
+    )
     assistant = MagicMock()
     assistant.completion_model = SimpleNamespace(
         id=None,
@@ -581,7 +587,6 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         provider_type="openai",
     )
     assistant.completion_model_kwargs = original_kwargs
-    assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
     assistant.get_response = AsyncMock(
         side_effect=[
             ProviderCapabilityRejectedException(
@@ -633,8 +638,9 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert assistant.get_response.await_count == 2
     first_kwargs = assistant.get_response.await_args_list[0].kwargs
     second_kwargs = assistant.get_response.await_args_list[1].kwargs
-    assert first_kwargs["model_kwargs"] is json_mode_kwargs
-    assert second_kwargs["model_kwargs"] is original_kwargs
+    assert first_kwargs["model_kwargs"].response_format == {"type": "json_object"}
+    assert second_kwargs["model_kwargs"].response_format is None
+    assert second_kwargs["model_kwargs"].temperature == 0.2
     assert state.json_mode_supported["openai:gpt-test:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'

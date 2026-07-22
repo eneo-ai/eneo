@@ -1147,13 +1147,16 @@ async def complete_step_execution(
             and model_exc.retry_without_capability_safe
         ):
             state.json_mode_supported[cache_key] = False
+            fallback_kwargs = original_kwargs.model_copy(
+                update={"response_format": None}
+            )
             response = await call_assistant_with_timeout(
                 step=step,
                 run=run,
                 state=state,
                 prepared=prepared,
                 deps=deps,
-                model_kwargs=original_kwargs,
+                model_kwargs=fallback_kwargs,
                 info_blob_chunks=info_blob_chunks,
                 prompt_override=prompt_override,
                 version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,

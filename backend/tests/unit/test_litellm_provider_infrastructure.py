@@ -119,7 +119,7 @@ def test_response_format_capability_rejection_is_typed_from_provider_metadata(
 
     assert exc_info.value.capability == "response_format"
     assert exc_info.value.retry_without_capability_safe is True
-    assert exc_info.value.code == "provider_capability_rejected"
+    assert exc_info.value.code == "provider_rejected_request"
 
 
 def test_response_format_validation_rejection_is_not_treated_as_unsupported():
