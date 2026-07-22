@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -20,9 +20,11 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunStatus
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+    FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
     FlowRunHistoryPurgeResult,
 )
@@ -200,6 +202,16 @@ async def _delete_runtime_upload_with_lock_timeout(
 async def _purge_run(run_id: UUID) -> FlowRunHistoryPurgeResult:
     async with sessionmanager.session() as session, session.begin():
         return await FlowRunHistoryPurgeRepository(session).purge_run_history([run_id])
+
+
+async def _sweep_abandoned_runtime_uploads() -> FlowRunHistoryPurgeCounts:
+    async with sessionmanager.session() as session, session.begin():
+        return await FlowRunHistoryPurgeRepository(
+            session
+        ).purge_abandoned_runtime_uploads(
+            now=datetime.now(timezone.utc),
+            limit=10,
+        )
 
 
 async def _lock_runtime_upload_for_binding(
@@ -421,6 +433,68 @@ async def test_runtime_upload_purge_first_blocks_binding_then_removes_source(
         == set()
     )
     assert await _runtime_source_rows_exist(fixture=fixture) == (False, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_runtime_upload_bind_during_abandonment_sweep_survives(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    fixture = await _create_bound_runtime_upload(
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        admin_user=admin_user,
+    )
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.delete(FlowRunStepInputFiles).where(
+                FlowRunStepInputFiles.flow_run_id == fixture.run_id
+            )
+        )
+        await session.execute(
+            sa.update(FlowRuntimeUploadedFiles)
+            .where(FlowRuntimeUploadedFiles.file_id == fixture.upload.file_id)
+            .values(created_at=datetime.now(timezone.utc) - timedelta(days=2))
+        )
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == fixture.upload.tenant_id)
+            .values(flow_runtime_upload_abandonment_days=1)
+        )
+
+    async with sessionmanager.session() as binding_session:
+        async with binding_session.begin():
+            locked_ids = await FlowRuntimeUploadRepository(
+                session=binding_session
+            ).list_bound_file_ids_for_owner(
+                file_ids=[fixture.upload.file_id],
+                flow_id=fixture.upload.flow_id,
+                tenant_id=fixture.upload.tenant_id,
+                principal=fixture.upload.principal,
+                lock_for_binding=True,
+            )
+            assert locked_ids == {fixture.upload.file_id}
+            retained_run_id = await _add_retained_runtime_input(
+                session=binding_session,
+                fixture=fixture,
+            )
+
+            skipped_counts = await _sweep_abandoned_runtime_uploads()
+            assert skipped_counts.flow_runtime_source_candidates == 0
+            assert skipped_counts.flow_runtime_source_bindings_deleted == 0
+            assert skipped_counts.flow_runtime_source_files_deleted == 0
+
+    repeated_counts = await _sweep_abandoned_runtime_uploads()
+
+    assert repeated_counts.flow_runtime_source_candidates == 0
+    assert repeated_counts.flow_runtime_source_bindings_deleted == 0
+    assert repeated_counts.flow_runtime_source_files_deleted == 0
+    assert await _runtime_source_rows_exist(fixture=fixture) == (True, True)
+    async with sessionmanager.session() as session, session.begin():
+        assert await session.get(FlowRuns, retained_run_id) is not None
 
 
 @pytest.mark.asyncio

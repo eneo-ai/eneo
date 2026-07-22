@@ -14,6 +14,7 @@ from eneo.data_retention.infrastructure import (
 )
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
+    FlowRetentionOrganizationProposal,
 )
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
@@ -92,6 +93,13 @@ class FlowTemplateAssetRetentionFixture:
     flow: Flows
     template_file: Files
     template_asset: FlowTemplateAssets
+
+
+@dataclass(frozen=True)
+class AbandonedRuntimeUploadFixture:
+    flow: Flows
+    file: Files
+    upload: FlowRuntimeUploadedFiles
 
 
 @pytest.fixture
@@ -526,6 +534,61 @@ async def _create_flow_template_asset_fixture(
         template_file=template_file,
         template_asset=template_asset,
     )
+
+
+async def _create_unbound_runtime_upload_fixture(
+    async_session: AsyncSession,
+    *,
+    tenant,
+    user,
+    space: Spaces,
+    uploaded_at: datetime,
+    size: int,
+) -> AbandonedRuntimeUploadFixture:
+    flow = Flows(
+        name=f"Abandoned runtime upload flow {uuid4()}",
+        description="Runtime upload abandonment target",
+        tenant_id=tenant.id,
+        space_id=space.id,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json={},
+        data_retention_days=None,
+    )
+    file = Files(
+        name=f"abandoned-runtime-upload-{uuid4()}.txt",
+        text="confidential unbound runtime upload",
+        blob=None,
+        checksum=f"abandoned-runtime-upload-{uuid4()}",
+        size=size,
+        mimetype="text/plain",
+        file_type="text",
+        transcription=None,
+        owner_type="user",
+        owner_user_id=user.id,
+        owner_service_id=None,
+        tenant_id=tenant.id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    async_session.add_all([flow, file])
+    await async_session.flush()
+
+    upload = FlowRuntimeUploadedFiles(
+        file_id=file.id,
+        flow_id=flow.id,
+        tenant_id=tenant.id,
+        uploaded_for_step_id=uuid4(),
+        owner_type="user",
+        owner_user_id=user.id,
+        owner_service_id=None,
+        created_at=uploaded_at,
+        updated_at=uploaded_at,
+    )
+    async_session.add(upload)
+    await async_session.flush()
+    return AbandonedRuntimeUploadFixture(flow=flow, file=file, upload=upload)
 
 
 async def _add_flow_version_definition(
@@ -1172,6 +1235,114 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
     assert second_counts["flow_webhook_deliveries_deleted"] == 0
     assert second_counts["flow_audit_outbox_rows_deleted"] == 0
     assert second_counts["flow_review_checkpoints_deleted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_uploads(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: DataRetentionService,
+):
+    now = datetime.now(timezone.utc)
+    abandoned = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now - timedelta(days=2),
+        size=321,
+    )
+    retained = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now - timedelta(hours=12),
+        size=654,
+    )
+    abandoned_file_id = abandoned.file.id
+    retained_file_id = retained.file.id
+
+    async def set_policy_and_preview(
+        *, abandonment_days: int | None, minimum_days: int | None, no_purge: bool
+    ):
+        await async_session.execute(
+            update(Tenants)
+            .where(Tenants.id == test_tenant.id)
+            .values(
+                flow_runtime_upload_abandonment_days=abandonment_days,
+                flow_run_history_minimum_retention_days=minimum_days,
+                flow_run_history_no_purge=no_purge,
+            )
+        )
+        await async_session.flush()
+        return await flow_retention_service.preview_flow_retention_organization_change(
+            tenant_id=test_tenant.id,
+            proposal=FlowRetentionOrganizationProposal(
+                flow_run_history_retention_days=2555,
+                flow_runtime_upload_abandonment_days=abandonment_days,
+                flow_run_history_minimum_retention_days=minimum_days,
+                flow_run_history_no_purge=no_purge,
+            ),
+            previewed_at=now,
+        )
+
+    no_purge_preview = await set_policy_and_preview(
+        abandonment_days=1, minimum_days=None, no_purge=True
+    )
+    assert no_purge_preview.runtime_uploads.current_eligible_count == 0
+    assert no_purge_preview.policy_blockers.runtime_upload_no_purge_count == 1
+    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
+        "flow_runtime_source_bindings_deleted"
+    ] == 0
+
+    minimum_preview = await set_policy_and_preview(
+        abandonment_days=1, minimum_days=3, no_purge=False
+    )
+    assert minimum_preview.runtime_uploads.current_eligible_count == 0
+    assert (
+        minimum_preview.policy_blockers.runtime_upload_minimum_not_satisfied_count == 1
+    )
+    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
+        "flow_runtime_source_bindings_deleted"
+    ] == 0
+
+    disabled_preview = await set_policy_and_preview(
+        abandonment_days=None, minimum_days=None, no_purge=False
+    )
+    assert disabled_preview.runtime_uploads.current_eligible_count == 0
+    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
+        "flow_runtime_source_bindings_deleted"
+    ] == 0
+
+    enabled_preview = await set_policy_and_preview(
+        abandonment_days=1, minimum_days=None, no_purge=False
+    )
+    assert enabled_preview.runtime_uploads.current_eligible_count == 1
+    assert enabled_preview.runtime_uploads.proposed_eligible_bytes == 321
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["flow_runtime_source_candidates"] == 1
+    assert counts["flow_runtime_source_candidate_bytes"] == 321
+    assert counts["flow_runtime_source_bindings_deleted"] == 1
+    assert counts["flow_runtime_source_files_deleted"] == 1
+    assert counts["flow_runtime_source_bytes_deleted"] == 321
+    assert await async_session.get(Files, abandoned_file_id) is None
+    assert await async_session.get(Files, retained_file_id) is not None
+
+    repeated_counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert repeated_counts["flow_runtime_source_candidates"] == 0
+    assert repeated_counts["flow_runtime_source_candidate_bytes"] == 0
+    assert repeated_counts["flow_runtime_source_bindings_deleted"] == 0
+    assert repeated_counts["flow_runtime_source_files_deleted"] == 0
+    assert repeated_counts["flow_runtime_source_bytes_deleted"] == 0
+    assert await async_session.get(Files, retained_file_id) is not None
 
 
 @pytest.mark.asyncio

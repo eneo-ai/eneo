@@ -1466,7 +1466,13 @@ class DataRetentionService:
         counts = _empty_flow_runtime_cleanup_counts()
 
         purge_result = await self._purge_all_old_flow_run_history(now=now)
-        purge_counts = purge_result.counts
+        abandoned_upload_counts = await FlowRunHistoryPurgeRepository(
+            self.session
+        ).purge_abandoned_runtime_uploads(
+            now=now,
+            limit=RETENTION_BATCH_SIZE,
+        )
+        purge_counts = purge_result.counts.add(abandoned_upload_counts)
         counts["flow_runs_considered"] += purge_counts.flow_runs_considered
         counts["flow_runs_lock_deferred"] += purge_counts.flow_runs_lock_deferred
         counts["flow_runs_purged"] += purge_counts.flow_runs_purged

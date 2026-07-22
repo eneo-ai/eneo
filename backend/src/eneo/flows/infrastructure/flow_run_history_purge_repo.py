@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 from uuid import UUID
 
@@ -28,6 +29,7 @@ from eneo.database.tables.flow_tables import (
     FlowTemplateAssets,
 )
 from eneo.database.tables.questions_table import QuestionsFiles
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.enums import (
     TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowRunRerunOperationStatus,
@@ -309,6 +311,38 @@ class FlowRunHistoryPurgeRepository:
             affected_flow_tenant_ids=frozenset(deleted_flow_identities),
         )
 
+    async def purge_abandoned_runtime_uploads(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> FlowRunHistoryPurgeCounts:
+        """Reclaim uploads only after the binder's key-share fence is clear.
+
+        Candidate row locks serialize with binding, and the delete-time run-reference
+        check closes the READ COMMITTED window between candidate selection and deletion.
+        """
+        candidate_sizes = await self._lock_abandoned_runtime_upload_candidates(
+            now=now,
+            limit=limit,
+        )
+        if not candidate_sizes:
+            return FlowRunHistoryPurgeCounts()
+
+        deleted_runtime_upload_ids = await self._delete_unreferenced_runtime_uploads(
+            set(candidate_sizes)
+        )
+        deleted_file_counts = await self._delete_unreferenced_files(
+            deleted_runtime_upload_ids
+        )
+        return FlowRunHistoryPurgeCounts(
+            flow_runtime_source_candidates=len(candidate_sizes),
+            flow_runtime_source_candidate_bytes=sum(candidate_sizes.values()),
+            flow_runtime_source_bindings_deleted=len(deleted_runtime_upload_ids),
+            flow_runtime_source_files_deleted=deleted_file_counts.files_deleted,
+            flow_runtime_source_bytes_deleted=deleted_file_counts.bytes_deleted,
+        )
+
     async def purge_soft_deleted_template_assets(
         self,
         *,
@@ -475,6 +509,71 @@ class FlowRunHistoryPurgeRepository:
             _RuntimeSourceCandidate(run_id=run_id, file_id=file_id, size=size)
             for run_id, file_id, size in rows
         ]
+
+    async def _lock_abandoned_runtime_upload_candidates(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> dict[UUID, int]:
+        attached_to_run = (
+            sa.select(sa.literal(1))
+            .select_from(FlowRunStepInputFiles)
+            .where(
+                FlowRunStepInputFiles.file_id == FlowRuntimeUploadedFiles.file_id,
+                FlowRunStepInputFiles.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+            )
+            .exists()
+        )
+        horizon_due = FlowRuntimeUploadedFiles.created_at <= sa.literal(
+            now
+        ) - sa.func.make_interval(
+            0,
+            0,
+            0,
+            Tenants.flow_runtime_upload_abandonment_days,
+        )
+        minimum_satisfied = sa.or_(
+            Tenants.flow_run_history_minimum_retention_days.is_(None),
+            FlowRuntimeUploadedFiles.created_at
+            <= sa.literal(now)
+            - sa.func.make_interval(
+                0,
+                0,
+                0,
+                Tenants.flow_run_history_minimum_retention_days,
+            ),
+        )
+        rows = (
+            await self.session.execute(
+                sa.select(FlowRuntimeUploadedFiles.file_id, Files.size)
+                .join(
+                    Files,
+                    sa.and_(
+                        Files.id == FlowRuntimeUploadedFiles.file_id,
+                        Files.tenant_id == FlowRuntimeUploadedFiles.tenant_id,
+                    ),
+                )
+                .join(Tenants, Tenants.id == FlowRuntimeUploadedFiles.tenant_id)
+                .where(
+                    Tenants.flow_runtime_upload_abandonment_days.is_not(None),
+                    Tenants.flow_run_history_no_purge.is_(False),
+                    horizon_due,
+                    minimum_satisfied,
+                    sa.not_(attached_to_run),
+                )
+                .order_by(
+                    FlowRuntimeUploadedFiles.created_at,
+                    FlowRuntimeUploadedFiles.file_id,
+                )
+                .limit(limit)
+                .with_for_update(
+                    of=FlowRuntimeUploadedFiles,
+                    skip_locked=True,
+                )
+            )
+        ).tuples()
+        return {file_id: size for file_id, size in rows}
 
     async def _result_file_ids_by_run(
         self, run_ids: set[UUID]
