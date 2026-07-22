@@ -6,6 +6,10 @@ readonly SOURCE_COMMIT="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa"
 readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
 readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
+readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-grpc-to-1.82.1.patch"
+readonly DOWNSTREAM_PATCH_SHA256="54cc9bd8b0cfadebbce56754914655526cee882075141fd64790686bd4ac409e"
+readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
 readonly GO_IMAGE="docker.io/library/golang:1.25.12-bookworm@sha256:ea341baa9bd5ba6784f6d7161ace70544349a6242d54d34a0fbfd2c4d51c9d58"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
 readonly GOVULNCHECK_VERSION="v1.6.0"
@@ -43,7 +47,7 @@ audit_source() {
     local source_directory
     local upstream_tree
 
-    for command in curl diff docker jq sha256sum tar; do
+    for command in curl diff docker git jq sha256sum tar; do
         require_command "$command"
     done
 
@@ -76,6 +80,12 @@ audit_source() {
         exit 1
     }
 
+    printf '%s  %s\n' "$DOWNSTREAM_PATCH_SHA256" "$DOWNSTREAM_PATCH" \
+        | sha256sum --check --strict -
+    git -C "$source_directory" apply --check "$DOWNSTREAM_PATCH"
+    git -C "$source_directory" apply "$DOWNSTREAM_PATCH"
+    cp "$DOWNSTREAM_PATCH" "$output_directory/$DOWNSTREAM_PATCH_NAME"
+
     docker run --rm \
         --volume "$source_directory:/src:ro" \
         --volume "$output_directory:/out" \
@@ -102,6 +112,8 @@ audit_source() {
             and .Version == "v0.23.0"
             and .Replace.Path == "github.com/apache/thrift"
             and .Replace.Version == "v0.23.1-0.20260429145742-d2acd3c49e58")
+        and any(.[]; .Path == "google.golang.org/grpc"
+            and .Version == "v1.82.1")
         ' "$output_directory/modules.json" >/dev/null
 
     cut -d, -f3 "$output_directory/licenses.csv" | LC_ALL=C sort -u \
@@ -161,13 +173,16 @@ source_commit=$SOURCE_COMMIT
 source_tree=$SOURCE_TREE
 source_archive_sha256=$SOURCE_ARCHIVE_SHA256
 source_license=Apache-2.0
+downstream_patch=$DOWNSTREAM_PATCH_NAME
+downstream_patch_sha256=$DOWNSTREAM_PATCH_SHA256
 builder=$GO_IMAGE
 go_licenses_revision=$GO_LICENSES_REVISION
 govulncheck_version=$GOVULNCHECK_VERSION
 EOF
     (
         cd "$output_directory"
-        sha256sum -- SOURCE-PROVENANCE.txt govulncheck.txt licenses.csv modules.json \
+        sha256sum -- SOURCE-PROVENANCE.txt "$DOWNSTREAM_PATCH_NAME" \
+            govulncheck.txt licenses.csv modules.json \
             >SOURCE-SHA256SUMS
     )
 }
@@ -197,7 +212,8 @@ audit_image() {
     docker image inspect "$image_ref" | jq -e \
         --arg commit "$SOURCE_COMMIT" \
         --arg tree "$SOURCE_TREE" \
-        --arg archive "$SOURCE_ARCHIVE_SHA256" '
+        --arg archive "$SOURCE_ARCHIVE_SHA256" \
+        --arg patch "$DOWNSTREAM_PATCH_SHA256" '
         length == 1
         and .[0].Config.User == "65532:65532"
         and .[0].Config.WorkingDir == "/data"
@@ -209,6 +225,7 @@ audit_image() {
         and .[0].Config.Labels["io.eneo.upstream.commit"] == $commit
         and .[0].Config.Labels["io.eneo.upstream.tree"] == $tree
         and .[0].Config.Labels["io.eneo.upstream.archive.sha256"] == $archive
+        and .[0].Config.Labels["io.eneo.downstream.patch.sha256"] == $patch
         ' >/dev/null
 
     "$SYFT_CMD" "docker:$image_ref" --platform "$platform" --quiet \

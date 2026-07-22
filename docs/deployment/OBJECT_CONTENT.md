@@ -27,6 +27,8 @@ the private `object_content_net`. The image is built from upstream commit
 pins the source archive, build image, runtime image, and GitHub Actions; scans
 the exact amd64 and arm64 image digests; publishes CycloneDX 1.6 and SPDX SBOMs;
 and signs provenance and SBOM attestations with Eneo's GitHub Actions identity.
+The source evidence also records a hashed downstream patch that upgrades gRPC
+to 1.82.1 until an upstream SeaweedFS release contains the fix.
 This proves what Eneo built. It is not supplier-signed SeaweedFS provenance.
 
 An operator may instead use a self-hosted or European-operated S3-compatible
