@@ -20,6 +20,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
@@ -761,6 +762,9 @@ async def test_flow_package_name_collision_persists_failed_receipt_and_audit_unt
             sa.select(AuditLogTable).where(
                 AuditLogTable.action == ActionType.FLOW_PACKAGE_IMPORT_FAILED.value,
                 AuditLogTable.entity_id == space.id,
+                AuditLogTable.outcome == Outcome.FAILURE.value,
+                AuditLogTable.error_message
+                == "A Flow with this name already exists in the target space.",
             )
         )
         flow_count = await session.scalar(

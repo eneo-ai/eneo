@@ -18,7 +18,9 @@ from sqlalchemy.exc import IntegrityError
 
 from eneo.actors.actors.space_actor import SpaceActor
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flow_packages.api import flow_package_router
 from eneo.flow_packages.api.flow_package_models import (
@@ -602,6 +604,8 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
     captured_failure: list[FlowPackageImportFailurePayload] = []
     captured_selection: list[FlowPackageImportSelection] = []
     fake_session = _FakeSession()
+    audit_service = _FakeAuditService()
+    failure_message = "Selected model is unavailable. " + "x" * 2_000
 
     _patch_import_access(
         monkeypatch,
@@ -613,7 +617,7 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
         async def install_as_draft(self, **kwargs: object) -> FlowPackageInstallResult:
             raise FlowPackageValidationError(
                 code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
-                message="Selected model is unavailable.",
+                message=failure_message,
                 context={"slot_ref": "model.structured"},
             )
 
@@ -650,17 +654,24 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
         id=target_space_id,
         import_request=_import_request(selected_binding),
         request=_request(),
-        container=cast(Container, _FakeContainer(session=fake_session)),
+        container=cast(
+            Container,
+            _FakeContainer(audit_service=audit_service, session=fake_session),
+        ),
     )
 
     assert isinstance(response, flow_package_router.JSONResponse)
     payload = json.loads(response.body)
     error = GeneralError.model_validate(payload)
     assert error.code == FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value
-    assert error.message == "Selected model is unavailable."
+    assert error.message == failure_message
     assert error.context == {"slot_ref": "model.structured"}
     assert captured_failure[0].code == error.code
     assert captured_selection[0].selected_bindings == [canonical_binding]
+    assert (
+        audit_service.persisted_events[0]["error_message"]
+        == (failure_message[:MAX_ERROR_MESSAGE_LENGTH])
+    )
     assert fake_session.nested_transactions == ["rolled_back"]
     assert fake_session.commit_count == 1
 
@@ -759,6 +770,10 @@ async def test_import_flow_package_name_collision_returns_safe_receipt_and_audit
     assert event["entity_type"] is EntityType.SPACE
     assert event["entity_id"] == target_space_id
     assert event["description"] == "Flow package import failed"
+    assert event["outcome"] is Outcome.FAILURE
+    assert event["error_message"] == (
+        "A Flow with this name already exists in the target space."
+    )
     assert event["metadata"] == {
         "actor": {
             "type": "user",

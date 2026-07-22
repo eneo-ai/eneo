@@ -23,7 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.flow_packages.api import flow_package_openapi_examples as openapi_examples
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
@@ -677,6 +679,8 @@ async def _record_failed_flow_package_import(
         entity_id=space_id,
         description="Flow package import failed",
         required=True,
+        outcome=Outcome.FAILURE,
+        error_message=failure.message[:MAX_ERROR_MESSAGE_LENGTH],
         metadata=AuditMetadata.standard(
             actor=user,
             target=_FailedFlowImportAuditTarget(id=space_id),
