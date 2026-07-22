@@ -105,6 +105,57 @@ async def test_question_placeholder_commits_independently(
 
 
 @pytest.mark.asyncio
+async def test_new_session_and_first_question_share_one_short_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fresh_session = MagicMock()
+    created_session = SimpleNamespace(id=uuid4(), questions=[])
+    created_question = SimpleNamespace(id=uuid4())
+    fresh_session_repo = SimpleNamespace(add=AsyncMock(return_value=created_session))
+    fresh_question_repo = SimpleNamespace(add=AsyncMock(return_value=created_question))
+
+    @asynccontextmanager
+    async def _fresh_session_scope():
+        yield fresh_session
+
+    @asynccontextmanager
+    async def _begin():
+        yield
+
+    fresh_session.begin.return_value = _begin()
+    monkeypatch.setattr(
+        session_service_module.sessionmanager,
+        "session",
+        _fresh_session_scope,
+    )
+    session_repo_factory = MagicMock(return_value=fresh_session_repo)
+    question_repo_factory = MagicMock(return_value=fresh_question_repo)
+    monkeypatch.setattr(
+        session_service_module, "SessionRepository", session_repo_factory
+    )
+    monkeypatch.setattr(
+        session_service_module, "QuestionRepository", question_repo_factory
+    )
+    service = SessionService(
+        session_repo=SimpleNamespace(session=MagicMock()),
+        question_repo=AsyncMock(),
+        user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+    )
+
+    session, question_id = await service.create_session_with_question_placeholder(
+        name="new-session",
+        question="first question",
+    )
+
+    assert session is created_session
+    assert question_id == created_question.id
+    session_repo_factory.assert_called_once_with(fresh_session)
+    question_repo_factory.assert_called_once_with(fresh_session)
+    fresh_session_repo.add.assert_awaited_once()
+    fresh_question_repo.add.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_file_service_save_image_starts_short_transaction_when_needed():
     entered = 0
 

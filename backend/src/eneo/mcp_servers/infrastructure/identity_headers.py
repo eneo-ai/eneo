@@ -20,6 +20,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 from urllib.parse import quote
 
+from eneo.authentication.auth_models import is_service_api_key
+
 if TYPE_CHECKING:
     from eneo.tenants.tenant import TenantInDB
     from eneo.users.user import UserInDB
@@ -53,7 +55,7 @@ def build_identity_headers(
     header. Callers forward the result only to servers with
     ``forward_identity=True``.
     """
-    if user is None:
+    if user is None or is_service_api_key(user):
         return {}
 
     display_name = user.username or (user.email.split("@")[0] if user.email else None)

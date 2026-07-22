@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.chat_session_mcp_state_table import ChatSessionMcpState
+from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.sessions_table import Sessions
 
 if TYPE_CHECKING:
@@ -37,10 +38,17 @@ class ChatSessionMcpStateRepo:
         async with self.session.begin():
             yield
 
-    async def get(self, chat_session_id: UUID, mcp_server_id: UUID) -> str | None:
+    async def get(
+        self,
+        chat_session_id: UUID,
+        mcp_server_id: UUID,
+        identity_policy_generation: int,
+    ) -> str | None:
         stmt = sa.select(ChatSessionMcpState.mcp_session_id).where(
             ChatSessionMcpState.chat_session_id == chat_session_id,
             ChatSessionMcpState.mcp_server_id == mcp_server_id,
+            ChatSessionMcpState.identity_policy_generation
+            == identity_policy_generation,
         )
         async with self._tx():
             return await self.session.scalar(stmt)
@@ -62,6 +70,7 @@ class ChatSessionMcpStateRepo:
         mcp_server_id: UUID,
         candidate_mcp_session_id: str,
         expected_mcp_session_id: str | None,
+        identity_policy_generation: int,
     ) -> str | None:
         """Commit one protocol-session claimant and return the winning ID.
 
@@ -72,16 +81,30 @@ class ChatSessionMcpStateRepo:
         concurrent first turns from both considering their remote ID durable.
         """
         async with sessionmanager.session() as session, session.begin():
+            current_generation = await session.scalar(
+                sa.select(MCPServers.identity_policy_generation)
+                .where(MCPServers.id == mcp_server_id)
+                .with_for_update(read=True)
+            )
+            if current_generation != identity_policy_generation:
+                return None
+
             if expected_mcp_session_id is None:
                 values = sa.select(
                     Sessions.id,
                     sa.literal(mcp_server_id),
                     sa.literal(candidate_mcp_session_id),
+                    sa.literal(identity_policy_generation),
                 ).where(Sessions.id == chat_session_id)
                 stmt = (
                     pg_insert(ChatSessionMcpState)
                     .from_select(
-                        ["chat_session_id", "mcp_server_id", "mcp_session_id"],
+                        [
+                            "chat_session_id",
+                            "mcp_server_id",
+                            "mcp_session_id",
+                            "identity_policy_generation",
+                        ],
                         values,
                     )
                     .on_conflict_do_nothing(
@@ -96,6 +119,8 @@ class ChatSessionMcpStateRepo:
                     sa.select(ChatSessionMcpState.mcp_session_id).where(
                         ChatSessionMcpState.chat_session_id == chat_session_id,
                         ChatSessionMcpState.mcp_server_id == mcp_server_id,
+                        ChatSessionMcpState.identity_policy_generation
+                        == identity_policy_generation,
                     )
                 )
 
@@ -105,6 +130,8 @@ class ChatSessionMcpStateRepo:
                     ChatSessionMcpState.chat_session_id == chat_session_id,
                     ChatSessionMcpState.mcp_server_id == mcp_server_id,
                     ChatSessionMcpState.mcp_session_id == expected_mcp_session_id,
+                    ChatSessionMcpState.identity_policy_generation
+                    == identity_policy_generation,
                 )
                 .values(mcp_session_id=candidate_mcp_session_id)
                 .returning(ChatSessionMcpState.mcp_session_id)
@@ -112,10 +139,17 @@ class ChatSessionMcpStateRepo:
             winner = await session.scalar(stmt)
             if winner is not None:
                 return winner
-            # A missing or changed expected row is an invalidated generation.
-            # Never recreate it: an identity-mode toggle owns deletion as the
-            # durable boundary between old and new header policy.
-            return None
+            # A same-generation replacement may have won while this caller was
+            # reconnecting. Return that winner so the proxy can terminate its
+            # losing candidate and retry against the durable session.
+            return await session.scalar(
+                sa.select(ChatSessionMcpState.mcp_session_id).where(
+                    ChatSessionMcpState.chat_session_id == chat_session_id,
+                    ChatSessionMcpState.mcp_server_id == mcp_server_id,
+                    ChatSessionMcpState.identity_policy_generation
+                    == identity_policy_generation,
+                )
+            )
 
     async def delete_for_server(self, mcp_server_id: UUID) -> None:
         """Invalidate saved protocol sessions in the caller's transaction."""

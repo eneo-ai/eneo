@@ -39,6 +39,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCPServer,
 )
+from eneo.mcp_servers.infrastructure.client import mcp_client as mcp_client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -241,6 +242,91 @@ class TestMCPClientListToolsErrorPropagation:
                     await client.list_tools()
 
         await asyncio.wait_for(stream_cancelled.wait(), timeout=1)
+        assert chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["initialize", "ping"])
+    async def test_control_responses_are_bounded_before_sdk_decoding(
+        self, monkeypatch: pytest.MonkeyPatch, method: str
+    ) -> None:
+        app = FastAPI()
+        chunks_sent = 0
+        total_chunks = 64
+        stream_closed = asyncio.Event()
+
+        monkeypatch.setattr(
+            mcp_client_module,
+            "MCP_INITIALIZE_RESPONSE_MAX_BYTES",
+            1024,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            mcp_client_module,
+            "MCP_PING_RESPONSE_MAX_BYTES",
+            1024,
+            raising=False,
+        )
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            nonlocal chunks_sent
+            payload = await request.json()
+            request_method = payload.get("method")
+            if request_method == "notifications/initialized":
+                return Response(status_code=202)
+            if request_method != method:
+                return Response(status_code=400)
+
+            if method == "initialize":
+                prefix = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"protocolVersion":"2025-06-18",'
+                    b'"capabilities":{"tools":{}},"serverInfo":'
+                    b'{"name":"control-test","version":"1"},"instructions":"'
+                )
+                suffix = b'"}}'
+            else:
+                prefix = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"padding":"'
+                )
+                suffix = b'"}}'
+
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal chunks_sent
+                try:
+                    yield prefix
+                    for _ in range(total_chunks):
+                        chunks_sent += 1
+                        yield b"x" * 256
+                        await asyncio.sleep(0.001)
+                    yield suffix
+                finally:
+                    stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(),
+                media_type="application/json",
+                headers={"Mcp-Session-Id": "control-session"},
+            )
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="control-test",
+                http_url=url,
+            )
+            client = MCPClient(
+                server,
+                resume_mcp_session_id="control-session" if method == "ping" else None,
+            )
+            with pytest.raises(MCPClientError, match="wire response exceeds"):
+                async with client:
+                    pass
+
+        await asyncio.wait_for(stream_closed.wait(), timeout=1)
         assert chunks_sent < total_chunks
 
     @pytest.mark.asyncio

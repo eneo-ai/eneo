@@ -13,6 +13,7 @@ import httpx
 import pytest
 from mcp.shared._httpx_utils import create_mcp_http_client
 
+from eneo.authentication.auth_models import ApiKeyOwnership
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
@@ -20,6 +21,7 @@ from eneo.mcp_servers.infrastructure.identity_headers import build_identity_head
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
+from tests.unit.api_key_test_utils import make_api_key
 
 
 def _user(**overrides):
@@ -138,6 +140,29 @@ class TestMCPClientIdentityForwarding:
         headers = await client._build_auth_headers()
         assert headers == {"Authorization": "Bearer secret"}
         assert "X-Eneo-User-Id" not in headers
+
+    @pytest.mark.asyncio
+    async def test_service_key_keeps_bearer_auth_without_fabricated_user_headers(self):
+        service_key = make_api_key(ownership=ApiKeyOwnership.SERVICE)
+        synthetic_service_user = _user(
+            id=service_key.id,
+            email=f"sk-{service_key.key_suffix}@service.key",
+            username=f"Service Key ({service_key.name})",
+            tenant_id=service_key.tenant_id,
+            active_api_key=service_key,
+        )
+
+        identity = build_identity_headers(synthetic_service_user, None)
+        client = MCPClient(
+            self._server(forward_identity=True),
+            auth_credentials={"token": "secret"},
+            identity_headers=identity,
+        )
+
+        headers = await client._build_auth_headers()
+
+        assert headers == {"Authorization": "Bearer secret"}
+        assert not any(name.startswith("X-Eneo-User-") for name in headers)
 
 
 class TestManagementPathsCarryIdentity:
@@ -258,6 +283,42 @@ class TestManagementPathsCarryIdentity:
         assert [change.tool.name for change in result.removed_tools] == ["removed_tool"]
         assert existing.removed_from_remote is True
         assert existing.requires_approval is True
+
+    @pytest.mark.asyncio
+    async def test_management_refresh_adds_tools_through_bounded_catalog_staging(self):
+        user = _user(permissions=["admin"])
+        service = self._service(user)
+        server = MagicMock()
+        server.id = uuid4()
+        server.name = "srv"
+        server.tenant_id = user.tenant_id
+        server.forward_identity = True
+        stored: list[MCPServerTool] = []
+
+        async def stage_observed(observations: list[MCPServerTool]):
+            stored.extend(observations)
+            return observations
+
+        service.tool_repo.by_server.side_effect = lambda _server_id: list(stored)
+        service.tool_repo.stage_observed.side_effect = stage_observed
+        client_cls = self._recording_client_cls()
+        client_cls.return_value.__aenter__.return_value.list_tools.return_value = [
+            {
+                "name": "new_tool",
+                "title": "New tool",
+                "description": "Pending contract",
+                "input_schema": {"type": "object"},
+            }
+        ]
+
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", client_cls
+        ):
+            result = await service.discover_and_sync_tools(server)
+
+        assert [change.tool.name for change in result.new_tools] == ["new_tool"]
+        service.tool_repo.stage_observed.assert_awaited_once()
+        service.tool_repo.upsert_by_server_and_name.assert_not_awaited()
 
 
 class TestTerminationCarriesIdentityOnTheWire:

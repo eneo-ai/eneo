@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Text
+from sqlalchemy import ForeignKey, Index, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseCrossReference
@@ -23,6 +23,9 @@ class ChatSessionMcpState(BaseCrossReference):
         ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
     )
     mcp_session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_policy_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
 
     __table_args__ = (
         Index("ix_chat_session_mcp_state_mcp_server_id", "mcp_server_id"),

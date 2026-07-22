@@ -45,6 +45,9 @@ class MCPServers(BasePublic):
     forward_identity: Mapped[bool] = mapped_column(
         Boolean, server_default="False", nullable=False
     )
+    identity_policy_generation: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
     tool_catalog_max_count: Mapped[int] = mapped_column(
         Integer, server_default="256", nullable=False
     )

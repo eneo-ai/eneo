@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -9,7 +10,9 @@ from eneo.database.tables.chat_session_mcp_state_table import ChatSessionMcpStat
 from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
     MCPServerTool,
     MCPToolCatalogStagingTimeout,
 )
@@ -63,6 +66,7 @@ async def test_protocol_session_state_survives_outer_request_rollback(
             server_id,
             candidate_mcp_session_id="protocol-committed",
             expected_mcp_session_id=None,
+            identity_policy_generation=0,
         )
         assert winner == "protocol-committed"
         await outer_session.rollback()
@@ -124,6 +128,7 @@ async def test_protocol_session_state_rejects_uncommitted_chat_without_blocking(
                 server_id,
                 candidate_mcp_session_id="protocol-not-durable",
                 expected_mcp_session_id=None,
+                identity_policy_generation=0,
             ),
             timeout=0.5,
         )
@@ -198,6 +203,7 @@ async def test_new_chat_and_protocol_state_survive_outer_request_rollback(
                 server_id,
                 candidate_mcp_session_id="protocol-first-turn",
                 expected_mcp_session_id=None,
+                identity_policy_generation=0,
             ),
             timeout=0.5,
         )
@@ -459,6 +465,194 @@ async def test_runtime_discovery_rejects_disjoint_catalog_beyond_persisted_limit
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_identity_admin_refresh_cannot_grow_persisted_union_past_limit(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server_row = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"admin-union-count-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+            tool_catalog_max_count=2,
+            tool_catalog_max_bytes=1024 * 1024,
+        )
+        seed_session.add(server_row)
+        await seed_session.flush()
+        server_id = server_row.id
+
+    server = MCPServer(
+        id=server_id,
+        tenant_id=admin_user.tenant_id,
+        name="admin-union-count",
+        http_url="http://localhost:9000/mcp",
+        forward_identity=True,
+        tool_catalog_max_count=2,
+        tool_catalog_max_bytes=1024 * 1024,
+    )
+    live_catalog = [
+        {"name": "first", "description": "first", "input_schema": {}},
+        {"name": "second", "description": "second", "input_schema": {}},
+    ]
+
+    class CatalogClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def list_tools(self):
+            return list(live_catalog)
+
+    try:
+        async with sessionmanager.session() as service_session, service_session.begin():
+            service = MCPServerService(
+                mcp_server_repo=AsyncMock(),
+                mcp_server_tool_repo=MCPServerToolRepoImpl(
+                    service_session, MCPServerToolMapper()
+                ),
+                user=admin_user,
+                mcp_state_repo=AsyncMock(),
+            )
+            with patch(
+                "eneo.mcp_servers.application.mcp_server_service.MCPClient",
+                CatalogClient,
+            ):
+                first = await service.discover_and_sync_tools(server)
+                assert first.connection.success is True
+                live_catalog[:] = [
+                    {"name": "third", "description": "third", "input_schema": {}}
+                ]
+                rejected = await service.discover_and_sync_tools(server)
+                assert rejected.connection.success is False
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert [tool.name for tool in tools] == ["first", "second"]
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_and_admin_refresh_share_one_bounded_catalog_union(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server_row = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"mixed-union-count-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+            tool_catalog_max_count=1,
+            tool_catalog_max_bytes=1024 * 1024,
+        )
+        seed_session.add(server_row)
+        await seed_session.flush()
+        server_id = server_row.id
+
+    server = MCPServer(
+        id=server_id,
+        tenant_id=admin_user.tenant_id,
+        name="mixed-union-count",
+        http_url="http://localhost:9000/mcp",
+        forward_identity=True,
+        tool_catalog_max_count=1,
+        tool_catalog_max_bytes=1024 * 1024,
+    )
+
+    class CatalogClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def list_tools(self):
+            return [
+                {
+                    "name": "admin-observed",
+                    "description": "admin",
+                    "input_schema": {},
+                }
+            ]
+
+    async def admin_refresh():
+        async with sessionmanager.session() as service_session, service_session.begin():
+            service = MCPServerService(
+                mcp_server_repo=AsyncMock(),
+                mcp_server_tool_repo=MCPServerToolRepoImpl(
+                    service_session, MCPServerToolMapper()
+                ),
+                user=admin_user,
+                mcp_state_repo=AsyncMock(),
+            )
+            return await service.discover_and_sync_tools(server)
+
+    async def runtime_observation():
+        async with sessionmanager.session() as runtime_session, runtime_session.begin():
+            return await MCPServerToolRepoImpl(
+                runtime_session, MCPServerToolMapper()
+            ).stage_observed(
+                [
+                    MCPServerTool.pending_discovery(
+                        mcp_server_id=server_id,
+                        name="runtime-observed",
+                        title=None,
+                        description="runtime",
+                        input_schema={},
+                    )
+                ]
+            )
+
+    try:
+        with patch(
+            "eneo.mcp_servers.application.mcp_server_service.MCPClient", CatalogClient
+        ):
+            refresh_result, runtime_result = await asyncio.gather(
+                admin_refresh(), runtime_observation(), return_exceptions=True
+            )
+
+        successful_refresh = (
+            not isinstance(refresh_result, BaseException)
+            and refresh_result.connection.success
+        )
+        successful_runtime = isinstance(runtime_result, list)
+        assert int(successful_refresh) + int(successful_runtime) == 1
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            tools = await MCPServerToolRepoImpl(
+                verify_session, MCPServerToolMapper()
+            ).by_server(server_id)
+        assert len(tools) == 1
+        assert tools[0].name in {"admin-observed", "runtime-observed"}
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_concurrent_disjoint_catalogs_cannot_exceed_persisted_byte_limit(
     setup_database: None,
     admin_user,
@@ -632,6 +826,7 @@ async def test_concurrent_protocol_session_claims_return_one_winner(
                 server_id,
                 candidate_mcp_session_id=candidate,
                 expected_mcp_session_id=None,
+                identity_policy_generation=0,
             )
 
     try:
@@ -639,6 +834,131 @@ async def test_concurrent_protocol_session_claims_return_one_winner(
         assert len(set(winners)) == 1
         assert winners[0] in {"protocol-a", "protocol-b"}
     finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(Sessions).where(Sessions.id == chat_session_id)
+            )
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_expired_session_replacements_return_current_winner(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"session-replacement-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=True,
+        )
+        chat_session = Sessions(
+            user_id=admin_user.id,
+            name="Concurrent expired MCP session replacement",
+        )
+        seed_session.add_all([server, chat_session])
+        await seed_session.flush()
+        server_id = server.id
+        chat_session_id = chat_session.id
+
+    async def claim(candidate: str, expected: str | None) -> str | None:
+        async with sessionmanager.session() as session:
+            return await ChatSessionMcpStateRepo(session).claim(
+                chat_session_id,
+                server_id,
+                candidate_mcp_session_id=candidate,
+                expected_mcp_session_id=expected,
+                identity_policy_generation=0,
+            )
+
+    try:
+        assert await claim("expired", None) == "expired"
+        winners = await asyncio.gather(
+            claim("replacement-a", "expired"),
+            claim("replacement-b", "expired"),
+        )
+        assert len(set(winners)) == 1
+        assert winners[0] in {"replacement-a", "replacement-b"}
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(Sessions).where(Sessions.id == chat_session_id)
+            )
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_first_session_claim_crossing_identity_toggle_is_rejected(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"session-generation-{uuid4()}",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        chat_session = Sessions(
+            user_id=admin_user.id,
+            name="MCP identity generation barrier",
+        )
+        seed_session.add_all([server, chat_session])
+        await seed_session.flush()
+        server_id = server.id
+        chat_session_id = chat_session.id
+
+    claim_ready = asyncio.Event()
+    toggle_committed = asyncio.Event()
+
+    async def old_generation_claim() -> str | None:
+        claim_ready.set()
+        await toggle_committed.wait()
+        async with sessionmanager.session() as claim_session:
+            return await ChatSessionMcpStateRepo(claim_session).claim(
+                chat_session_id,
+                server_id,
+                candidate_mcp_session_id="old-policy-session",
+                expected_mcp_session_id=None,
+                identity_policy_generation=0,
+            )
+
+    claim_task = asyncio.create_task(old_generation_claim())
+    await claim_ready.wait()
+    try:
+        async with sessionmanager.session() as toggle_session, toggle_session.begin():
+            await toggle_session.execute(
+                sa.update(MCPServers)
+                .where(MCPServers.id == server_id)
+                .values(identity_policy_generation=1, forward_identity=True)
+            )
+            await ChatSessionMcpStateRepo(toggle_session).delete_for_server(server_id)
+        toggle_committed.set()
+
+        assert await claim_task is None
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            state = await verify_session.scalar(
+                sa.select(ChatSessionMcpState.mcp_session_id).where(
+                    ChatSessionMcpState.chat_session_id == chat_session_id,
+                    ChatSessionMcpState.mcp_server_id == server_id,
+                )
+            )
+        assert state is None
+    finally:
+        toggle_committed.set()
+        if not claim_task.done():
+            claim_task.cancel()
         async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
             await cleanup_session.execute(
                 sa.delete(Sessions).where(Sessions.id == chat_session_id)
@@ -678,6 +998,7 @@ async def test_server_session_invalidation_joins_the_callers_transaction(
             server_id,
             candidate_mcp_session_id="protocol-before-toggle",
             expected_mcp_session_id=None,
+            identity_policy_generation=0,
         )
         assert winner == "protocol-before-toggle"
 
@@ -685,13 +1006,13 @@ async def test_server_session_invalidation_joins_the_callers_transaction(
         async with rollback_session.begin():
             repo = ChatSessionMcpStateRepo(rollback_session)
             await repo.delete_for_server(server_id)
-            assert await repo.get(chat_session_id, server_id) is None
+            assert await repo.get(chat_session_id, server_id, 0) is None
             await rollback_session.rollback()
 
     async with sessionmanager.session() as verify_session:
         assert (
             await ChatSessionMcpStateRepo(verify_session).get(
-                chat_session_id, server_id
+                chat_session_id, server_id, 0
             )
             == "protocol-before-toggle"
         )
@@ -706,12 +1027,15 @@ async def test_server_session_invalidation_joins_the_callers_transaction(
             server_id,
             candidate_mcp_session_id="protocol-stale-after-toggle",
             expected_mcp_session_id="protocol-before-toggle",
+            identity_policy_generation=0,
         )
         assert stale_winner is None
 
     async with sessionmanager.session() as final_session:
         assert (
-            await ChatSessionMcpStateRepo(final_session).get(chat_session_id, server_id)
+            await ChatSessionMcpStateRepo(final_session).get(
+                chat_session_id, server_id, 0
+            )
             is None
         )
 

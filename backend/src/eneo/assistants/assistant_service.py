@@ -1782,7 +1782,10 @@ class AssistantService:
             files=files,
         )
 
-        if session_id is not None:
+        question_id: UUID | None = None
+        is_new_session = session_id is None
+        if not is_new_session:
+            assert session_id is not None
             if group_chat_id is not None:
                 session = await self.session_service.get_session_by_uuid(
                     id=session_id, group_chat_id=group_chat_id
@@ -1797,12 +1800,32 @@ class AssistantService:
             if not name and files:
                 name = " ".join(file.name for file in files)
             if group_chat_id is not None:
-                session = await self.session_service.create_session(
-                    name=name, group_chat_id=group_chat_id
+                (
+                    session,
+                    question_id,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    question_assistant_id=assistant_to_ask.id,
+                    group_chat_id=group_chat_id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
                 )
             else:
-                session = await self.session_service.create_session(
-                    name=name, assistant_id=active_assistant.id
+                (
+                    session,
+                    question_id,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    session_assistant_id=active_assistant.id,
+                    question_assistant_id=assistant_to_ask.id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
                 )
 
         assert session is not None
@@ -1818,16 +1841,16 @@ class AssistantService:
             completion_model=effective_completion_model,
         )
 
-        # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
-        # with the router's setup transaction (conversations_router.py line 300/328), so
-        # the user's message is durable even if the stream is aborted mid-flight.
-        question_id = await self.session_service.create_question_placeholder(
-            question=question,
-            session=session,
-            files=files,
-            assistant_id=assistant_to_ask.id,
-            completion_model=cast("AICompletionModel", effective_completion_model),
-        )
+        if not is_new_session:
+            # Existing conversations need only the new placeholder transaction.
+            question_id = await self.session_service.create_question_placeholder(
+                question=question,
+                session=session,
+                files=files,
+                assistant_id=assistant_to_ask.id,
+                completion_model=cast("AICompletionModel", effective_completion_model),
+            )
+        assert question_id is not None
 
         if use_web_search and version == 2:
             web_search = await self.web_search

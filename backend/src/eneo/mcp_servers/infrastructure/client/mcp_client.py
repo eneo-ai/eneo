@@ -31,6 +31,8 @@ MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
 MCP_TERMINATE_TIMEOUT_SECONDS = 5.0
 MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES = 64 * 1024
+MCP_INITIALIZE_RESPONSE_MAX_BYTES = 1024 * 1024
+MCP_PING_RESPONSE_MAX_BYTES = 64 * 1024
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
@@ -203,20 +205,22 @@ def _extract_sse_data(buffer: bytearray, event_end: int) -> bytearray | None:
     return data if found_data else None
 
 
-class _BoundedToolListStream(httpx.AsyncByteStream):
-    """Stop a tools/list body before the MCP SDK can decode an unsafe payload."""
+class _BoundedMCPResponseStream(httpx.AsyncByteStream):
+    """Stop a bounded MCP response before the SDK can decode it."""
 
     def __init__(
         self,
         stream: httpx.AsyncByteStream,
         *,
+        method: str,
         max_bytes: int,
-        max_count: int,
+        max_count: int | None,
         request_id: object,
         content_type: str,
         reject_immediately: bool = False,
     ) -> None:
         self._stream = stream
+        self._method = method
         self._max_bytes = max_bytes
         self._max_count = max_count
         self._request_id = request_id
@@ -226,7 +230,7 @@ class _BoundedToolListStream(httpx.AsyncByteStream):
     def _error_response(self, message: str | None = None) -> bytes:
         if message is None:
             message = (
-                "MCP tools/list wire response exceeds the configured "
+                f"MCP {self._method} wire response exceeds the configured "
                 f"maximum of {self._max_bytes} bytes"
             )
         payload = json.dumps(
@@ -275,8 +279,10 @@ class _BoundedToolListStream(httpx.AsyncByteStream):
                     delimiter, delimiter_size = min(candidates)
                     event_end = delimiter + delimiter_size
                     event_data = _extract_sse_data(buffered, event_end)
-                    if event_data is not None and _tools_list_exceeds_max_count(
-                        event_data, self._max_count
+                    if (
+                        self._max_count is not None
+                        and event_data is not None
+                        and _tools_list_exceeds_max_count(event_data, self._max_count)
                     ):
                         await self._stream.aclose()
                         yield self._error_response(
@@ -288,8 +294,10 @@ class _BoundedToolListStream(httpx.AsyncByteStream):
                     del buffered[:event_end]
 
         if buffered:
-            if not self._is_sse and _tools_list_exceeds_max_count(
-                buffered, self._max_count
+            if (
+                self._max_count is not None
+                and not self._is_sse
+                and _tools_list_exceeds_max_count(buffered, self._max_count)
             ):
                 yield self._error_response(
                     "MCP tool catalog exceeds the configured maximum of "
@@ -312,12 +320,26 @@ def _json_rpc_request_payload(request: httpx.Request) -> dict[str, object] | Non
     return cast(dict[str, object], payload)
 
 
-async def _bound_tools_list_response(
-    response: httpx.Response, *, max_bytes: int, max_count: int
+async def _bound_mcp_response(
+    response: httpx.Response, *, tools_max_bytes: int, tools_max_count: int
 ) -> None:
-    """Install a streaming ceiling on tools/list responses, with or without CL."""
+    """Install method-specific pre-decode ceilings on untrusted MCP responses."""
     request_payload = _json_rpc_request_payload(response.request)
-    if request_payload is None or request_payload.get("method") != "tools/list":
+    if request_payload is None:
+        return
+    method = request_payload.get("method")
+    if not isinstance(method, str):
+        return
+    if method == "tools/list":
+        max_bytes = tools_max_bytes
+        max_count: int | None = tools_max_count
+    elif method == "initialize":
+        max_bytes = MCP_INITIALIZE_RESPONSE_MAX_BYTES
+        max_count = None
+    elif method == "ping":
+        max_bytes = MCP_PING_RESPONSE_MAX_BYTES
+        max_count = None
+    else:
         return
 
     reject_immediately = False
@@ -342,8 +364,9 @@ async def _bound_tools_list_response(
         del response.headers["content-length"]
 
     if isinstance(response.stream, httpx.AsyncByteStream):
-        response.stream = _BoundedToolListStream(
+        response.stream = _BoundedMCPResponseStream(
             response.stream,
+            method=method,
             max_bytes=max_bytes,
             max_count=max_count,
             request_id=request_payload.get("id"),
@@ -427,14 +450,14 @@ async def _open_streamable_http_client(
         # validate_tool_catalog later enforces the compact semantic definition
         # budget. The fixed allowance covers JSON-RPC and SSE framing.
 
-        async def bound_tools_list(response: httpx.Response) -> None:
-            await _bound_tools_list_response(
+        async def bound_mcp_response(response: httpx.Response) -> None:
+            await _bound_mcp_response(
                 response,
-                max_bytes=wire_max_bytes,
-                max_count=tool_catalog_max_count,
+                tools_max_bytes=wire_max_bytes,
+                tools_max_count=tool_catalog_max_count,
             )
 
-        http_client.event_hooks["response"].append(bound_tools_list)
+        http_client.event_hooks["response"].append(bound_mcp_response)
         async with streamable_http_client(
             url,
             http_client=http_client,
@@ -515,6 +538,11 @@ def _is_session_not_found(exc: BaseException) -> bool:
         or "session has been terminated" in msg
         or "invalid session id" in msg
     )
+
+
+def _is_response_limit_error(exc: BaseException) -> bool:
+    """True when the transport rejected a response before SDK decoding."""
+    return "wire response exceeds" in (_extract_error_message(exc) or str(exc)).lower()
 
 
 async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
@@ -845,6 +873,9 @@ class MCPClient:
                     # fresh-connect path and the proxy persists the new id.
                     await self._connect_internal()
                     return
+                if _is_response_limit_error(exc):
+                    await self._cleanup_contexts()
+                    raise
                 # Transient or ambiguous failure: keep the sticky session id and
                 # proceed. The session is probably still valid, and real tool
                 # calls carry their own error handling.

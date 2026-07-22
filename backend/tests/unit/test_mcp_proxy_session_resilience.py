@@ -107,16 +107,25 @@ class _FakeMCPClient:
 
 class _InMemoryMcpStateRepo:
     values: dict[tuple[UUID, UUID], str] = {}
+    generations: dict[tuple[UUID, UUID], int] = {}
     fail_reads = False
     fail_writes = False
 
     def __init__(self, session: object) -> None:
         self.session = session
 
-    async def get(self, chat_session_id: UUID, mcp_server_id: UUID) -> str | None:
+    async def get(
+        self,
+        chat_session_id: UUID,
+        mcp_server_id: UUID,
+        identity_policy_generation: int,
+    ) -> str | None:
         if self.fail_reads:
             raise RuntimeError("persistence unavailable")
-        return self.values.get((chat_session_id, mcp_server_id))
+        key = (chat_session_id, mcp_server_id)
+        if self.generations.get(key, 0) != identity_policy_generation:
+            return None
+        return self.values.get(key)
 
     async def claim(
         self,
@@ -124,15 +133,23 @@ class _InMemoryMcpStateRepo:
         mcp_server_id: UUID,
         candidate_mcp_session_id: str,
         expected_mcp_session_id: str | None,
+        identity_policy_generation: int,
     ) -> str | None:
         if self.fail_writes:
             raise RuntimeError("persistence unavailable")
         key = (chat_session_id, mcp_server_id)
         current = self.values.get(key)
+        if (
+            self.generations.get(key, identity_policy_generation)
+            != identity_policy_generation
+        ):
+            return None
         if expected_mcp_session_id is None and current is None:
             self.values[key] = candidate_mcp_session_id
+            self.generations[key] = identity_policy_generation
         elif current == expected_mcp_session_id:
             self.values[key] = candidate_mcp_session_id
+            self.generations[key] = identity_policy_generation
         return self.values.get(key)
 
 
@@ -337,6 +354,7 @@ def _install_fake_client(
 def _install_stateful_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _StatefulMCPClient.reset()
     _InMemoryMcpStateRepo.values = {}
+    _InMemoryMcpStateRepo.generations = {}
     _InMemoryMcpStateRepo.fail_reads = False
     _InMemoryMcpStateRepo.fail_writes = False
     monkeypatch.setattr(proxy_module, "MCPClient", _StatefulMCPClient)

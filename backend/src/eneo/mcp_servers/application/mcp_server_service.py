@@ -340,19 +340,43 @@ class MCPServerService:
                     mcp_server.http_auth_config_schema
                 )
 
-            _, connection_result = await self._test_connection_and_discover_tools(
+            (
+                discovered_tools,
+                connection_result,
+            ) = await self._test_connection_and_discover_tools(
                 mcp_server, test_credentials
             )
             if not connection_result.success:
                 return MCPServerUpdateResult(
                     server=mcp_server, connection=connection_result
                 )
+            if identity_mode_changed and not mcp_server.forward_identity:
+                try:
+                    await self._sync_discovered_tool_definitions(
+                        mcp_server, discovered_tools
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to reconcile the anonymous MCP tool catalog for %s",
+                        mcp_server.name,
+                    )
+                    return MCPServerUpdateResult(
+                        server=mcp_server,
+                        connection=ConnectionResult(
+                            success=False,
+                            error_message=(
+                                f"The anonymous tool catalog could not be saved: {exc}"
+                            ),
+                        ),
+                    )
 
         # Encrypt and apply new credentials after validation passes
         if http_auth_config_schema is not None and mcp_server.http_auth_type != "none":
             mcp_server.http_auth_config_schema = self._encrypt_auth_config(
                 http_auth_config_schema
             )
+        if identity_mode_changed:
+            mcp_server.identity_policy_generation += 1
 
         try:
             mcp_server = await self.repo.update(mcp_server)
@@ -459,90 +483,7 @@ class MCPServerService:
 
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
 
-            # Get existing tools from database
-            existing_tools = await self.tool_repo.by_server(mcp_server.id)
-            existing_by_name = {t.name: t for t in existing_tools}
-            remote_names = {td["name"] for td in tool_defs}
-
-            result = ToolSyncResult(
-                connection=ConnectionResult(
-                    success=True, tools_discovered=len(tool_defs)
-                )
-            )
-
-            for tool_def in tool_defs:
-                name = tool_def["name"]
-                remote_title = tool_def.get("title")
-                remote_desc = tool_def.get("description")
-                remote_schema = tool_def.get("input_schema")
-
-                if name not in existing_by_name:
-                    # New tool — create with pending state, not yet active
-                    tool = MCPServerTool.pending_discovery(
-                        mcp_server_id=mcp_server.id,
-                        name=name,
-                        title=remote_title,
-                        description=remote_desc,
-                        input_schema=remote_schema,
-                    )
-                    synced = await self.tool_repo.upsert_by_server_and_name(tool)
-                    result.new_tools.append(
-                        ToolChange(
-                            tool=synced,
-                            change_type="new",
-                            pending_description=remote_desc,
-                            pending_input_schema=remote_schema,
-                        )
-                    )
-                else:
-                    existing = existing_by_name[name]
-                    title_changed = existing.title != remote_title
-                    desc_changed = existing.description != remote_desc
-                    schema_changed = existing.input_schema != remote_schema
-
-                    if title_changed:
-                        existing.title = remote_title
-
-                    if desc_changed or schema_changed:
-                        # Changed tool — store pending values, keep active values
-                        existing.pending_description = remote_desc
-                        existing.pending_input_schema = remote_schema
-                        existing.requires_approval = True
-                        existing.removed_from_remote = False
-                        await self.tool_repo.update(existing)
-                        result.changed_tools.append(
-                            ToolChange(
-                                tool=existing,
-                                change_type="changed",
-                                current_description=existing.description,
-                                current_input_schema=existing.input_schema,
-                                pending_description=remote_desc,
-                                pending_input_schema=remote_schema,
-                            )
-                        )
-                    else:
-                        # Unchanged — clear any stale removed flag
-                        if title_changed or existing.removed_from_remote:
-                            existing.removed_from_remote = False
-                            await self.tool_repo.update(existing)
-                        result.unchanged_count += 1
-
-            # An identity-scoped admin catalog is only that admin's view. Its
-            # omissions cannot prove that a user-specific tool disappeared.
-            if not mcp_server.forward_identity:
-                for name, existing in existing_by_name.items():
-                    if name not in remote_names and not existing.removed_from_remote:
-                        existing.removed_from_remote = True
-                        existing.requires_approval = True
-                        await self.tool_repo.update(existing)
-                        result.removed_tools.append(
-                            ToolChange(
-                                tool=existing,
-                                change_type="removed",
-                                current_description=existing.description,
-                                current_input_schema=existing.input_schema,
-                            )
-                        )
+            result = await self._sync_discovered_tool_definitions(mcp_server, tool_defs)
 
             logger.info(
                 f"Sync for {mcp_server.name}: "
@@ -569,6 +510,116 @@ class MCPServerService:
                     success=False, error_message=f"Failed to connect: {e}"
                 )
             )
+
+    async def _sync_discovered_tool_definitions(
+        self, mcp_server: MCPServer, tool_defs: list[dict[str, Any]]
+    ) -> ToolSyncResult:
+        """Reconcile one validated remote catalog through the bounded owner.
+
+        New definitions and approved-definition drift are staged atomically by
+        the repository's projected-union transaction. Availability changes and
+        display titles are applied only after that bounded operation succeeds.
+        """
+        existing_tools = await self.tool_repo.by_server(mcp_server.id)
+        existing_by_name = {tool.name: tool for tool in existing_tools}
+        remote_names = {tool_def["name"] for tool_def in tool_defs}
+
+        observations = [
+            MCPServerTool.pending_discovery(
+                mcp_server_id=mcp_server.id,
+                name=tool_def["name"],
+                title=tool_def.get("title"),
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+            )
+            for tool_def in tool_defs
+            if (
+                tool_def["name"] not in existing_by_name
+                or (
+                    not existing_by_name[tool_def["name"]].requires_approval
+                    and existing_by_name[tool_def["name"]].has_definition_drift(
+                        description=tool_def.get("description"),
+                        input_schema=tool_def.get("input_schema"),
+                    )
+                )
+            )
+        ]
+        staged = await self.tool_repo.stage_observed(observations)
+        staged_by_name = {tool.name: tool for tool in staged}
+        if observations:
+            current_tools = await self.tool_repo.by_server(mcp_server.id)
+        else:
+            current_tools = existing_tools
+        current_by_name = {tool.name: tool for tool in current_tools}
+
+        result = ToolSyncResult(
+            connection=ConnectionResult(success=True, tools_discovered=len(tool_defs))
+        )
+        for tool_def in tool_defs:
+            name = tool_def["name"]
+            remote_title = tool_def.get("title")
+            remote_desc = tool_def.get("description")
+            remote_schema = tool_def.get("input_schema")
+            previous = existing_by_name.get(name)
+            current = current_by_name.get(name) or staged_by_name.get(name)
+            if current is None:
+                raise RuntimeError(f"Observed MCP tool '{name}' was not persisted")
+
+            if previous is None:
+                result.new_tools.append(
+                    ToolChange(
+                        tool=current,
+                        change_type="new",
+                        pending_description=current.pending_description,
+                        pending_input_schema=current.pending_input_schema,
+                    )
+                )
+                continue
+
+            title_changed = current.title != remote_title
+            was_removed = current.removed_from_remote
+            if title_changed:
+                current.title = remote_title
+            if was_removed:
+                current.removed_from_remote = False
+            if title_changed or was_removed:
+                await self.tool_repo.update(current)
+
+            if previous.has_definition_drift(
+                description=remote_desc,
+                input_schema=remote_schema,
+            ):
+                result.changed_tools.append(
+                    ToolChange(
+                        tool=current,
+                        change_type="changed",
+                        current_description=current.description,
+                        current_input_schema=current.input_schema,
+                        pending_description=current.pending_description,
+                        pending_input_schema=current.pending_input_schema,
+                    )
+                )
+            else:
+                result.unchanged_count += 1
+
+        # An identity-scoped catalog is one principal's view. Only an anonymous
+        # catalog is a safe availability snapshot for global exposure.
+        if not mcp_server.forward_identity:
+            for name, current in current_by_name.items():
+                if name not in remote_names and not current.removed_from_remote:
+                    current.removed_from_remote = True
+                    current.requires_approval = True
+                    await self.tool_repo.update(current)
+                    result.removed_tools.append(
+                        ToolChange(
+                            tool=current,
+                            change_type="removed",
+                            current_description=current.description,
+                            current_input_schema=current.input_schema,
+                        )
+                    )
+
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def refresh_tools(

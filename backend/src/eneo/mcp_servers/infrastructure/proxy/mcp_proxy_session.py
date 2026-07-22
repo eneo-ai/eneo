@@ -198,6 +198,8 @@ class MCPProxySession:
         """
         if not tool.is_enabled_by_default:
             return False
+        if getattr(tool, "removed_from_remote", False) is True:
+            return False
         if (
             tool.requires_approval
             and tool.description is None
@@ -303,6 +305,7 @@ class MCPProxySession:
                 return await self._mcp_state_repo.get(
                     chat_session_id=self.chat_session_id,
                     mcp_server_id=server.id,
+                    identity_policy_generation=server.identity_policy_generation,
                 )
         except Exception as exc:
             logger.warning(
@@ -334,6 +337,7 @@ class MCPProxySession:
                     mcp_server_id=server.id,
                     candidate_mcp_session_id=assigned_id,
                     expected_mcp_session_id=resume_id,
+                    identity_policy_generation=server.identity_policy_generation,
                 )
         except Exception as exc:
             logger.warning(

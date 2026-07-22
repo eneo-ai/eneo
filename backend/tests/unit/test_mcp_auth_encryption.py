@@ -659,6 +659,58 @@ class TestUpdateConnectionValidation:
 
         mock_repo.update.assert_awaited_once()
         state_repo.delete_for_server.assert_awaited_once_with(existing.id)
+        assert existing.identity_policy_generation == 1
+
+    @pytest.mark.asyncio
+    async def test_disabling_identity_uses_anonymous_catalog_as_availability_snapshot(
+        self, _setup
+    ):
+        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
+        from eneo.mcp_servers.domain.entities.mcp_server import MCPServerTool
+        from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+            MCPProxySession,
+        )
+
+        service, mock_repo, existing, _ = _setup
+        tool_repo = service.tool_repo
+        existing.forward_identity = True
+        shared = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="shared",
+            description="Approved shared tool",
+            input_schema={"type": "object"},
+        )
+        user_only = MCPServerTool(
+            mcp_server_id=existing.id,
+            name="user_only",
+            description="Approved user-scoped tool",
+            input_schema={"type": "object"},
+        )
+        existing.tools = [shared, user_only]
+        tool_repo.by_server.return_value = existing.tools
+        tool_repo.stage_observed.return_value = []
+        service._test_connection_and_discover_tools = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "name": "shared",
+                        "description": "Approved shared tool",
+                        "input_schema": {"type": "object"},
+                    }
+                ],
+                ConnectionResult(success=True, tools_discovered=1),
+            )
+        )
+
+        await service.update_mcp_server(
+            mcp_server_id=existing.id,
+            forward_identity=False,
+        )
+
+        assert mock_repo.update.await_count == 1
+        assert user_only.removed_from_remote is True
+        proxy = MCPProxySession([existing])
+        assert proxy.get_allowed_tool_names() == {"test__shared"}
 
     @pytest.mark.asyncio
     async def test_rejects_credential_update_when_connection_fails(self, _setup):
