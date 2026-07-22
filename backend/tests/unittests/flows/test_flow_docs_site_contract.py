@@ -1459,14 +1459,7 @@ def test_flow_developer_docs_data_schema_is_generated_from_backend_metadata() ->
         "flow_package_imports }o--o| flows : "
         '"flow_id, tenant_id, space_id ondelete=CASCADE"'
     ) in page
-    assert (
-        'flow_step_dependencies }o--|| flow_steps : "child_step_id ondelete=CASCADE"'
-        in page
-    )
-    assert (
-        'flow_step_dependencies }o--|| flow_steps : "parent_step_id ondelete=CASCADE"'
-        in page
-    )
+    assert "flow_step_dependencies" not in page
     assert 'flow_steps }o--|| assistants : "assistant_id ondelete=RESTRICT"' in page
     assert (
         'flows |o--o| flow_versions : "id, published_version ondelete=NO ACTION"'
@@ -1521,6 +1514,20 @@ def test_flow_schema_docs_registry_covers_flow_schema_models() -> None:
                 expected_table_names.add(table.name)
 
     assert set(registry_table_names) == expected_table_names
+
+
+def test_flow_architecture_records_bounded_updated_at_staleness_risk() -> None:
+    architecture = _read(FLOW_ARCHITECTURE_GUIDE)
+
+    assert "`flow_runs.updated_at` is the accepted stale-running clock" in architecture
+    assert "7,320 seconds (two task hard-timeout windows)" in architecture
+    assert "one further 60-second reconciliation interval" in architecture
+    assert "`last_progress_at`" in architecture
+    assert (
+        "backend/tests/integration/flows/test_flow_worker_crash_recovery.py::"
+        "test_updated_at_staleness_clock_has_bounded_transcription_reset_ceiling"
+        in architecture
+    )
 
 
 def test_flow_schema_docs_boundary_allowlist_covers_external_fks() -> None:

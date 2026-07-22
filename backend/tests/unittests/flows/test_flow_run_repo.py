@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult
@@ -121,6 +122,33 @@ async def test_save_step_result_requires_attempt_for_result_files() -> None:
         )
 
     session.scalar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_save_step_result_guards_insert_and_update_with_active_parent() -> None:
+    session = AsyncMock()
+    session.scalar.return_value = None
+    repo = FlowRunRepository(session=session)
+    result = _step_result(FlowStepResultStatus.PENDING)
+
+    saved = await repo.save_step_result(
+        flow_run_id=result.flow_run_id,
+        result=result,
+        tenant_id=result.tenant_id,
+        attempt_no=None,
+    )
+
+    assert saved is None
+    statement = session.scalar.await_args.args[0]
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+    insert_arm, conflict_arm = sql.split(" ON CONFLICT ", maxsplit=1)
+    assert "INSERT INTO flow_step_results" in insert_arm
+    assert " SELECT " in insert_arm
+    assert " WHERE EXISTS (SELECT " in insert_arm
+    assert "flow_runs.status IN" in insert_arm
+    assert "DO UPDATE SET" in conflict_arm
+    assert "WHERE EXISTS (SELECT " in conflict_arm
+    assert "flow_runs.status IN" in conflict_arm
 
 
 @pytest.mark.asyncio

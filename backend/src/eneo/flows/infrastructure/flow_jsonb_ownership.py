@@ -41,8 +41,8 @@ class FlowJsonbColumnOwner:
     envelope_name: str
     owner_symbols: tuple[str, ...]
     storage_category: FlowJsonbStorageCategory
-    schema_version_policy: FlowJsonbSchemaVersionPolicy
-    corruption_behavior: FlowJsonbCorruptionBehavior
+    schema_version_policy: str
+    corruption_behavior: str
     relational_candidate: bool
     rationale: str
 
@@ -73,8 +73,8 @@ def _owner(
     envelope_name: str,
     owner_symbols: tuple[str, ...] = (),
     storage_category: FlowJsonbStorageCategory,
-    schema_version_policy: FlowJsonbSchemaVersionPolicy,
-    corruption_behavior: FlowJsonbCorruptionBehavior,
+    schema_version_policy: str,
+    corruption_behavior: str,
     rationale: str,
     relational_candidate: bool = False,
 ) -> FlowJsonbColumnOwner:
@@ -93,6 +93,24 @@ def _owner(
 
 
 FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
+    _owner(
+        "tenants",
+        "flow_settings",
+        owner_module="eneo.flows.flow_settings",
+        envelope_name="TenantFlowSettings",
+        owner_symbols=(
+            "normalize_flow_settings_object",
+            "validate_flow_settings_write",
+            "validate_flow_settings_object",
+        ),
+        storage_category=FlowJsonbStorageCategory.AUTHORED_CONFIG,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        rationale=(
+            "Tenant Flow settings are one bounded object whose top-level keys and "
+            "nested policies are normalized on read and validated before writes."
+        ),
+    ),
     _owner(
         "flows",
         "metadata_json",
@@ -358,8 +376,8 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "build_failed_step_result",
         ),
         storage_category=FlowJsonbStorageCategory.RUNTIME_PAYLOAD,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_RUN_OR_STEP,
+        schema_version_policy="No persisted schema version is currently recorded.",
+        corruption_behavior="No dedicated corruption behavior is currently enforced.",
         rationale=(
             "Step-result input is the resolved runtime input snapshot used to "
             "debug what the step saw."
@@ -372,8 +390,8 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         envelope_name="FlowStepResultOutputPayload",
         owner_symbols=("build_completed_step_result",),
         storage_category=FlowJsonbStorageCategory.RUNTIME_PAYLOAD,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.KEEP_AUDITABLE_FAILURE,
+        schema_version_policy="No persisted schema version is currently recorded.",
+        corruption_behavior="No dedicated corruption behavior is currently enforced.",
         rationale=(
             "Step-result output is mode-specific runtime data projected to API "
             "consumers as one typed result payload."
@@ -480,8 +498,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "FlowRunReviewCheckpointRepository.open_review_checkpoint_for_completed_step",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        schema_version_policy=(
+            "schema_version is written as 1 but is not read by a payload parser."
+        ),
+        corruption_behavior=(
+            "There is no dedicated pre-write payload validation at this owner."
+        ),
         rationale=(
             "The checkpoint keeps the original reviewed output next to its state "
             "revision so reviewer edits can be compared and audited."
@@ -497,8 +519,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "FlowRunReviewCheckpointRepository.edit_review_checkpoint_payload",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        schema_version_policy=(
+            "schema_version is written as 1 but is not read by a payload parser."
+        ),
+        corruption_behavior=(
+            "There is no dedicated pre-write payload validation at this owner."
+        ),
         rationale=(
             "Current reviewed output is checkpoint-local mutable state guarded by "
             "checkpoint revision and schema version."
@@ -514,8 +540,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "FlowRunReviewCheckpointRepository.open_review_checkpoint_for_completed_step",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        schema_version_policy=(
+            "schema_version is written as 1 but is not read by a payload parser."
+        ),
+        corruption_behavior=(
+            "There is no dedicated pre-write payload validation at this owner."
+        ),
         rationale=(
             "The output contract is snapshotted with the checkpoint so review UI "
             "can validate edits against the published step contract."
@@ -531,8 +561,12 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "FlowRunReviewCheckpointRepository.open_review_checkpoint_for_completed_step",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        schema_version_policy=(
+            "schema_version is written as 1 but is not read by a payload parser."
+        ),
+        corruption_behavior=(
+            "There is no dedicated pre-write payload validation at this owner."
+        ),
         rationale=(
             "Next-step ids are a small resume snapshot from the published graph; "
             "there is no separate row identity to constrain relationally."

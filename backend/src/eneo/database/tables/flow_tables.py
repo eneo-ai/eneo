@@ -318,53 +318,6 @@ class FlowSteps(BasePublic):
     )
 
 
-class FlowStepDependencies(BaseCrossReference):
-    """Stores explicit draft step dependency edges. Writer: FlowRepository. Purpose: keep authored graph constraints queryable and tenant-scoped."""
-
-    flow_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Flows.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
-    parent_step_id: Mapped[UUID] = mapped_column(
-        ForeignKey(FlowSteps.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
-    child_step_id: Mapped[UUID] = mapped_column(
-        ForeignKey(FlowSteps.id, ondelete="CASCADE"),
-        primary_key=True,
-    )
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            "parent_step_id <> child_step_id",
-            name="ck_flow_step_dependencies_no_self_ref",
-        ),
-        ForeignKeyConstraint(
-            ["flow_id", "parent_step_id"],
-            ["flow_steps.flow_id", "flow_steps.id"],
-            ondelete="CASCADE",
-            name="fk_flow_step_deps_parent_same_flow",
-        ),
-        ForeignKeyConstraint(
-            ["flow_id", "child_step_id"],
-            ["flow_steps.flow_id", "flow_steps.id"],
-            ondelete="CASCADE",
-            name="fk_flow_step_deps_child_same_flow",
-        ),
-        ForeignKeyConstraint(
-            ["flow_id", "tenant_id"],
-            ["flows.id", "flows.tenant_id"],
-            ondelete="CASCADE",
-            name="fk_flow_step_deps_flow_tenant",
-        ),
-    )
-
-
 class FlowVersions(BaseCrossReference):
     """Stores immutable published Flow definitions. Writer: FlowRepository. Purpose: provide checksummed runtime snapshots for every run."""
 

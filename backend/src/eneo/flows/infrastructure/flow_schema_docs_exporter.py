@@ -65,9 +65,6 @@ FLOW_SCHEMA_MODEL_REGISTRY: tuple[FlowSchemaModelEntry, ...] = (
     FlowSchemaModelEntry(flow_tables.FlowVersions, FlowSchemaAggregate.FLOW_DEFINITION),
     FlowSchemaModelEntry(flow_tables.FlowSteps, FlowSchemaAggregate.FLOW_DEFINITION),
     FlowSchemaModelEntry(
-        flow_tables.FlowStepDependencies, FlowSchemaAggregate.FLOW_DEFINITION
-    ),
-    FlowSchemaModelEntry(
         flow_tables.FlowTemplateAssets, FlowSchemaAggregate.FLOW_DEFINITION
     ),
     FlowSchemaModelEntry(
@@ -692,8 +689,8 @@ def _render_jsonb_policy() -> str:
                 f"`{owner.envelope_name}`",
                 f"`{owner.owner_module}`",
                 f"`{owner.storage_category.value}`",
-                f"`{owner.schema_version_policy.value}`",
-                f"`{owner.corruption_behavior.value}`",
+                _markdown_cell(str(owner.schema_version_policy)),
+                _markdown_cell(str(owner.corruption_behavior)),
                 "yes" if owner.relational_candidate else "no",
                 _markdown_cell(owner.rationale),
             )
@@ -705,8 +702,8 @@ def _render_jsonb_policy() -> str:
             "Envelope",
             "Owner",
             "Category",
-            "Version policy",
-            "Corruption behavior",
+            "Version behavior",
+            "Invalid-payload behavior",
             "Relational candidate",
             "Rationale",
         ),

@@ -292,6 +292,21 @@ Flows separate the two axes that used to drift together:
 `backend/src/eneo/flows/runtime/step_execution_runtime.py::prepare_step_execution`,
 and `backend/src/eneo/flows/runtime/output_runtime.py::process_typed_output`.
 
+## Stale-running recovery clock
+
+`flow_runs.updated_at` is the accepted stale-running clock. The only legitimate
+mid-run reset is the one-shot transcription input patch. With the default
+3,600-second task timeout, that late patch can delay stale eligibility to at
+most 7,320 seconds (two task hard-timeout windows) after run start, followed by
+one further 60-second reconciliation interval before the periodic reconciler
+must observe it. This is an accepted bounded risk, not a claim that every run
+waits that long.
+
+Introducing `last_progress_at` remains the deletion trigger for this accepted
+risk if runtime deadline work needs a clock that excludes incidental row
+writes. The fake-clock ceiling proof is
+`backend/tests/integration/flows/test_flow_worker_crash_recovery.py::test_updated_at_staleness_clock_has_bounded_transcription_reset_ceiling`.
+
 ## Webhook Outbox Lifecycle
 
 HTTP post is durable outbox work:

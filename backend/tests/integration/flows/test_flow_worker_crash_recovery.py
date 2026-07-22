@@ -8,14 +8,54 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from freezegun import freeze_time
 from httpx import AsyncClient
 
 from eneo.database.tables.flow_tables import FlowRunAuditOutbox
 from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
     flow_stale_running_reconcile_after_seconds,
+    flow_task_hard_timeout_seconds,
 )
 from eneo.flows.enums import FlowRunLifecycleSource
 from tests.integration.flows.conftest import FlowBrokerWorkerSeam
+
+
+def test_updated_at_staleness_clock_has_bounded_transcription_reset_ceiling() -> None:
+    task_timeout_seconds = 3600
+    run_started_at = datetime(2026, 7, 22, 8, 0, tzinfo=timezone.utc)
+    hard_timeout_seconds = flow_task_hard_timeout_seconds(
+        task_timeout_seconds=task_timeout_seconds
+    )
+    stale_after_seconds = flow_stale_running_reconcile_after_seconds(
+        task_timeout_seconds=task_timeout_seconds
+    )
+    assert hard_timeout_seconds == stale_after_seconds == 3660
+
+    latest_transcription_patch_at = run_started_at + timedelta(
+        seconds=hard_timeout_seconds
+    )
+    stale_eligible_at = latest_transcription_patch_at + timedelta(
+        seconds=stale_after_seconds
+    )
+    assert stale_eligible_at - run_started_at == timedelta(seconds=7320)
+
+    with freeze_time(stale_eligible_at - timedelta(microseconds=1)):
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=stale_after_seconds
+        )
+        assert latest_transcription_patch_at > stale_before
+
+    with freeze_time(stale_eligible_at):
+        stale_before = datetime.now(timezone.utc) - timedelta(
+            seconds=stale_after_seconds
+        )
+        assert latest_transcription_patch_at <= stale_before
+
+    reconciled_by = stale_eligible_at + timedelta(
+        seconds=FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS
+    )
+    assert reconciled_by - run_started_at == timedelta(seconds=7380)
 
 
 @pytest.mark.asyncio

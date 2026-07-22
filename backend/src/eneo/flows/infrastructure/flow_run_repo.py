@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapper
 
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
@@ -1168,9 +1169,22 @@ class FlowRunRepository:
             .exists()
         )
 
+        step_result_mapper = cast(Mapper[FlowStepResults], sa.inspect(FlowStepResults))
+        insert_values = (
+            cast(
+                sa.ColumnElement[object],
+                sa.bindparam(
+                    column_name,
+                    cast(object, value),
+                    type_=step_result_mapper.columns[column_name].type,
+                ),
+            )
+            for column_name, value in payload.items()
+        )
+        insert_projection = sa.select(*insert_values).where(active_run_exists)
         stmt = (
             pg_insert(FlowStepResults)
-            .values(payload)
+            .from_select(tuple(payload), insert_projection)
             .on_conflict_do_update(
                 constraint="uq_flow_step_results_run_step",
                 set_=payload,

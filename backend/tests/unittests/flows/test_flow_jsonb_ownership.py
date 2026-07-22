@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql.sqltypes import JSON
 
 from eneo.database.tables import flow_tables
+from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.infrastructure.flow_jsonb_ownership import (
     FLOW_JSONB_COLUMN_OWNERS,
     FlowJsonbCorruptionBehavior,
@@ -33,7 +34,7 @@ def _is_executable_owner_symbol(symbol: object) -> bool:
     return inspect.isclass(symbol) or inspect.isfunction(symbol) or callable(symbol)
 
 
-def _flow_tables_json_columns() -> set[JsonbColumnKey]:
+def _flow_owned_json_columns() -> set[JsonbColumnKey]:
     import_module("eneo.database.tables")
 
     keys: set[JsonbColumnKey] = set()
@@ -49,11 +50,12 @@ def _flow_tables_json_columns() -> set[JsonbColumnKey]:
             if isinstance(column.type, (JSONB, JSON)):
                 keys.add((table.name, column.name))
 
+    keys.add((Tenants.__table__.name, Tenants.flow_settings.property.columns[0].name))
     return keys
 
 
 def test_flow_jsonb_owner_registry_matches_sqlalchemy_metadata() -> None:
-    discovered_columns = _flow_tables_json_columns()
+    discovered_columns = _flow_owned_json_columns()
 
     assert discovered_columns
     assert set(FLOW_JSONB_COLUMN_OWNERS) == discovered_columns
@@ -68,8 +70,10 @@ def test_flow_jsonb_owner_registry_entries_are_reviewable() -> None:
         assert owner.rationale
         assert "TODO" not in owner.rationale.upper()
         assert isinstance(owner.storage_category, FlowJsonbStorageCategory)
-        assert isinstance(owner.schema_version_policy, FlowJsonbSchemaVersionPolicy)
-        assert isinstance(owner.corruption_behavior, FlowJsonbCorruptionBehavior)
+        assert isinstance(owner.schema_version_policy, str)
+        assert owner.schema_version_policy
+        assert isinstance(owner.corruption_behavior, str)
+        assert owner.corruption_behavior
 
         module = import_module(owner.owner_module)
         assert owner.owner_symbols, f"{owner.table_name}.{owner.column_name}"
@@ -96,6 +100,53 @@ def test_flow_jsonb_owner_registry_has_no_deferred_inventory_escape_hatch() -> N
         FlowJsonbCorruptionBehavior,
     ):
         assert "deferred_inventory" not in {item.value for item in enum_type}
+
+
+def test_tenant_flow_settings_has_canonical_validated_owner() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("tenants", "flow_settings")]
+
+    assert owner.owner_module == "eneo.flows.flow_settings"
+    assert owner.envelope_name == "TenantFlowSettings"
+    assert owner.owner_symbols == (
+        "normalize_flow_settings_object",
+        "validate_flow_settings_write",
+        "validate_flow_settings_object",
+    )
+    assert owner.storage_category is FlowJsonbStorageCategory.AUTHORED_CONFIG
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
+    )
+    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
+
+
+def test_unexecuted_step_result_and_checkpoint_policies_are_plain_descriptions() -> (
+    None
+):
+    step_result_keys = (
+        ("flow_step_results", "input_payload_json"),
+        ("flow_step_results", "output_payload_json"),
+    )
+    checkpoint_keys = (
+        ("flow_run_review_checkpoints", "original_payload_json"),
+        ("flow_run_review_checkpoints", "current_payload_json"),
+        ("flow_run_review_checkpoints", "output_contract_json"),
+        ("flow_run_review_checkpoints", "next_step_ids_json"),
+    )
+
+    for key in step_result_keys:
+        owner = FLOW_JSONB_COLUMN_OWNERS[key]
+        assert not isinstance(owner.schema_version_policy, FlowJsonbSchemaVersionPolicy)
+        assert "no persisted schema version" in owner.schema_version_policy.lower()
+        assert not isinstance(owner.corruption_behavior, FlowJsonbCorruptionBehavior)
+        assert "no dedicated corruption" in owner.corruption_behavior.lower()
+
+    for key in checkpoint_keys:
+        owner = FLOW_JSONB_COLUMN_OWNERS[key]
+        assert not isinstance(owner.schema_version_policy, FlowJsonbSchemaVersionPolicy)
+        assert "written as 1 but is not read" in owner.schema_version_policy
+        assert not isinstance(owner.corruption_behavior, FlowJsonbCorruptionBehavior)
+        assert "no dedicated pre-write payload validation" in owner.corruption_behavior
 
 
 def test_published_definition_has_verified_functional_and_forensic_owners() -> None:
