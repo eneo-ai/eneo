@@ -160,6 +160,7 @@ def compile_ordered_edit_proposal(
                     step_draft=item.step,
                     plan_step_ref=plan_ref,
                     prior_steps=compiled_steps,
+                    require_declared_previous_fields=True,
                 )
             )
             continue
@@ -254,6 +255,7 @@ def _compile_existing_step_modification(
             uses_previous_fields=uses_previous_fields,
             uses_previous_outputs=[],
             prior_steps=prior_steps,
+            require_declared_previous_fields=True,
         )
         input_contract = derive_input_contract(
             input_source=step.input_source,

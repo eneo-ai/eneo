@@ -697,7 +697,18 @@ def test_edit_overlay_add_step_rejects_unresolvable_previous_output_ref() -> Non
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         compile_ordered_edit_proposal(
-            base_spec=_base_spec(),
+            base_spec=_base_spec(
+                _step(
+                    "step_a",
+                    "existing_step_1",
+                    "Extract",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"answer": {"type": "string"}},
+                    },
+                )
+            ),
             proposal=materialize_ordered_edit_proposal(proposal),
         )
 
@@ -793,6 +804,53 @@ def test_edit_overlay_rejects_unresolvable_previous_field_ref_before_hint_compil
         "ref_kind": "uses_previous_fields",
         "from_step": 2,
         "prior_step_count": 1,
+    }
+    assert base.steps[1].assistant_spec.instructions == "Original prompt"
+
+
+def test_edit_overlay_rejects_previous_field_missing_from_output_contract() -> None:
+    base = _base_spec(
+        _step(
+            "step_a",
+            "existing_step_1",
+            "Extract",
+            output_type=OutputType.JSON,
+            output_contract={
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+            },
+        ),
+        _step(
+            "step_b",
+            "existing_step_2",
+            "Summarize",
+            input_source=InputSource.ALL_PREVIOUS_STEPS,
+        ),
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        compile_ordered_edit_proposal(
+            base_spec=base,
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(existing_step_ref="existing_step_1"),
+                    ModifyExistingStep(
+                        existing_step_ref="existing_step_2",
+                        uses_previous_fields=[
+                            PreviousFieldRef(from_step=1, field_path="missing")
+                        ],
+                    ),
+                ],
+            ),
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_PLAN_STEP_REF
+    assert exc_info.value.context == {
+        "ref_kind": "uses_previous_fields",
+        "from_step": 1,
+        "field_path": "missing",
+        "missing_path": "missing",
+        "source_step_ref": "step_a",
     }
     assert base.steps[1].assistant_spec.instructions == "Original prompt"
 

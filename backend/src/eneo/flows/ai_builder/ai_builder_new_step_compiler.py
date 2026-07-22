@@ -9,6 +9,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    missing_structured_output_path,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -94,6 +97,7 @@ def compile_new_step_draft(
     source_capture_fields: tuple[SourceCaptureField, ...] = (),
     assistant_output_fields: list[StructuredFieldDraft] | None = None,
     ui_language: str | None = None,
+    require_declared_previous_fields: bool = False,
 ) -> StepSpec:
     step_draft = normalize_new_step_input_shape(
         step_draft,
@@ -103,7 +107,11 @@ def compile_new_step_draft(
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
     input_config = compile_runtime_input_overrides(step_draft)
-    input_bindings = compile_input_bindings(step_draft, prior_steps)
+    input_bindings = compile_input_bindings(
+        step_draft,
+        prior_steps,
+        require_declared_previous_fields=require_declared_previous_fields,
+    )
     input_contract = derive_input_contract(
         input_source=input_source,
         input_type=step_draft.input_type,
@@ -248,6 +256,8 @@ def compile_review_policy(
 def compile_input_bindings(
     step_draft: NewStepDraft,
     prior_steps: list[StepSpec],
+    *,
+    require_declared_previous_fields: bool = False,
 ) -> dict[str, Any] | None:
     """Compile explicit "Underlag till text" only when implicit input is insufficient.
 
@@ -264,6 +274,7 @@ def compile_input_bindings(
         uses_previous_fields=step_draft.uses_previous_fields,
         uses_previous_outputs=step_draft.uses_previous_outputs,
         prior_steps=prior_steps,
+        require_declared_previous_fields=require_declared_previous_fields,
     )
 
 
@@ -275,12 +286,14 @@ def compile_step_input_bindings(
     uses_previous_fields: list[PreviousFieldRef],
     uses_previous_outputs: list[PreviousOutputRef],
     prior_steps: list[StepSpec],
+    require_declared_previous_fields: bool = False,
 ) -> dict[str, Any] | None:
     """Compile explicit "Underlag till text" for a step in plan-ref order."""
     _require_resolvable_previous_refs(
         uses_previous_fields,
         ref_kind="uses_previous_fields",
         prior_steps=prior_steps,
+        require_declared_fields=require_declared_previous_fields,
     )
     _require_resolvable_previous_refs(
         uses_previous_outputs,
@@ -749,19 +762,50 @@ def _require_resolvable_previous_refs(
     *,
     ref_kind: Literal["uses_previous_fields", "uses_previous_outputs"],
     prior_steps: list[StepSpec],
+    require_declared_fields: bool = False,
 ) -> None:
     for ref in refs:
-        if 1 <= ref.from_step <= len(prior_steps):
+        if not 1 <= ref.from_step <= len(prior_steps):
+            raise AIBuilderBadRequestException(
+                "A previous-step reference points outside the compiled prior-step frame.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+                context={
+                    "ref_kind": ref_kind,
+                    "from_step": ref.from_step,
+                    "prior_step_count": len(prior_steps),
+                },
+            )
+        if not isinstance(ref, PreviousFieldRef) or not require_declared_fields:
             continue
-        raise AIBuilderBadRequestException(
-            "A previous-step reference points outside the compiled prior-step frame.",
-            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
-            context={
-                "ref_kind": ref_kind,
-                "from_step": ref.from_step,
-                "prior_step_count": len(prior_steps),
-            },
-        )
+        source_step = prior_steps[ref.from_step - 1]
+        if source_step.output_type != OutputType.JSON:
+            raise AIBuilderBadRequestException(
+                "A previous-field reference targets a step that does not produce structured output.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+                context={
+                    "ref_kind": ref_kind,
+                    "from_step": ref.from_step,
+                    "field_path": ref.field_path,
+                    "source_step_ref": source_step.plan_step_ref,
+                    "source_output_type": source_step.output_type.value,
+                },
+            )
+        output_contract = source_step.output_contract
+        if not isinstance(output_contract, dict):
+            continue
+        missing_path = missing_structured_output_path(output_contract, ref.field_path)
+        if missing_path is not None:
+            raise AIBuilderBadRequestException(
+                "A previous-field reference is not declared by the source step output contract.",
+                code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+                context={
+                    "ref_kind": ref_kind,
+                    "from_step": ref.from_step,
+                    "field_path": ref.field_path,
+                    "missing_path": missing_path,
+                    "source_step_ref": source_step.plan_step_ref,
+                },
+            )
 
 
 def _collapsible_previous_field_ref_steps(
