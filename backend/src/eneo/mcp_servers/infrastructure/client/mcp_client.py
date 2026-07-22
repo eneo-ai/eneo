@@ -554,7 +554,8 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     """
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            resp = await client.post(
+            async with client.stream(
+                "POST",
                 url,
                 headers={**headers, "Content-Type": "application/json"},
                 json={
@@ -567,17 +568,18 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                         "clientInfo": {"name": "eneo", "version": "0.1"},
                     },
                 },
-            )
-            if resp.status_code == 401:
-                return (
-                    "Authentication failed (401 Unauthorized). Check your bearer token."
-                )
-            elif resp.status_code == 403:
-                return "Access denied (403 Forbidden). Check your credentials."
-            elif resp.status_code >= 500:
-                return f"Server error (HTTP {resp.status_code})."
-            elif resp.status_code >= 400:
-                return f"Server returned HTTP {resp.status_code}."
+            ) as response:
+                if response.status_code == 401:
+                    return (
+                        "Authentication failed (401 Unauthorized). "
+                        "Check your bearer token."
+                    )
+                if response.status_code == 403:
+                    return "Access denied (403 Forbidden). Check your credentials."
+                if response.status_code >= 500:
+                    return f"Server error (HTTP {response.status_code})."
+                if response.status_code >= 400:
+                    return f"Server returned HTTP {response.status_code}."
     except httpx.ConnectError:
         return f"Could not connect to {url}. Verify the URL and that the server is running."
     except httpx.TimeoutException:
@@ -1189,11 +1191,12 @@ class MCPClient:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(MCP_TERMINATE_TIMEOUT_SECONDS)
         ) as client:
-            response = await client.delete(self.mcp_server.http_url, headers=headers)
-
-        if response.status_code in {404, 405}:
-            return
-        response.raise_for_status()
+            async with client.stream(
+                "DELETE", self.mcp_server.http_url, headers=headers
+            ) as response:
+                if response.status_code in {404, 405}:
+                    return
+                response.raise_for_status()
 
     async def __aenter__(self):
         """Async context manager entry."""

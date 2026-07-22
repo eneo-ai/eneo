@@ -330,6 +330,108 @@ class TestMCPClientListToolsErrorPropagation:
         assert chunks_sent < total_chunks
 
     @pytest.mark.asyncio
+    async def test_failed_catalog_cleanup_does_not_buffer_delete_body(self) -> None:
+        app = FastAPI()
+        delete_stream_closed = asyncio.Event()
+        delete_chunks_sent = 0
+        total_chunks = 512
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "cleanup-test", "version": "1"},
+                        },
+                    },
+                    headers={"Mcp-Session-Id": "cleanup-session"},
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                return Response(status_code=500)
+            return Response(status_code=400)
+
+        @app.delete("/mcp")
+        async def delete_session() -> StreamingResponse:
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal delete_chunks_sent
+                try:
+                    for _ in range(total_chunks):
+                        delete_chunks_sent += 1
+                        yield b"x" * 4096
+                        await asyncio.sleep(0.001)
+                finally:
+                    delete_stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(), media_type="application/octet-stream"
+            )
+
+        async with _serve_test_app(app) as url:
+            client = MCPClient(
+                MCPServer(tenant_id=uuid4(), name="cleanup-test", http_url=url)
+            )
+            async with client:
+                assigned_id = client.assigned_mcp_session_id
+                assert assigned_id == "cleanup-session"
+                with pytest.raises(MCPClientError, match="Failed to list tools"):
+                    await client.list_tools()
+
+            await client.terminate_protocol_session(assigned_id)
+
+        await asyncio.wait_for(delete_stream_closed.wait(), timeout=1)
+        assert delete_chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    async def test_message_less_connection_diagnostic_does_not_buffer_body(
+        self,
+    ) -> None:
+        app = FastAPI()
+        diagnostic_stream_closed = asyncio.Event()
+        diagnostic_chunks_sent = 0
+        total_chunks = 512
+
+        @app.post("/mcp")
+        async def diagnostic_endpoint() -> StreamingResponse:
+            async def oversized_response() -> AsyncIterator[bytes]:
+                nonlocal diagnostic_chunks_sent
+                try:
+                    for _ in range(total_chunks):
+                        diagnostic_chunks_sent += 1
+                        yield b"x" * 4096
+                        await asyncio.sleep(0.001)
+                finally:
+                    diagnostic_stream_closed.set()
+
+            return StreamingResponse(
+                oversized_response(),
+                status_code=503,
+                media_type="application/octet-stream",
+            )
+
+        async with _serve_test_app(app) as url:
+            client = MCPClient(
+                MCPServer(tenant_id=uuid4(), name="diagnostic-test", http_url=url)
+            )
+            client._connect_internal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+                side_effect=Exception()
+            )
+
+            with pytest.raises(MCPClientError, match="Server error \\(HTTP 503\\)"):
+                await client.connect()
+
+        await asyncio.wait_for(diagnostic_stream_closed.wait(), timeout=1)
+        assert diagnostic_chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
     async def test_tool_count_is_bounded_before_sdk_model_validation(
         self, monkeypatch: pytest.MonkeyPatch, response_mode: str
