@@ -178,6 +178,7 @@ from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
+    ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
@@ -1667,7 +1668,13 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
         exc: Exception | None = None,
     ) -> dict[str, Any]:
-        if isinstance(exc, ProviderRejectedRequestException):
+        late_capability_rejection = (
+            isinstance(exc, ProviderCapabilityRejectedException)
+            and not exc.retry_without_capability_safe
+        )
+        if isinstance(exc, ProviderRejectedRequestException) and not (
+            late_capability_rejection
+        ):
             public_error = (
                 f"Flow step {step.step_order} execution failed because the provider "
                 "rejected the request; the runtime did not repeat it."

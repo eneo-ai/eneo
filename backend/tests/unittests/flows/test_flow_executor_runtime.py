@@ -92,6 +92,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.main.exceptions import (
     BadRequestException,
+    ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
@@ -1442,6 +1443,44 @@ async def test_known_provider_rejection_has_no_ambiguous_outcome_disclosure(user
     assert "may or may not have started" not in finish_kwargs["error_message"]
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
     assert "may or may not have started" not in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_late_capability_rejection_discloses_prior_provider_work(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=ProviderCapabilityRejectedException(
+            "response_format was rejected after an earlier provider round",
+            capability="response_format",
+            retry_without_capability_safe=False,
+            code="provider_capability_rejected",
+        ),
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert "may or may not have started" in finish_kwargs["error_message"]
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert "rerunning can repeat provider work and spend" in terminal_error.message
 
 
 @pytest.mark.asyncio
