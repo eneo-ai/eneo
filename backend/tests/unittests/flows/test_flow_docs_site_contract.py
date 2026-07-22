@@ -596,9 +596,20 @@ def test_flow_architecture_uses_durable_existing_repository_references() -> None
         )
         if "::" not in reference and Path(reference).suffix in {".py", ".svelte", ".ts"}
     )
+    path_only_python_references = sorted(
+        reference
+        for reference in FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN.findall(
+            architecture
+        )
+        if "::" not in reference and Path(reference).suffix == ".py"
+    )
     assert not path_only_guard_references, (
         "Architecture guard rows must cite the exact test symbol, not only its "
         f"file: {path_only_guard_references}"
+    )
+    assert not path_only_python_references, (
+        "Architecture Python references must cite exact symbols: "
+        f"{path_only_python_references}"
     )
 
     numeric_line_references = sorted(
