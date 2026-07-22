@@ -345,7 +345,17 @@ packages. Standalone assistants and conversations retain their separately owned
 MCP behavior.
 
 Terminal HTTP POST output remains supported through the durable webhook outbox,
-including its idempotency, retry, and dead-letter lifecycle.
+with an **at-least-once sender contract**. Delivery can be duplicated after a
+timeout, connection loss, worker crash, or expired claim. Eneo sends the same
+opaque `Idempotency-Key` for retries of one Flow run, output step, and step
+attempt; this does not verify receiver idempotency. Receivers must retain and
+deduplicate that key for their required replay window.
+
+Eneo charges each of the five delivery attempts when the durable claim is made,
+before HTTP. HTTP `408` and `429`, `5xx`, and transport failures are
+bounded-retryable; other `4xx` responses are terminal. If the fifth claim
+expires with an unknown remote outcome, Eneo dead-letters the delivery and
+fails the run without a sixth POST.
 
 ## Ownership and visibility
 

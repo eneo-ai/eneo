@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -22,6 +22,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
 from eneo.flows.domain.flow import (
@@ -341,6 +342,26 @@ class _FailureCasFailingWebhookDeliveryRepository(FlowRunWebhookDeliveryReposito
         return False
 
 
+class _FailureCasFailingOnceWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
+    fail_next_failure = False
+
+    async def record_delivery_failure(self, **kwargs):
+        if self.fail_next_failure:
+            self.fail_next_failure = False
+            return False
+        return await super().record_delivery_failure(**kwargs)
+
+
+class _SuccessCasFailingOnceWebhookDeliveryRepository(FlowRunWebhookDeliveryRepository):
+    fail_next_success = False
+
+    async def mark_delivery_succeeded(self, **kwargs):
+        if self.fail_next_success:
+            self.fail_next_success = False
+            return False
+        return await super().mark_delivery_succeeded(**kwargs)
+
+
 def _delivery_service(
     *,
     session,
@@ -419,17 +440,217 @@ async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconci
             now=datetime.now(timezone.utc),
             limit=10,
             claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
         )
         second_claim = await webhook_repo.claim_due_delivery_rows(
             now=datetime.now(timezone.utc),
             limit=10,
             claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
         )
 
     assert stale_runs == []
     assert [item.id for item in claimed] == [delivery_id]
     assert second_claim == []
     assert all(item.id != run.id for item in stale_runs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_claim_charges_attempt_before_outcome(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        now = datetime.now(timezone.utc)
+
+        claimed = await webhook_repo.claim_due_delivery_rows(
+            now=now,
+            limit=1,
+            claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+        )
+        await session.commit()
+
+        async with sessionmanager.session() as check_session:
+            async with check_session.begin():
+                committed_attempts = await check_session.scalar(
+                    sa.select(FlowRunWebhookDeliveries.delivery_attempts).where(
+                        FlowRunWebhookDeliveries.id == delivery_id
+                    )
+                )
+
+        assert claimed[0].delivery_attempts == 1
+        assert committed_attempts == 1
+
+        did_record = await webhook_repo.record_delivery_failure(
+            delivery_id=delivery_id,
+            claim_token=claimed[0].claim_token,
+            error_message="retryable failure",
+            next_delivery_at=now,
+            dead_lettered_at=None,
+        )
+        attempts_after_outcome = await session.scalar(
+            sa.select(FlowRunWebhookDeliveries.delivery_attempts).where(
+                FlowRunWebhookDeliveries.id == delivery_id
+            )
+        )
+
+    assert did_record is True
+    assert attempts_after_outcome == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_reclaims_expired_claim_after_pre_send_crash(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        now = datetime.now(timezone.utc)
+
+        first_claim = (
+            await webhook_repo.claim_due_delivery_rows(
+                now=now,
+                limit=1,
+                claim_ttl_seconds=120,
+                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+            )
+        )[0]
+        await session.commit()
+
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        request = httpx.Request("POST", "https://example.org/hook/case-123")
+        send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+        service._send_http_request = send_http_request
+
+        recovered = await service.deliver_due(now=now + timedelta(seconds=121))
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.idempotency_key,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert first_claim.delivery_attempts == 1
+    assert recovered.attempted_count == 1
+    assert recovered.delivered_count == 1
+    assert send_http_request.await_count == 1
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+    assert delivery_state.delivery_attempts == 2
+    assert delivery_state.idempotency_key == first_claim.idempotency_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_reposts_after_expired_success_claim_with_stable_key(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = _SuccessCasFailingOnceWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        webhook_repo.fail_next_success = True
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        request = httpx.Request("POST", "https://example.org/hook/case-123")
+        sent_idempotency_keys: list[str] = []
+
+        async def _send_http_request(**kwargs):
+            sent_idempotency_keys.append(kwargs["headers"]["Idempotency-Key"])
+            return httpx.Response(200, request=request)
+
+        service._send_http_request = _send_http_request
+        now = datetime.now(timezone.utc)
+
+        outcome_commit_lost = await service.deliver_due(now=now)
+        recovered = await service.deliver_due(
+            now=now + timedelta(seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 1)
+        )
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+
+    assert outcome_commit_lost.attempted_count == 1
+    assert outcome_commit_lost.delivered_count == 0
+    assert recovered.attempted_count == 1
+    assert recovered.delivered_count == 1
+    assert len(sent_idempotency_keys) == 2
+    assert sent_idempotency_keys[0] == sent_idempotency_keys[1]
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+    assert delivery_state.delivery_attempts == 2
 
 
 @pytest.mark.asyncio
@@ -545,12 +766,16 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
         async def _send_http_request(**kwargs):
             async with sessionmanager.session() as check_session:
                 enable_autobegin_for_flow_task_session(check_session)
-                committed_claim_token = await check_session.scalar(
-                    sa.select(FlowRunWebhookDeliveries.claim_token).where(
-                        FlowRunWebhookDeliveries.id == delivery_id
+                committed_claim = (
+                    await check_session.execute(
+                        sa.select(
+                            FlowRunWebhookDeliveries.claim_token,
+                            FlowRunWebhookDeliveries.delivery_attempts,
+                        ).where(FlowRunWebhookDeliveries.id == delivery_id)
                     )
-                )
-            assert committed_claim_token is not None
+                ).one()
+            assert committed_claim.claim_token is not None
+            assert committed_claim.delivery_attempts == 1
             assert kwargs["url"] == "https://example.org/hook/case-123"
             assert kwargs["body_bytes"] == b"done"
             assert len(kwargs["headers"]["Idempotency-Key"]) == 64
@@ -1275,3 +1500,213 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
     assert delivery_state.claim_token is not None
     assert run_state == FlowRunStatus.RUNNING.value
     assert result_payload == {"text": "done"}
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_retry", "expected_dead_letter"),
+    [(408, 1, 0), (429, 1, 0), (422, 0, 1)],
+)
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_applies_http_status_retry_policy(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    status_code: int,
+    expected_retry: int,
+    expected_dead_letter: int,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        request = httpx.Request("POST", "https://example.org/hook/case-123")
+        service._send_http_request = AsyncMock(
+            return_value=httpx.Response(status_code, request=request)
+        )
+
+        result = await service.deliver_due(now=datetime.now(timezone.utc))
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+        run_status = await session.scalar(
+            sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+        )
+
+    assert result.retry_scheduled_count == expected_retry
+    assert result.dead_lettered_count == expected_dead_letter
+    assert delivery_state.delivery_attempts == 1
+    if expected_dead_letter:
+        assert (
+            delivery_state.delivery_status
+            == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+        )
+        assert run_status == FlowRunStatus.FAILED.value
+    else:
+        assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+        assert run_status == FlowRunStatus.RUNNING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_five_claims_then_converges_without_sixth_post(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = _FailureCasFailingOnceWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        request = httpx.Request("POST", "https://example.org/hook/case-123")
+        send_http_request = AsyncMock(return_value=httpx.Response(503, request=request))
+        service._send_http_request = send_http_request
+        now = datetime.now(timezone.utc)
+
+        for delivery_attempt in range(1, FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
+            if delivery_attempt == FLOW_WEBHOOK_MAX_ATTEMPTS:
+                webhook_repo.fail_next_failure = True
+            result = await service.deliver_due(now=now)
+            assert result.attempted_count == 1
+            now += timedelta(seconds=2_000)
+
+        attempts_after_lost_outcome = await session.scalar(
+            sa.select(FlowRunWebhookDeliveries.delivery_attempts).where(
+                FlowRunWebhookDeliveries.id == delivery_id
+            )
+        )
+        converged = await service.deliver_due(now=now)
+        delivery_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.delivery_status,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                    FlowRunWebhookDeliveries.delivery_last_error,
+                ).where(FlowRunWebhookDeliveries.id == delivery_id)
+            )
+        ).one()
+        run_state = (
+            await session.execute(
+                sa.select(FlowRuns.status, FlowRuns.error_json).where(
+                    FlowRuns.id == run.id
+                )
+            )
+        ).one()
+
+    assert attempts_after_lost_outcome == FLOW_WEBHOOK_MAX_ATTEMPTS
+    assert send_http_request.await_count == FLOW_WEBHOOK_MAX_ATTEMPTS
+    assert converged.attempted_count == 0
+    assert converged.dead_lettered_count == 1
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
+    assert delivery_state.delivery_attempts == FLOW_WEBHOOK_MAX_ATTEMPTS
+    assert "outcome is unknown" in delivery_state.delivery_last_error
+    assert "may have been delivered" in delivery_state.delivery_last_error
+    assert run_state.status == FlowRunStatus.FAILED.value
+    run_error = FlowRunError.model_validate(run_state.error_json)
+    assert "may have been delivered" in run_error.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_redacts_url_secrets_from_persisted_error(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+        )
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        delivery_id = await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+        service = _delivery_service(
+            session=session,
+            container=container,
+            webhook_repo=webhook_repo,
+        )
+        request = httpx.Request("POST", "https://example.org/hook/case-123")
+        service._send_http_request = AsyncMock(
+            side_effect=httpx.ConnectError(
+                "POST https://user:pass@example.org/hook?token=secret-value failed",
+                request=request,
+            )
+        )
+
+        result = await service.deliver_due(now=datetime.now(timezone.utc))
+        persisted_error = await session.scalar(
+            sa.select(FlowRunWebhookDeliveries.delivery_last_error).where(
+                FlowRunWebhookDeliveries.id == delivery_id
+            )
+        )
+
+    assert result.retry_scheduled_count == 1
+    assert persisted_error is not None
+    assert "user:pass" not in persisted_error
+    assert "secret-value" not in persisted_error
+    assert "token=%5BREDACTED%5D" in persisted_error

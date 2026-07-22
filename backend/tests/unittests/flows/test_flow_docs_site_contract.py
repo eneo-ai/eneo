@@ -575,6 +575,25 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_flow_webhook_docs_disclose_at_least_once_sender_contract() -> None:
+    architecture = _read(REPO_ROOT / "docs" / "flows" / "architecture.md")
+    reliability = _read(
+        REPO_ROOT / "docs" / "engineering" / "runtime-reliability-standard.md"
+    )
+    public_pages = (_read(FLOW_OVERVIEW), _read(FLOW_API_GUIDE))
+
+    assert "at-least-once sender contract" in " ".join(architecture.split())
+    assert "without a verified receiver idempotency contract" in " ".join(
+        reliability.split()
+    )
+    for page in public_pages:
+        normalized_page = " ".join(page.split())
+        assert "at-least-once sender contract" in normalized_page
+        assert "Idempotency-Key" in normalized_page
+        assert "duplicate" in normalized_page
+        assert "without a sixth POST" in normalized_page
+
+
 def _assert_generated_doc(actual: str, expected: str, *, path: Path) -> None:
     relative_path = path.relative_to(REPO_ROOT)
     assert actual == expected, (

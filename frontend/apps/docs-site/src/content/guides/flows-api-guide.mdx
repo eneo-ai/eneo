@@ -564,6 +564,24 @@ Run creation supports caller-supplied idempotency. Reusing the same key with the
 
 This is especially useful for browser retries, webhook retries, and unreliable networks.
 
+#### Receiving terminal Flow webhooks
+
+Terminal HTTP POST output uses an **at-least-once sender contract**. A timeout,
+connection loss, worker crash, or claim expiry can occur after the receiver
+accepted a request but before Eneo committed its receipt, so duplicate POSTs
+are possible.
+
+Eneo sends an opaque `Idempotency-Key` that is stable across retries of one Flow
+run, output step, and step attempt. That scope is sender-side only: Eneo does
+not verify how long your receiver retains keys or how it handles replays. Your
+receiver must store the key for its required replay window and return the same
+logical result without repeating the mutation when the key is seen again.
+
+Each durable claim consumes one of five attempts before HTTP starts. HTTP `408`
+and `429`, `5xx`, and transport failures remain bounded-retryable; other `4xx`
+responses are terminal. If the fifth claim expires with an unknown remote
+outcome, Eneo dead-letters the delivery and fails the run without a sixth POST.
+
 When tenant capacity is full, create returns HTTP `429`, `Retry-After: 60`, and
 code `flow_run_concurrency_limit_reached`. Branch on the HTTP status plus that
 string code, wait at least the advertised delay while polling existing runs,

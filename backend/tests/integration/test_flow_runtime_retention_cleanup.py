@@ -40,6 +40,9 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_MAX_ATTEMPTS,
+)
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import (
     FlowRunRerunOperationStatus,
@@ -1492,6 +1495,7 @@ async def test_cleanup_old_flow_runtime_data_keeps_run_with_pending_webhook(
             now=now,
             limit=10,
             claim_ttl_seconds=120,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
         )
         if claim_expiry_offset_seconds > 0:
             assert claimed == []

@@ -17,6 +17,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
     FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
+    FLOW_WEBHOOK_MAX_ATTEMPTS,
     flow_webhook_retry_delay_seconds,
     sanitize_webhook_delivery_error,
 )
@@ -55,6 +56,7 @@ from eneo.flows.runtime.http_audit import (
 )
 from eneo.flows.runtime.http_orchestration import (
     FlowHttpOrchestrationDeps,
+    WebhookDeliveryError,
     deliver_webhook,
 )
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
@@ -99,6 +101,10 @@ class WebhookDeliveryClaimLostError(RuntimeError):
     pass
 
 
+class WebhookDeliveryAttemptBudgetExhaustedError(RuntimeError):
+    pass
+
+
 class FlowRunWebhookDeliveryService:
     def __init__(
         self,
@@ -137,27 +143,55 @@ class FlowRunWebhookDeliveryService:
         if limit <= 0:
             return FlowWebhookDeliveryResult()
 
+        processed = 0
         attempted = 0
         delivered = 0
         retry_scheduled = 0
         dead_lettered = 0
         started_at = monotonic()
-        while attempted < limit:
+        while processed < limit:
             if (
-                attempted > 0
+                processed > 0
                 and monotonic() - started_at >= FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS
             ):
                 break
+
+            exhausted_rows = (
+                await self.webhook_delivery_repo.lock_expired_at_budget_delivery_rows(
+                    now=now,
+                    limit=1,
+                    max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+                )
+            )
+            if exhausted_rows:
+                await self._record_failure(
+                    row=exhausted_rows[0],
+                    now=now,
+                    error=WebhookDeliveryAttemptBudgetExhaustedError(
+                        "Webhook delivery claim expired after the final allowed "
+                        "attempt; the remote outcome is unknown and the payload may "
+                        "have been delivered."
+                    ),
+                    force_dead_letter=True,
+                )
+            await self.webhook_delivery_repo.session.commit()
+            if exhausted_rows:
+                processed += 1
+                dead_lettered += 1
+                continue
+
             rows = await self.webhook_delivery_repo.claim_due_delivery_rows(
                 now=now,
                 limit=1,
                 claim_ttl_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
             )
             await self.webhook_delivery_repo.session.commit()
             if not rows:
                 break
 
             row = rows[0]
+            processed += 1
             attempted += 1
             payload_prepared = False
             try:
@@ -216,6 +250,26 @@ class FlowRunWebhookDeliveryService:
                     continue
                 if did_dead_letter:
                     dead_lettered += 1
+            except WebhookDeliveryError as exc:
+                terminal_http_failure = (
+                    exc.status_code is not None
+                    and 400 <= exc.status_code < 500
+                    and exc.status_code not in {408, 429}
+                )
+                try:
+                    async with self.webhook_delivery_repo.session.begin():
+                        did_dead_letter = await self._record_failure(
+                            row=row,
+                            now=now,
+                            error=exc,
+                            force_dead_letter=terminal_http_failure,
+                        )
+                except WebhookDeliveryClaimLostError:
+                    continue
+                if did_dead_letter:
+                    dead_lettered += 1
+                else:
+                    retry_scheduled += 1
             except Exception as exc:
                 try:
                     async with self.webhook_delivery_repo.session.begin():
@@ -439,7 +493,6 @@ class FlowRunWebhookDeliveryService:
             delivery_id=row.id,
             claim_token=row.claim_token,
             delivered_at=now,
-            attempt_no=row.delivery_attempts + 1,
         )
         if not did_mark:
             raise WebhookDeliveryClaimLostError(
@@ -467,11 +520,12 @@ class FlowRunWebhookDeliveryService:
         force_dead_letter: bool,
         terminal_error: FlowRunError | None = None,
     ) -> bool:
-        attempt_no = row.delivery_attempts + 1
         retry_delay = (
             None
             if force_dead_letter
-            else flow_webhook_retry_delay_seconds(failed_attempt_no=attempt_no)
+            else flow_webhook_retry_delay_seconds(
+                failed_attempt_no=row.delivery_attempts
+            )
         )
         dead_lettered_at = now if retry_delay is None else None
         next_delivery_at = (
@@ -482,7 +536,6 @@ class FlowRunWebhookDeliveryService:
         did_record = await self.webhook_delivery_repo.record_delivery_failure(
             delivery_id=row.id,
             claim_token=row.claim_token,
-            attempt_no=attempt_no,
             error_message=error_message,
             next_delivery_at=next_delivery_at,
             dead_lettered_at=dead_lettered_at,

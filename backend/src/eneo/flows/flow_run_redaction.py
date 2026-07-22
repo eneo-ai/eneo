@@ -16,6 +16,7 @@ _SENSITIVE_EXACT_KEYS = {
     "secret",
     "cookie",
     "cookies",
+    "code",
     "credential",
     "credentials",
     "bearer",
@@ -33,6 +34,7 @@ _SENSITIVE_EXACT_KEYS = {
     "secret_key",
     "signature",
     "signed_url",
+    "state",
 }
 _SENSITIVE_SUFFIXES = (
     "_token",
@@ -49,6 +51,8 @@ _SENSITIVE_SUFFIXES = (
     "_signed_url",
 )
 _BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_URL_TRAILING_PROSE_PUNCTUATION = ".,;:!?)]}"
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,8 @@ def is_sensitive_key(key: str | None) -> bool:
     normalized_key = _normalize_key(key)
     if not normalized_key:
         return False
+    if "token" in normalized_key or "secret" in normalized_key:
+        return True
     if normalized_key in _SENSITIVE_EXACT_KEYS:
         return True
     if any(normalized_key.endswith(suffix) for suffix in _SENSITIVE_SUFFIXES):
@@ -109,37 +115,49 @@ def is_sensitive_key(key: str | None) -> bool:
 
 
 def redact_url_secrets(value: str) -> str:
-    parsed = urlsplit(value)
-    if not parsed.scheme or not parsed.netloc:
-        return value
-
-    host = parsed.hostname or ""
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    netloc = f"{host}{port}"
-
-    if not parse_qsl(parsed.query, keep_blank_values=True):
-        if parsed.username is None and parsed.password is None:
+    try:
+        parsed = urlsplit(value)
+        if not parsed.scheme or not parsed.netloc:
             return value
+
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        netloc = f"{host}{port}"
+
+        if not parse_qsl(parsed.query, keep_blank_values=True):
+            if parsed.username is None and parsed.password is None:
+                return value
+            return urlunsplit(
+                (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+            )
+
+        redacted_query: list[tuple[str, str]] = []
+        for key, item_value in parse_qsl(parsed.query, keep_blank_values=True):
+            if is_sensitive_key(key):
+                redacted_query.append((key, _REDACTED_VALUE))
+            else:
+                redacted_query.append((key, redact_url_secrets(item_value)))
+
         return urlunsplit(
-            (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+            (
+                parsed.scheme,
+                netloc if parsed.username or parsed.password else parsed.netloc,
+                parsed.path,
+                urlencode(redacted_query, doseq=True),
+                parsed.fragment,
+            )
         )
+    except ValueError:
+        return _REDACTED_VALUE
 
-    redacted_query: list[tuple[str, str]] = []
-    for key, item_value in parse_qsl(parsed.query, keep_blank_values=True):
-        if is_sensitive_key(key):
-            redacted_query.append((key, _REDACTED_VALUE))
-        else:
-            redacted_query.append((key, item_value))
 
-    return urlunsplit(
-        (
-            parsed.scheme,
-            netloc if parsed.username or parsed.password else parsed.netloc,
-            parsed.path,
-            urlencode(redacted_query, doseq=True),
-            parsed.fragment,
-        )
-    )
+def _redact_embedded_url(match: re.Match[str]) -> str:
+    url = match.group(0)
+    trailing_punctuation = ""
+    while url and url[-1] in _URL_TRAILING_PROSE_PUNCTUATION:
+        trailing_punctuation = url[-1] + trailing_punctuation
+        url = url[:-1]
+    return f"{redact_url_secrets(url)}{trailing_punctuation}"
 
 
 def redact_string(value: str, *, key: str | None) -> str:
@@ -153,7 +171,7 @@ def redact_string_with_reason(value: str, *, key: str | None) -> StringRedaction
     redacted_value = value
     reason: str | None = None
     if "://" in redacted_value:
-        url_redacted = redact_url_secrets(redacted_value)
+        url_redacted = _URL_PATTERN.sub(_redact_embedded_url, redacted_value)
         if url_redacted != redacted_value:
             redacted_value = url_redacted
             reason = "sensitive_url"

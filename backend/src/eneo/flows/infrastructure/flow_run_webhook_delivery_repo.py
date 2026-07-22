@@ -79,6 +79,7 @@ class FlowRunWebhookDeliveryRepository:
         now: datetime,
         limit: int,
         claim_ttl_seconds: int,
+        max_attempts: int,
     ) -> list[FlowRunWebhookDeliveryRow]:
         if limit <= 0:
             return []
@@ -92,6 +93,7 @@ class FlowRunWebhookDeliveryRepository:
                         FlowRunWebhookDeliveries.delivery_status
                         == FlowOutboxDeliveryStatus.PENDING.value
                     )
+                    .where(FlowRunWebhookDeliveries.delivery_attempts < max_attempts)
                     .where(
                         sa.or_(
                             FlowRunWebhookDeliveries.next_delivery_at.is_(None),
@@ -126,13 +128,53 @@ class FlowRunWebhookDeliveryRepository:
                 await self.session.execute(
                     sa.update(FlowRunWebhookDeliveries)
                     .where(FlowRunWebhookDeliveries.id.in_(candidate_ids))
+                    .where(FlowRunWebhookDeliveries.delivery_attempts < max_attempts)
                     .values(
                         claim_token=claim_token,
                         claimed_at=now,
                         claim_expires_at=claim_expires_at,
+                        delivery_attempts=(
+                            FlowRunWebhookDeliveries.delivery_attempts + 1
+                        ),
                         updated_at=datetime.now(timezone.utc),
                     )
                     .returning(FlowRunWebhookDeliveries)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [self._to_delivery_row(row) for row in rows]
+
+    async def lock_expired_at_budget_delivery_rows(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        max_attempts: int,
+    ) -> list[FlowRunWebhookDeliveryRow]:
+        if limit <= 0:
+            return []
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunWebhookDeliveries)
+                    .where(
+                        FlowRunWebhookDeliveries.delivery_status
+                        == FlowOutboxDeliveryStatus.PENDING.value
+                    )
+                    .where(FlowRunWebhookDeliveries.delivery_attempts >= max_attempts)
+                    .where(FlowRunWebhookDeliveries.claim_token.is_not(None))
+                    .where(FlowRunWebhookDeliveries.claim_expires_at <= now)
+                    .order_by(
+                        FlowRunWebhookDeliveries.claim_expires_at.asc(),
+                        FlowRunWebhookDeliveries.created_at.asc(),
+                    )
+                    .limit(limit)
+                    .with_for_update(
+                        of=FlowRunWebhookDeliveries,
+                        skip_locked=True,
+                    )
                 )
             )
             .scalars()
@@ -146,7 +188,6 @@ class FlowRunWebhookDeliveryRepository:
         delivery_id: UUID,
         claim_token: UUID,
         delivered_at: datetime,
-        attempt_no: int,
     ) -> bool:
         result = await self.session.execute(
             sa.update(FlowRunWebhookDeliveries)
@@ -158,7 +199,6 @@ class FlowRunWebhookDeliveryRepository:
             )
             .values(
                 delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
-                delivery_attempts=attempt_no,
                 next_delivery_at=None,
                 claim_token=None,
                 claimed_at=None,
@@ -176,7 +216,6 @@ class FlowRunWebhookDeliveryRepository:
         *,
         delivery_id: UUID,
         claim_token: UUID,
-        attempt_no: int,
         error_message: str,
         next_delivery_at: datetime | None,
         dead_lettered_at: datetime | None,
@@ -196,7 +235,6 @@ class FlowRunWebhookDeliveryRepository:
             )
             .values(
                 delivery_status=delivery_status,
-                delivery_attempts=attempt_no,
                 next_delivery_at=next_delivery_at,
                 claim_token=None,
                 claimed_at=None,

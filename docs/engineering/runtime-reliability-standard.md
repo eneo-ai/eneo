@@ -149,6 +149,14 @@ An idempotency header is not a guarantee unless the remote system defines its
 scope, retention window, payload-conflict behavior, and replay response. An
 approval flag or policy string is not a durable effect boundary.
 
+A generic webhook may be offered without a verified receiver idempotency
+contract only as an explicit at-least-once sender contract. The product must
+disclose possible duplicate delivery, define the stable key's sender-side
+scope, require receivers to deduplicate that key, preserve it across bounded
+retries, and terminalize an exhausted outcome-unknown claim without another
+send. This declared exception does not permit exactly-once language or a claim
+that receiver idempotency was verified.
+
 If a mutation lacks the required contract, reject or disable it at the narrowest
 reliable API, compile, publish, or execution boundary. Do not run it optimistically
 and add repair logic afterward.

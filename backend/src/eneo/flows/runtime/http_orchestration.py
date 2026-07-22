@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.http_transport import (
     EffectiveHttpRequest,
     HttpAuthoredConfig,
@@ -79,6 +80,12 @@ class ReadResponseTextFn(Protocol):
 
 SendHttpRequestFn = Callable[..., Awaitable[httpx.Response]]
 AuditHttpOutboundFn = Callable[..., Awaitable[None]]
+
+
+class WebhookDeliveryError(RuntimeError):
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -375,6 +382,7 @@ async def deliver_webhook(
         )
     except TypedIOValidationException as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
+        err_msg = redact_string(str(exc), key=None)
         await deps.audit_http_outbound(
             run=run,
             step=step,
@@ -382,10 +390,10 @@ async def deliver_webhook(
             method="POST",
             call_type="webhook_delivery",
             outcome=Outcome.FAILURE,
-            error_message=str(exc),
+            error_message=err_msg,
             duration_ms=duration_ms,
         )
-        raise BadRequestException(str(exc)) from exc
+        raise BadRequestException(err_msg) from exc
     except httpx.TimeoutException as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
         err_msg = f"Webhook delivery timed out after {timeout_seconds:g}s."
@@ -399,10 +407,10 @@ async def deliver_webhook(
             error_message=err_msg,
             duration_ms=duration_ms,
         )
-        raise BadRequestException(err_msg) from exc
+        raise WebhookDeliveryError(err_msg) from exc
     except httpx.HTTPError as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
-        err_msg = f"Webhook delivery failed: {exc}"
+        err_msg = redact_string(f"Webhook delivery failed: {exc}", key=None)
         await deps.audit_http_outbound(
             run=run,
             step=step,
@@ -413,7 +421,7 @@ async def deliver_webhook(
             error_message=err_msg,
             duration_ms=duration_ms,
         )
-        raise BadRequestException(err_msg) from exc
+        raise WebhookDeliveryError(err_msg) from exc
 
     duration_ms = (time.monotonic() - start_time) * 1000
     if response.status_code >= 400:
@@ -429,7 +437,7 @@ async def deliver_webhook(
             status_code=response.status_code,
             duration_ms=duration_ms,
         )
-        raise BadRequestException(err_msg)
+        raise WebhookDeliveryError(err_msg, status_code=response.status_code)
     await deps.audit_http_outbound(
         run=run,
         step=step,

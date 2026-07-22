@@ -315,15 +315,16 @@ HTTP post is durable outbox work:
    `FOR UPDATE SKIP LOCKED` for delivery claims. See
    `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:38`
    and `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:76`.
-4. `FlowRunWebhookDeliveryService.deliver_due` claims one row at a time, commits
-   the claim, prepares the payload from the published snapshot and current step
-   result, sends HTTP, records success or retry/dead-letter failure, and finalizes
-   the run after success. See
-   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:117`,
-   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:202`,
-   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:267`,
-   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:317`, and
-   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py:360`.
+4. `FlowRunWebhookDeliveryService.deliver_due` provides an at-least-once sender
+   contract. A claim atomically charges one of five attempts and commits before
+   HTTP. An expired below-budget claim can be reclaimed with the same
+   `Idempotency-Key`; an expired fifth claim is outcome-unknown, is dead-lettered,
+   and fails the run without a sixth POST. HTTP `408` and `429`, `5xx`, and
+   transport failures remain bounded-retryable; other `4xx` responses are
+   terminal. See
+   `backend/src/eneo/flows/runtime/flow_webhook_delivery.py::FlowRunWebhookDeliveryService.deliver_due`
+   and
+   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py::FlowRunWebhookDeliveryRepository.claim_due_delivery_rows`.
 5. The data model enforces one delivery per `(flow_run_id, step_id, attempt_no)`
    and uses the shared outbox delivery status vocabulary. See
    `backend/src/eneo/database/tables/flow_tables.py:1982` and
@@ -336,6 +337,12 @@ HTTP post is durable outbox work:
    `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:668`
    and
    `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:76`.
+
+The sender may repeat a POST after a timeout, connection loss, worker crash, or
+claim expiry because remote success may have occurred before the local receipt
+commit. The opaque header value is stable only for one Flow run, output step,
+and step attempt; Eneo does not verify the receiver's retention or replay
+semantics. Receivers must deduplicate repeated requests carrying that key.
 
 ## Runtime Step Identity
 

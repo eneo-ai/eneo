@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from eneo.audit.domain.constants import MAX_ERROR_MESSAGE_LENGTH
+from eneo.flows.flow_run_redaction import redact_string
 
 FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS = 30
 FLOW_WEBHOOK_DELIVERY_BATCH_SIZE = 50
@@ -23,4 +24,5 @@ def sanitize_webhook_delivery_error(error: Exception) -> str:
     message = " ".join(str(error).split())
     if not message:
         message = error.__class__.__name__
+    message = redact_string(message, key=None)
     return f"{error.__class__.__name__}: {message}"[:MAX_ERROR_MESSAGE_LENGTH]

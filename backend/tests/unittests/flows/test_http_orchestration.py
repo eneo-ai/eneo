@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from eneo.flows.runtime.http_orchestration import (
+    WebhookDeliveryError,
     deliver_webhook,
     resolve_http_input_source_text,
 )
@@ -263,7 +264,7 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
 
 
 @pytest.mark.asyncio
-async def test_deliver_webhook_timeout_maps_to_bad_request_and_audits() -> None:
+async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> None:
     step = _Step(
         step_order=4,
         step_id="step-4",
@@ -278,7 +279,7 @@ async def test_deliver_webhook_timeout_maps_to_bad_request_and_audits() -> None:
     send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
     deps = _make_deps(send_http_request=send_http_request)
 
-    with pytest.raises(BadRequestException) as exc:
+    with pytest.raises(WebhookDeliveryError) as exc:
         await deliver_webhook(
             step=step,
             text_payload="payload",
@@ -291,6 +292,82 @@ async def test_deliver_webhook_timeout_maps_to_bad_request_and_audits() -> None:
     assert "timed out" in str(exc.value)
     deps.audit_http_outbound.assert_awaited()
     assert deps.audit_http_outbound.await_args.kwargs["call_type"] == "webhook_delivery"
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_redacts_transport_error_before_audit() -> None:
+    step = _Step(
+        step_order=44,
+        step_id="step-44",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-44", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://example.org/webhook")
+    send_http_request = AsyncMock(
+        side_effect=httpx.ConnectError(
+            "POST https://user:pass@example.org/hook?token=secret-value failed",
+            request=request,
+        )
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(WebhookDeliveryError) as exc:
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-44:step-44:1:webhook",
+        )
+
+    assert "user:pass" not in str(exc.value)
+    assert "secret-value" not in str(exc.value)
+    audit_error = deps.audit_http_outbound.await_args.kwargs["error_message"]
+    assert "user:pass" not in audit_error
+    assert "secret-value" not in audit_error
+    assert "token=%5BREDACTED%5D" in audit_error
+
+
+@pytest.mark.parametrize("status_code", [408, 429, 400, 422, 503])
+@pytest.mark.asyncio
+async def test_deliver_webhook_exposes_typed_http_status(status_code: int) -> None:
+    step = _Step(
+        step_order=43,
+        step_id="step-43",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-43", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://example.org/webhook")
+    deps = _make_deps(
+        send_http_request=AsyncMock(
+            return_value=httpx.Response(status_code, request=request)
+        )
+    )
+
+    with pytest.raises(WebhookDeliveryError) as exc:
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-43:step-43:1:webhook",
+        )
+
+    assert exc.value.status_code == status_code
+    assert f"status {status_code}" in str(exc.value)
+    assert deps.audit_http_outbound.await_args.kwargs["status_code"] == status_code
 
 
 @pytest.mark.asyncio
@@ -562,7 +639,7 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
 
     deps = _make_deps(send_http_request=_send_http_request)
 
-    with pytest.raises(BadRequestException, match="timed out"):
+    with pytest.raises(WebhookDeliveryError, match="timed out"):
         await deliver_webhook(
             step=step,
             text_payload="payload",
