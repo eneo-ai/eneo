@@ -6,7 +6,6 @@
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import HistoryTable from "$lib/features/chat/components/history/HistoryTable.svelte";
   import AssistantSwitcher from "$lib/features/chat/components/switcher/AssistantSwitcher.svelte";
-  import ChatSkillSummary from "$lib/features/skills/ChatSkillSummary.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -46,11 +45,10 @@
     });
   }
 
-  function partnerEditHref(anchor = false) {
-    const href = localizeHref(
+  function partnerEditHref() {
+    return localizeHref(
       `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
     );
-    return anchor ? `${href}#skills` : href;
   }
 
   $effect(() => {
@@ -138,14 +136,6 @@
       </Page.Tabbar>
 
       <Page.Flex>
-        {#if chat.partner.type !== "default-assistant"}
-          <ChatSkillSummary
-            bindings={data.skillBindings}
-            manageHref={chat.partner.permissions?.includes("edit")
-              ? partnerEditHref(true)
-              : undefined}
-          />
-        {/if}
         {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
           <Button href={partnerEditHref()}>{m.edit()}</Button>
         {/if}

@@ -99,7 +99,7 @@ describe("Assistant edit loader", () => {
     };
     const skills = {
       ...emptySkillBindingCatalogPage(),
-      items: localSkills.items,
+      items: localSkills.items.map((skill) => ({ ...skill, source: "space" as const })),
       count: 1
     };
     const bindings = [{ skill_id: "skill-1" }];

@@ -68,6 +68,14 @@ class SkillService:
             raise RuntimeError("Persisted Space is missing its tenant")
         return space.tenant_id
 
+    @staticmethod
+    def _require_space_skill_mutation(space: "Space") -> None:
+        if space.is_organization():
+            raise BadRequestException(
+                "Organisation Skills must be managed through the organisation "
+                "Skill workflow"
+            )
+
     async def list_skills(
         self,
         *,
@@ -146,6 +154,7 @@ class SkillService:
         instructions: str,
     ) -> Skill:
         space = await self._space(space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_create_skills():
             raise UnauthorizedException(
@@ -199,6 +208,7 @@ class SkillService:
     ) -> SkillRevisionChange:
         skill = await self.get_skill(skill_id=skill_id)
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_skills():
             raise UnauthorizedException(
@@ -294,6 +304,7 @@ class SkillService:
         if skill.space_id != space_id:
             raise NotFoundException()
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_skills():
             raise UnauthorizedException(
@@ -352,6 +363,7 @@ class SkillService:
     async def delete_skill(self, *, skill_id: UUID) -> Skill:
         skill = await self.get_skill(skill_id=skill_id)
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_delete_skills():
             raise UnauthorizedException(
@@ -667,11 +679,6 @@ class SkillService:
         if not space.is_organization() or space.tenant_id != self.user.tenant_id:
             raise BadRequestException(
                 "Governance Skills must belong to this tenant's organisation Space"
-            )
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_read_skills():
-            raise UnauthorizedException(
-                "You do not have permission to configure organisation Skills"
             )
         existing = await self.repo.list_policy_bindings(policy_id=policy_id)
         resolved = await self._resolve_governance_references(

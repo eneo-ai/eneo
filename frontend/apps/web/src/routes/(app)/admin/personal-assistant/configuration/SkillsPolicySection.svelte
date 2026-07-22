@@ -2,10 +2,10 @@
   import type { SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
   import { BookOpenCheck, Info } from "lucide-svelte";
   import { resolve } from "$app/paths";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
   import type {
+    GetSkillBindingPreview,
     ListSkillBindingCatalog,
     SkillBindingCatalogPage
   } from "$lib/features/skills/skillBindingCatalog";
@@ -17,8 +17,8 @@
     initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     summary: string;
-    canUseSkills: boolean;
     onListCatalog: ListSkillBindingCatalog;
+    onGetSkillPreview: GetSkillBindingPreview;
   };
 
   let {
@@ -26,8 +26,8 @@
     initialCatalogPage,
     bindingSummaries,
     summary,
-    canUseSkills,
-    onListCatalog
+    onListCatalog,
+    onGetSkillPreview
   }: Props = $props();
 </script>
 
@@ -42,27 +42,35 @@
     <BookOpenCheck class="size-5" />
   {/snippet}
 
-  <Alert.Root>
-    <Info aria-hidden="true" />
-    <Alert.Title>{m.governance_skills_scope_title()}</Alert.Title>
-    <Alert.Description>{m.governance_skills_scope_description()}</Alert.Description>
-  </Alert.Root>
+  <div class="space-y-5">
+    <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div class="flex items-start gap-3" role="note">
+        <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div class="min-w-0">
+          <p class="text-sm font-medium">{m.governance_skills_scope_title()}</p>
+          <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
+            {m.governance_skills_scope_description()}
+          </p>
+        </div>
+      </div>
 
-  <div class="flex flex-col items-start gap-2">
-    <p class="text-muted-foreground text-sm">
-      {m.governance_manage_skills_description()}
-    </p>
-    <Button href={resolve("/spaces/organization/skills")} variant="outline">
-      {m.governance_manage_skills_action()}
-    </Button>
+      <Button
+        href={resolve("/spaces/organization/skills")}
+        variant="outline"
+        class="shrink-0 self-start"
+      >
+        {m.governance_manage_skills_action()}
+      </Button>
+    </div>
+
+    <SkillBindingsEditor
+      bind:bindings={skillBindings}
+      {initialCatalogPage}
+      {bindingSummaries}
+      canEditBindings={true}
+      canCreateSkills={false}
+      {onListCatalog}
+      {onGetSkillPreview}
+    />
   </div>
-
-  <SkillBindingsEditor
-    bind:bindings={skillBindings}
-    {initialCatalogPage}
-    {bindingSummaries}
-    canEditBindings={canUseSkills}
-    canCreateSkills={false}
-    {onListCatalog}
-  />
 </PolicySection>

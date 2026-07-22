@@ -21,12 +21,7 @@
 import { invalidate } from "$app/navigation";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type {
-  Eneo,
-  ResourcePermission,
-  SkillBindingReferenceInput,
-  SkillBindingSummary
-} from "@eneo/eneo-js";
+import type { Eneo, SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
 import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
@@ -98,16 +93,10 @@ export type PolicyPageData = {
   modelProviders?: ModelProvider[] | null;
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
-  organizationSpace: {
-    id: string;
-    skill_permissions: ResourcePermission[];
-  };
   skills: SkillBindingCatalogPage;
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
-
-const READ_SKILL_PERMISSION: ResourcePermission = "read";
 
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
@@ -135,7 +124,6 @@ export class PolicyDraft {
     next_cursor: null
   });
   skillBindingSummaries = $state<SkillBindingSummary[]>([]);
-  canUseSkills = $state(false);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -169,7 +157,6 @@ export class PolicyDraft {
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
     this.skillCatalogPage = data.skills;
-    this.canUseSkills = data.organizationSpace.skill_permissions.includes(READ_SKILL_PERMISSION);
     this.#seed(data.policy, selectableModels);
   }
 

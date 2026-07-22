@@ -4,13 +4,7 @@
     Licensed under the MIT License.
 */
 
-import type { ResourcePermission } from "@eneo/eneo-js";
-import {
-  emptySkillBindingCatalogPage,
-  loadSkillBindingCatalogPage
-} from "$lib/features/skills/skillBindingCatalog";
-
-const READ_SKILL_PERMISSION: ResourcePermission = "read";
+import { loadSkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 
 export const load = async (event) => {
   event.depends("admin:governance-policy");
@@ -18,14 +12,12 @@ export const load = async (event) => {
   event.depends("organization:skills");
   const { eneo } = await event.parent();
   const organizationSpacePromise = eneo.spaces.getOrganizationSpace();
-  const skillsPromise = organizationSpacePromise.then(async (space) =>
-    space.skill_permissions.includes(READ_SKILL_PERMISSION)
-      ? loadSkillBindingCatalogPage({
-          eneo,
-          spaceId: space.id,
-          organizationSpace: true
-        })
-      : emptySkillBindingCatalogPage()
+  const skillsPromise = organizationSpacePromise.then((space) =>
+    loadSkillBindingCatalogPage({
+      eneo,
+      spaceId: space.id,
+      organizationSpace: true
+    })
   );
   const [policy, models, mcpSettings, promptLibrary, modelProviders, organizationSpace, skills] =
     await Promise.all([

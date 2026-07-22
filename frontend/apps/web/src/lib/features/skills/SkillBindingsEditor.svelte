@@ -11,10 +11,16 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
-  import type { ListSkillBindingCatalog, SkillBindingCatalogPage } from "./skillBindingCatalog";
+  import SkillPreview from "./SkillPreview.svelte";
+  import type {
+    GetSkillBindingPreview,
+    ListSkillBindingCatalog,
+    SkillBindingCatalogPage,
+    SkillBindingPreview
+  } from "./skillBindingCatalog";
   import { SkillCatalogQuery } from "./skillCatalogQuery.svelte";
   import {
-    appendSkillBinding,
+    appendSkillRevisionBinding,
     getAvailableSkills,
     getSkillCandidateRevisionNumber,
     getSkillBindingRows,
@@ -34,6 +40,7 @@
     canEditBindings: boolean;
     canCreateSkills: boolean;
     onListCatalog: ListSkillBindingCatalog;
+    onGetSkillPreview: GetSkillBindingPreview;
     onCreateSkill?: (value: SkillFormValue) => Promise<SkillPublic>;
   };
 
@@ -44,6 +51,7 @@
     canEditBindings,
     canCreateSkills,
     onListCatalog,
+    onGetSkillPreview,
     onCreateSkill
   }: Props = $props();
 
@@ -54,7 +62,13 @@
   let addExistingOpen = $state(false);
   let createOpen = $state(false);
   let createFormDirty = $state(false);
-  let createdSkills = $state<SkillPublic[]>([]);
+  let createdSkills = $state<SkillBindingCandidate[]>([]);
+  let previewOpen = $state(false);
+  let previewCandidate = $state<SkillBindingCandidate | null>(null);
+  let preview = $state<SkillBindingPreview | null>(null);
+  let previewLoading = $state(false);
+  let previewError = $state<string | null>(null);
+  let previewRequestGeneration = 0;
   let announcement = $state("");
 
   let loadedInitialPage = untrack(() => initialCatalogPage);
@@ -96,19 +110,47 @@
     void tick().then(() => document.getElementById(id)?.focus());
   }
 
-  function addExisting(skill: SkillBindingCandidate) {
+  async function openPreview(skill: SkillBindingCandidate) {
     if (!canEditBindings) return;
-    bindings = appendSkillBinding(bindings, skill);
+    const requestGeneration = ++previewRequestGeneration;
     addExistingOpen = false;
-    announcement = m.skills_added_to_draft_announcement({ name: skill.display_name });
+    previewCandidate = skill;
+    preview = null;
+    previewError = null;
+    previewOpen = true;
+    previewLoading = true;
+    try {
+      const loaded = await onGetSkillPreview(skill);
+      if (previewRequestGeneration === requestGeneration) preview = loaded;
+    } catch {
+      if (previewRequestGeneration === requestGeneration) {
+        previewError = m.skills_preview_load_error();
+      }
+    } finally {
+      if (previewRequestGeneration === requestGeneration) previewLoading = false;
+    }
+  }
+
+  function addPreviewedSkill() {
+    if (!canEditBindings || preview === null) return;
+    bindings = appendSkillRevisionBinding(bindings, {
+      id: preview.id,
+      revisionId: preview.revisionId
+    });
+    previewOpen = false;
+    announcement = m.skills_added_to_draft_announcement({ name: preview.displayName });
     focusElement(addExistingTriggerId);
   }
 
   async function createSkill(value: SkillFormValue) {
     if (!onCreateSkill) return;
     const created = await onCreateSkill(value);
-    createdSkills = [...createdSkills.filter((skill) => skill.id !== created.id), created];
-    bindings = appendSkillBinding(bindings, created);
+    const candidate = { ...created, source: "space" as const };
+    createdSkills = [...createdSkills.filter((skill) => skill.id !== created.id), candidate];
+    bindings = appendSkillRevisionBinding(bindings, {
+      id: created.id,
+      revisionId: created.current_revision_id
+    });
     createFormDirty = false;
     createOpen = false;
     announcement = m.skills_created_and_added_to_draft_announcement({
@@ -137,19 +179,19 @@
   function useLatestRevision(row: SkillBindingRow, index: number) {
     if (
       !canEditBindings ||
-      row.currentRevisionId === undefined ||
-      row.currentRevisionNumber === undefined ||
+      row.attachableRevisionId === undefined ||
+      row.attachableRevisionNumber === undefined ||
       row.isActive !== true
     )
       return;
     bindings = upgradeSkillBinding(bindings, index, {
       id: row.reference.skill_id,
-      current_revision_id: row.currentRevisionId,
-      is_active: row.isActive
+      attachableRevisionId: row.attachableRevisionId,
+      isActive: row.isActive
     });
     announcement = m.skills_revision_upgraded_announcement({
       name: rowName(row),
-      revision: String(row.currentRevisionNumber)
+      revision: String(row.attachableRevisionNumber)
     });
     focusElement(rowId(row.reference.skill_id));
   }
@@ -167,6 +209,22 @@
     addExistingOpen = open;
     if (open) return;
     if (skillCatalog.query) skillCatalog.setQuery("");
+  }
+
+  function setPreviewOpen(open: boolean) {
+    previewOpen = open;
+    if (open) return;
+    previewRequestGeneration += 1;
+    const restorePickerFocus = previewCandidate !== null;
+    previewCandidate = null;
+    preview = null;
+    previewError = null;
+    previewLoading = false;
+    if (restorePickerFocus) focusElement(addExistingTriggerId);
+  }
+
+  function retryPreview() {
+    if (previewCandidate) void openPreview(previewCandidate);
   }
 
   function rowId(skillId: string): string {
@@ -226,10 +284,10 @@
                       {m.skills_unavailable_binding_explanation()}
                     </span>
                   {/if}
-                  {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined}
+                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined}
                     <Badge variant="secondary">
                       {m.skills_newer_revision_available({
-                        revision: String(row.currentRevisionNumber)
+                        revision: String(row.attachableRevisionNumber)
                       })}
                     </Badge>
                   {/if}
@@ -238,7 +296,7 @@
             </div>
 
             <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
-              {#if row.hasNewerRevision && row.currentRevisionNumber !== undefined && row.isActive}
+              {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive}
                 <Button
                   type="button"
                   variant="outline"
@@ -246,7 +304,7 @@
                   disabled={!canEditBindings}
                   aria-label={m.skills_use_latest_revision_aria({
                     name: rowName(row),
-                    revision: String(row.currentRevisionNumber)
+                    revision: String(row.attachableRevisionNumber)
                   })}
                   onclick={() => useLatestRevision(row, index)}
                 >
@@ -317,7 +375,9 @@
       </Popover.Trigger>
       <Popover.Content
         align="start"
-        class="w-(--bits-popover-anchor-width) min-w-[min(20rem,calc(100vw-2rem))] p-0"
+        sideOffset={8}
+        collisionPadding={16}
+        class="w-[min(32rem,calc(100vw-2rem))] p-0"
       >
         <Command.Root label={m.skills_search_existing()} shouldFilter={false}>
           <Command.Input
@@ -327,6 +387,7 @@
             oninput={(event) => skillCatalog.setQuery(event.currentTarget.value)}
           />
           <Command.List
+            class="max-h-[min(24rem,55dvh)]"
             aria-label={m.skills_available_group()}
             aria-busy={skillCatalog.loading || skillCatalog.loadingMore}
           >
@@ -356,17 +417,32 @@
                 {#each addExistingChoices as skill (skill.id)}
                   <Command.Item
                     value={`${skill.display_name} ${skill.description} ${skill.slug} ${skill.id}`}
-                    onSelect={() => addExisting(skill)}
+                    class="items-start px-3 py-3 [&_.cn-command-item-indicator]:hidden"
+                    onSelect={() => openPreview(skill)}
                   >
                     <div class="min-w-0 flex-1">
-                      <p class="truncate font-medium">{skill.display_name}</p>
-                      <p class="text-muted-foreground truncate text-xs">{skill.description}</p>
+                      <div class="flex items-start justify-between gap-3">
+                        <p class="line-clamp-2 font-medium leading-5">{skill.display_name}</p>
+                        <Badge variant="outline" class="shrink-0">
+                          {m.skills_revision_label({
+                            revision: String(getSkillCandidateRevisionNumber(skill))
+                          })}
+                        </Badge>
+                      </div>
+                      <p class="text-muted-foreground mt-1 line-clamp-2 text-sm leading-5">
+                        {skill.description}
+                      </p>
+                      <div class="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                        <Badge variant="secondary">
+                          {skill.source === "organization"
+                            ? m.skills_source_organization()
+                            : m.skills_source_space()}
+                        </Badge>
+                        <span class="text-muted-foreground truncate font-mono text-xs">
+                          {skill.slug}
+                        </span>
+                      </div>
                     </div>
-                    <span class="text-muted-foreground shrink-0 text-xs">
-                      {m.skills_revision_label({
-                        revision: String(getSkillCandidateRevisionNumber(skill))
-                      })}
-                    </span>
                   </Command.Item>
                 {/each}
               </Command.Group>
@@ -395,6 +471,49 @@
       </Popover.Content>
     </Popover.Root>
 
+    <Dialog.Root bind:open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Dialog.Content
+        class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        closeLabel={m.close()}
+      >
+        <Dialog.Header class="border-b px-6 py-5 pr-12">
+          <Dialog.Title>
+            {m.skills_preview_title({
+              name: preview?.displayName ?? previewCandidate?.display_name ?? m.skills()
+            })}
+          </Dialog.Title>
+          <Dialog.Description>{m.skills_preview_description()}</Dialog.Description>
+        </Dialog.Header>
+        <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
+          {#if previewLoading}
+            <p class="text-muted-foreground py-8 text-center text-sm" role="status">
+              {m.loading()}
+            </p>
+          {:else if previewError}
+            <div class="flex flex-col items-center gap-3 py-8 text-center">
+              <p class="text-destructive text-sm" role="alert">{previewError}</p>
+              {#if previewCandidate}
+                <Button type="button" variant="outline" onclick={retryPreview}>
+                  {m.retry()}
+                </Button>
+              {/if}
+            </div>
+          {:else if preview}
+            <SkillPreview {preview} />
+          {/if}
+        </div>
+        <Dialog.Footer class="border-t px-6 py-4">
+          <Button type="button" variant="outline" onclick={() => setPreviewOpen(false)}>
+            {m.cancel()}
+          </Button>
+          <Button type="button" disabled={preview === null} onclick={addPreviewedSkill}>
+            <Plus data-icon="inline-start" aria-hidden="true" />
+            {m.skills_add_to_draft()}
+          </Button>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
+
     {#if canCreateSkills && onCreateSkill}
       <Dialog.Root bind:open={createOpen} onOpenChange={setCreateOpen}>
         <Dialog.Trigger>
@@ -421,7 +540,7 @@
           </Dialog.Header>
           <div class="min-h-0 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
             <div class="flex flex-col gap-5">
-              <Alert.Root>
+              <Alert.Root role="note">
                 <Info aria-hidden="true" />
                 <Alert.Title>{m.skills_create_immediate_title()}</Alert.Title>
                 <Alert.Description>{m.skills_create_immediate_description()}</Alert.Description>

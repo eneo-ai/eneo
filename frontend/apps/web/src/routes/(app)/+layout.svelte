@@ -18,7 +18,6 @@
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { Toaster } from "$lib/components/toast";
 
   export let data;
 
@@ -147,8 +146,6 @@
     <slot />
   </main>
 </div>
-
-<Toaster />
 
 <style lang="postcss">
   @reference "../../app.css";

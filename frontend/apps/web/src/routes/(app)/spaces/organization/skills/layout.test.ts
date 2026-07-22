@@ -1,10 +1,7 @@
 import type { Permission } from "@eneo/eneo-js";
 import { describe, expect, test } from "vitest";
 import { load } from "./+layout";
-import {
-  hasOrganizationNavigationPermission,
-  resolveOrganizationSkillsAccess
-} from "./organizationSkillsAccess";
+import { hasOrganizationNavigationPermission } from "./organizationSkillsAccess";
 
 function eventWithPermissions(permissions: Permission[]) {
   return {
@@ -34,10 +31,7 @@ describe("organisation Skills layout", () => {
   });
 
   test("gives tenant admins publication authority", async () => {
-    await expect(load(eventWithPermissions(["admin"]) as never)).resolves.toEqual({
-      canManage: true,
-      canPublish: true
-    });
+    await expect(load(eventWithPermissions(["admin"]) as never)).resolves.toBeUndefined();
   });
 
   test("rejects direct visits without Skills access", async () => {
@@ -48,26 +42,18 @@ describe("organisation Skills layout", () => {
   });
 
   test("shows administrators only the reachable organisation workspace destinations", () => {
-    const access = resolveOrganizationSkillsAccess({
-      admin: true
-    });
-
-    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(true);
-    expect(hasOrganizationNavigationPermission(access, "read", "website")).toBe(true);
-    expect(hasOrganizationNavigationPermission(access, "read", "collection")).toBe(true);
-    expect(hasOrganizationNavigationPermission(access, "edit", "space")).toBe(true);
-    expect(hasOrganizationNavigationPermission(access, "read", "service")).toBe(false);
-    expect(hasOrganizationNavigationPermission(access, "edit", "website")).toBe(false);
+    expect(hasOrganizationNavigationPermission(true, "read", "skill")).toBe(true);
+    expect(hasOrganizationNavigationPermission(true, "read", "website")).toBe(true);
+    expect(hasOrganizationNavigationPermission(true, "read", "collection")).toBe(true);
+    expect(hasOrganizationNavigationPermission(true, "edit", "space")).toBe(true);
+    expect(hasOrganizationNavigationPermission(true, "read", "service")).toBe(false);
+    expect(hasOrganizationNavigationPermission(true, "edit", "website")).toBe(false);
   });
 
   test("does not project organisation navigation for delegated users", () => {
-    const access = resolveOrganizationSkillsAccess({
-      admin: false
-    });
-
-    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(false);
-    expect(hasOrganizationNavigationPermission(access, "read", "website")).toBe(false);
-    expect(hasOrganizationNavigationPermission(access, "read", "collection")).toBe(false);
-    expect(hasOrganizationNavigationPermission(access, "edit", "space")).toBe(false);
+    expect(hasOrganizationNavigationPermission(false, "read", "skill")).toBe(false);
+    expect(hasOrganizationNavigationPermission(false, "read", "website")).toBe(false);
+    expect(hasOrganizationNavigationPermission(false, "read", "collection")).toBe(false);
+    expect(hasOrganizationNavigationPermission(false, "edit", "space")).toBe(false);
   });
 });

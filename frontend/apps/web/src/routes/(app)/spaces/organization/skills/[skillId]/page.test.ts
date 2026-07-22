@@ -1,13 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { load } from "./+page";
 
-function event({
-  canManage,
-  publishedRevisionNumber
-}: {
-  canManage: boolean;
-  publishedRevisionNumber: number | null;
-}) {
+function event({ publishedRevisionNumber }: { publishedRevisionNumber: number | null }) {
   const skill = {
     id: "skill-1",
     published_revision_number: publishedRevisionNumber
@@ -29,7 +23,6 @@ function event({
       params: { skillId: "skill-1" },
       depends: vi.fn(),
       parent: vi.fn().mockResolvedValue({
-        canManage,
         eneo: {
           skills: {
             catalogue: { get: catalogueGet },
@@ -51,22 +44,10 @@ function event({
 }
 
 describe("organisation Skill detail loader", () => {
-  test("Use Skills users receive the exact approved version only", async () => {
-    const fixture = event({ canManage: false, publishedRevisionNumber: 2 });
-
-    await expect(load(fixture.input as never)).resolves.toEqual({
-      mode: "browse",
-      published: fixture.published
-    });
-    expect(fixture.catalogueGet).toHaveBeenCalledWith({ skillId: "skill-1" });
-    expect(fixture.organizationGet).not.toHaveBeenCalled();
-  });
-
   test("managers can compare current work with the approved version", async () => {
-    const fixture = event({ canManage: true, publishedRevisionNumber: 2 });
+    const fixture = event({ publishedRevisionNumber: 2 });
 
     await expect(load(fixture.input as never)).resolves.toEqual({
-      mode: "manage",
       skill: fixture.skill,
       revisionPage: fixture.revisionPage,
       published: fixture.published
@@ -76,10 +57,9 @@ describe("organisation Skill detail loader", () => {
   });
 
   test("draft details do not call the published catalogue", async () => {
-    const fixture = event({ canManage: true, publishedRevisionNumber: null });
+    const fixture = event({ publishedRevisionNumber: null });
 
     await expect(load(fixture.input as never)).resolves.toMatchObject({
-      mode: "manage",
       published: null
     });
     expect(fixture.catalogueGet).not.toHaveBeenCalled();

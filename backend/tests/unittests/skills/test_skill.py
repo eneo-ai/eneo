@@ -19,6 +19,7 @@ from eneo.skills.domain.skill import (
     NormalizedSkillContent,
     Skill,
     SkillBindingReference,
+    SkillBindingSource,
     SkillExecutionReference,
     SkillPublicationState,
     SkillRevision,
@@ -38,6 +39,7 @@ def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
         instructions=f"Instructions for {name}",
         content_digest="a" * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
     )
 
 
@@ -258,6 +260,7 @@ def test_composition_rejects_duplicate_skill_identity():
         instructions="Updated instructions",
         content_digest="b" * 64,
         position=1,
+        source=SkillBindingSource.SPACE,
     )
     with pytest.raises(BadRequestException, match="only be bound once"):
         compose_skill_instructions(

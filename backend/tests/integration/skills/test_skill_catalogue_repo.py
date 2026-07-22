@@ -8,6 +8,7 @@ from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     SkillBindingReference,
+    SkillBindingSource,
     SkillPublicationState,
     SkillRevisionConflictError,
 )
@@ -278,6 +279,14 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
 
         assert assistant_bindings[0].skill_space_id == organization.id
         assert app_bindings[0].skill_space_id == organization.id
+        assert assistant_bindings[0].source is SkillBindingSource.ORGANIZATION
+        assert app_bindings[0].source is SkillBindingSource.ORGANIZATION
+        assert assistant_bindings[0].current_revision_id == draft.revision.id
+        assert (
+            assistant_bindings[0].attachable_revision_id
+            == published.current_revision.id
+        )
+        assert assistant_bindings[0].attachable_revision_number == 1
         assert (
             "approved catalogue instructions"
             in (
@@ -320,10 +329,30 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
                     references=[reference],
                 )
 
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=published.id,
+            expected_revision_id=draft.revision.id,
+        )
+        [published_update] = await repo.list_assistant_bindings(
+            assistant_id=assistant.id
+        )
+        assert published_update.skill_revision_id == published.current_revision.id
+        assert published_update.attachable_revision_id == draft.revision.id
+        assert published_update.attachable_revision_number == 2
+
         await repo.unpublish_organization(
             tenant_id=admin_user.tenant_id,
             skill_id=published.id,
         )
+        [unpublished_binding] = await repo.list_assistant_bindings(
+            assistant_id=assistant.id
+        )
+        assert unpublished_binding.skill_revision_id == published.current_revision.id
+        assert unpublished_binding.source is SkillBindingSource.ORGANIZATION
+        assert unpublished_binding.attachable_revision_id is None
+        assert unpublished_binding.attachable_revision_number is None
+        assert unpublished_binding.is_active is False
         await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=assistant.id,

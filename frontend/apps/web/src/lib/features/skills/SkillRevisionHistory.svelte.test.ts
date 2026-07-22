@@ -112,11 +112,10 @@ describe("SkillRevisionHistory", () => {
       onRestored
     });
 
-    await page
-      .getByRole("button", {
-        name: m.skills_library_view_revision_aria({ revision: "2" })
-      })
-      .click();
+    const viewRevisionTrigger = page.getByRole("button", {
+      name: m.skills_library_view_revision_aria({ revision: "2" })
+    });
+    await viewRevisionTrigger.click();
     await vi.waitFor(() => expect(onView).toHaveBeenCalledWith(historical.id));
     await expect.element(page.getByText(historical.instructions)).toBeVisible();
     await expect.element(page.getByText(current.instructions)).toBeVisible();
@@ -142,6 +141,34 @@ describe("SkillRevisionHistory", () => {
       )
     );
     await vi.waitFor(() => expect(onRestored).toHaveBeenCalledWith(outcome));
+    await expect.element(viewRevisionTrigger).toHaveFocus();
+  });
+
+  test("returns focus to the viewed revision after cancelling restore", async () => {
+    const current = revision(2);
+    const historical = revision(1);
+
+    render(SkillRevisionHistory, {
+      currentRevision: current,
+      initialPage: revisionPage([summary(current), summary(historical)], null),
+      canRestore: true,
+      hasUnsavedChanges: false,
+      onLoadMore: vi.fn(),
+      onView: vi.fn(async () => historical),
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
+    });
+
+    const viewRevisionTrigger = page.getByRole("button", {
+      name: m.skills_library_view_revision_aria({ revision: "1" })
+    });
+    await viewRevisionTrigger.click();
+    await page
+      .getByRole("button", { name: m.skills_library_restore_revision_from_preview() })
+      .click();
+    await page.getByRole("button", { name: m.cancel() }).click();
+
+    await expect.element(viewRevisionTrigger).toHaveFocus();
   });
 
   test("keeps the current form when restore is a no-op on the visible revision", async () => {
@@ -246,6 +273,33 @@ describe("SkillRevisionHistory", () => {
     await expect
       .element(page.getByRole("button", { name: m.skills_library_load_older() }))
       .not.toBeInTheDocument();
+  });
+
+  test("labels the fixed-width revision table as a keyboard-scrollable region", async () => {
+    const current = revision(2);
+
+    render(SkillRevisionHistory, {
+      currentRevision: current,
+      initialPage: revisionPage([summary(current), summary(revision(1))], null),
+      canRestore: false,
+      hasUnsavedChanges: false,
+      onLoadMore: vi.fn(),
+      onView: vi.fn(),
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
+    });
+
+    const region = page.getByRole("region", {
+      name: m.skills_library_history_heading()
+    });
+    await expect.element(region).toBeVisible();
+    const regionElement = region.element();
+    expect(regionElement.getAttribute("tabindex")).toBe("0");
+    expect(regionElement).toBeInstanceOf(HTMLElement);
+    if (!(regionElement instanceof HTMLElement))
+      throw new Error("Expected a scrollable HTML region");
+    regionElement.style.width = "320px";
+    expect(regionElement.scrollWidth).toBeGreaterThan(regionElement.clientWidth);
   });
 
   test("keeps history usable when an older page fails and allows retry", async () => {

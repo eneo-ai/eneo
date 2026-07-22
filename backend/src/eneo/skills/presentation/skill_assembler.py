@@ -13,6 +13,7 @@ from eneo.skills.presentation.skill_models import (
     OrganizationSkillPublic,
     OrganizationSkillSummaryPublic,
     PublishedSkillPublic,
+    PublishedSkillRevisionPublic,
     PublishedSkillSummaryPublic,
     SkillBindingReferenceInput,
     SkillBindingSummary,
@@ -170,7 +171,16 @@ class SkillAssembler:
     def published_to_public(cls, skill: PublishedSkill) -> PublishedSkillPublic:
         return PublishedSkillPublic(
             **cls.published_summary_to_public(skill.summary).model_dump(),
-            revision=cls.revision_to_public(skill.revision),
+            revision=PublishedSkillRevisionPublic(
+                id=skill.revision.id,
+                skill_id=skill.revision.skill_id,
+                revision_number=skill.revision.revision_number,
+                display_name=skill.revision.display_name,
+                description=skill.revision.description,
+                instructions=skill.revision.instructions,
+                content_digest=skill.revision.content_digest,
+                created_at=skill.revision.created_at,
+            ),
         )
 
     @staticmethod
@@ -178,13 +188,14 @@ class SkillAssembler:
         return SkillBindingSummary(
             skill_id=binding.skill_id,
             skill_revision_id=binding.skill_revision_id,
-            current_revision_id=binding.current_revision_id,
+            attachable_revision_id=binding.attachable_revision_id,
             slug=binding.slug,
             revision_number=binding.revision_number,
-            current_revision_number=binding.current_revision_number,
+            attachable_revision_number=binding.attachable_revision_number,
             display_name=binding.display_name,
             description=binding.description,
             content_digest=binding.content_digest,
             position=binding.position,
             is_active=binding.is_active,
+            source=binding.source,
         )

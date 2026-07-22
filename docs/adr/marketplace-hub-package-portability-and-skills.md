@@ -28,10 +28,10 @@ Assistant can later travel with its exact Skills as one complete package.
 
 Each Eneo installation also gets an **Organisation Skill catalogue**. It is not
 the external Marketplace. A municipality publishes approved local Skill
-revisions there; builders with Use Skills permission can attach the exact
-approved revision to an Assistant or App in a Space they may edit. Skill
-managers author revisions, while tenant administrators decide what is published
-and what Personal Chat may use. Existing pins keep working after unpublication
+revisions there; builders with Use Skills permission can inspect and attach the
+exact approved revision to an Assistant or App in a Space they may edit. Tenant
+administrators alone author, revise, and publish organisation Skills and decide
+what Personal Chat may use. Existing pins keep working after unpublication
 and never advance silently. A later optional install-to-Space workflow creates
 an editable local copy when a team needs independent customisation and lifecycle.
 
@@ -437,8 +437,10 @@ Only the predefined Owner role receives both capabilities by default. The
 predefined User and AI Configurator roles receive neither. Tenant owners can
 delegate reuse and management through custom roles when the organisation is
 ready to broaden catalogue access. Migration converges the predefined roles to
-that same baseline without changing explicit grants on custom roles. It does
-not invent a parallel role system.
+that same baseline. Existing custom-role grants remain stored because the
+current schema does not record whether a grant came from a default or an
+administrator; tenant administrators must review those roles after upgrade. It
+does not invent a parallel role system.
 
 The authorization rules are:
 
@@ -586,18 +588,18 @@ revision and audit evidence.
 
 #### Local roles and catalogue actions
 
-Use Skills users may browse published summaries, open a full approved preview,
-and install that exact revision into a Space they may edit. Manage Skills users
-who also have Use Skills may author and revise organisation drafts. Tenant
-administrators publish, unpublish, republish, and delete eligible organisation
-drafts. They must also have Use Skills to select Personal Chat Skills.
+Use Skills users may search published summaries in the existing Assistant and
+App pickers, open a full approved preview, and attach that exact revision to a
+parent they may edit. They do not receive the organisation management route.
+Tenant administrators alone author and revise organisation drafts and publish,
+unpublish, republish, or delete eligible organisation Skills. Personal Chat
+selection remains an administrator-owned Governance Policy action.
 
-Organisation draft authoring is a tenant-capability exception scoped only to
-Skill actions. It does not synthesize organisation-Space membership or an Editor
-role. The existing Space actor must deny the same user every non-Skill
-organisation resource, member list, and Space-management action. Published
-catalogue reads use their dedicated projection rather than broad organisation
-Space access.
+Organisation authoring reuses the existing administrator-only Organisation
+Space boundary. It does not synthesize membership, an Editor role, or a second
+admin editor. Published picker reads use their dedicated projection and do not
+grant access to drafts, unpublished Skills, member lists, or other Organisation
+Space management actions.
 
 The management page uses Eneo's installed shadcn-svelte components and
 progressive disclosure: searchable list, Draft/Published/Unpublished and Update
@@ -613,8 +615,10 @@ and reuse surface. Admin does not receive a duplicate Skill editor or catalogue
 dashboard. This keeps one visible owner for the same lifecycle and avoids making
 tenant administrators switch areas to complete one review decision.
 
-The first oversight slice extends each Organisation Skill detail page with a
-server-derived adoption and drift summary:
+The first oversight follow-up (goal-board task T005) extends each Organisation
+Skill detail page with a server-derived adoption and drift summary. It is
+required before O1 general availability but is not part of the #560 catalogue
+foundation:
 
 - exact numbers of Assistants and Apps pinned to a revision;
 - whether Personal Chat is pinned to it;
@@ -629,7 +633,7 @@ remain out of scope until runtime has an explicit attribution contract. Because
 Skills are composed instructions rather than separately invoked units, deriving
 those figures from ordinary Assistant or App runs would present misleading
 precision. A cross-catalogue Admin overview becomes justified only when
-delegated Skill management creates a real need for organisation-wide oversight.
+administrator-owned Skill management creates a real need for organisation-wide oversight.
 
 #### Approved reuse, optional install, and local customisation
 
@@ -1652,7 +1656,7 @@ to revise this record.
 
 | Slice and canonical owner                                                                                                                                                                                       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Depends on                                              | Acceptance evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **S1.1 — Domain, tables, and migration**: `eneo.skills`, database tables, Alembic, and existing role permissions                                                                                                | Add stable Skill identity, immutable revisions, three concrete binding tables, provenance columns, same-tenant/Space-owned/exact-revision constraints, reverse binding indexes, `Permission.SKILLS`, `Permission.SKILLS_MANAGEMENT`, and role backfill. Add only the candidate composite parent indexes needed by those FKs and the App-run provenance containment index required by deletion safety. Update both migration backfill and post-migration tenant bootstrap so upgraded and fresh installations create equivalent permissions.                                                                                                                                                                                                                                                                            | Current `develop`; read-only deployed-schema preflight. | Fresh and current-schema PostgreSQL upgrades reach one head; interrupted index creation is retry-safe; database constraints reject cross-tenant, mismatched Skill/revision, duplicate position, and invalid current pointers; application tests prove that only local-Space or exact published organisation references are accepted; pre-use downgrade succeeds; role tests prove Owner-only defaults while preserving explicit custom-role grants; a fresh-install owner can manage Skills.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **S1.1 — Domain, tables, and migration**: `eneo.skills`, database tables, Alembic, and existing role permissions                                                                                                | Add stable Skill identity, immutable revisions, three concrete binding tables, provenance columns, same-tenant/Space-owned/exact-revision constraints, reverse binding indexes, `Permission.SKILLS`, `Permission.SKILLS_MANAGEMENT`, and role backfill. Add only the candidate composite parent indexes needed by those FKs and the App-run provenance containment index required by deletion safety. Update both migration backfill and post-migration tenant bootstrap so upgraded and fresh installations create equivalent permissions.                                                                                                                                                                                                                                                                            | Current `develop`; read-only deployed-schema preflight. | Fresh and current-schema PostgreSQL upgrades reach one head; interrupted index creation is retry-safe; database constraints reject cross-tenant, mismatched Skill/revision, duplicate position, and invalid current pointers; application tests prove that only local-Space or exact published organisation references are accepted; pre-use downgrade succeeds; role tests prove Owner-only defaults, preserve stored custom-role grants where provenance is unavailable, and tell administrators to review those roles; a fresh-install owner can manage Skills.                                                                                                                                                                                                                                                                                                                                   |
 | **S1.2 — Skill library/API owner**: Skill repository, service, session-only router, audit                                                                                                                       | Implement create/list/read, revision history, no-op save, monotonic revert, status, conflict-safe delete, exact-reference resolution, and session-only Assistant/App binding GET projections. Enforce slug uniqueness, permissions, and typed conflict responses. Return lifecycle mutation outcomes from the locked repository/service boundary so audit never depends on a stale router snapshot. Add no direct binding write route.                                                                                                                                                                                                                                                                                                                                                                                 | S1.1.                                                   | Service/API and real two-session tests cover duplicate-slug conflict, current-content no-op, concurrent identical revision/status/delete outcomes, monotonic revert with a repeated digest, inactive state, deletion race, at-most-one lifecycle audit event, body-free GET projection, and no partial library mutation. OpenAPI contains GET binding routes but no dedicated binding PUT/POST route.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **S1.3 — Parent save, runtime composition, queue safety, and capacity**: existing Assistant/App update services and routers, `SkillService`, App-run queue owner, completion context/budget owner, parent audit | Add an optional ordered exact Skill facet to canonical Assistant/App update. When supplied, lock the parent and replace bindings atomically with ordinary parent fields; hold referenced Skill lifecycle state through resolution and commit; reject the facet for API keys in the router and again in `SkillService`; run composed-context validation on binding-only saves before commit; fold body-free binding evidence into the one parent update audit event. Compose the fixed boundary and ordered pinned bodies, preserve byte-identical instructions when empty, and snapshot App bindings while holding referenced Skills until the queued App run is durable. Deletion uses the same Skill lock and rejects retained provenance from queued/running runs.                                                  | S1.2 and the existing parent update/context owners.     | Tests cover same-Space local reuse; exact published organisation reuse across same-tenant Spaces; draft, stale, ordinary sibling-Space, foreign-tenant, missing, and inactive rejection; retained exact pins after unpublication; concurrent Assistant/App replacement including clear; deactivation-versus-new-binding serialization; configured guardrail; API-key rejection at both boundaries; binding-only context-fit rejection including an explicit clear; rollback of fields and bindings together; one body-free audit event; actual Assistant/App provider instructions; exact order/revision; App queue-time stability; snapshot-versus-delete serialization; queued/running conflict and terminal recovery; defensive runtime failure; unchanged zero-Skill App create/update/publish/queue/run behavior; and acceptance of a long multi-line Skill when the selected model can fit it. |
 | **S1.4 — Organizational personal-chat policy**: existing Governance Policy, organizational Space, and personal-session owners                                                                                   | Store ordered exact revisions from the tenant organizational Space; expose them only through the admin governance contract; compose them after the enforced administrator prompt or stored base prompt; reject direct bindings on the personal default Assistant and fail closed on corrupt state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | S1.2 and S1.3 composition.                              | Tests cover tenant/Space isolation, admin and session enforcement, API-key rejection for the Skill facet, prompt enforcement plus Skills, ordinary stored prompt plus Skills, direct-binding rejection, exact retained provenance, and sequential repository loading so request-scoped reads never overlap on one SQLAlchemy `AsyncSession`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1790,15 +1794,16 @@ are not hidden work inside another delivery.
 - Queue snapshot creation and deletion serialize on referenced Skills. A queued
   or running App run blocks deletion; after the Job becomes complete or failed,
   retained provenance remains readable and deletion may proceed.
-- Tenant administrators who also have Use Skills apply organizational-Space
-  Skills to personal chat only through Governance Policy. Enforced prompts and
+- Tenant administrators apply organizational-Space Skills to personal chat only
+  through Governance Policy. Enforced prompts and
   governance Skills compose together; direct personal-default bindings are
   rejected and corrupt state fails closed.
 - Inactive Skills reject new bindings but do not silently change existing pinned
   parents. Bound deletion and Assistant Space transfer return conflict.
 - Group Chat and existing Assistants/Apps without Skills remain unchanged.
 - Existing-role migration backfill and fresh-tenant bootstrap grant the same
-  Owner-only default while preserving explicit custom-role grants.
+  Owner-only default. Existing custom-role grants remain stored because their
+  origin is not recorded; administrators review them after upgrade.
 
 ### Organisation catalogue
 
@@ -1806,12 +1811,14 @@ are not hidden work inside another delivery.
   revisions; API and UI derive Draft, Published, Unpublished, and Update pending
   through one typed domain status.
 - Use Skills users see only published summaries and explicitly selected full
-  previews from their own tenant. Organisation drafts and unpublished Skills do
-  not leak through catalogue, search, counts, or errors.
-- Manage Skills plus Use Skills permits organisation draft authoring without
-  granting organisation-Space membership or access to any non-Skill resource.
-  Tenant admin alone publishes, unpublishes, and deletes eligible
-  never-published drafts; governing Personal Chat also requires Use Skills.
+  previews in Assistant and App pickers for their own tenant. Organisation
+  drafts and unpublished Skills do not leak through catalogue, search, counts,
+  errors, or a separate browse route.
+- Tenant administrators alone access the canonical Organisation > Skills
+  lifecycle surface and author, revise, publish, unpublish, or delete eligible
+  organisation Skills. This reuses the existing administrator-only Organisation
+  Space boundary; it does not create delegated organisation authoring or a
+  duplicate admin editor. Personal Chat selection remains in Governance Policy.
 - Restoring history creates the next immutable revision and changes no parent
   pin or publication pointer.
 - Builders may attach only the current exact published revision to same-tenant

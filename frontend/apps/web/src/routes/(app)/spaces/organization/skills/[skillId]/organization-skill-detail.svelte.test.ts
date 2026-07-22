@@ -80,7 +80,106 @@ function publishedSkill(): PublishedSkillPublic {
 
 describe("organisation Skill detail page", () => {
   beforeEach(() => {
-    invalidate.mockClear();
+    invalidate.mockReset();
+    invalidate.mockResolvedValue(undefined);
+  });
+
+  test("keeps a created revision saved when refreshing the page data fails", async () => {
+    const createRevision = vi.fn(async () => {});
+    invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              createRevision,
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page.getByLabelText(m.skills_description_label()).fill("Updated description");
+    await page.getByRole("button", { name: m.save(), exact: true }).click();
+
+    await vi.waitFor(() =>
+      expect(createRevision).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        display_name: "HR support",
+        description: "Updated description",
+        instructions: "Follow revision 2."
+      })
+    );
+    await expect
+      .element(page.getByRole("status").getByText(m.skills_form_saved_status(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_revision_form_error_title()))
+      .not.toBeInTheDocument();
+    expect(createRevision).toHaveBeenCalledTimes(1);
+  });
+
+  test("places content and the approved version before publication controls in reading order", () => {
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              get: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    const content = document
+      .querySelector("#organization-skill-content-heading")
+      ?.closest("section");
+    const approved = document
+      .querySelector("#organization-skill-approved-heading")
+      ?.closest("section");
+    const publication = document.querySelector("aside[aria-labelledby]");
+
+    expect(content).not.toBeNull();
+    expect(approved).not.toBeNull();
+    expect(publication).not.toBeNull();
+    expect(content?.compareDocumentPosition(approved as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(approved?.compareDocumentPosition(publication as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
   });
 
   test("unpublishes an approved revision while a newer draft remains pending", async () => {
@@ -89,9 +188,6 @@ describe("organisation Skill detail page", () => {
 
     render(OrganizationSkillDetailPage, {
       data: {
-        mode: "manage",
-        canManage: true,
-        canPublish: true,
         skill: updatePendingSkill(),
         published: publishedSkill(),
         revisionPage: {
@@ -137,5 +233,51 @@ describe("organisation Skill detail page", () => {
     );
     expect(publish).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+  });
+
+  test("keeps a publication change committed when refreshing the page data fails", async () => {
+    const unpublish = vi.fn(async () => {});
+    invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_unpublish_action(), exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => expect(unpublish).toHaveBeenCalledTimes(1));
+    await expect
+      .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: m.organization_skills_unpublish_title() }))
+      .not.toBeInTheDocument();
   });
 });

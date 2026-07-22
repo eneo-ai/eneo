@@ -8,6 +8,7 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    SkillBindingSource,
     SkillPublicationState,
 )
 
@@ -112,8 +113,19 @@ class PublishedSkillSummaryPublic(BaseModel):
     first_published_at: datetime
 
 
+class PublishedSkillRevisionPublic(BaseModel):
+    id: UUID
+    skill_id: UUID
+    revision_number: int
+    display_name: str
+    description: str
+    instructions: str
+    content_digest: str
+    created_at: datetime
+
+
 class PublishedSkillPublic(PublishedSkillSummaryPublic):
-    revision: SkillRevisionPublic
+    revision: PublishedSkillRevisionPublic
 
 
 class PublishedSkillSummaryPagePublic(PaginatedResponse[PublishedSkillSummaryPublic]):
@@ -129,12 +141,13 @@ class SkillBindingReferenceInput(BaseModel):
 class SkillBindingSummary(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
-    current_revision_id: UUID
+    attachable_revision_id: UUID | None
     slug: str
     revision_number: int
-    current_revision_number: int
+    attachable_revision_number: int | None
     display_name: str
     description: str
     content_digest: str
     position: int
     is_active: bool
+    source: SkillBindingSource

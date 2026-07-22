@@ -440,7 +440,9 @@ async def test_publish_explains_a_stale_revision_conflict():
         repo=repo,
     )
 
-    with pytest.raises(NameCollisionException, match="changed since you reviewed"):
+    with pytest.raises(
+        SkillRevisionConflictException, match="changed since you reviewed"
+    ):
         await service.publish(
             skill_id=uuid4(),
             expected_revision_id=uuid4(),

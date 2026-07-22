@@ -7,15 +7,10 @@
   import SpaceSelector from "$lib/features/spaces/components/SpaceSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import SpaceMenu, { type SpaceMenuContext } from "../../[spaceId]/SpaceMenu.svelte";
-  import {
-    hasOrganizationNavigationPermission,
-    resolveOrganizationSkillsAccess
-  } from "./organizationSkillsAccess";
+  import { hasOrganizationNavigationPermission } from "./organizationSkillsAccess";
 
   const { user } = getAppContext();
-  const access = resolveOrganizationSkillsAccess({
-    admin: user.hasPermission("admin")
-  });
+  const admin = user.hasPermission("admin");
   let mobileNavigationOpen = false;
 
   const organizationSpace = {
@@ -25,7 +20,7 @@
     organization: true,
     routeId: "organization",
     hasPermission: (action, resource) =>
-      hasOrganizationNavigationPermission(access, action, resource)
+      hasOrganizationNavigationPermission(admin, action, resource)
   } satisfies SpaceMenuContext & { id: string; name: string };
 </script>
 

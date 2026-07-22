@@ -35,7 +35,11 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import UnauthorizedException
 from eneo.sessions.session import SessionFeedback, SessionInDB
-from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingReference
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingReference,
+    SkillBindingSource,
+)
 from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
 
 
@@ -481,6 +485,7 @@ def _skill_binding(*, position: int) -> ResolvedSkillBinding:
         instructions="Sensitive instructions must not enter audit evidence",
         content_digest=str(position + 1) * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
         is_active=True,
     )
 

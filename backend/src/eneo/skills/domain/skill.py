@@ -193,6 +193,11 @@ class SkillPublicationState(str, Enum):
     UNPUBLISHED = "unpublished"
 
 
+class SkillBindingSource(str, Enum):
+    SPACE = "space"
+    ORGANIZATION = "organization"
+
+
 def derive_skill_publication_state(
     *,
     current_revision_number: int,
@@ -358,8 +363,11 @@ class ResolvedSkillBinding:
     instructions: str
     content_digest: str
     position: int
+    source: SkillBindingSource
     description: str = ""
     is_active: bool = True
+    attachable_revision_id: UUID | None = None
+    attachable_revision_number: int | None = None
 
 
 @dataclass(frozen=True)

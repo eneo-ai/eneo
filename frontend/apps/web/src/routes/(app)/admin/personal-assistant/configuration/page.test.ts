@@ -44,17 +44,21 @@ describe("personal assistant configuration loader", () => {
       cursor: null,
       search: null
     });
-    expect(result.skills.items).toEqual(skills);
+    expect(result.skills.items).toEqual(
+      skills.map((skill) => ({ ...skill, source: "organization" }))
+    );
     expect(result.organizationSpace).toEqual(organizationSpace);
     expect(event.depends).toHaveBeenCalledWith("organization:skills");
   });
 
-  test("does not load catalogue entries without Skill use permission", async () => {
-    const { event, listSkills } = createEvent([]);
+  test("loads the admin catalogue without a separate Space Skill permission", async () => {
+    const { event, listSkills, skills } = createEvent([]);
 
     const result = await load(event as never);
 
-    expect(listSkills).not.toHaveBeenCalled();
-    expect(result.skills.items).toEqual([]);
+    expect(listSkills).toHaveBeenCalledOnce();
+    expect(result.skills.items).toEqual(
+      skills.map((skill) => ({ ...skill, source: "organization" }))
+    );
   });
 });

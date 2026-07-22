@@ -27,6 +27,7 @@ from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
+    SkillBindingSource,
     SkillCatalogEntry,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
@@ -62,6 +63,7 @@ def _escape_like_literal(value: str) -> str:
 
 
 _CurrentSkillRevision = aliased(SkillRevisions, name="current_skill_revision")
+_PublishedSkillRevision = aliased(SkillRevisions, name="published_skill_revision")
 
 
 class SkillRepoImpl:
@@ -831,15 +833,29 @@ class SkillRepoImpl:
     @staticmethod
     def _resolved_query(
         binding_table: type[_BindingRow],
-    ) -> sa.Select[tuple[_BindingRow, Skills, SkillRevisions, UUID]]:
+    ):
+        is_organization = sa.and_(
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
         return (
             sa.select(
                 binding_table,
                 Skills,
                 SkillRevisions,
                 _CurrentSkillRevision.id.label("current_revision_id"),
+                is_organization.label("is_organization"),
+                sa.case(
+                    (is_organization, _PublishedSkillRevision.id),
+                    else_=_CurrentSkillRevision.id,
+                ).label("attachable_revision_id"),
+                sa.case(
+                    (is_organization, Skills.published_revision_number),
+                    else_=Skills.current_revision_number,
+                ).label("attachable_revision_number"),
             )
             .join(Skills, Skills.id == binding_table.skill_id)
+            .join(Spaces, Spaces.id == Skills.space_id)
             .join(
                 SkillRevisions,
                 sa.and_(
@@ -855,6 +871,14 @@ class SkillRepoImpl:
                     == Skills.current_revision_number,
                 ),
             )
+            .outerjoin(
+                _PublishedSkillRevision,
+                sa.and_(
+                    _PublishedSkillRevision.skill_id == Skills.id,
+                    _PublishedSkillRevision.revision_number
+                    == Skills.published_revision_number,
+                ),
+            )
         )
 
     @staticmethod
@@ -862,6 +886,9 @@ class SkillRepoImpl:
         skill: Skills,
         revision: SkillRevisions,
         current_revision_id: UUID,
+        is_organization: bool,
+        attachable_revision_id: UUID | None,
+        attachable_revision_number: int | None,
         position: int,
     ) -> ResolvedSkillBinding:
         return ResolvedSkillBinding(
@@ -876,8 +903,15 @@ class SkillRepoImpl:
             instructions=revision.instructions,
             content_digest=revision.content_digest,
             position=position,
+            source=(
+                SkillBindingSource.ORGANIZATION
+                if is_organization
+                else SkillBindingSource.SPACE
+            ),
             description=revision.description,
             is_active=skill.is_active,
+            attachable_revision_id=attachable_revision_id,
+            attachable_revision_number=attachable_revision_number,
         )
 
     async def _resolve_references(
@@ -891,11 +925,24 @@ class SkillRepoImpl:
             return []
         skill_ids = [reference.skill_id for reference in references]
         revision_ids = [reference.skill_revision_id for reference in references]
+        is_organization = sa.and_(
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
         statement = (
             sa.select(
                 Skills,
                 SkillRevisions,
                 _CurrentSkillRevision.id.label("current_revision_id"),
+                is_organization.label("is_organization"),
+                sa.case(
+                    (is_organization, _PublishedSkillRevision.id),
+                    else_=_CurrentSkillRevision.id,
+                ).label("attachable_revision_id"),
+                sa.case(
+                    (is_organization, Skills.published_revision_number),
+                    else_=Skills.current_revision_number,
+                ).label("attachable_revision_number"),
             )
             .join(SkillRevisions, SkillRevisions.skill_id == Skills.id)
             .join(
@@ -907,6 +954,14 @@ class SkillRepoImpl:
                 ),
             )
             .join(Spaces, Spaces.id == Skills.space_id)
+            .outerjoin(
+                _PublishedSkillRevision,
+                sa.and_(
+                    _PublishedSkillRevision.skill_id == Skills.id,
+                    _PublishedSkillRevision.revision_number
+                    == Skills.published_revision_number,
+                ),
+            )
             .where(
                 source_scope,
                 Skills.id.in_(skill_ids),
@@ -920,8 +975,22 @@ class SkillRepoImpl:
             SkillBindingReference(
                 skill_id=skill.id,
                 skill_revision_id=revision.id,
-            ): (skill, revision, current_revision_id)
-            for skill, revision, current_revision_id in rows.all()
+            ): (
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            )
+            for (
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            ) in rows.all()
         }
         return [
             self._to_resolved(*by_reference[reference], position)
@@ -999,13 +1068,25 @@ class SkillRepoImpl:
         skill_ids = [reference.skill_id for reference in references]
         revision_ids = [reference.skill_revision_id for reference in references]
         rows = await self.session.execute(
-            sa.select(Skills, SkillRevisions)
+            sa.select(
+                Skills,
+                SkillRevisions,
+                _CurrentSkillRevision.id.label("current_revision_id"),
+            )
             .join(Spaces, Spaces.id == Skills.space_id)
             .join(
                 SkillRevisions,
                 sa.and_(
                     SkillRevisions.skill_id == Skills.id,
                     SkillRevisions.revision_number == Skills.published_revision_number,
+                ),
+            )
+            .join(
+                _CurrentSkillRevision,
+                sa.and_(
+                    _CurrentSkillRevision.skill_id == Skills.id,
+                    _CurrentSkillRevision.revision_number
+                    == Skills.current_revision_number,
                 ),
             )
             .where(
@@ -1020,11 +1101,17 @@ class SkillRepoImpl:
             SkillBindingReference(
                 skill_id=skill.id,
                 skill_revision_id=revision.id,
-            ): (skill, revision)
-            for skill, revision in rows.all()
+            ): (skill, revision, current_revision_id)
+            for skill, revision, current_revision_id in rows.all()
         }
         return [
-            self._to_resolved(*by_reference[reference], position)
+            self._to_resolved(
+                *by_reference[reference],
+                True,
+                by_reference[reference][1].id,
+                by_reference[reference][1].revision_number,
+                position,
+            )
             for position, reference in enumerate(references)
             if reference in by_reference
         ]
@@ -1053,8 +1140,24 @@ class SkillRepoImpl:
             .order_by(AssistantSkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, current_revision_id, binding.position)
-            for binding, skill, revision, current_revision_id in rows.all()
+            self._to_resolved(
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+                binding.position,
+            )
+            for (
+                binding,
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            ) in rows.all()
         ]
 
     async def has_assistant_bindings(self, *, assistant_id: UUID) -> bool:
@@ -1105,8 +1208,24 @@ class SkillRepoImpl:
             .order_by(AppSkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, current_revision_id, binding.position)
-            for binding, skill, revision, current_revision_id in rows.all()
+            self._to_resolved(
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+                binding.position,
+            )
+            for (
+                binding,
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            ) in rows.all()
         ]
 
     async def list_app_bindings_for_execution_plan(
@@ -1119,8 +1238,24 @@ class SkillRepoImpl:
             .with_for_update(read=True, of=Skills)
         )
         return [
-            self._to_resolved(skill, revision, current_revision_id, binding.position)
-            for binding, skill, revision, current_revision_id in rows.all()
+            self._to_resolved(
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+                binding.position,
+            )
+            for (
+                binding,
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            ) in rows.all()
         ]
 
     async def replace_app_bindings(
@@ -1160,8 +1295,24 @@ class SkillRepoImpl:
             .order_by(GovernancePolicySkillBindings.position)
         )
         return [
-            self._to_resolved(skill, revision, current_revision_id, binding.position)
-            for binding, skill, revision, current_revision_id in rows.all()
+            self._to_resolved(
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+                binding.position,
+            )
+            for (
+                binding,
+                skill,
+                revision,
+                current_revision_id,
+                is_organization,
+                attachable_revision_id,
+                attachable_revision_number,
+            ) in rows.all()
         ]
 
     async def replace_policy_bindings(

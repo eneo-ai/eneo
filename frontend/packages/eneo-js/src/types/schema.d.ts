@@ -14995,7 +14995,35 @@ export interface components {
        * Format: date-time
        */
       first_published_at: string;
-      revision: components["schemas"]["SkillRevisionPublic"];
+      revision: components["schemas"]["PublishedSkillRevisionPublic"];
+    };
+    /** PublishedSkillRevisionPublic */
+    PublishedSkillRevisionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Instructions */
+      instructions: string;
+      /** Content Digest */
+      content_digest: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
     };
     /** PublishedSkillSummaryPagePublic */
     PublishedSkillSummaryPagePublic: {
@@ -15935,6 +15963,11 @@ export interface components {
        */
       skill_revision_id: string;
     };
+    /**
+     * SkillBindingSource
+     * @enum {string}
+     */
+    SkillBindingSource: "space" | "organization";
     /** SkillBindingSummary */
     SkillBindingSummary: {
       /**
@@ -15947,17 +15980,14 @@ export interface components {
        * Format: uuid
        */
       skill_revision_id: string;
-      /**
-       * Current Revision Id
-       * Format: uuid
-       */
-      current_revision_id: string;
+      /** Attachable Revision Id */
+      attachable_revision_id: string | null;
       /** Slug */
       slug: string;
       /** Revision Number */
       revision_number: number;
-      /** Current Revision Number */
-      current_revision_number: number;
+      /** Attachable Revision Number */
+      attachable_revision_number: number | null;
       /** Display Name */
       display_name: string;
       /** Description */
@@ -15968,6 +15998,7 @@ export interface components {
       position: number;
       /** Is Active */
       is_active: boolean;
+      source: components["schemas"]["SkillBindingSource"];
     };
     /** SkillCreateRequest */
     SkillCreateRequest: {

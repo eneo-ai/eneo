@@ -6,7 +6,9 @@ import type {
   SkillSparse
 } from "@eneo/eneo-js";
 
-export type SkillBindingCandidate = SkillSparse | PublishedSkillSummaryPublic;
+export type SkillBindingSource = "space" | "organization";
+export type SkillBindingCandidate =
+  (SkillSparse & { source: "space" }) | (PublishedSkillSummaryPublic & { source: "organization" });
 
 export type SkillRevisionFormValue = Pick<
   SkillPublic["current_revision"],
@@ -18,10 +20,12 @@ export type SkillFormValue = Pick<SkillPublic, "slug"> & SkillRevisionFormValue;
 export type SkillBindingRow = {
   reference: SkillBindingReferenceInput;
   summary: SkillBindingSummary | undefined;
-  currentRevisionId: string | undefined;
-  currentRevisionNumber: number | undefined;
+  attachableRevisionId: string | undefined;
+  attachableRevisionNumber: number | undefined;
   displayName: string | undefined;
   description: string | undefined;
+  slug: string | undefined;
+  source: SkillBindingSource | undefined;
   pinnedRevision: number | undefined;
   isActive: boolean | undefined;
   hasNewerRevision: boolean;
@@ -35,9 +39,9 @@ export function getAvailableSkills(
   return catalog.filter((skill) => isSkillCandidateActive(skill) && !boundSkillIds.has(skill.id));
 }
 
-export function appendSkillBinding(
+export function appendSkillRevisionBinding(
   bindings: SkillBindingReferenceInput[],
-  skill: SkillBindingCandidate
+  skill: { id: string; revisionId: string }
 ): SkillBindingReferenceInput[] {
   if (bindings.some((binding) => binding.skill_id === skill.id)) return bindings;
 
@@ -45,7 +49,7 @@ export function appendSkillBinding(
     ...bindings,
     {
       skill_id: skill.id,
-      skill_revision_id: getSkillCandidateRevisionId(skill)
+      skill_revision_id: skill.revisionId
     }
   ];
 }
@@ -75,15 +79,18 @@ export function moveSkillBinding(
 export function upgradeSkillBinding(
   bindings: SkillBindingReferenceInput[],
   index: number,
-  currentSkill: Pick<SkillSparse, "id" | "current_revision_id" | "is_active">
+  skill: {
+    id: string;
+    attachableRevisionId: string;
+    isActive: boolean;
+  }
 ): SkillBindingReferenceInput[] {
-  const currentRevisionId = currentSkill.current_revision_id;
   const binding = bindings[index];
   if (
     !binding ||
-    binding.skill_id !== currentSkill.id ||
-    !currentSkill.is_active ||
-    binding.skill_revision_id === currentRevisionId
+    binding.skill_id !== skill.id ||
+    !skill.isActive ||
+    binding.skill_revision_id === skill.attachableRevisionId
   ) {
     return bindings;
   }
@@ -91,7 +98,7 @@ export function upgradeSkillBinding(
   const upgraded = bindings.slice();
   upgraded[index] = {
     skill_id: binding.skill_id,
-    skill_revision_id: currentRevisionId
+    skill_revision_id: skill.attachableRevisionId
   };
   return upgraded;
 }
@@ -122,42 +129,44 @@ export function getSkillBindingRows(
     );
     const skillSummary = summariesBySkillId.get(reference.skill_id);
     const currentSkill = catalogById.get(reference.skill_id);
-    const currentRevisionId =
-      skillSummary?.current_revision_id ??
+    const attachableRevisionId =
+      skillSummary?.attachable_revision_id ??
       (currentSkill === undefined ? undefined : getSkillCandidateRevisionId(currentSkill));
-    const currentRevisionNumber =
-      skillSummary?.current_revision_number ??
+    const attachableRevisionNumber =
+      skillSummary?.attachable_revision_number ??
       (currentSkill === undefined ? undefined : getSkillCandidateRevisionNumber(currentSkill));
-    const referencesCurrentRevision = currentRevisionId === reference.skill_revision_id;
+    const referencesAttachableRevision = attachableRevisionId === reference.skill_revision_id;
 
     return {
       reference,
       summary,
-      currentRevisionId,
-      currentRevisionNumber,
+      attachableRevisionId,
+      attachableRevisionNumber,
       displayName:
         summary?.display_name ?? skillSummary?.display_name ?? currentSkill?.display_name,
       description: summary?.description ?? skillSummary?.description ?? currentSkill?.description,
+      slug: summary?.slug ?? skillSummary?.slug ?? currentSkill?.slug,
+      source: summary?.source ?? currentSkill?.source,
       pinnedRevision:
-        summary?.revision_number ?? (referencesCurrentRevision ? currentRevisionNumber : undefined),
+        summary?.revision_number ??
+        (referencesAttachableRevision ? attachableRevisionNumber : undefined),
       isActive:
         currentSkill !== undefined ? isSkillCandidateActive(currentSkill) : skillSummary?.is_active,
-      hasNewerRevision: currentRevisionId !== undefined && !referencesCurrentRevision
+      hasNewerRevision: attachableRevisionId !== undefined && !referencesAttachableRevision
     };
   });
 }
 
 export function getSkillCandidateRevisionId(skill: SkillBindingCandidate): string {
-  return "current_revision_id" in skill ? skill.current_revision_id : skill.revision_id;
+  return skill.source === "space" ? skill.current_revision_id : skill.revision_id;
 }
 
 export function getSkillCandidateRevisionNumber(skill: SkillBindingCandidate): number {
-  return "current_revision_number" in skill ? skill.current_revision_number : skill.revision_number;
+  return skill.source === "space" ? skill.current_revision_number : skill.revision_number;
 }
 
 export function isSkillCandidateActive(skill: SkillBindingCandidate): boolean {
-  // Publication is the availability boundary for organisation catalogue candidates.
-  return "is_active" in skill ? skill.is_active : true;
+  return skill.source === "space" ? skill.is_active : true;
 }
 
 function bindingKey(skillId: string, revisionId: string): string {

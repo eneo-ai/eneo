@@ -1,21 +1,11 @@
 import { redirect } from "@sveltejs/kit";
 import { resolve } from "$app/paths";
 import { hasPermission } from "$lib/core/hasPermission";
-import { resolveOrganizationSkillsAccess } from "./organizationSkillsAccess";
 
 export const load = async (event) => {
   const { user } = await event.parent();
   const userHasPermission = hasPermission(user);
-  const access = resolveOrganizationSkillsAccess({
-    admin: userHasPermission("admin")
-  });
-
-  if (!access.canBrowse) {
+  if (!userHasPermission("admin")) {
     redirect(307, resolve("/spaces/list"));
   }
-
-  return {
-    canManage: access.canManage,
-    canPublish: access.canPublish
-  };
 };

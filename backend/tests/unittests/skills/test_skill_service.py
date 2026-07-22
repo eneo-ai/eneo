@@ -15,9 +15,9 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
-    PublishedSkillDeletionError,
     ResolvedSkillBinding,
     SkillBindingReference,
+    SkillBindingSource,
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionChange,
@@ -49,6 +49,7 @@ def _binding(
         instructions="Use the payroll handbook.",
         content_digest="a" * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
         is_active=active,
     )
 
@@ -169,16 +170,71 @@ async def test_organisation_skill_availability_uses_publication_not_status_toggl
     repo.set_active.assert_not_awaited()
 
 
-async def test_space_delete_reports_published_organisation_skill_as_a_conflict():
+async def test_generic_space_create_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    repo = AsyncMock()
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.create_skill(
+            space_id=space.id,
+            slug="payroll",
+            display_name="Payroll",
+            description="Answers payroll questions",
+            instructions="Use approved guidance.",
+        )
+
+    repo.create.assert_not_awaited()
+
+
+async def test_generic_space_revision_rejects_organisation_skills_before_write():
     space = _space(organization=True)
     skill = SimpleNamespace(id=uuid4(), space_id=space.id)
     repo = AsyncMock()
     repo.get.return_value = skill
-    repo.delete.side_effect = PublishedSkillDeletionError
     service = _service(space=space, repo=repo)
 
-    with pytest.raises(NameCollisionException, match="Unpublish"):
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.create_revision(
+            skill_id=skill.id,
+            display_name="Payroll",
+            description="Answers payroll questions",
+            instructions="Use approved guidance.",
+        )
+
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_generic_space_restore_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.restore_revision(
+            space_id=space.id,
+            skill_id=skill.id,
+            source_revision_id=uuid4(),
+            reviewed_current_revision_id=uuid4(),
+        )
+
+    repo.get_revision.assert_not_awaited()
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_generic_space_delete_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
         await service.delete_skill(skill_id=skill.id)
+
+    repo.delete.assert_not_awaited()
 
 
 def _space(*, personal=False, organization=False, default_assistant=False):
@@ -1038,28 +1094,25 @@ async def test_existing_unpublished_governance_binding_can_remain():
     repo.replace_policy_bindings.assert_awaited_once()
 
 
-async def test_tenant_admin_without_skill_use_cannot_replace_governance_bindings():
+async def test_tenant_admin_without_space_skill_use_can_replace_governance_bindings():
     space = _space(organization=True)
     repo = AsyncMock()
-    actor = MagicMock(
-        can_read_skills=MagicMock(return_value=False),
-        can_edit_skills=MagicMock(return_value=True),
-    )
+    repo.list_policy_bindings.return_value = []
     service = _service(
         space=space,
-        actor=actor,
         repo=repo,
         permissions={Permission.ADMIN},
     )
 
-    with pytest.raises(UnauthorizedException, match="configure organisation Skills"):
-        await service.replace_governance_bindings(
-            policy_id=uuid4(),
-            organization_space_id=space.id,
-            references=[],
-        )
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        references=[],
+    )
 
-    repo.list_policy_bindings.assert_not_awaited()
+    assert result == []
+    repo.list_policy_bindings.assert_awaited_once()
+    repo.replace_policy_bindings.assert_awaited_once()
 
 
 async def test_skill_user_without_tenant_admin_cannot_replace_governance_bindings():

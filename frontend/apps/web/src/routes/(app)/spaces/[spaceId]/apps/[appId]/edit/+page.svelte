@@ -25,7 +25,10 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
-  import { loadSkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
@@ -293,7 +296,6 @@
               description={m.skills_editor_description()}
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
               revertFn={() => discardChanges("skill_bindings")}
-              fullWidth
             >
               <SkillBindingsEditor
                 bind:bindings={$update.skill_bindings}
@@ -308,6 +310,12 @@
                     spaceId: data.currentSpace.id,
                     organizationSpace: data.currentSpace.organization === true,
                     ...params
+                  })}
+                onGetSkillPreview={(skill) =>
+                  loadSkillBindingPreview({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    skill
                   })}
                 onCreateSkill={createSkill}
               />

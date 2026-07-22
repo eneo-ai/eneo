@@ -49,7 +49,8 @@ function skill(
 
 describe("organisation Skill catalogue page", () => {
   beforeEach(() => {
-    invalidate.mockClear();
+    invalidate.mockReset();
+    invalidate.mockResolvedValue(undefined);
   });
 
   test("deletes drafts and unpublished Skills, then removes the deleted row", async () => {
@@ -61,10 +62,7 @@ describe("organisation Skill catalogue page", () => {
 
     render(OrganizationSkillsPage, {
       data: {
-        mode: "manage",
         search: "",
-        canManage: true,
-        canPublish: true,
         page: {
           items: [draft, unpublished, published, updatePending],
           count: 4,
@@ -140,13 +138,71 @@ describe("organisation Skill catalogue page", () => {
     await expect.element(page.getByText(draft.display_name)).toBeVisible();
   });
 
+  test("keeps the catalogue table keyboard-scrollable", async () => {
+    const draft = skill("draft", "draft");
+
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        page: {
+          items: [draft],
+          count: 1,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: vi.fn(),
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    const region = page.getByRole("region", {
+      name: m.organization_skills_table_scroll_region_label({ count: "1" })
+    });
+    await expect.element(region).toBeVisible();
+    expect(region.element().getAttribute("tabindex")).toBe("0");
+    await expect.element(region.getByRole("table")).toBeVisible();
+  });
+
+  test("keeps one action surface while catalogue fields adapt responsively", () => {
+    const draft = skill("draft", "draft");
+
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        page: {
+          items: [draft],
+          count: 1,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: vi.fn(),
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    expect(
+      document.querySelectorAll(
+        `[aria-label="${m.skills_library_delete_aria({ name: draft.display_name })}"]`
+      )
+    ).toHaveLength(1);
+  });
+
   test("offers one clear creation action when the catalogue is empty", async () => {
     render(OrganizationSkillsPage, {
       data: {
-        mode: "manage",
         search: "",
-        canManage: true,
-        canPublish: true,
         page: {
           items: [],
           count: 0,
@@ -178,15 +234,57 @@ describe("organisation Skill catalogue page", () => {
       .not.toBeInTheDocument();
   });
 
+  test("keeps a deleted Skill removed when refreshing the page data fails", async () => {
+    const draft = skill("draft", "draft");
+    const deleteSkill = vi.fn(async () => {});
+    invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
+
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        page: {
+          items: [draft],
+          count: 1,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: deleteSkill,
+              list: vi.fn()
+            },
+            catalogue: {
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.skills_library_delete_aria({ name: draft.display_name })
+      })
+      .click();
+    await page.getByRole("button", { name: m.delete(), exact: true }).click();
+
+    await vi.waitFor(() => expect(deleteSkill).toHaveBeenCalledTimes(1));
+    await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_delete_error()))
+      .not.toBeInTheDocument();
+  });
+
   test("replaces appended results when the server page refreshes", async () => {
     const first = skill("first", "draft");
     const appended = skill("appended", "published");
     const refreshed = skill("refreshed", "published");
     const data = {
-      mode: "manage",
       search: "",
-      canManage: true,
-      canPublish: true,
       page: {
         items: [first],
         count: 1,

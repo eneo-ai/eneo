@@ -855,18 +855,20 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     assert owner_permissions.count("skills") == 1
     assert owner_permissions.count("skills_management") == 1
 
-    for role_name in (
-        "user",
-        "ai_configurator",
-        "assistants",
-        "apps",
-        "admin",
-        "ai",
-        "unrelated",
-    ):
+    for role_name in ("user", "ai_configurator", "unrelated"):
         permissions = _permissions(connection, role_ids[role_name])
         assert "skills" not in permissions
         assert "skills_management" not in permissions
+
+    for role_name in ("assistants", "apps"):
+        permissions = _permissions(connection, role_ids[role_name])
+        assert permissions.count("skills") == 1
+        assert "skills_management" not in permissions
+
+    for role_name in ("admin", "ai"):
+        permissions = _permissions(connection, role_ids[role_name])
+        assert permissions.count("skills") == 1
+        assert permissions.count("skills_management") == 1
 
     assert _permissions(connection, role_ids["already_granted"]).count("skills") == 1
     already_managed_permissions = _permissions(connection, role_ids["already_managed"])
@@ -971,10 +973,12 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     owner_permissions = _permissions(connection, role_ids["owner"])
     assert "skills" not in owner_permissions
     assert "skills_management" not in owner_permissions
-    assert _permissions(connection, role_ids["already_granted"]).count("skills") == 1
+    # The already-shipped 1300 downgrade removes the two permissions globally;
+    # it did not persist enough provenance to reconstruct earlier custom grants.
+    assert "skills" not in _permissions(connection, role_ids["already_granted"])
     already_managed_permissions = _permissions(connection, role_ids["already_managed"])
-    assert already_managed_permissions.count("skills") == 1
-    assert already_managed_permissions.count("skills_management") == 1
+    assert "skills" not in already_managed_permissions
+    assert "skills_management" not in already_managed_permissions
 
     command.downgrade(config, PRE_SKILLS_REVISION)
     assert _current_revision(connection) == PRE_SKILLS_REVISION

@@ -14,6 +14,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingSource,
     SkillCatalogEntry,
     SkillCatalogPage,
     SkillRevision,
@@ -34,10 +35,11 @@ from eneo.skills.presentation.skill_router import router
 
 
 def _binding(*, position: int) -> ResolvedSkillBinding:
+    current_revision_id = uuid4()
     return ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
-        current_revision_id=uuid4(),
+        current_revision_id=current_revision_id,
         skill_space_id=uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
@@ -47,7 +49,10 @@ def _binding(*, position: int) -> ResolvedSkillBinding:
         instructions="Instructions are not audit evidence",
         content_digest=str(position + 1) * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
         is_active=True,
+        attachable_revision_id=current_revision_id,
+        attachable_revision_number=position + 1,
     )
 
 
@@ -152,13 +157,14 @@ def test_skill_binding_reference_input_maps_to_named_domain_reference():
     ]
 
 
-def test_binding_summary_carries_current_revision_without_catalog_lookup():
+def test_binding_summary_carries_attachable_revision_without_catalog_lookup():
     binding = _binding(position=0)
 
     summary = SkillAssembler.binding_to_summary(binding)
 
-    assert summary.current_revision_id == binding.current_revision_id
-    assert summary.current_revision_number == binding.current_revision_number
+    assert summary.attachable_revision_id == binding.attachable_revision_id
+    assert summary.attachable_revision_number == binding.attachable_revision_number
+    assert summary.source is SkillBindingSource.SPACE
 
 
 def test_parent_binding_projection_routes_are_get_only():

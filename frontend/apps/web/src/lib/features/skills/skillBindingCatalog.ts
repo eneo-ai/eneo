@@ -1,4 +1,4 @@
-import type { Eneo } from "@eneo/eneo-js";
+import type { Eneo, PublishedSkillPublic } from "@eneo/eneo-js";
 import { SKILL_CATALOG_PAGE_SIZE, type CatalogPage } from "./skillCatalog";
 import { mergeSkillCatalog, type SkillBindingCandidate } from "./skillBindings";
 
@@ -15,6 +15,19 @@ export type ListSkillBindingCatalog = (params: {
   cursor?: string | null;
   query?: string | null;
 }) => Promise<SkillBindingCatalogPage>;
+
+export type SkillBindingPreview = {
+  id: string;
+  source: "space" | "organization";
+  slug: string;
+  revisionId: string;
+  revisionNumber: number;
+  displayName: string;
+  description: string;
+  instructions: string;
+};
+
+export type GetSkillBindingPreview = (skill: SkillBindingCandidate) => Promise<SkillBindingPreview>;
 
 export function emptySkillBindingCatalogPage(): SkillBindingCatalogPage {
   return {
@@ -56,7 +69,11 @@ export async function loadSkillBindingCatalogPage({
       cursor: state.cursor,
       query: normalizedQuery
     });
-    return createPage(page.items, limit, nextCursor("space", page.next_cursor));
+    return createPage(
+      page.items.map((skill) => ({ ...skill, source: "space" as const })),
+      limit,
+      nextCursor("space", page.next_cursor)
+    );
   }
 
   const publishedPage = await eneo.skills.catalogue.list({
@@ -64,7 +81,10 @@ export async function loadSkillBindingCatalogPage({
     cursor: state.cursor,
     search: normalizedQuery
   });
-  const published = publishedPage.items;
+  const published = publishedPage.items.map((skill) => ({
+    ...skill,
+    source: "organization" as const
+  }));
   if (publishedPage.next_cursor) {
     return createPage(published, limit, encodeCursor("published", publishedPage.next_cursor));
   }
@@ -80,10 +100,56 @@ export async function loadSkillBindingCatalogPage({
     query: normalizedQuery
   });
   return createPage(
-    mergeSkillCatalog(localPage.items, published),
+    mergeSkillCatalog(
+      localPage.items.map((skill) => ({ ...skill, source: "space" as const })),
+      published
+    ),
     limit,
     nextCursor("space", localPage.next_cursor)
   );
+}
+
+export async function loadSkillBindingPreview({
+  eneo,
+  spaceId,
+  skill
+}: {
+  eneo: Eneo;
+  spaceId: string;
+  skill: SkillBindingCandidate;
+}): Promise<SkillBindingPreview> {
+  if (skill.source === "organization") {
+    return publishedSkillPreview(await eneo.skills.catalogue.get({ skillId: skill.id }));
+  }
+
+  const revision = await eneo.skills.getRevision({
+    spaceId,
+    skillId: skill.id,
+    revisionId: skill.current_revision_id
+  });
+  return {
+    id: skill.id,
+    source: "space",
+    slug: skill.slug,
+    revisionId: revision.id,
+    revisionNumber: revision.revision_number,
+    displayName: revision.display_name,
+    description: revision.description,
+    instructions: revision.instructions
+  };
+}
+
+export function publishedSkillPreview(skill: PublishedSkillPublic): SkillBindingPreview {
+  return {
+    id: skill.id,
+    source: "organization",
+    slug: skill.slug,
+    revisionId: skill.revision.id,
+    revisionNumber: skill.revision.revision_number,
+    displayName: skill.revision.display_name,
+    description: skill.revision.description,
+    instructions: skill.revision.instructions
+  };
 }
 
 function createPage(

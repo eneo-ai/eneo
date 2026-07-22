@@ -1,24 +1,31 @@
 <script lang="ts">
-  import { beforeNavigate, goto, invalidate } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { Info } from "lucide-svelte";
+  import { CheckCircle2, Info } from "lucide-svelte";
 
   let { data } = $props();
 
   let formDirty = $state(false);
   let allowNavigation = $state(false);
+  let createdSkillHref = $state<string | null>(null);
 
   async function createSkill(value: SkillFormValue) {
     const skill = await data.eneo.skills.organization.create(value);
-    await invalidate("organization:skills");
+    const skillHref = resolve(`/spaces/organization/skills/${skill.id}`);
+    createdSkillHref = skillHref;
+    formDirty = false;
     allowNavigation = true;
     try {
-      await goto(resolve(`/spaces/organization/skills/${skill.id}`));
+      await goto(skillHref);
+    } catch {
+      // Creation is already committed. Keep a non-repeatable success state with
+      // a direct link instead of reporting the mutation as failed.
     } finally {
       allowNavigation = false;
     }
@@ -55,16 +62,29 @@
           {m.organization_skills_new_intro()}
         </p>
       </div>
-      <Alert.Root>
-        <Info aria-hidden="true" />
-        <Alert.Title>{m.organization_skills_draft_notice_title()}</Alert.Title>
-        <Alert.Description>{m.organization_skills_draft_notice_description()}</Alert.Description>
-      </Alert.Root>
-      <SkillForm
-        onSubmit={createSkill}
-        showDiscardAction
-        onDirtyChange={(dirty) => (formDirty = dirty)}
-      />
+      {#if createdSkillHref}
+        <Alert.Root>
+          <CheckCircle2 aria-hidden="true" />
+          <Alert.Title>{m.organization_skills_created_title()}</Alert.Title>
+          <Alert.Description>
+            {m.organization_skills_created_navigation_failed_description()}
+          </Alert.Description>
+          <Button class="mt-3" href={createdSkillHref} variant="outline">
+            {m.organization_skills_open_created_action()}
+          </Button>
+        </Alert.Root>
+      {:else}
+        <Alert.Root role="note">
+          <Info aria-hidden="true" />
+          <Alert.Title>{m.organization_skills_draft_notice_title()}</Alert.Title>
+          <Alert.Description>{m.organization_skills_draft_notice_description()}</Alert.Description>
+        </Alert.Root>
+        <SkillForm
+          onSubmit={createSkill}
+          showDiscardAction
+          onDirtyChange={(dirty) => (formDirty = dirty)}
+        />
+      {/if}
     </div>
   </Page.Main>
 </Page.Root>

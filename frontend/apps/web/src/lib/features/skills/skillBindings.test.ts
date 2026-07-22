@@ -6,7 +6,7 @@ import type {
 } from "@eneo/eneo-js";
 import { describe, expect, test } from "vitest";
 import {
-  appendSkillBinding,
+  appendSkillRevisionBinding,
   getAvailableSkills,
   getSkillCandidateRevisionNumber,
   getSkillBindingRows,
@@ -15,8 +15,9 @@ import {
   removeSkillBinding,
   upgradeSkillBinding
 } from "./skillBindings";
+import type { SkillBindingCandidate } from "./skillBindings";
 
-function makeSkill(id: string, revision = 1, isActive = true): SkillSparse {
+function makeSkill(id: string, revision = 1, isActive = true): SkillSparse & { source: "space" } {
   return {
     id,
     space_id: "space-1",
@@ -29,7 +30,8 @@ function makeSkill(id: string, revision = 1, isActive = true): SkillSparse {
     content_digest: `digest-${id}-${revision}`,
     created_by_user_id: "user-1",
     created_at: "2026-07-15T12:00:00Z",
-    updated_at: "2026-07-15T12:00:00Z"
+    updated_at: "2026-07-15T12:00:00Z",
+    source: "space"
   };
 }
 
@@ -44,8 +46,9 @@ function makeSummary(skill: SkillSparse, revision: number): SkillBindingSummary 
     content_digest: `digest-${skill.id}-${revision}`,
     position: 0,
     is_active: skill.is_active,
-    current_revision_id: skill.current_revision_id,
-    current_revision_number: skill.current_revision_number
+    attachable_revision_id: skill.current_revision_id,
+    attachable_revision_number: skill.current_revision_number,
+    source: "space"
   };
 }
 
@@ -72,16 +75,27 @@ describe("Skill binding draft state", () => {
     const bound = makeSkill("bound");
     const available = makeSkill("available");
     const inactive = makeSkill("inactive", 1, false);
-    const bindings = appendSkillBinding([], bound);
+    const bindings = appendSkillRevisionBinding([], {
+      id: bound.id,
+      revisionId: bound.current_revision_id
+    });
 
     expect(getAvailableSkills([bound, inactive, available], bindings)).toEqual([available]);
-    expect(appendSkillBinding(bindings, bound)).toBe(bindings);
+    expect(
+      appendSkillRevisionBinding(bindings, {
+        id: bound.id,
+        revisionId: bound.current_revision_id
+      })
+    ).toBe(bindings);
   });
 
   test("adds the exact current revision, reorders deterministically, and removes by identity", () => {
     const first = makeSkill("first", 2);
     const second = makeSkill("second", 4);
-    const added = appendSkillBinding(appendSkillBinding([], first), second);
+    const added = appendSkillRevisionBinding(
+      appendSkillRevisionBinding([], { id: first.id, revisionId: first.current_revision_id }),
+      { id: second.id, revisionId: second.current_revision_id }
+    );
 
     expect(added).toEqual([
       { skill_id: first.id, skill_revision_id: first.current_revision_id },
@@ -109,7 +123,7 @@ describe("Skill binding draft state", () => {
     expect(row.reference).toEqual(pinnedReference);
     expect(row.pinnedRevision).toBe(1);
     expect(row.hasNewerRevision).toBe(true);
-    expect(row.currentRevisionNumber).toBe(3);
+    expect(row.attachableRevisionNumber).toBe(3);
   });
 
   test("keeps upgrade metadata for a bound Skill outside the current catalog page", () => {
@@ -123,8 +137,8 @@ describe("Skill binding draft state", () => {
     const [row] = getSkillBindingRows([pinnedReference], [pinnedSummary], []);
 
     expect(row.displayName).toBe(current.display_name);
-    expect(row.currentRevisionId).toBe(current.current_revision_id);
-    expect(row.currentRevisionNumber).toBe(3);
+    expect(row.attachableRevisionId).toBe(current.current_revision_id);
+    expect(row.attachableRevisionNumber).toBe(3);
     expect(row.hasNewerRevision).toBe(true);
   });
 
@@ -136,33 +150,88 @@ describe("Skill binding draft state", () => {
       { skill_id: other.id, skill_revision_id: other.current_revision_id }
     ];
 
-    const upgraded = upgradeSkillBinding(bindings, 0, current);
+    const upgraded = upgradeSkillBinding(bindings, 0, {
+      id: current.id,
+      attachableRevisionId: current.current_revision_id,
+      isActive: current.is_active
+    });
 
     expect(upgraded).toEqual([
       { skill_id: current.id, skill_revision_id: current.current_revision_id },
       bindings[1]
     ]);
-    expect(upgradeSkillBinding(upgraded, 0, current)).toBe(upgraded);
-    expect(upgradeSkillBinding(bindings, 0, { ...current, is_active: false })).toBe(bindings);
+    expect(
+      upgradeSkillBinding(upgraded, 0, {
+        id: current.id,
+        attachableRevisionId: current.current_revision_id,
+        isActive: true
+      })
+    ).toBe(upgraded);
+    expect(
+      upgradeSkillBinding(bindings, 0, {
+        id: current.id,
+        attachableRevisionId: current.current_revision_id,
+        isActive: false
+      })
+    ).toBe(bindings);
+  });
+
+  test("offers only the published organisation revision and no draft or unpublished upgrade", () => {
+    const skill = makeSkill("organization", 3);
+    const pinned = makeSummary(skill, 1);
+    pinned.attachable_revision_id = "organization-revision-1";
+    pinned.attachable_revision_number = 1;
+
+    let [row] = getSkillBindingRows(
+      [{ skill_id: skill.id, skill_revision_id: "organization-revision-1" }],
+      [pinned],
+      []
+    );
+    expect(row.hasNewerRevision).toBe(false);
+
+    pinned.attachable_revision_id = "organization-revision-3";
+    pinned.attachable_revision_number = 3;
+    [row] = getSkillBindingRows(
+      [{ skill_id: skill.id, skill_revision_id: "organization-revision-1" }],
+      [pinned],
+      []
+    );
+    expect(row.hasNewerRevision).toBe(true);
+    expect(row.attachableRevisionNumber).toBe(3);
+
+    pinned.attachable_revision_id = null;
+    pinned.attachable_revision_number = null;
+    pinned.is_active = false;
+    [row] = getSkillBindingRows(
+      [{ skill_id: skill.id, skill_revision_id: "organization-revision-1" }],
+      [pinned],
+      []
+    );
+    expect(row.hasNewerRevision).toBe(false);
+    expect(row.isActive).toBe(false);
   });
 
   test("adds a created Skill to the local catalog and binding draft", () => {
     const created = makePublicSkill("created");
-    const catalog = mergeSkillCatalog([], [created]);
-    const bindings = appendSkillBinding([], created);
+    const candidate = { ...created, source: "space" as const };
+    const catalog = mergeSkillCatalog([], [candidate]);
+    const bindings = appendSkillRevisionBinding([], {
+      id: created.id,
+      revisionId: created.current_revision_id
+    });
 
-    expect(catalog).toEqual([created]);
+    expect(catalog).toEqual([candidate]);
     expect(bindings).toEqual([
       { skill_id: created.id, skill_revision_id: created.current_revision_id }
     ]);
     expect(getAvailableSkills(catalog, bindings)).toEqual([]);
     expect(getAvailableSkills(catalog, removeSkillBinding(bindings, created.id))).toEqual([
-      created
+      candidate
     ]);
   });
 
   test("binds the exact approved revision from an organisation catalogue candidate", () => {
-    const published = {
+    const published: SkillBindingCandidate = {
       id: "approved",
       slug: "approved",
       revision_id: "approved-revision-4",
@@ -170,10 +239,16 @@ describe("Skill binding draft state", () => {
       display_name: "Approved Skill",
       description: "Approved content only",
       content_digest: "digest-approved-4",
-      first_published_at: "2026-07-20T12:00:00Z"
+      first_published_at: "2026-07-20T12:00:00Z",
+      source: "organization"
     };
 
-    expect(appendSkillBinding([], published)).toEqual([
+    expect(
+      appendSkillRevisionBinding([], {
+        id: published.id,
+        revisionId: published.revision_id
+      })
+    ).toEqual([
       {
         skill_id: published.id,
         skill_revision_id: published.revision_id

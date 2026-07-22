@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createClient } from "../client/client.js";
 import { initSkills } from "./skills.js";
 
 test("Skill catalogue keeps the bounded cursor page contract", async () => {
@@ -304,4 +305,23 @@ test("catalogue reads use the tenant-scoped projection", async () => {
       }
     }
   ]);
+});
+
+test("catalogue reads omit absent optional query values", async () => {
+  const urls = [];
+  const client = createClient({
+    baseUrl: "https://eneo.example",
+    token: "token",
+    fetch: async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ items: [], limit: 25, next_cursor: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+  });
+
+  await initSkills(client).catalogue.list({ limit: 25, cursor: null, search: null });
+
+  assert.deepEqual(urls, ["https://eneo.example/api/v1/skills/catalogue/?limit=25"]);
 });

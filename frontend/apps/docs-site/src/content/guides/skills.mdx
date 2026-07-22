@@ -79,8 +79,8 @@ to that tool. Tool permissions and Skill instructions remain separate controls.
 
 ## Create a useful Skill
 
-1. Open a Space and select **Skills**, or open **Organisation → Skills** for a
-   reusable organisation Skill.
+1. Open a Space and select **Skills**. Tenant administrators can instead open
+   **Organisation → Skills** for a reusable organisation Skill.
 2. Choose a concise name that describes one capability.
 3. Write a description that tells builders what the Skill does and when it is
    relevant.
@@ -149,25 +149,26 @@ installation.
 
 | Status                      | Meaning                                                                                                           |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Draft                       | No version has been published. Only Skill managers and tenant admins can see it.                                  |
+| Draft                       | No version has been published. Only tenant administrators can see it.                                             |
 | Published                   | One exact version is approved and visible to people with **Use Skills**.                                          |
 | Update waiting for approval | A newer draft exists, but users still receive the previously approved version.                                    |
 | Unpublished                 | The Skill is no longer offered for new organisation-wide use. Existing revision-pinned attachments remain stable. |
 
-The authoring and approval roles are deliberately separate:
+Organisation authoring and reuse have separate boundaries:
 
-| Permission                | What it allows                                                                                   |
-| ------------------------- | ------------------------------------------------------------------------------------------------ |
-| Use Skills                | Browse approved organisation Skills and attach available Skills to resources the person may edit |
-| Manage + Use Skills       | Create, revise, compare, and restore organisation Skills; manage Skills in accessible Spaces     |
-| Tenant admin              | Publish, unpublish, republish, and delete eligible organisation Skills                           |
-| Tenant admin + Use Skills | Choose approved organisation Skills for Personal Chat                                            |
+| Permission          | What it allows                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Use Skills          | Preview approved organisation Skills and attach available Skills to resources the person may edit                  |
+| Manage + Use Skills | Create, revise, compare, restore, and delete local Skills in Spaces where the person has the matching Space access |
+| Tenant admin        | Author, revise, publish, unpublish, republish, and delete eligible organisation Skills; configure Personal Chat    |
 
 Only the predefined **Owner** role receives **Use Skills** and **Manage Skills**
 by default. Owners can delegate either capability through a custom role when the
 organisation is ready to broaden access. The predefined User and AI Configurator
-roles do not receive Skill permissions automatically, and upgrades preserve
-explicit Skill permissions already assigned to custom roles.
+roles do not receive Skill permissions automatically. Existing custom roles
+retain the Skill permissions already stored on them; because older releases did
+not record how each grant was assigned, administrators should review custom roles
+after upgrading.
 
 Runtime use does not depend on the author's current role. Removing an authoring
 permission does not break an Assistant or App that already has an exact,
@@ -175,10 +176,10 @@ permitted Skill attachment.
 
 ## Personal Chat
 
-Tenant admins who also have **Use Skills** manage organisation-wide Personal
-Chat behavior in the existing Personal Chat administration page. They can
-select ordered, published organisation Skill versions that supplement the base
-or enforced Personal Chat instructions.
+Tenant admins manage organisation-wide Personal Chat behavior in the existing
+Personal Chat administration page. They can select ordered, published
+organisation Skill versions that supplement the base or enforced Personal Chat
+instructions.
 
 This keeps one owner for Personal Chat policy. The Skill catalogue owns Skill
 content and publication; the Personal Chat settings own which approved Skills
@@ -222,11 +223,11 @@ dependency.
 
 ```mermaid
 flowchart TB
-    Author["Skill manager"] --> Draft["Local draft and version history"]
-    Draft --> Review["Tenant admin review"]
+    Admin["Tenant admin"] --> Draft["Organisation draft and version history"]
+    Draft --> Review["Admin review and publication"]
     Review --> Approved["Exact approved version"]
     Approved --> Catalogue["Organisation catalogue"]
-    Catalogue --> Builder["Assistant and App builders"]
+    Catalogue --> Builder["Use Skills + parent edit"]
     Approved --> Personal["Personal Chat policy"]
     Builder --> Local["Local Eneo resources"]
     Personal --> Local
@@ -283,8 +284,9 @@ and lifecycle.
 
 ### Who can publish an organisation Skill?
 
-Only a tenant admin. Skill managers can prepare and version the content, while
-the admin owns the organisation-wide publication decision.
+Only a tenant admin. The same admin-owned workflow creates, revises, restores,
+publishes, and unpublishes organisation Skills. **Manage Skills** governs local
+Space authoring; it does not grant access to the organisation authoring area.
 
 ### What happens if a published update is worse?
 

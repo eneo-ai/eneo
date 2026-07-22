@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.skills.domain.skill import (
+    PublishedSkill,
     PublishedSkillSummary,
     Skill,
     SkillPublicationChange,
@@ -128,6 +129,28 @@ def test_catalogue_summary_projects_the_exact_approved_revision():
     assert public.revision_id == summary.revision_id
     assert public.revision_number == 4
     assert not hasattr(public, "instructions")
+
+
+def test_catalogue_detail_exposes_approved_body_without_author_identity():
+    skill = _skill()
+    assert skill.first_published_at is not None
+    summary = PublishedSkillSummary(
+        id=skill.id,
+        slug=skill.slug,
+        revision_id=skill.current_revision.id,
+        revision_number=skill.current_revision.revision_number,
+        display_name=skill.current_revision.display_name,
+        description=skill.current_revision.description,
+        content_digest=skill.current_revision.content_digest,
+        first_published_at=skill.first_published_at,
+    )
+
+    public = SkillAssembler.published_to_public(
+        PublishedSkill(summary=summary, revision=skill.current_revision)
+    )
+
+    assert public.revision.instructions == skill.current_revision.instructions
+    assert not hasattr(public.revision, "created_by_user_id")
 
 
 async def test_organization_revision_history_uses_the_shared_bounded_cursor_contract():

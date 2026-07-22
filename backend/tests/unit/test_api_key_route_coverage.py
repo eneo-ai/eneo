@@ -130,6 +130,7 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
@@ -157,6 +158,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
 }
 
 
@@ -796,6 +798,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/skills/organization/": "Requires session authentication; OrganizationSkillService enforces tenant-admin authorization for every mutation",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission

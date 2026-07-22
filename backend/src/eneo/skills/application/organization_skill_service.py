@@ -55,9 +55,6 @@ class OrganizationSkillService:
                 "You do not have permission to browse organisation Skills"
             )
 
-    def _require_management(self) -> None:
-        self._require_admin()
-
     def _require_admin(self) -> None:
         if Permission.ADMIN not in self.user.permissions:
             raise UnauthorizedException(
@@ -106,7 +103,7 @@ class OrganizationSkillService:
         cursor: str | None,
         search: str | None = None,
     ) -> SkillSummaryPage:
-        self._require_management()
+        self._require_admin()
         normalized_search = search.strip() if search else None
         summaries = await self.repo.list_organization_for_tenant(
             tenant_id=self.user.tenant_id,
@@ -124,7 +121,7 @@ class OrganizationSkillService:
         )
 
     async def get_organization_skill(self, *, skill_id: UUID) -> Skill:
-        self._require_management()
+        self._require_admin()
         skill = await self.repo.get_organization_for_tenant(
             tenant_id=self.user.tenant_id,
             skill_id=skill_id,
@@ -141,7 +138,7 @@ class OrganizationSkillService:
         description: str,
         instructions: str,
     ) -> Skill:
-        self._require_management()
+        self._require_admin()
         organization = await self.space_service.get_or_create_tenant_space()
         if (
             organization.id is None
@@ -290,7 +287,7 @@ class OrganizationSkillService:
                 expected_revision_id=expected_revision_id,
             )
         except SkillRevisionConflictError as error:
-            raise NameCollisionException(
+            raise SkillRevisionConflictException(
                 "This Skill changed since you reviewed it. Reload it before publishing."
             ) from error
         if change is None:

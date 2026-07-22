@@ -59,6 +59,20 @@
   let restoreTarget = $state<SkillRevisionPublic | null>(null);
   let restoring = $state(false);
   let restoreError = $state<string | null>(null);
+  let viewFocusReturnId: string | null = null;
+  let restoreSucceeded = false;
+
+  function viewTriggerId(revisionId: string): string {
+    return `skill-revision-view-${revisionId}`;
+  }
+
+  async function focusViewTrigger() {
+    const triggerId = viewFocusReturnId;
+    if (triggerId === null) return;
+    await tick();
+    document.getElementById(triggerId)?.focus();
+    if (viewFocusReturnId === triggerId) viewFocusReturnId = null;
+  }
 
   function formatCreatedAt(value: string): string {
     return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
@@ -79,6 +93,15 @@
     restoreError = null;
   }
 
+  function handleRestoreCloseAutoFocus(event: Event) {
+    event.preventDefault();
+    if (!restoreSucceeded && viewedRevision === null) void focusViewTrigger();
+  }
+
+  function handlePreviewCloseAutoFocus(event: Event) {
+    if (restoreTarget !== null) event.preventDefault();
+  }
+
   function isConflict(error: unknown): error is { status: number } {
     return typeof error === "object" && error !== null && "status" in error && error.status === 409;
   }
@@ -93,8 +116,9 @@
     };
   }
 
-  async function viewRevision(revision: SkillRevisionSummaryPublic) {
+  async function viewRevision(revision: SkillRevisionSummaryPublic, triggerId: string) {
     if (viewingRevisionId !== null) return;
+    viewFocusReturnId = triggerId;
     previewError = null;
     if (revision.id === comparisonCurrentRevision.id) {
       viewedRevision = comparisonCurrentRevision;
@@ -163,6 +187,7 @@
     await onAnnounce?.(message);
     restoreTarget = null;
     restoring = false;
+    restoreSucceeded = true;
     await tick();
     if (outcome.created || outcome.revision.id !== comparisonCurrentRevision.id) {
       try {
@@ -171,6 +196,8 @@
         loadError = m.skills_library_restore_refresh_error();
       }
     }
+    await focusViewTrigger();
+    restoreSucceeded = false;
   }
 
   function revisionTitle(revision: SkillRevisionPublic | SkillRevisionSummaryPublic): string {
@@ -250,59 +277,68 @@
   </section>
 {/snippet}
 
-<div class="border-border overflow-x-auto border-y">
-  <Table.Root class="min-w-[640px]">
-    <Table.Header>
-      <Table.Row>
-        <Table.Head>{m.skills_library_revision_column()}</Table.Head>
-        <Table.Head>{m.name()}</Table.Head>
-        <Table.Head>{m.skills_library_created_column()}</Table.Head>
-        <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
-      </Table.Row>
-    </Table.Header>
-    <Table.Body>
-      {#each revisions as revision (revision.id)}
-        {@const isCurrent = revision.id === comparisonCurrentRevision.id}
+<!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
+<div
+  class="border-border focus-visible:ring-ring overflow-x-auto border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+  role="region"
+  aria-label={m.skills_library_history_heading()}
+  tabindex="0"
+>
+  <div style="min-width: 40rem">
+    <Table.Root>
+      <Table.Header>
         <Table.Row>
-          <Table.Cell>
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="font-medium">
-                {m.skills_revision_label({ revision: String(revision.revision_number) })}
-              </span>
-              {#if isCurrent}
-                <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
-              {/if}
-            </div>
-          </Table.Cell>
-          <Table.Cell>{revision.display_name}</Table.Cell>
-          <Table.Cell class="text-muted-foreground text-sm">
-            {formatCreatedAt(revision.created_at)}
-          </Table.Cell>
-          <Table.Cell class="text-right">
-            <div class="flex items-center justify-end gap-1">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                class="size-11 md:size-7"
-                disabled={viewingRevisionId !== null}
-                title={m.view()}
-                aria-label={m.skills_library_view_revision_aria({
-                  revision: String(revision.revision_number)
-                })}
-                onclick={() => void viewRevision(revision)}
-              >
-                {#if viewingRevisionId === revision.id}
-                  <LoaderCircle class="animate-spin" aria-hidden="true" />
-                {:else}
-                  <Eye aria-hidden="true" />
-                {/if}
-              </Button>
-            </div>
-          </Table.Cell>
+          <Table.Head>{m.skills_library_revision_column()}</Table.Head>
+          <Table.Head>{m.name()}</Table.Head>
+          <Table.Head>{m.skills_library_created_column()}</Table.Head>
+          <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
         </Table.Row>
-      {/each}
-    </Table.Body>
-  </Table.Root>
+      </Table.Header>
+      <Table.Body>
+        {#each revisions as revision (revision.id)}
+          {@const isCurrent = revision.id === comparisonCurrentRevision.id}
+          <Table.Row>
+            <Table.Cell>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-medium">
+                  {m.skills_revision_label({ revision: String(revision.revision_number) })}
+                </span>
+                {#if isCurrent}
+                  <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
+                {/if}
+              </div>
+            </Table.Cell>
+            <Table.Cell>{revision.display_name}</Table.Cell>
+            <Table.Cell class="text-muted-foreground text-sm">
+              {formatCreatedAt(revision.created_at)}
+            </Table.Cell>
+            <Table.Cell class="text-right">
+              <div class="flex items-center justify-end gap-1">
+                <Button
+                  id={viewTriggerId(revision.id)}
+                  variant="ghost"
+                  size="icon-sm"
+                  class="size-11 md:size-7"
+                  disabled={viewingRevisionId !== null}
+                  title={m.view()}
+                  aria-label={m.skills_library_view_revision_aria({
+                    revision: String(revision.revision_number)
+                  })}
+                  onclick={() => void viewRevision(revision, viewTriggerId(revision.id))}
+                >
+                  {#if viewingRevisionId === revision.id}
+                    <LoaderCircle class="animate-spin" aria-hidden="true" />
+                  {:else}
+                    <Eye aria-hidden="true" />
+                  {/if}
+                </Button>
+              </div>
+            </Table.Cell>
+          </Table.Row>
+        {/each}
+      </Table.Body>
+    </Table.Root>
+  </div>
   {#if nextCursor !== null || loadError || previewError}
     <div class="border-border flex flex-col items-center gap-3 border-t px-6 py-4">
       {#if loadError}
@@ -332,6 +368,7 @@
   <Dialog.Content
     class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-4xl"
     closeLabel={m.close()}
+    onCloseAutoFocus={handlePreviewCloseAutoFocus}
   >
     <Dialog.Header class="border-b px-6 py-5 pr-12">
       <Dialog.Title>
@@ -390,7 +427,7 @@
 </Dialog.Root>
 
 <AlertDialog.Root open={restoreTarget !== null} onOpenChange={setRestoreOpen}>
-  <AlertDialog.Content>
+  <AlertDialog.Content onCloseAutoFocus={handleRestoreCloseAutoFocus}>
     <AlertDialog.Header>
       <AlertDialog.Title>
         {m.skills_library_restore_title({
