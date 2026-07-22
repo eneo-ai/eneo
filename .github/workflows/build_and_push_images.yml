@@ -289,6 +289,8 @@ jobs:
           persist-credentials: false
 
       - name: Verify pinned source, licenses, and reachable vulnerabilities
+        env:
+          GITHUB_API_TOKEN: ${{ github.token }}
         run: docker/seaweedfs/verify-supply-chain.sh source seaweedfs-source-evidence
 
       - name: Upload source policy evidence

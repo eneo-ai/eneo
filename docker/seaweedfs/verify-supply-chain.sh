@@ -46,6 +46,16 @@ audit_source() {
     local work_directory
     local source_directory
     local upstream_tree
+    local -a github_api_arguments=(
+        --fail
+        --location
+        --silent
+        --show-error
+        --proto '=https'
+        --tlsv1.2
+        --header 'Accept: application/vnd.github+json'
+        --header 'X-GitHub-Api-Version: 2022-11-28'
+    )
 
     for command in curl diff docker git jq sha256sum tar; do
         require_command "$command"
@@ -67,9 +77,13 @@ audit_source() {
     printf '%s  %s\n' "$SOURCE_LICENSE_SHA256" "$source_directory/LICENSE" \
         | sha256sum --check --strict -
 
+    if [[ -n "${GITHUB_API_TOKEN:-}" ]]; then
+        github_api_arguments+=(
+            --header "Authorization: Bearer $GITHUB_API_TOKEN"
+        )
+    fi
     upstream_tree="$(
-        curl --fail --location --silent --show-error \
-            --proto '=https' --tlsv1.2 \
+        curl "${github_api_arguments[@]}" \
             "https://api.github.com/repos/seaweedfs/seaweedfs/git/commits/${SOURCE_COMMIT}" \
             | jq -er --arg commit "$SOURCE_COMMIT" '
                 select(.sha == $commit) | .tree.sha
