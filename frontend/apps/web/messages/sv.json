@@ -3919,6 +3919,7 @@
   "flow_package_error_flow_package_import_draft_references_undeclared_slot": "Flödesutkastet i paketet refererar till en resursslot som inte är deklarerad i manifestet.",
   "flow_package_error_flow_package_import_mcp_unsupported": "Paketet använder MCP-verktyg, vilket inte kan importeras automatiskt ännu.",
   "flow_package_error_flow_package_import_missing_required_resource_binding": "Välj en lokal resurs för varje obligatoriskt paketberoende innan du importerar.",
+  "flow_package_error_flow_package_import_name_collision": "Det finns redan ett flöde med det här namnet i målutrymmet. Byt namn på det befintliga flödet eller paketflödet och försök igen.",
   "flow_package_error_flow_package_import_selected_model_ineligible": "Den valda lokala modellen uppfyller inte paketets krav. Välj en annan modell.",
   "flow_package_error_flow_package_import_template_assets_unsupported": "Paketet använder mallfiler, vilket inte kan importeras automatiskt ännu.",
   "flow_package_error_flow_package_import_unavailable_local_resource": "En vald lokal resurs finns inte längre. Granska paketvalen och försök igen.",

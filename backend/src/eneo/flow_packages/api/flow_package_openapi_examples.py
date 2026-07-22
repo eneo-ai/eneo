@@ -328,6 +328,17 @@ FLOW_PACKAGE_IMPORT_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
     },
 }
 
+FLOW_PACKAGE_IMPORT_CONFLICT_EXAMPLES: dict[str, dict[str, object]] = {
+    "name_collision": {
+        "summary": "A Flow with this name already exists in the target space",
+        "value": {
+            "message": "A Flow with this name already exists in the target space.",
+            "eneo_error_code": int(ErrorCodes.NAME_COLLISION),
+            "code": FlowPackageErrorCode.IMPORT_NAME_COLLISION.value,
+        },
+    }
+}
+
 _FLOW_PACKAGE_EXPORT_BAD_REQUEST_MESSAGES = {
     FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT: (
         "Flow package export requires assistant authoring snapshots for every step."

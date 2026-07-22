@@ -3919,6 +3919,7 @@
   "flow_package_error_flow_package_import_draft_references_undeclared_slot": "The package draft references a resource slot that is not declared in the manifest.",
   "flow_package_error_flow_package_import_mcp_unsupported": "This package uses MCP tools, which cannot be imported automatically yet.",
   "flow_package_error_flow_package_import_missing_required_resource_binding": "Choose a local resource for every required package dependency before importing.",
+  "flow_package_error_flow_package_import_name_collision": "A flow with this name already exists in the target space. Rename the existing flow or the package flow, then try again.",
   "flow_package_error_flow_package_import_selected_model_ineligible": "The selected local model does not meet the package requirements. Choose another model.",
   "flow_package_error_flow_package_import_template_assets_unsupported": "This package uses template files, which cannot be imported automatically yet.",
   "flow_package_error_flow_package_import_unavailable_local_resource": "One selected local resource is no longer available. Review the package selections and try again.",

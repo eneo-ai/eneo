@@ -492,6 +492,7 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     )
     captured_repo_selection: list[FlowPackageImportSelection] = []
     captured_install_bindings: list[tuple[LocalResourceBinding, ...]] = []
+    fake_session = _FakeSession()
 
     _patch_import_access(
         monkeypatch,
@@ -558,7 +559,7 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
             Container,
             _FakeContainer(
                 audit_service=audit_service,
-                session=_FakeSession(),
+                session=fake_session,
             ),
         ),
     )
@@ -572,6 +573,7 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     assert audit_service.events[0]["action"] is ActionType.FLOW_PACKAGE_DRAFT_INSTALLED
     assert audit_service.events[0]["entity_id"] == flow_id
     assert audit_service.persisted_events == audit_service.events
+    assert fake_session.commit_count == 1
     assert audit_service.events[0]["metadata"]["extra"] == {
         "import_id": str(import_id),
         "space_id": str(target_space_id),
@@ -660,6 +662,7 @@ async def test_import_flow_package_records_failed_attempt_and_returns_general_er
     assert captured_failure[0].code == error.code
     assert captured_selection[0].selected_bindings == [canonical_binding]
     assert fake_session.nested_transactions == ["rolled_back"]
+    assert fake_session.commit_count == 1
 
 
 @pytest.mark.anyio
@@ -733,22 +736,23 @@ async def test_import_flow_package_name_collision_returns_safe_receipt_and_audit
     )
 
     assert isinstance(response, flow_package_router.JSONResponse)
-    assert response.status_code == 400
+    assert response.status_code == 409
     payload = json.loads(response.body)
     error = GeneralError.model_validate(payload)
-    assert error.code == "flow_import_name_collision"
+    assert error.code == "flow_package_import_name_collision"
     assert error.message == "A Flow with this name already exists in the target space."
     assert error.context is None
     assert error.request_id == "package-import-request"
     assert "private database details" not in response.body.decode()
     assert captured_failure == [
         FlowPackageImportFailurePayload(
-            code="flow_import_name_collision",
+            code="flow_package_import_name_collision",
             message="A Flow with this name already exists in the target space.",
             context={},
         )
     ]
     assert fake_session.nested_transactions == ["rolled_back"]
+    assert fake_session.commit_count == 1
     assert len(audit_service.persisted_events) == 1
     event = audit_service.persisted_events[0]
     assert event["action"] is ActionType.FLOW_PACKAGE_IMPORT_FAILED
@@ -771,7 +775,7 @@ async def test_import_flow_package_name_collision_returns_safe_receipt_and_audit
             "content_checksum": reader.read_flow_package(
                 _package_bytes()
             ).content_checksum,
-            "failure_code": "flow_import_name_collision",
+            "failure_code": "flow_package_import_name_collision",
         },
     }
 
@@ -843,6 +847,7 @@ async def test_import_flow_package_reraises_unrelated_integrity_error(
         )
 
     assert fake_session.nested_transactions == ["rolled_back"]
+    assert fake_session.commit_count == 0
     assert failed_receipts == []
     assert audit_service.persisted_events == []
 
@@ -1538,9 +1543,21 @@ class _FakeNestedTransaction:
 class _FakeSession:
     def __init__(self) -> None:
         self.nested_transactions: list[str] = []
+        self.commit_count = 0
+        self.transaction_active = False
+
+    def in_transaction(self) -> bool:
+        return self.transaction_active
+
+    async def begin(self) -> None:
+        self.transaction_active = True
 
     def begin_nested(self) -> _FakeNestedTransaction:
         return _FakeNestedTransaction(self)
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+        self.transaction_active = False
 
 
 def _patch_export_access(

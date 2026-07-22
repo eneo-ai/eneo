@@ -58,6 +58,7 @@ export const FLOW_PACKAGE_IMPORT_ERROR_CODES = [
   "flow_package_import_selected_model_ineligible",
   "flow_package_import_mcp_unsupported",
   "flow_package_import_template_assets_unsupported",
+  "flow_package_import_name_collision",
   "flow_package_file_too_large",
   "transcription_model_required"
 ] as const;

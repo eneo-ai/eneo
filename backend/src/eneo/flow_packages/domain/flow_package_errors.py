@@ -31,6 +31,7 @@ class FlowPackageErrorCode(StrEnum):
     IMPORT_TEMPLATE_ASSETS_UNSUPPORTED = (
         "flow_package_import_template_assets_unsupported"
     )
+    IMPORT_NAME_COLLISION = "flow_package_import_name_collision"
 
 
 class FlowPackageExportErrorCode(StrEnum):

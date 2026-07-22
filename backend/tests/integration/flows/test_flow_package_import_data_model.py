@@ -580,7 +580,6 @@ async def test_flow_package_import_failed_record_survives_draft_savepoint_rollba
                 models=[_model_candidate(missing_model_id)]
             ),
         )
-
         response = await flow_package_router.import_flow_package_as_draft(
             id=space_id,
             import_request=_import_request(
@@ -769,12 +768,12 @@ async def test_flow_package_name_collision_persists_failed_receipt_and_audit_unt
         )
 
         assert isinstance(response, JSONResponse)
-        assert response.status_code == 400
-        assert json.loads(response.body)["code"] == "flow_import_name_collision"
+        assert response.status_code == 409
+        assert json.loads(response.body)["code"] == "flow_package_import_name_collision"
         assert failed_receipt is not None
         assert failed_receipt.flow_id is None
         assert failed_receipt.failure_json == {
-            "code": "flow_import_name_collision",
+            "code": "flow_package_import_name_collision",
             "message": "A Flow with this name already exists in the target space.",
             "context": {},
         }
@@ -786,7 +785,7 @@ async def test_flow_package_name_collision_persists_failed_receipt_and_audit_unt
             "package_id": "se.demo.route-import",
             "package_version": "1.0.0",
             "content_checksum": failed_receipt.content_checksum,
-            "failure_code": "flow_import_name_collision",
+            "failure_code": "flow_package_import_name_collision",
         }
 
         failed_receipt_id = failed_receipt.id

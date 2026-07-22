@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from pydantic import BaseModel, TypeAdapter
@@ -14,6 +15,7 @@ from eneo.flow_packages.api.flow_package_models import (
     FlowPackageValidationPublic,
 )
 from eneo.flow_packages.domain.flow_package_errors import FlowPackageExportErrorCode
+from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import GeneralError
 from eneo.server.main import get_application
 
@@ -252,7 +254,7 @@ def test_openapi_flow_package_error_responses_are_typed(
         (
             "/api/v1/spaces/{id}/flow-packages/imports/",
             "post",
-        ): {"400", "403", "404", "413"},
+        ): {"400", "403", "404", "409", "413"},
         ("/api/v1/flows/{id}/package-exports/", "post"): {
             "400",
             "403",
@@ -375,6 +377,18 @@ def test_openapi_flow_package_error_examples_are_actionable(
         "local_kind": "transcription_model",
         "local_id": "11111111-1111-4111-8111-111111111111",
         "current_local_id": "22222222-2222-4222-8222-222222222222",
+    }
+    conflict_examples = cast(
+        dict[str, dict[str, object]],
+        _examples(cast(dict[str, object], import_responses), "409"),
+    )
+    name_collision_example = cast(
+        dict[str, object], conflict_examples["name_collision"]["value"]
+    )
+    assert name_collision_example == {
+        "message": "A Flow with this name already exists in the target space.",
+        "eneo_error_code": int(ErrorCodes.NAME_COLLISION),
+        "code": "flow_package_import_name_collision",
     }
 
     export_bad_request_codes = {

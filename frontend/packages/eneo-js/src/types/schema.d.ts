@@ -49821,6 +49821,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description A Flow with the imported name already exists in the target space. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description The decoded package exceeds the package upload size cap. */
       413: {
         headers: {

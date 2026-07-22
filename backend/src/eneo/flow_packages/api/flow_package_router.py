@@ -85,14 +85,17 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import GeneralError
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 from eneo.server.exception_handlers import extract_request_id
 from eneo.spaces.space import Space
 
 ENEO_PACKAGE_MEDIA_TYPE = "application/vnd.eneo.package+zip"
 MAX_PACKAGE_BASE64_CHARS = ((MAX_PACKAGE_UPLOAD_BYTES + 2) // 3) * 4
 FLOW_NAME_COLLISION_CONSTRAINT = "uq_flows_space_id_name_active"
-FLOW_IMPORT_NAME_COLLISION_CODE = "flow_import_name_collision"
+FLOW_IMPORT_NAME_COLLISION_CODE = FlowPackageErrorCode.IMPORT_NAME_COLLISION.value
 FLOW_IMPORT_NAME_COLLISION_MESSAGE = (
     "A Flow with this name already exists in the target space."
 )
@@ -280,6 +283,10 @@ async def create_flow_package_import_plan(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        409: error_response(
+            description="A Flow with the imported name already exists in the target space.",
+            examples=openapi_examples.FLOW_PACKAGE_IMPORT_CONFLICT_EXAMPLES,
+        ),
         413: error_response(
             description="The decoded package exceeds the package upload size cap.",
             examples=openapi_examples.FLOW_PACKAGE_TOO_LARGE_EXAMPLE,
@@ -293,9 +300,17 @@ async def import_flow_package_as_draft(
     ],
     import_request: FlowPackageImportRequest,
     request: Request,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container_for_explicit_transaction(with_user=True)),
+    ],
 ) -> FlowPackageImportPublic | JSONResponse:
-    """Return install failures as responses so the failed import record commits."""
+    """Commit each durable import receipt before returning its response."""
+    session = cast(AsyncSession, container.session())
+    owns_transaction = not session.in_transaction()
+    if owns_transaction:
+        await session.begin()
+
     access_context = await flow_access_context.resolve_space_access_context(
         request,
         container,
@@ -311,7 +326,6 @@ async def import_flow_package_as_draft(
         )
 
     envelope = _read_flow_package_base64(import_request.package_base64)
-    session = cast(AsyncSession, container.session())
     import_repo = FlowPackageImportRepository(session)
     user = container.user()
     await import_repo.acquire_space_import_lock(
@@ -366,6 +380,9 @@ async def import_flow_package_as_draft(
             selection=command.selection,
         )
         if existing is not None:
+            await _finish_flow_package_import_transaction(
+                session, owns_transaction=owns_transaction
+            )
             return _flow_package_import_public(
                 import_id=existing.import_id,
                 result=_replayed_install_result(command, existing),
@@ -405,6 +422,9 @@ async def import_flow_package_as_draft(
             result=install_result,
             import_id=import_id,
         )
+        await _finish_flow_package_import_transaction(
+            session, owns_transaction=owns_transaction
+        )
         return _flow_package_import_public(import_id=import_id, result=install_result)
 
     await _record_failed_flow_package_import(
@@ -415,6 +435,9 @@ async def import_flow_package_as_draft(
         import_plan=import_plan,
         selection=failure_selection,
         failure=failure,
+    )
+    await _finish_flow_package_import_transaction(
+        session, owns_transaction=owns_transaction
     )
     return _flow_package_import_error_response(failure, request)
 
@@ -723,15 +746,35 @@ def _safe_failure_context(context: Mapping[str, object] | None) -> dict[str, str
     return safe_context
 
 
+async def _finish_flow_package_import_transaction(
+    session: AsyncSession,
+    *,
+    owns_transaction: bool,
+) -> None:
+    if owns_transaction:
+        await session.commit()
+    else:
+        await session.flush()
+
+
 def _flow_package_import_error_response(
     failure: FlowPackageImportFailurePayload,
     request: Request,
 ) -> JSONResponse:
+    is_name_collision = failure.code == FLOW_IMPORT_NAME_COLLISION_CODE
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
+        status_code=(
+            status.HTTP_409_CONFLICT
+            if is_name_collision
+            else status.HTTP_400_BAD_REQUEST
+        ),
         content=GeneralError(
             message=failure.message,
-            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            eneo_error_code=(
+                ErrorCodes.NAME_COLLISION
+                if is_name_collision
+                else ErrorCodes.BAD_REQUEST
+            ),
             code=failure.code,
             context=dict(failure.context) or None,
             request_id=extract_request_id(request),
