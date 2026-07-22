@@ -84,6 +84,8 @@ def render_flow_consumer_error_reference_page() -> str:
             "- Handle `Run execution` codes from `run.error.code` while polling or rendering a terminal failed run.",
             "- Handle `Request path or run execution` codes in both places; the same logical failure can surface synchronously or after worker execution.",
             "- Unknown codes should degrade gracefully: show a generic Flow failure message, keep the raw code for support, and avoid automatic destructive retries.",
+            "- Do not automatically retry an LLM request timeout or ambiguous step execution failure: provider work may or may not have started, and a rerun can duplicate provider work and spend.",
+            "- A failed `per_source` or `per_item` step has no partial continuation: rerunning the step repeats every source or item provider call, including calls that may already have completed.",
             "",
             "## Catalog",
             "",

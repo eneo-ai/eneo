@@ -62,6 +62,10 @@ class RuntimeStep:
     review_policy: FlowStepReviewPolicy | None = None
     timeout_seconds: int | None = None
 
+    @property
+    def may_call_completion_provider(self) -> bool:
+        return self.output_mode in {"pass_through", "http_post"}
+
 
 @dataclass(frozen=True)
 class StepDiagnostic:

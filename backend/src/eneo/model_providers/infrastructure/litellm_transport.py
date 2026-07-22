@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from collections.abc import Mapping
 from typing import Any, Callable, NoReturn, cast
 
 import aiohttp
@@ -21,6 +22,7 @@ from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     BadRequestException,
     OpenAIException,
+    ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
 )
 
@@ -56,6 +58,12 @@ _PROVIDER_UNAVAILABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     socket.gaierror,
     ConnectionError,
     TimeoutError,
+)
+_UNSUPPORTED_CAPABILITY_CODES = frozenset(
+    {
+        "unsupported_parameter",
+        "unsupported_value",
+    }
 )
 
 # Deterministic failures (invalid request/config, bad credentials) that adapter
@@ -117,16 +125,53 @@ def raise_provider_unavailable(exc: BaseException) -> NoReturn:
     ) from exc
 
 
+def _provider_error_field(exc: BaseException, field: str) -> object:
+    value = getattr(exc, field, None)
+    if value is not None:
+        return value
+    body = getattr(exc, "body", None)
+    if not isinstance(body, Mapping):
+        return None
+    body_fields = cast(Mapping[object, object], body)
+    error = body_fields.get("error")
+    if isinstance(error, Mapping):
+        return cast(Mapping[object, object], error).get(field)
+    return body_fields.get(field)
+
+
+def _is_response_format_capability_rejection(exc: BaseException) -> bool:
+    return (
+        _provider_error_field(exc, "param") == "response_format"
+        and _provider_error_field(exc, "code") in _UNSUPPORTED_CAPABILITY_CODES
+    )
+
+
 def raise_public_litellm_error(
     exc: BaseException,
     *,
     provider_type: str,
     is_unavailable: Callable[[BaseException], bool],
     raise_unavailable: Callable[[BaseException], NoReturn],
+    retry_without_capability_safe: bool = False,
 ) -> NoReturn:
     """Map provider exceptions to stable public errors without leaking details."""
     if isinstance(exc, (APIKeyNotConfiguredException, OpenAIException)):
         raise exc
+
+    if isinstance(exc, BadRequestError) and _is_response_format_capability_rejection(
+        exc
+    ):
+        raise ProviderCapabilityRejectedException(
+            INVALID_REQUEST_MESSAGE,
+            capability="response_format",
+            retry_without_capability_safe=retry_without_capability_safe,
+            code="provider_capability_rejected",
+            details={
+                "reason": "provider_capability_rejected",
+                "capability": "response_format",
+                "retryable": False,
+            },
+        ) from exc
 
     if is_unavailable(exc):
         raise_unavailable(exc)

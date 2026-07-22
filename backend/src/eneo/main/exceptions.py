@@ -1,5 +1,5 @@
 from enum import Enum, unique
-from typing import Any
+from typing import Any, Literal
 
 from eneo.files.text import (
     CorruptFileError,
@@ -240,6 +240,29 @@ class ProviderRejectedRequestException(OpenAIException):
     """
 
     pass
+
+
+class ProviderCapabilityRejectedException(ProviderRejectedRequestException):
+    """The provider rejected a request parameter it does not support."""
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        capability: Literal["response_format"],
+        retry_without_capability_safe: bool,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code=code,
+            context=context,
+            details=details,
+        )
+        self.capability = capability
+        self.retry_without_capability_safe = retry_without_capability_safe
 
 
 class ClaudeException(Exception):

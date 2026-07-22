@@ -90,7 +90,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     derive_rag_retrieval_query,
 )
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
@@ -1337,13 +1341,107 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
     assert finish_kwargs["error_code"] == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
-    assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
+    public_error = (
+        "Flow step 1 execution failed. Provider work may or may not have started; "
+        "rerunning can repeat provider work and spend."
+    )
+    assert finish_kwargs["error_message"] == public_error
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
-    assert update_kwargs["error"].message == "Flow step 1 execution failed."
+    assert update_kwargs["error"].message == public_error
     saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
-    assert saved_result.error_message == "Flow step 1 execution failed."
+    assert saved_result.error_message == public_error
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "expected"),
+    [
+        ("pass_through", True),
+        ("http_post", True),
+        ("compose_text", False),
+        ("transcribe_only", False),
+        ("template_fill", False),
+        ("render_verbatim", False),
+    ],
+)
+def test_runtime_step_identifies_completion_provider_calling_modes(
+    output_mode: str,
+    expected: bool,
+):
+    step = replace(_step_for_execute_step(), output_mode=output_mode)
+
+    assert step.may_call_completion_provider is expected
+
+
+@pytest.mark.asyncio
+async def test_zero_call_compose_failure_has_no_provider_work_disclosure(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = replace(_step_for_execute_step(), output_mode="compose_text")
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=RuntimeError("compose failed"),
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert "Provider work" not in terminal_error.message
+
+
+@pytest.mark.asyncio
+async def test_known_provider_rejection_has_no_ambiguous_outcome_disclosure(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_run_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+    step = _step_for_execute_step()
+    run_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+
+    await executor._handle_generic_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=_empty_execution_state(),
+        exc=ProviderRejectedRequestException(
+            "invalid provider request",
+            code="provider_rejected_request",
+        ),
+    )
+
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert "provider rejected the request" in finish_kwargs["error_message"]
+    assert "may or may not have started" not in finish_kwargs["error_message"]
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert "may or may not have started" not in terminal_error.message
 
 
 @pytest.mark.asyncio
@@ -1756,6 +1854,11 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
     assert finish_kwargs["provider"] == "openai"
+    assert "Provider work may or may not have started" in finish_kwargs["error_message"]
+    terminal_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert "rerunning can repeat provider work and spend" in terminal_error.message
 
 
 @pytest.mark.asyncio

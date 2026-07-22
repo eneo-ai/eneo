@@ -3756,6 +3756,9 @@ def test_flow_consumer_error_reference_is_generated_from_taxonomy() -> None:
     assert page.count("`flow_") + page.count("`typed_io_") == len(FlowApiErrorCode)
     assert "Handling phase" in page
     assert "| Surface |" not in page
+    assert "provider work may or may not have started" in page
+    assert "rerunning the step repeats every source or item provider call" in page
+    assert "duplicate provider work and spend" in page
     assert "### Runtime error codes" not in guide
     assert "flow-error-catalog" not in guide
     assert "/guides/flows/reference/errors" in guide

@@ -54,7 +54,10 @@ from eneo.flows.runtime.step_input_validation import (
     validate_runtime_input_policy,
 )
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import (
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
 
 
 def _string_key_dict(value: object) -> dict[str, Any]:
@@ -322,11 +325,6 @@ def attach_typed_failure_context(
     if not isinstance(existing_prompt, str):
         setattr(exc, "effective_prompt", effective_prompt)
     return exc
-
-
-def is_json_mode_rejection(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(term in msg for term in ("response_format", "json_object", "json mode"))
 
 
 def _context_window_source_hint(input_payload: dict[str, Any]) -> str:
@@ -1142,8 +1140,12 @@ async def complete_step_execution(
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
             step_deadline_monotonic=step_deadline_monotonic,
         )
-    except Exception as model_exc:
-        if native_json_object_requested and is_json_mode_rejection(model_exc):
+    except ProviderCapabilityRejectedException as model_exc:
+        if (
+            native_json_object_requested
+            and model_exc.capability == "response_format"
+            and model_exc.retry_without_capability_safe
+        ):
             state.json_mode_supported[cache_key] = False
             response = await call_assistant_with_timeout(
                 step=step,

@@ -10,6 +10,7 @@ from eneo.embedding_models.infrastructure.adapters.litellm_embeddings import (
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
+    ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
 )
 from eneo.model_providers.infrastructure import litellm_transport
@@ -86,6 +87,88 @@ def test_bad_request_error_does_not_leak_provider_details():
     assert str(exc_info.value) == INVALID_REQUEST_MESSAGE
     assert "secret upstream" not in str(exc_info.value)
     assert exc_info.value.code == "provider_rejected_request"
+
+
+@pytest.mark.parametrize(
+    "provider_code", ["unsupported_parameter", "unsupported_value"]
+)
+def test_response_format_capability_rejection_is_typed_from_provider_metadata(
+    provider_code: str,
+):
+    provider_error = BadRequestError(
+        message="unsupported request parameter",
+        model="gpt-4o",
+        llm_provider="openai",
+        body={
+            "error": {
+                "type": "invalid_request_error",
+                "param": "response_format",
+                "code": provider_code,
+            }
+        },
+    )
+
+    with pytest.raises(ProviderCapabilityRejectedException) as exc_info:
+        raise_public_litellm_error(
+            provider_error,
+            provider_type="openai",
+            is_unavailable=is_provider_unavailable_error,
+            raise_unavailable=raise_provider_unavailable,
+            retry_without_capability_safe=True,
+        )
+
+    assert exc_info.value.capability == "response_format"
+    assert exc_info.value.retry_without_capability_safe is True
+    assert exc_info.value.code == "provider_capability_rejected"
+
+
+def test_response_format_validation_rejection_is_not_treated_as_unsupported():
+    provider_error = BadRequestError(
+        message="invalid response format schema",
+        model="gpt-4o",
+        llm_provider="openai",
+        body={
+            "error": {
+                "type": "invalid_request_error",
+                "param": "response_format",
+                "code": "invalid_json_schema",
+            }
+        },
+    )
+
+    with pytest.raises(ProviderRejectedRequestException) as exc_info:
+        raise_public_litellm_error(
+            provider_error,
+            provider_type="openai",
+            is_unavailable=is_provider_unavailable_error,
+            raise_unavailable=raise_provider_unavailable,
+        )
+
+    assert not isinstance(exc_info.value, ProviderCapabilityRejectedException)
+    assert exc_info.value.code == "provider_rejected_request"
+
+
+def test_structured_capability_rejection_wins_over_availability_words():
+    provider_error = BadRequestError(
+        message="response_format timed out during validation",
+        model="gpt-4o",
+        llm_provider="openai",
+        body={
+            "error": {
+                "param": "response_format",
+                "code": "unsupported_parameter",
+            }
+        },
+    )
+
+    with pytest.raises(ProviderCapabilityRejectedException):
+        raise_public_litellm_error(
+            provider_error,
+            provider_type="openai",
+            is_unavailable=is_provider_unavailable_error,
+            raise_unavailable=raise_provider_unavailable,
+            retry_without_capability_safe=True,
+        )
 
 
 @pytest.mark.asyncio

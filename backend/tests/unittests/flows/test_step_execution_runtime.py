@@ -48,12 +48,14 @@ from eneo.flows.runtime.step_execution_runtime import (
     detect_native_json_output_support,
     effective_model_parameters,
     execution_hash,
-    is_json_mode_rejection,
     json_mode_cache_key,
     prepare_step_execution,
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import (
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
 
 
 def _run() -> FlowRun:
@@ -582,7 +584,12 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
     assistant.get_response = AsyncMock(
         side_effect=[
-            RuntimeError("response_format json_object unsupported"),
+            ProviderCapabilityRejectedException(
+                "The provider rejected JSON mode.",
+                capability="response_format",
+                retry_without_capability_safe=True,
+                code="provider_capability_rejected",
+            ),
             SimpleNamespace(total_token_count=4, completion='{"ok": true}'),
         ]
     )
@@ -631,6 +638,119 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert state.json_mode_supported["openai:gpt-test:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_does_not_repeat_non_capability_error_with_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: None,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        litellm_model_name="openai/gpt-test",
+        name="gpt-test",
+        provider_type="openai",
+    )
+    assistant.completion_model_kwargs = MagicMock(name="original_kwargs")
+    assistant.get_response = AsyncMock(
+        side_effect=RuntimeError(
+            "Connection failed after logging request parameters: response_format=json_object"
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="hello", source_text="hello"),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="response_format=json_object"):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert assistant.get_response.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_step_execution_does_not_repeat_late_json_mode_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: None,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        litellm_model_name="openai/gpt-test",
+        name="gpt-test",
+        provider_type="openai",
+    )
+    assistant.completion_model_kwargs = MagicMock(name="original_kwargs")
+    assistant.get_response = AsyncMock(
+        side_effect=ProviderCapabilityRejectedException(
+            "The provider rejected JSON mode after earlier provider work.",
+            capability="response_format",
+            retry_without_capability_safe=False,
+            code="provider_capability_rejected",
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="hello", source_text="hello"),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+    )
+
+    with pytest.raises(ProviderCapabilityRejectedException):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert assistant.get_response.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -732,7 +852,12 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         counter["n"] += 1
         if counter["n"] == 1:
             await asyncio.sleep(0.25)
-            raise RuntimeError("response_format json_object unsupported")
+            raise ProviderCapabilityRejectedException(
+                "The provider rejected JSON mode.",
+                capability="response_format",
+                retry_without_capability_safe=True,
+                code="provider_capability_rejected",
+            )
         await asyncio.sleep(0.2)
         return SimpleNamespace(total_token_count=4, completion='{"ok": true}')
 
@@ -2012,14 +2137,6 @@ def test_json_mode_cache_key_uses_provider_name_and_id():
     cache_key = json_mode_cache_key(assistant)
 
     assert cache_key.startswith("openai:gpt-4.1:")
-
-
-def test_is_json_mode_rejection_matches_supported_error_phrases():
-    assert (
-        is_json_mode_rejection(RuntimeError("response_format is unsupported")) is True
-    )
-    assert is_json_mode_rejection(RuntimeError("JSON_OBJECT mode unavailable")) is True
-    assert is_json_mode_rejection(RuntimeError("some other transport failure")) is False
 
 
 def test_execution_hash_is_stable_for_same_payload():

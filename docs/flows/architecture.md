@@ -223,6 +223,29 @@ race cannot recreate active work after the run becomes terminal. See
 and
 `backend/src/eneo/flows/infrastructure/flow_run_repo.py::FlowRunRepository.create_or_get_attempt_started`.
 
+### Provider outcome honesty
+
+`pass_through` and `http_post` are provider-calling output modes. A failure after
+their step claim carries the conservative disclosure that provider work may or
+may not have started. `AttemptStartProvenance` is not evidence that a provider
+call started: every output mode records it, including zero-call `compose_text`.
+The transport's typed provider rejection is the only narrower fact used here;
+the runtime does not infer call start from exception text and does not repeat an
+outcome-unknown request automatically.
+
+`per_source` and `per_item` are whole-step maps, not resumable per-call ledgers.
+Rerunning either mode repeats all source or item calls. A caller must therefore
+treat an ambiguous failure or `flow_llm_request_timeout` as possible duplicate
+provider work and spend, even when no partial output was persisted.
+
+Design note: a bounded pre-provider-infrastructure retry class may be added only
+at an adapter boundary that can prove transport invocation did not begin. It
+must use a small explicit attempt budget and exclude timeouts, disconnects, and
+every other outcome-unknown failure. Until that typed boundary and budget are
+implemented, post-claim provider failures remain terminal and are never
+automatically repeated. This adds no persisted provider-call marker or second
+retry owner.
+
 ## Large Runtime Input And Context-Window Policy
 
 Large-input handling is a runtime execution concern, not a static file-count

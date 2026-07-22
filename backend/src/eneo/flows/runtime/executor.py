@@ -176,7 +176,11 @@ from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import get_settings
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
 
@@ -197,6 +201,16 @@ _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV = (
     "ENEO_TEST_FLOW_CRASH_AFTER_ATTEMPT_START_RUN_ID"
 )
 _PROCESS_TEST_CRASH_EXIT_CODE = 86
+_PROVIDER_WORK_AMBIGUITY_DISCLOSURE = (
+    "Provider work may or may not have started; rerunning can repeat provider work "
+    "and spend."
+)
+
+
+def _with_provider_work_disclosure(message: str, *, step: RuntimeStep) -> str:
+    if not step.may_call_completion_provider:
+        return message
+    return f"{message.rstrip()} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
 
 
 def _typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
@@ -982,6 +996,7 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                     claimed=claimed_result,
                     state=state,
+                    exc=exc,
                 )
 
             latest_run = await self.flow_run_repo.get(
@@ -1566,18 +1581,23 @@ class FlowRunExecutor:
     ) -> dict[str, Any]:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
         error_code = _typed_io_failure_code(typed_exc.code)
-        failure_plan = build_typed_failure_plan(
-            claimed=claimed,
-            error_code=error_code,
-            error_message=str(typed_exc),
-            input_payload_json=failed_input_payload,
-            effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
-            run_error_message=build_typed_failure_run_error_message(
+        error_message = _with_provider_work_disclosure(str(typed_exc), step=step)
+        run_error_message = _with_provider_work_disclosure(
+            build_typed_failure_run_error_message(
                 step_order=step.step_order,
                 error_code=error_code,
                 error_message=str(typed_exc),
                 contract_validation=getattr(typed_exc, "contract_validation", None),
             ),
+            step=step,
+        )
+        failure_plan = build_typed_failure_plan(
+            claimed=claimed,
+            error_code=error_code,
+            error_message=error_message,
+            input_payload_json=failed_input_payload,
+            effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
+            run_error_message=run_error_message,
         )
         await self._rollback()
         requested_model = getattr(typed_exc, "requested_model", None)
@@ -1645,10 +1665,21 @@ class FlowRunExecutor:
         attempt_no: int,
         claimed: FlowStepResult,
         state: RunExecutionState | None = None,
+        exc: Exception | None = None,
     ) -> dict[str, Any]:
+        if isinstance(exc, ProviderRejectedRequestException):
+            public_error = (
+                f"Flow step {step.step_order} execution failed because the provider "
+                "rejected the request; the runtime did not repeat it."
+            )
+        else:
+            public_error = _with_provider_work_disclosure(
+                f"Flow step {step.step_order} execution failed.",
+                step=step,
+            )
         failure_plan = build_generic_failure_plan(
             claimed=claimed,
-            public_error=f"Flow step {step.step_order} execution failed.",
+            public_error=public_error,
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)

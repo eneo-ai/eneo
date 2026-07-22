@@ -532,9 +532,18 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.STEP_EXECUTION_FAILED: _entry(
         category="Step runtime",
         surfaced_through="Run error payload",
-        cause="A step handler failed without a more specific typed error.",
-        consumer_action="Open step details and use the stored message to guide rerun or support.",
-        user_action="Open the failed step, fix input or configuration, then rerun.",
+        cause=(
+            "A step handler failed without a more specific typed error; provider "
+            "work may or may not have started in provider-calling modes."
+        ),
+        consumer_action=(
+            "Do not auto-retry provider-calling failures: reruns can repeat provider "
+            "work and spend; inspect step details first."
+        ),
+        user_action=(
+            "Open the failed step before rerunning; a rerun can repeat provider work "
+            "and spend."
+        ),
     ),
     FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED: _entry(
         category="Step runtime",
@@ -574,9 +583,18 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
-        cause="The model request for a step exceeded the runtime timeout.",
-        consumer_action="Retry with smaller input or route the flow to a faster model.",
-        user_action="Retry with smaller input or choose a faster model.",
+        cause=(
+            "The model request exceeded the runtime timeout, but the provider may "
+            "still have received or completed it."
+        ),
+        consumer_action=(
+            "Do not auto-retry: a rerun can duplicate provider work and spend; "
+            "inspect the run before choosing smaller input or a faster model."
+        ),
+        user_action=(
+            "Check the run before retrying; a retry can duplicate provider work and "
+            "spend."
+        ),
     ),
     FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED: _entry(
         category="Typed input/output",

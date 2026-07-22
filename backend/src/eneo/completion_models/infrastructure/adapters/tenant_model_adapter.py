@@ -812,6 +812,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        completed_provider_calls = 0
         try:
             response = cast(
                 _LiteLLMResponse,
@@ -823,6 +824,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     **litellm_kwargs,
                 ),
             )
+            completed_provider_calls += 1
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
@@ -920,6 +922,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             **litellm_kwargs,
                         ),
                     )
+                    completed_provider_calls += 1
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -955,6 +958,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 raise_unavailable=lambda error: self._raise_provider_unavailable(
                     phase="completion", exc=error
                 ),
+                retry_without_capability_safe=completed_provider_calls == 0,
             )
 
     @override
