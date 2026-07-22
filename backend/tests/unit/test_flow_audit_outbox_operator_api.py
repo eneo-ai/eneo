@@ -263,9 +263,9 @@ def test_flow_audit_outbox_redrive_errors_match_declared_general_error_shape() -
     app.include_router(router, prefix="/sysadmin")
     redrive_route = next(
         route
-        for route in app.routes
+        for route in router.routes
         if isinstance(route, APIRoute)
-        and route.path == "/sysadmin/flows/audit-outbox/{outbox_id}/redrive/"
+        and route.path == "/flows/audit-outbox/{outbox_id}/redrive/"
     )
     container_dependency = next(
         dependency
