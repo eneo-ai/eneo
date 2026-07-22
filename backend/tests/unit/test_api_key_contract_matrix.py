@@ -970,6 +970,41 @@ class TestSuperKeyIsolationContract:
                 route, "authenticate_super_duper_api_key"
             ), f"{route.path} should not use authenticate_super_duper_api_key"
 
+    @pytest.mark.parametrize(
+        ("path", "methods", "operation_id"),
+        [
+            (
+                "/sysadmin/flows/audit-outbox/dead-letters/",
+                {"GET"},
+                "list_flow_run_audit_outbox_dead_letters",
+            ),
+            (
+                "/sysadmin/flows/audit-outbox/{outbox_id}/redrive/",
+                {"POST"},
+                "redrive_flow_run_audit_outbox_delivery",
+            ),
+        ],
+    )
+    def test_flow_audit_outbox_operator_routes_inherit_sysadmin_auth(
+        self,
+        path: str,
+        methods: set[str],
+        operation_id: str,
+    ):
+        route = next(
+            (
+                route
+                for route in runtime_router_routes()
+                if route.path == path and route.methods == methods
+            ),
+            None,
+        )
+
+        assert route is not None, f"Flow audit outbox route not found: {path}"
+        assert self._route_has_dependency(route, "authenticate_super_api_key")
+        assert not self._route_has_dependency(route, "authenticate_super_duper_api_key")
+        assert route.operation_id == operation_id
+
     def test_module_routes_use_super_duper_key_only(self):
         module_routes = [
             route

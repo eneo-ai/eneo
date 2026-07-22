@@ -169,6 +169,7 @@ class TestCategoryMappings:
             ActionType.RETENTION_POLICY_APPLIED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
+            ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN,
         ]
 
         for action_type in system_actions:

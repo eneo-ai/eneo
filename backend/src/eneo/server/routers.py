@@ -52,6 +52,9 @@ from eneo.flow_packages.api import (
     tenant_router as flow_package_tenant_router,
 )
 from eneo.flows.api.flow_router import router as flows_router
+from eneo.flows.api.flow_run_audit_outbox_operator_router import (
+    router as flow_run_audit_outbox_operator_router,
+)
 from eneo.flows.api.flow_runtime_paths import FLOW_ROOT_PATH
 from eneo.governance_policy.presentation.governance_policy_router import (
     router as governance_policy_router,
@@ -582,6 +585,7 @@ router.include_router(
     integration_auth_router, prefix="/integrations/auth", tags=["integrations"]
 )
 
+sysadmin_router.include_router(flow_run_audit_outbox_operator_router)
 router.include_router(sysadmin_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(tenant_credentials_router, prefix="/sysadmin", tags=["sysadmin"])
 router.include_router(

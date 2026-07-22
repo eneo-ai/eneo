@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import (
     data_retention_service as data_retention_service_module,
 )
@@ -40,6 +41,9 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.application.flow_run_audit_outbox_delivery import (
+    FlowRunAuditOutboxDeliveryService,
+)
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
@@ -57,6 +61,9 @@ from eneo.flows.flow_retention_tombstone import (
 )
 from eneo.flows.infrastructure import (
     flow_run_history_purge_repo as flow_run_history_purge_repo_module,
+)
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
 )
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
@@ -2043,6 +2050,55 @@ async def test_cleanup_old_flow_runtime_data_skips_runs_with_undelivered_audit_o
     assert counts["flow_runs_skipped_undelivered_audit"] == 1
     assert await async_session.get(FlowRuns, fixture.run.id)
     assert await async_session.get(FlowStepResults, fixture.step_result.id)
+
+
+@pytest.mark.asyncio
+async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_policy(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    dead_lettered_at = fixture.run.created_at
+    outbox_id = await _add_flow_audit_outbox_row(
+        async_session,
+        run=fixture.run,
+        user_id=admin_user.id,
+        delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+        with_audit_log=False,
+    )
+    assert dead_lettered_at is not None
+    delivery_service = FlowRunAuditOutboxDeliveryService(
+        audit_outbox_repo=FlowRunAuditOutboxRepository(session=async_session),
+        audit_log_repo=AuditLogRepositoryImpl(async_session),
+    )
+    now = datetime.now(timezone.utc)
+
+    await delivery_service.redrive_dead_lettered(
+        outbox_id=outbox_id,
+        expected_dead_lettered_at=dead_lettered_at,
+        reason="Audit storage recovered.",
+        now=now,
+    )
+    delivery_result = await delivery_service.deliver_due(now=now)
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert delivery_result.delivered_count == 1
+    assert counts["flow_runs_skipped_undelivered_audit"] == 0
+    assert counts["flow_runs_purged"] == 1
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
 
 
 @pytest.mark.asyncio

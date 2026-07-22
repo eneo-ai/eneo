@@ -45,6 +45,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN: "flow_run_evidence_raw_export_forbidden";
   RUN_ARTIFACT_NOT_FOUND: "flow_run_artifact_not_found";
   RUN_ARTIFACT_CONTENT_UNAVAILABLE: "flow_run_artifact_content_unavailable";
+  AUDIT_OUTBOX_DELIVERY_NOT_FOUND: "flow_audit_outbox_delivery_not_found";
+  AUDIT_OUTBOX_REDRIVE_CONFLICT: "flow_audit_outbox_redrive_conflict";
   DEFINITION_CHECKSUM_MISMATCH: "flow_definition_checksum_mismatch";
   DEFINITION_INVALID: "flow_definition_invalid";
   DEFINITION_SCHEMA_VERSION_MISSING: "flow_definition_schema_version_missing";
@@ -188,6 +190,8 @@ export type FlowApiErrorCode =
   | "flow_run_evidence_raw_export_forbidden"
   | "flow_run_artifact_not_found"
   | "flow_run_artifact_content_unavailable"
+  | "flow_audit_outbox_delivery_not_found"
+  | "flow_audit_outbox_redrive_conflict"
   | "flow_definition_checksum_mismatch"
   | "flow_definition_invalid"
   | "flow_definition_schema_version_missing"

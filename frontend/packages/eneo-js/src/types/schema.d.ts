@@ -6432,7 +6432,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 148 actions with their enabled status for the modal UI.
+     * @description Retrieve all 149 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -8131,6 +8131,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/sysadmin/flows/audit-outbox/dead-letters/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List dead-lettered Flow audit deliveries
+     * @description Requires the configured super API key. List a bounded, oldest-first window of dead-lettered Flow lifecycle audit deliveries. Use each row's dead_lettered_at as the generation token for redrive.
+     */
+    get: operations["list_flow_run_audit_outbox_dead_letters"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/flows/audit-outbox/{outbox_id}/redrive/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Redrive dead-lettered Flow audit delivery
+     * @description Requires the configured super API key. Atomically reset one listed dead-letter generation to pending with a fresh five-attempt budget and record the required tenant audit. A stale generation token is rejected; the normal delivery worker performs delivery. Poll Flow runtime health and list dead letters again to verify recovery.
+     */
+    post: operations["redrive_flow_run_audit_outbox_delivery"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -9142,6 +9182,7 @@ export interface components {
       | "flow_run_redispatched"
       | "flow_run_rerun_requested"
       | "flow_run_cancelled"
+      | "flow_run_audit_delivery_redriven"
       | "flow_classification_override"
       | "flow_run_document_generated"
       | "flow_run_contract_rejected"
@@ -15427,6 +15468,118 @@ export interface components {
        * @description Current-attempt artifacts produced by the published final step. File content remains behind the authorized run-artifact download endpoint.
        */
       files: components["schemas"]["FlowRunStepResultFile"][];
+    };
+    /** FlowRunAuditOutboxDeadLetterResponse */
+    FlowRunAuditOutboxDeadLetterResponse: {
+      /**
+       * Outbox Id
+       * Format: uuid
+       * @description Audit outbox row identifier used for redrive.
+       */
+      outbox_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant that owns the lifecycle audit row.
+       */
+      tenant_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Flow whose run emitted the lifecycle audit.
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       * @description Flow run whose lifecycle audit is pending.
+       */
+      flow_run_id: string;
+      /**
+       * Action
+       * @description Lifecycle audit action awaiting delivery.
+       */
+      action: string;
+      /**
+       * Source
+       * @description Runtime source that emitted the lifecycle audit.
+       */
+      source: string;
+      /**
+       * Delivery Attempts
+       * @description Delivery attempts charged in this dead-letter generation.
+       */
+      delivery_attempts: number;
+      /**
+       * Dead Lettered At
+       * Format: date-time
+       * @description Generation token required by the redrive operation.
+       */
+      dead_lettered_at: string;
+      /**
+       * Delivery Last Error
+       * @description Bounded, secret-redacted diagnostic from the final attempt.
+       */
+      delivery_last_error: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       * @description Time the durable lifecycle audit outbox row was created.
+       */
+      created_at: string;
+    };
+    /** FlowRunAuditOutboxRedriveRequest */
+    FlowRunAuditOutboxRedriveRequest: {
+      /**
+       * Expected Dead Lettered At
+       * Format: date-time
+       * @description Exact dead_lettered_at generation token returned by the list.
+       */
+      expected_dead_lettered_at: string;
+      /**
+       * Reason
+       * @description Operator diagnosis recorded in the mandatory audit row.
+       */
+      reason: string;
+    };
+    /** FlowRunAuditOutboxRedriveResponse */
+    FlowRunAuditOutboxRedriveResponse: {
+      /**
+       * Outbox Id
+       * Format: uuid
+       * @description Redriven audit outbox row identifier.
+       */
+      outbox_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       * @description Flow run whose audit row was redriven.
+       */
+      flow_run_id: string;
+      /**
+       * Delivery Status
+       * @description Post-redrive state consumed by the normal delivery worker.
+       * @constant
+       */
+      delivery_status: "pending";
+      /**
+       * Delivery Attempts
+       * @description Fresh delivery-attempt budget starts at zero.
+       * @constant
+       */
+      delivery_attempts: 0;
+      /**
+       * Next Delivery At
+       * Format: date-time
+       * @description Time from which the normal delivery worker may claim the row.
+       */
+      next_delivery_at: string;
+      /**
+       * Operator Audit Id
+       * Format: uuid
+       * @description Tenant-scoped mandatory audit record for this redrive.
+       */
+      operator_audit_id: string;
     };
     /**
      * FlowRunContractPublic
@@ -22012,6 +22165,24 @@ export interface components {
       reason: string | null;
       /** Backend */
       backend: string;
+    };
+    /** OffsetPaginatedResponse[FlowRunAuditOutboxDeadLetterResponse] */
+    OffsetPaginatedResponse_FlowRunAuditOutboxDeadLetterResponse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowRunAuditOutboxDeadLetterResponse"][];
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window
+       */
+      has_more: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
     };
     /** OffsetPaginatedResponse[FlowRunPublic] */
     OffsetPaginatedResponse_FlowRunPublic_: {
@@ -56412,6 +56583,111 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_audit_outbox_dead_letters: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of rows to return. */
+        limit?: number;
+        /** @description Number of dead-lettered rows to skip. */
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunAuditOutboxDeadLetterResponse_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  redrive_flow_run_audit_outbox_delivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        outbox_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunAuditOutboxRedriveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunAuditOutboxRedriveResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

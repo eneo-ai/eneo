@@ -47,6 +47,31 @@ def test_redact_url_secrets_removes_credentials_and_sensitive_query_values():
     assert "safe=yes" in redacted
 
 
+def test_redact_string_redacts_sensitive_assignments_in_diagnostics() -> None:
+    cases = (
+        ("request failed password=alpha123", ("alpha123",)),
+        ("request failed api_key=beta456", ("beta456",)),
+        ("params={'password': 'gamma789'}", ("gamma789",)),
+        ('payload={"client_secret": "delta012"}', ("delta012",)),
+        ("headers Authorization: Basic dXNlcjpwYXNz", ("dXNlcjpwYXNz",)),
+    )
+
+    for value, secrets in cases:
+        redacted = redact_string(value, key="message")
+
+        assert "[REDACTED]" in redacted
+        for secret in secrets:
+            assert secret not in redacted
+
+    assert (
+        redact_string(
+            "POST https://example.com/audit?token=top-secret failed",
+            key="message",
+        )
+        == "POST https://example.com/audit?token=%5BREDACTED%5D failed"
+    )
+
+
 def test_redact_string_redacts_url_secrets_embedded_in_prose() -> None:
     value = (
         "Request failed for "

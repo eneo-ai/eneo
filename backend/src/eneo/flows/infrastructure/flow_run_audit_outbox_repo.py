@@ -24,6 +24,8 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 
+FLOW_AUDIT_OUTBOX_OPERATOR_LIST_MAX = 200
+
 
 @dataclass(frozen=True, slots=True)
 class FlowRunAuditOutboxDeliveryRow:
@@ -47,6 +49,48 @@ class FlowRunAuditOutboxDeliveryRow:
     error_message: str | None
     created_at: datetime
     delivery_attempts: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxDeadLetterRow:
+    outbox_id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    action: str
+    source: str
+    delivery_attempts: int
+    dead_lettered_at: datetime
+    delivery_last_error: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxDeadLetterPage:
+    items: tuple[FlowRunAuditOutboxDeadLetterRow, ...]
+    has_more: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxRedriveTransition:
+    outbox_id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    previous_delivery_attempts: int
+    previous_dead_lettered_at: datetime
+    previous_delivery_last_error: str | None
+    next_delivery_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxRedriveStateConflict:
+    delivery_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxRedriveGenerationConflict:
+    current_dead_lettered_at: datetime
 
 
 def flow_run_audit_description(
@@ -175,6 +219,47 @@ class FlowRunAuditOutboxRepository:
         )
         return [self._to_delivery_row(row) for row in rows]
 
+    async def list_dead_letters(
+        self,
+        *,
+        limit: int,
+        offset: int,
+    ) -> FlowRunAuditOutboxDeadLetterPage:
+        if not 1 <= limit <= FLOW_AUDIT_OUTBOX_OPERATOR_LIST_MAX:
+            raise ValueError(
+                "Flow audit outbox dead-letter list limit must be between 1 and "
+                f"{FLOW_AUDIT_OUTBOX_OPERATOR_LIST_MAX}."
+            )
+        if offset < 0:
+            raise ValueError(
+                "Flow audit outbox dead-letter list offset cannot be negative."
+            )
+
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(
+                        FlowRunAuditOutbox.delivery_status
+                        == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+                    )
+                    .order_by(
+                        FlowRunAuditOutbox.dead_lettered_at.asc().nullsfirst(),
+                        FlowRunAuditOutbox.id.asc(),
+                    )
+                    .offset(offset)
+                    .limit(limit + 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        items = tuple(self._to_dead_letter_row(row) for row in rows[:limit])
+        return FlowRunAuditOutboxDeadLetterPage(
+            items=items,
+            has_more=len(rows) > limit,
+        )
+
     async def mark_delivery_succeeded(
         self,
         *,
@@ -230,6 +315,91 @@ class FlowRunAuditOutboxRepository:
                 delivery_last_error=error_message,
                 updated_at=datetime.now(timezone.utc),
             )
+        )
+
+    async def redrive_dead_lettered(
+        self,
+        *,
+        outbox_id: UUID,
+        expected_dead_lettered_at: datetime,
+        now: datetime,
+    ) -> (
+        FlowRunAuditOutboxRedriveTransition
+        | FlowRunAuditOutboxRedriveStateConflict
+        | FlowRunAuditOutboxRedriveGenerationConflict
+        | None
+    ):
+        row = await self.session.scalar(
+            sa.select(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .with_for_update()
+        )
+        if row is None:
+            return None
+
+        previous_status = row.delivery_status
+        if previous_status != FlowOutboxDeliveryStatus.DEAD_LETTERED.value:
+            return FlowRunAuditOutboxRedriveStateConflict(
+                delivery_status=previous_status,
+            )
+        if row.dead_lettered_at is None:
+            raise RuntimeError("Dead-lettered Flow audit outbox row has no generation.")
+        if row.dead_lettered_at != expected_dead_lettered_at:
+            return FlowRunAuditOutboxRedriveGenerationConflict(
+                current_dead_lettered_at=row.dead_lettered_at,
+            )
+
+        transition = FlowRunAuditOutboxRedriveTransition(
+            outbox_id=row.id,
+            tenant_id=row.tenant_id,
+            flow_id=row.flow_id,
+            flow_run_id=row.flow_run_id,
+            previous_delivery_attempts=row.delivery_attempts,
+            previous_dead_lettered_at=row.dead_lettered_at,
+            previous_delivery_last_error=row.delivery_last_error,
+            next_delivery_at=now,
+        )
+
+        redriven_id = await self.session.scalar(
+            sa.update(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            )
+            .where(FlowRunAuditOutbox.dead_lettered_at == expected_dead_lettered_at)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                delivery_attempts=0,
+                next_delivery_at=now,
+                delivered_at=None,
+                dead_lettered_at=None,
+                delivery_last_error=None,
+                updated_at=now,
+            )
+            .returning(FlowRunAuditOutbox.id)
+        )
+        if redriven_id is None:
+            raise RuntimeError("Locked Flow audit outbox redrive lost its transition.")
+        return transition
+
+    @staticmethod
+    def _to_dead_letter_row(
+        row: FlowRunAuditOutbox,
+    ) -> FlowRunAuditOutboxDeadLetterRow:
+        if row.dead_lettered_at is None:
+            raise RuntimeError("Dead-lettered Flow audit outbox row has no generation.")
+        return FlowRunAuditOutboxDeadLetterRow(
+            outbox_id=row.id,
+            tenant_id=row.tenant_id,
+            flow_id=row.flow_id,
+            flow_run_id=row.flow_run_id,
+            action=row.action,
+            source=row.source,
+            delivery_attempts=row.delivery_attempts,
+            dead_lettered_at=row.dead_lettered_at,
+            delivery_last_error=row.delivery_last_error,
+            created_at=row.created_at,
         )
 
     @staticmethod

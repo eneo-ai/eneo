@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
@@ -13,9 +14,15 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunWebhookDeliveries,
 )
+from eneo.flows.application.flow_run_audit_outbox_delivery import (
+    FlowRunAuditOutboxDeliveryService,
+)
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunStatus
 from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
+)
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.runtime.flow_runtime_health import (
@@ -421,8 +428,12 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             admin_user=admin_user,
             case="dead-lettered-audit-outbox",
         )
+        pending_outbox_id = uuid4()
+        dead_lettered_outbox_id = uuid4()
+        dead_lettered_at = now - timedelta(minutes=2)
         await session.execute(
             sa.insert(FlowRunAuditOutbox).values(
+                id=pending_outbox_id,
                 tenant_id=admin_user.tenant_id,
                 flow_id=flow.id,
                 flow_run_id=pending_run.id,
@@ -444,6 +455,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
         )
         await session.execute(
             sa.insert(FlowRunAuditOutbox).values(
+                id=dead_lettered_outbox_id,
                 tenant_id=admin_user.tenant_id,
                 flow_id=flow.id,
                 flow_run_id=dead_lettered_run.id,
@@ -461,7 +473,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
                 delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
                 delivery_attempts=5,
                 next_delivery_at=None,
-                dead_lettered_at=now - timedelta(minutes=2),
+                dead_lettered_at=dead_lettered_at,
                 delivery_last_error="ValueError: invalid audit row",
             )
         )
@@ -479,6 +491,29 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
         )
 
+        delivery_service = FlowRunAuditOutboxDeliveryService(
+            audit_outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            audit_log_repo=AuditLogRepositoryImpl(session),
+        )
+        await delivery_service.redrive_dead_lettered(
+            outbox_id=dead_lettered_outbox_id,
+            expected_dead_lettered_at=dead_lettered_at,
+            reason="Audit storage recovered.",
+            now=now,
+        )
+        delivery_result = await delivery_service.deliver_due(now=now)
+        recovered_snapshot = await load_flow_runtime_health_snapshot(
+            session=session,
+            now=now,
+            policy=policy,
+        )
+        recovered_response = classify_flow_runtime_health(
+            snapshot=recovered_snapshot,
+            now=now,
+            policy=policy,
+            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+        )
+
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
     assert response.status_flags == [
         FlowRuntimeHealthFlag.AUDIT_OUTBOX_DELIVERY_BACKLOG,
@@ -489,6 +524,10 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
     assert response.audit_outbox.dead_lettered_count == 1
     assert response.audit_outbox.oldest_delivery_backlog_age_seconds == 600
     assert response.audit_outbox.oldest_dead_lettered_age_seconds == 120
+    assert delivery_result.delivered_count == 2
+    assert recovered_response.status == FlowRuntimeHealthStatus.HEALTHY
+    assert recovered_response.audit_outbox.pending_count == 0
+    assert recovered_response.audit_outbox.dead_lettered_count == 0
 
 
 @pytest.mark.asyncio

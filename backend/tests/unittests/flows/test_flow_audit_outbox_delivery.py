@@ -11,6 +11,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     build_audit_log_from_outbox,
+    sanitize_delivery_error,
 )
 from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_MAX_ATTEMPTS,
@@ -176,6 +177,22 @@ def test_failed_run_outbox_error_message_fallback_order(
     audit_log = build_audit_log_from_outbox(row)
 
     assert audit_log.error_message == expected_error_message
+
+
+def test_audit_outbox_delivery_error_sanitizes_secrets_before_persistence() -> None:
+    error = RuntimeError(
+        "POST https://operator:password@example.com/hook?token=top-secret "
+        "failed with Authorization: Bearer bearer-secret"
+    )
+
+    sanitized = sanitize_delivery_error(error)
+
+    assert "operator" not in sanitized
+    assert "password" not in sanitized
+    assert "top-secret" not in sanitized
+    assert "bearer-secret" not in sanitized
+    assert "https://example.com/hook?token=%5BREDACTED%5D" in sanitized
+    assert "Bearer [REDACTED]" in sanitized
 
 
 def test_retry_policy_dead_letters_at_max_attempts() -> None:

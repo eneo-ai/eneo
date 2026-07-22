@@ -51,6 +51,40 @@ _SENSITIVE_SUFFIXES = (
     "_signed_url",
 )
 _BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
+_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"""
+    (?<![a-z0-9_.-])
+    (?P<key_quote>["']?)
+    (?P<key>
+        [a-z0-9_.-]*
+        (?:
+            api[_-]?key
+            |apikey
+            |authorization
+            |bearer
+            |cookie
+            |credential
+            |password
+            |passwd
+            |secret
+            |signature
+            |signed[_-]?url
+            |token
+        )
+        [a-z0-9_.-]*
+    )
+    ["']?
+    (?P<separator>\s*[:=]\s*)
+    (?P<value>
+        "(?:\\.|[^"\\])*"
+        |
+        '(?:\\.|[^'\\])*'
+        |
+        (?:(?:basic|bearer|digest|token)\s+)?[^\s,;}&\]]+
+    )
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
+)
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _URL_TRAILING_PROSE_PUNCTUATION = ".,;:!?)]}"
 
@@ -184,7 +218,29 @@ def _redact_embedded_url(match: re.Match[str]) -> str:
     url = match.group(0)
     trimmed_url = url.rstrip(_URL_TRAILING_PROSE_PUNCTUATION)
     trailing_punctuation = url[len(trimmed_url) :]
+    if trimmed_url.endswith(_REDACTED_VALUE[:-1]) and trailing_punctuation.startswith(
+        "]"
+    ):
+        trimmed_url += "]"
+        trailing_punctuation = trailing_punctuation[1:]
     return f"{redact_url_secrets(trimmed_url)}{trailing_punctuation}"
+
+
+def _redact_sensitive_assignment(match: re.Match[str]) -> str:
+    if not is_sensitive_key(match.group("key")):
+        return match.group(0)
+
+    raw_value = match.group("value").strip("\"'")
+    scheme_match = re.match(r"(?i)^(basic|bearer|digest|token)\s+", raw_value)
+    redacted_value = (
+        f"{scheme_match.group(1)} {_REDACTED_VALUE}"
+        if scheme_match is not None
+        else _REDACTED_VALUE
+    )
+    return (
+        f"{match.group('key_quote')}{match.group('key')}"
+        f"{match.group('key_quote')}{match.group('separator')}{redacted_value}"
+    )
 
 
 def redact_string(value: str, *, key: str | None) -> str:
@@ -197,6 +253,14 @@ def redact_string_with_reason(value: str, *, key: str | None) -> StringRedaction
 
     redacted_value = value
     reason: str | None = None
+    assignment_redacted = _SENSITIVE_ASSIGNMENT_PATTERN.sub(
+        _redact_sensitive_assignment,
+        redacted_value,
+    )
+    if assignment_redacted != redacted_value:
+        redacted_value = assignment_redacted
+        reason = "sensitive_assignment"
+
     if "://" in redacted_value:
         url_redacted = _URL_PATTERN.sub(_redact_embedded_url, redacted_value)
         if url_redacted != redacted_value:

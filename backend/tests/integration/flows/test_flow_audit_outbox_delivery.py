@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -10,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -17,6 +19,9 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
+    FlowRunAuditOutboxGenerationConflictError,
+    FlowRunAuditOutboxNotFoundError,
+    FlowRunAuditOutboxStateConflictError,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.enums import FlowRunLifecycleSource, FlowRunStatus
@@ -266,6 +271,486 @@ async def test_flow_audit_outbox_delivery_reuses_existing_audit_log_id(
 
     assert result.delivered_count == 1
     assert audit_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_dead_letter_listing_is_bounded_and_stable(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        dead_lettered_at_values = [
+            datetime(2026, 7, 22, 8, minute, tzinfo=timezone.utc) for minute in range(3)
+        ]
+        outbox_ids: list[UUID] = []
+        run_ids: list[UUID] = []
+        for dead_lettered_at in dead_lettered_at_values:
+            _flow, run = await _create_flow_and_run(
+                session=session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+            )
+            outbox_id = await _insert_completed_outbox(
+                outbox_repo=FlowRunAuditOutboxRepository(session=session),
+                run=run,
+                actor_id=admin_user.id,
+            )
+            await session.execute(
+                sa.update(FlowRunAuditOutbox)
+                .where(FlowRunAuditOutbox.id == outbox_id)
+                .values(
+                    delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                    delivery_attempts=5,
+                    next_delivery_at=None,
+                    dead_lettered_at=dead_lettered_at,
+                    delivery_last_error=(
+                        "POST https://operator:password@example.com/audit?token=top-secret "
+                        "failed with Bearer bearer-secret"
+                        if len(outbox_ids) == 0
+                        else "audit store unavailable"
+                    ),
+                )
+            )
+            outbox_ids.append(outbox_id)
+            run_ids.append(run.id)
+
+        service = _delivery_service(session)
+        first_page = await service.list_dead_letters(limit=2, offset=0)
+        second_page = await service.list_dead_letters(limit=2, offset=2)
+
+    assert [row.outbox_id for row in first_page.items] == outbox_ids[:2]
+    assert [row.flow_run_id for row in first_page.items] == run_ids[:2]
+    assert [row.dead_lettered_at for row in first_page.items] == (
+        dead_lettered_at_values[:2]
+    )
+    listed_error = first_page.items[0].delivery_last_error
+    assert listed_error is not None
+    assert "operator" not in listed_error
+    assert "password" not in listed_error
+    assert "top-secret" not in listed_error
+    assert "bearer-secret" not in listed_error
+    assert "https://example.com/audit?token=%5BREDACTED%5D" in listed_error
+    assert "Bearer [REDACTED]" in listed_error
+    assert first_page.has_more is True
+    assert [row.outbox_id for row in second_page.items] == outbox_ids[2:]
+    assert second_page.has_more is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_id = await _insert_completed_outbox(
+            outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            run=run,
+            actor_id=admin_user.id,
+        )
+        dead_lettered_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+        await session.execute(
+            sa.update(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=dead_lettered_at,
+                delivery_last_error=(
+                    "POST https://operator:password@example.com/audit?token=top-secret "
+                    "failed with Bearer bearer-secret"
+                ),
+            )
+        )
+        redriven_at = datetime.now(timezone.utc)
+
+        delivery_service = _delivery_service(session)
+        result = await delivery_service.redrive_dead_lettered(
+            outbox_id=outbox_id,
+            expected_dead_lettered_at=dead_lettered_at,
+            reason="Audit storage recovered.",
+            now=redriven_at,
+        )
+
+        outbox_state = (
+            await session.execute(
+                sa.select(
+                    FlowRunAuditOutbox.delivery_status,
+                    FlowRunAuditOutbox.delivery_attempts,
+                    FlowRunAuditOutbox.next_delivery_at,
+                    FlowRunAuditOutbox.delivered_at,
+                    FlowRunAuditOutbox.dead_lettered_at,
+                    FlowRunAuditOutbox.delivery_last_error,
+                ).where(FlowRunAuditOutbox.id == outbox_id)
+            )
+        ).one()
+        operator_audit = (
+            await session.execute(
+                sa.select(
+                    AuditLogTable.tenant_id,
+                    AuditLogTable.actor_type,
+                    AuditLogTable.action,
+                    AuditLogTable.entity_id,
+                    AuditLogTable.log_metadata,
+                ).where(AuditLogTable.id == result.operator_audit_id)
+            )
+        ).one()
+        first_delivery = await delivery_service.deliver_due(now=redriven_at)
+        repeated_delivery = await delivery_service.deliver_due(now=redriven_at)
+        final_delivery_status = await session.scalar(
+            sa.select(FlowRunAuditOutbox.delivery_status).where(
+                FlowRunAuditOutbox.id == outbox_id
+            )
+        )
+        lifecycle_audit_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(AuditLogTable.id == outbox_id)
+            .where(AuditLogTable.action == ActionType.FLOW_RUN_COMPLETED.value)
+        )
+        run_id = run.id
+        run_tenant_id = run.tenant_id
+        flow_id = run.flow_id
+
+    assert result.outbox_id == outbox_id
+    assert result.flow_run_id == run_id
+    assert result.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert result.delivery_attempts == 0
+    assert result.next_delivery_at == redriven_at
+    assert outbox_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert outbox_state.delivery_attempts == 0
+    assert outbox_state.next_delivery_at == redriven_at
+    assert outbox_state.delivered_at is None
+    assert outbox_state.dead_lettered_at is None
+    assert outbox_state.delivery_last_error is None
+    assert first_delivery.delivered_count == 1
+    assert repeated_delivery.attempted_count == 0
+    assert final_delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+    assert lifecycle_audit_count == 1
+    assert operator_audit.tenant_id == run_tenant_id
+    assert operator_audit.actor_type == ActorType.SYSTEM.value
+    assert operator_audit.action == ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value
+    assert operator_audit.entity_id == run_id
+    assert operator_audit.log_metadata == {
+        "flow_id": str(flow_id),
+        "flow_run_id": str(run_id),
+        "outbox_id": str(outbox_id),
+        "reason": "Audit storage recovered.",
+        "prior_delivery_attempts": 5,
+        "prior_dead_lettered_at": dead_lettered_at.isoformat(),
+        "prior_delivery_last_error": (
+            "POST https://example.com/audit?token=%5BREDACTED%5D "
+            "failed with Bearer [REDACTED]"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_redrive_distinguishes_missing_and_wrong_state(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_id = await _insert_completed_outbox(
+            outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            run=run,
+            actor_id=admin_user.id,
+        )
+        service = _delivery_service(session)
+        now = datetime.now(timezone.utc)
+
+        with pytest.raises(FlowRunAuditOutboxNotFoundError):
+            await service.redrive_dead_lettered(
+                outbox_id=uuid4(),
+                expected_dead_lettered_at=now,
+                reason="Investigated missing row.",
+                now=now,
+            )
+        with pytest.raises(FlowRunAuditOutboxStateConflictError) as conflict:
+            await service.redrive_dead_lettered(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=now,
+                reason="Attempted a duplicate redrive.",
+                now=now,
+            )
+
+        operator_audit_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(
+                AuditLogTable.action
+                == ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value
+            )
+        )
+        delivery_status = await session.scalar(
+            sa.select(FlowRunAuditOutbox.delivery_status).where(
+                FlowRunAuditOutbox.id == outbox_id
+            )
+        )
+
+    assert conflict.value.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert operator_audit_count == 0
+    assert delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_redrive_rejects_stale_dead_letter_generation(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_id = await _insert_completed_outbox(
+            outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            run=run,
+            actor_id=admin_user.id,
+        )
+        stale_generation = datetime.now(timezone.utc) - timedelta(minutes=5)
+        current_generation = datetime.now(timezone.utc)
+        await session.execute(
+            sa.update(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=current_generation,
+                delivery_last_error="second delivery generation failed",
+            )
+        )
+
+        with pytest.raises(FlowRunAuditOutboxGenerationConflictError) as conflict:
+            await _delivery_service(session).redrive_dead_lettered(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=stale_generation,
+                reason="Using an obsolete operator listing.",
+                now=datetime.now(timezone.utc),
+            )
+
+        state = (
+            await session.execute(
+                sa.select(
+                    FlowRunAuditOutbox.delivery_status,
+                    FlowRunAuditOutbox.delivery_attempts,
+                    FlowRunAuditOutbox.dead_lettered_at,
+                    FlowRunAuditOutbox.delivery_last_error,
+                ).where(FlowRunAuditOutbox.id == outbox_id)
+            )
+        ).one()
+        audit_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(
+                AuditLogTable.action
+                == ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value
+            )
+        )
+
+    assert conflict.value.current_dead_lettered_at == current_generation
+    assert state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    assert state.delivery_attempts == 5
+    assert state.dead_lettered_at == current_generation
+    assert state.delivery_last_error == "second delivery generation failed"
+    assert audit_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_audit_outbox_redrive_rolls_back_when_operator_audit_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_id = await _insert_completed_outbox(
+            outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            run=run,
+            actor_id=admin_user.id,
+        )
+        dead_lettered_at = datetime.now(timezone.utc)
+        await session.execute(
+            sa.update(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=dead_lettered_at,
+                delivery_last_error="audit store unavailable",
+            )
+        )
+        audit_repo = AuditLogRepositoryImpl(session)
+
+        async def _fail_create(_audit_log):
+            raise RuntimeError("operator audit insert failed")
+
+        monkeypatch.setattr(audit_repo, "create", _fail_create)
+        service = FlowRunAuditOutboxDeliveryService(
+            audit_outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            audit_log_repo=audit_repo,
+        )
+
+        with pytest.raises(RuntimeError, match="operator audit insert failed"):
+            await service.redrive_dead_lettered(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=dead_lettered_at,
+                reason="Audit storage recovered.",
+                now=datetime.now(timezone.utc),
+            )
+
+        state = (
+            await session.execute(
+                sa.select(
+                    FlowRunAuditOutbox.delivery_status,
+                    FlowRunAuditOutbox.delivery_attempts,
+                    FlowRunAuditOutbox.dead_lettered_at,
+                    FlowRunAuditOutbox.delivery_last_error,
+                ).where(FlowRunAuditOutbox.id == outbox_id)
+            )
+        ).one()
+
+    assert state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    assert state.delivery_attempts == 5
+    assert state.dead_lettered_at == dead_lettered_at
+    assert state.delivery_last_error == "audit store unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_flow_audit_outbox_redrives_allow_one_transition(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        _flow, run = await _create_flow_and_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        outbox_id = await _insert_completed_outbox(
+            outbox_repo=FlowRunAuditOutboxRepository(session=session),
+            run=run,
+            actor_id=admin_user.id,
+        )
+        await session.execute(
+            sa.update(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.id == outbox_id)
+            .values(
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+                delivery_attempts=5,
+                next_delivery_at=None,
+                dead_lettered_at=datetime.now(timezone.utc),
+                delivery_last_error="audit store unavailable",
+            )
+        )
+        run_id = run.id
+        dead_lettered_at = await session.scalar(
+            sa.select(FlowRunAuditOutbox.dead_lettered_at).where(
+                FlowRunAuditOutbox.id == outbox_id
+            )
+        )
+        assert dead_lettered_at is not None
+
+    async def _redrive(reason: str):
+        async with sessionmanager.session() as session, session.begin():
+            return await _delivery_service(session).redrive_dead_lettered(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=dead_lettered_at,
+                reason=reason,
+                now=datetime.now(timezone.utc),
+            )
+
+    outcomes = await asyncio.gather(
+        _redrive("Operator A investigated."),
+        _redrive("Operator B investigated."),
+        return_exceptions=True,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        delivery_status = await session.scalar(
+            sa.select(FlowRunAuditOutbox.delivery_status).where(
+                FlowRunAuditOutbox.id == outbox_id
+            )
+        )
+        operator_audit_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(
+                AuditLogTable.action
+                == ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value
+            )
+            .where(AuditLogTable.entity_id == run_id)
+        )
+
+    assert sum(not isinstance(outcome, Exception) for outcome in outcomes) == 1
+    assert (
+        sum(
+            isinstance(outcome, FlowRunAuditOutboxStateConflictError)
+            for outcome in outcomes
+        )
+        == 1
+    )
+    assert delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+    assert operator_audit_count == 1
 
 
 @pytest.mark.asyncio

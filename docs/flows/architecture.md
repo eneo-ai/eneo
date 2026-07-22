@@ -52,7 +52,7 @@ Use this split when changing code:
 | Byte rendering                 | `runtime/document_rendering` and renderer deps                                                                                | `backend/src/eneo/flows/runtime/output_formats/base.py:34`, `backend/src/eneo/flows/runtime/output_runtime.py:59`                                                                                                     | Renderer functions are leaf adapters. Keep DOCX/PDF/Markdown libraries out of executor and step handlers.                                                                                                                                                                                                                                                                                                                                    |
 | Runtime output artifacts       | `output_runtime.py`                                                                                                           | `backend/src/eneo/flows/runtime/output_runtime.py:71`, `backend/src/eneo/flows/runtime/output_runtime.py:112`                                                                                                         | Persists rendered artifact bytes through the runtime principal owner fields.                                                                                                                                                                                                                                                                                                                                                                 |
 | Webhook delivery outbox        | `FlowRunWebhookDeliveryRepository` and `FlowRunWebhookDeliveryService`                                                        | `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py`, `backend/src/eneo/flows/runtime/flow_webhook_delivery.py`                                                                                  | Executor only inserts delivery intents. The repository owns the tenant-scoped, ordered, secret-free public read projection; the outbox worker owns claims, delivery, retries, dead-lettering, and finalization.                                                                                                                                                                                                                                |
-| Runtime lifecycle audit outbox | `FlowRunAuditOutboxDeliveryService`                                                                                           | `backend/src/eneo/flows/application/flow_run_audit_outbox_delivery.py:43`                                                                                                                                             | Lifecycle audit is committed runtime state and is delivered outside tenant audit feature flags.                                                                                                                                                                                                                                                                                                                                              |
+| Runtime lifecycle audit outbox | `FlowRunAuditOutboxRepository` and `FlowRunAuditOutboxDeliveryService`                                                        | `backend/src/eneo/flows/infrastructure/flow_run_audit_outbox_repo.py`, `backend/src/eneo/flows/application/flow_run_audit_outbox_delivery.py`                                                                          | Lifecycle audit is committed runtime state and is delivered outside tenant audit feature flags. The repository owns bounded dead-letter listing plus the locked generation compare-and-swap; the service owns the atomic redrive and operator audit.                                                                                                                                      |
 | Evidence and artifacts         | `FlowRunEvidenceService`, `application/flow_run_evidence.py`, `application/flow_run_export_json.py`                           | `backend/src/eneo/flows/application/flow_run_evidence_service.py::FlowRunEvidenceService`, `backend/src/eneo/flows/application/flow_run_evidence.py::build_debug_export`, `backend/src/eneo/flows/application/flow_run_export_json.py::render_evidence_json_export`              | Evidence assembly, export, redaction, artifact availability, and retention summaries belong here.                                                                                                                                                                                                                                                                                                                                            |
 | Retention control plane        | Nullable tenant columns, `FlowClassificationRetentionPolicyService`, and `DataRetentionService`                               | `backend/src/eneo/database/tables/tenant_table.py`, `backend/src/eneo/flows/application/flow_classification_retention_policy_service.py`, `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`  | Tenant and classification rows own independent delete-after, minimum-retention, and no-purge inputs. Settings, Space, and Flow services are adapters that expose configured and effective state. `DataRetentionService` owns one set-based SQL envelope for purge, preview, and effective reads, plus exact-preview/CAS confirmation. Automatic Flow deletion is Off until an organization or matching-classification delete-after value activates the envelope; minimum-retention and no-purge values only block it. |
 | Retention tombstones           | `flow_retention_tombstone.py`                                                                                                 | `backend/src/eneo/flows/flow_retention_tombstone.py:8`, `backend/src/eneo/flows/flow_retention_tombstone.py:50`                                                                                                       | Tombstones preserve cleanup evidence. They do not activate the tenant retention control plane or replace its preview/confirmation contract.                                                                                                                                                                                                                                                                                                  |
@@ -343,6 +343,34 @@ claim expiry because remote success may have occurred before the local receipt
 commit. The opaque header value is stable only for one Flow run, output step,
 and step attempt; Eneo does not verify the receiver's retention or replay
 semantics. Receivers must deduplicate repeated requests carrying that key.
+
+## Lifecycle Audit Outbox Recovery
+
+Flow lifecycle audit delivery is a required local effect, not a best-effort
+log. The delivery worker inserts an audit row idempotently with the outbox id,
+then marks the outbox row `delivered`; retry exhaustion moves the row from
+`pending` to `dead_lettered` and records `dead_lettered_at` as that failure
+generation's token.
+
+The super-API-key-only operator API exposes a bounded, offset-paginated list of
+dead letters and one redrive command. The repository locks the selected row and
+compares both `delivery_status = 'dead_lettered'` and the listed
+`dead_lettered_at` token. A missing row returns 404; a non-dead-lettered row or
+stale generation returns 409 without mutation or operator audit. A successful
+compare-and-swap resets exactly one row to immediately eligible `pending` state,
+clears terminal delivery diagnostics, and restores the attempt count to zero.
+The application service writes the tenant-scoped SYSTEM operator audit with the
+required reason in the same transaction. There is no unaudited resolve path or
+manual-SQL recovery contract. See
+`backend/src/eneo/flows/api/flow_run_audit_outbox_operator_router.py`,
+`backend/src/eneo/flows/infrastructure/flow_run_audit_outbox_repo.py`, and
+`backend/src/eneo/flows/application/flow_run_audit_outbox_delivery.py`.
+
+Unlike terminal webhook delivery, both `pending` and `dead_lettered` lifecycle
+audit rows remain run-history purge blockers. After redrive, normal idempotent
+delivery creates at most one lifecycle audit, clears the audit-outbox health
+flags, and lets the existing run-history policy select the run. Operator
+diagnosis and recovery are documented in [Flows runbook](../runbooks/flows.md).
 
 ## Runtime Step Identity
 
