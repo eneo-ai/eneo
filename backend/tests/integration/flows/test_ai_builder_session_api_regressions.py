@@ -3693,6 +3693,96 @@ async def test_ai_builder_detach_attachment_rejects_live_turn_and_preserves_memb
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_cancel_applied_session_returns_typed_conflict_without_mutation(
+    client,
+    bearer_token,
+    db_container,
+):
+    space_id = await _create_space_via_api(
+        client=client,
+        bearer_token=bearer_token,
+        name="AI Builder Applied Cancel Rejection",
+    )
+    session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
+    file_id = UUID(
+        await _upload_reference_file(
+            client=client,
+            bearer_token=bearer_token,
+            filename="applied-session-reference.txt",
+        )
+    )
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = container.user().tenant_id
+        session_state_stmt = select(
+            BuilderSessions.status,
+            BuilderSessions.active_request_id,
+            BuilderSessions.lock_token,
+            BuilderSessions.locked_at,
+            BuilderSessions.lock_expires_at,
+            BuilderSessions.latest_turn_state,
+        ).where(
+            BuilderSessions.id == session_id,
+            BuilderSessions.tenant_id == tenant_id,
+        )
+        attachment_stmt = select(BuilderSessionFiles.file_id).where(
+            BuilderSessionFiles.session_id == session_id,
+            BuilderSessionFiles.tenant_id == tenant_id,
+        )
+        await session.execute(
+            insert(BuilderSessionFiles).values(
+                session_id=session_id,
+                file_id=file_id,
+                tenant_id=tenant_id,
+            )
+        )
+        await session.execute(
+            update(BuilderSessions)
+            .where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+            .values(status=SessionStatus.APPLIED.value)
+        )
+        before_state = tuple((await session.execute(session_state_stmt)).one())
+        before_attachments = tuple(
+            (await session.execute(attachment_stmt)).scalars().all()
+        )
+
+    request_id = f"cancel-applied-{uuid4()}"
+    response = await client.post(
+        f"/api/v1/flows/ai-builder/sessions/{session_id}/cancel",
+        headers={
+            "Authorization": f"Bearer {bearer_token}",
+            "X-Request-ID": request_id,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    error = AIBuilderPublicError.model_validate(response.json())
+    assert error.code is AIBuilderErrorCode.INVALID_SESSION_TRANSITION
+    assert error.category.value == "conflict"
+    assert error.request_id == request_id
+
+    async with db_container() as container:
+        session = container.session()
+        after_state = tuple((await session.execute(session_state_stmt)).one())
+        after_attachments = tuple(
+            (await session.execute(attachment_stmt)).scalars().all()
+        )
+
+    assert after_state == before_state
+    assert after_attachments == before_attachments == (file_id,)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_cancel_session_clears_send_lock_fields(
     client,
     bearer_token,

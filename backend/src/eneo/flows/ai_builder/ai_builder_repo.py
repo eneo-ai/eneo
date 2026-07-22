@@ -291,16 +291,20 @@ class AIBuilderRepository:
         tenant_id: UUID,
     ) -> None:
         async with self._transaction():
-            session_row_id = await self.session.scalar(
-                select(BuilderSessions.id)
+            current_status = await self.session.scalar(
+                select(BuilderSessions.status)
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
                 )
                 .with_for_update()
             )
-            if session_row_id is None:
+            if current_status is None:
                 return
+            ensure_valid_session_status_transition(
+                current=SessionStatus(current_status),
+                next_status=SessionStatus.CANCELLED,
+            )
             detach_stmt = sa.delete(BuilderSessionFiles).where(
                 BuilderSessionFiles.session_id == session_id,
                 BuilderSessionFiles.tenant_id == tenant_id,

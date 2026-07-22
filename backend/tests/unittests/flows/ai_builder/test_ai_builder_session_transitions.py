@@ -73,8 +73,10 @@ def test_effective_builder_turn_state_projects_only_expired_active_turns(
     ("current", "next_status"),
     [
         (SessionStatus.CHATTING, SessionStatus.AWAITING_APPROVAL),
+        (SessionStatus.CHATTING, SessionStatus.CANCELLED),
         (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
         (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLIED),
+        (SessionStatus.AWAITING_APPROVAL, SessionStatus.CANCELLED),
         (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
     ],
 )
@@ -87,11 +89,11 @@ def test_valid_transitions_are_allowed(
     )
 
 
-def test_invalid_transition_is_rejected() -> None:
+def test_applied_session_cannot_be_cancelled() -> None:
     with pytest.raises(
         BadRequestException, match="Invalid AI Builder session transition"
     ):
         ensure_valid_session_status_transition(
             current=SessionStatus.APPLIED,
-            next_status=SessionStatus.CHATTING,
+            next_status=SessionStatus.CANCELLED,
         )
