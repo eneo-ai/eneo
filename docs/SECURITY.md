@@ -75,7 +75,7 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The bundled object store is an Eneo-built artifact, not an upstream-signed
   SeaweedFS image. The trusted publication job is restricted to protected
   push/manual runs and uses the GitHub OIDC workflow identity—no PAT, registry
-  password, or signing key. It pins the SeaweedFS 4.39 source commit/archive,
+  password, or signing key. It pins the SeaweedFS 4.40 source commit/archive,
   Dockerfile frontend, compiler image, runtime image, tools, and every Action by
   immutable digest or full commit SHA. It publishes only after both Linux
   platform candidates pass source/license policy, the exact reference Compose

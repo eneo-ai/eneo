@@ -21,9 +21,9 @@ This is a deployment capability, not a tenant or administrator feature toggle.
 
 ## Choose the endpoint
 
-The reference Compose deployment starts an Eneo-built SeaweedFS 4.39 service on
+The reference Compose deployment starts an Eneo-built SeaweedFS 4.40 service on
 the private `object_content_net`. The image is built from upstream commit
-`db42bb49757b459551607939807017d7a9d5a94a`, not from an upstream image. Eneo
+`875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`, not from an upstream image. Eneo
 pins the source archive, build image, runtime image, and GitHub Actions; scans
 the exact amd64 and arm64 image digests; publishes CycloneDX 1.6 and SPDX SBOMs;
 and signs provenance and SBOM attestations with Eneo's GitHub Actions identity.

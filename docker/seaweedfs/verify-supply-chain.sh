@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-readonly SOURCE_COMMIT="db42bb49757b459551607939807017d7a9d5a94a"
-readonly SOURCE_TREE="da91641fdd520e465c68fa48af3b3ad07ad86822"
-readonly SOURCE_ARCHIVE_SHA256="cd6f53fb3e4d1ad955af60e6c3128b3306666168907c24d31a4f28b677b1c028"
+readonly SOURCE_COMMIT="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa"
+readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
+readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
 readonly GO_IMAGE="docker.io/library/golang:1.25.12-bookworm@sha256:ea341baa9bd5ba6784f6d7161ace70544349a6242d54d34a0fbfd2c4d51c9d58"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
@@ -156,7 +156,7 @@ EOF
         "$output_directory/govulncheck.txt"
 
     cat >"$output_directory/SOURCE-PROVENANCE.txt" <<EOF
-upstream=SeaweedFS 4.39
+upstream=SeaweedFS 4.40
 source_commit=$SOURCE_COMMIT
 source_tree=$SOURCE_TREE
 source_archive_sha256=$SOURCE_ARCHIVE_SHA256
