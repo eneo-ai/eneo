@@ -10,7 +10,11 @@ from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_argument
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
+from eneo.flows.ai_builder.planning_state import (
+    OutputSchemaEvidence,
+    PlanningState,
+    ResolvedSlot,
+)
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -56,6 +60,294 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
     assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
     assert result.compiled_proposal.content.edit is not None
     assert result.compiled_proposal.content.edit.base_flow_revision == 7
+
+
+@pytest.mark.asyncio
+async def test_edit_inserting_non_writer_between_body_writer_and_renderer_is_advisory() -> (
+    None
+):
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Write final report",
+            output_mode="compose_text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Create PDF",
+            input_source="previous_step",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Record processing metrics before rendering.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Record processing metrics",
+                        "instructions": "Record the processing duration and item count.",
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    edit = result.compiled_proposal.content.edit
+    assert edit is not None
+    assert any(
+        advisory.code == "document_renderer_must_immediately_follow_body_writer"
+        and advisory.severity == "warning"
+        for advisory in edit.advisories
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_preserving_body_writer_renderer_adjacency_has_no_topology_advisory() -> (
+    None
+):
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Write final report",
+            output_mode="compose_text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Create PDF",
+            input_source="previous_step",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Clarify the body writer name.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Write polished final report",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    edit = result.compiled_proposal.content.edit
+    assert edit is not None
+    assert result.compiled_proposal.content.spec.document_body_writer_step_refs == (
+        "step_a",
+    )
+    assert not any(
+        advisory.code == "document_renderer_must_immediately_follow_body_writer"
+        for advisory in edit.advisories
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
+    flow = _source_reader_flow()
+
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Narrow the source extraction.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert "source_reader_required_fields_must_be_captured" in result.failure_codes
+    assert result.feedback is not None
+    assert "summary" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_edit_preserving_required_source_reader_field_is_accepted() -> None:
+    flow = _source_reader_flow()
+
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Clarify the source reader name.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Read and summarize source",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+
+
+@pytest.mark.asyncio
+async def test_edit_removing_terminal_schema_source_leaf_is_rejected() -> None:
+    result = await _process(
+        flow=_terminal_schema_source_reader_flow(),
+        planning_state=_terminal_schema_planning_state(),
+        arguments={
+            "plan_rationale": "Narrow the source extraction.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert "source_reader_required_fields_must_be_captured" in result.failure_codes
+    assert result.feedback is not None
+    assert "source_case_id" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_edit_preserving_terminal_schema_source_leaf_is_accepted() -> None:
+    result = await _process(
+        flow=_terminal_schema_source_reader_flow(),
+        planning_state=_terminal_schema_planning_state(),
+        arguments={
+            "plan_rationale": "Clarify the source reader name.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Read source case identity",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+
+
+@pytest.mark.asyncio
+async def test_edit_removing_compare_aggregation_target_is_rejected() -> None:
+    flow = _comparison_flow()
+
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            comparison_scope="same_run_compare",
+        ),
+        arguments={
+            "plan_rationale": "Use only the immediately preceding analysis.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "input_source": "previous_step",
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert "multi_document_compare_requires_all_previous_steps" in result.failure_codes
+
+
+@pytest.mark.asyncio
+async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
+    flow = _comparison_flow()
+
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            comparison_scope="same_run_compare",
+        ),
+        arguments={
+            "plan_rationale": "Clarify the comparison step name.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "name": "Compare all source analyses",
+                },
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+
+
+@pytest.mark.asyncio
+async def test_edit_preserving_targeted_compare_source_refs_is_accepted() -> None:
+    result = await _process(
+        flow=_comparison_flow(targeted=True),
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            comparison_scope="same_run_compare",
+        ),
+        arguments={
+            "plan_rationale": "Clarify the targeted comparison name.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "name": "Compare the targeted source analyses",
+                },
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
 
 
 @pytest.mark.asyncio
@@ -1015,19 +1307,129 @@ def _flow_step(
 
 
 def _planning_state_with_primary_input(value: str) -> PlanningState:
+    return _planning_state_with_slots(primary_runtime_input=value)
+
+
+def _planning_state_with_slots(**values: str) -> PlanningState:
     state = PlanningState.empty()
-    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
-        name="primary_runtime_input",
-        value=value,
-        source="structured_answer",
-        evidence=[],
-        confidence="high",
-    )
+    for name, value in values.items():
+        state.resolved_slots[name] = ResolvedSlot(
+            name=name,
+            value=value,
+            source="structured_answer",
+            evidence=[],
+            confidence="high",
+        )
     return state
 
 
 def _form_metadata(*fields: dict[str, object]) -> dict[str, object]:
     return {"form_schema": {"fields": list(fields)}}
+
+
+def _comparison_flow(*, targeted: bool = False) -> SimpleNamespace:
+    reader_contract = {
+        "type": "object",
+        "properties": {"analysis": {"type": "string"}},
+    }
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Read first source",
+            input_type="document",
+            output_type="json",
+            output_contract=reader_contract,
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Analyze source evidence",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_contract=reader_contract,
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Compare source analyses",
+            input_source="previous_step" if targeted else "all_previous_steps",
+            input_type="text",
+            input_bindings=(
+                {
+                    "source_refs": [
+                        {"step_ref": "step_a", "output": "structured"},
+                        {"step_ref": "step_b", "output": "structured"},
+                    ]
+                }
+                if targeted
+                else None
+            ),
+        ),
+    )
+
+
+def _source_reader_flow() -> SimpleNamespace:
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Read source",
+            input_type="document",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Write report",
+            input_source="previous_step",
+            input_type="json",
+        ),
+    )
+
+
+def _terminal_schema_source_reader_flow() -> SimpleNamespace:
+    contract = {
+        "type": "object",
+        "properties": {"source_case_id": {"type": "string"}},
+    }
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Read source case identity",
+            input_type="document",
+            output_type="json",
+            output_contract=contract,
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Build structured result",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_contract=contract,
+        ),
+    )
+
+
+def _terminal_schema_planning_state() -> PlanningState:
+    state = _planning_state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="structured_json",
+    )
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"source_case_id": {"type": "string"}},
+        },
+        source="freeform_text",
+        confidence="high",
+        evidence=["message:source_case_id"],
+    )
+    return state
 
 
 def _audio_document_flow(

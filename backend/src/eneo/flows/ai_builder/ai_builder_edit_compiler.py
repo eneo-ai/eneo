@@ -58,6 +58,7 @@ from eneo.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,
+    OutputMode,
     OutputType,
     StepSpec,
 )
@@ -80,6 +81,20 @@ class _PreparedOrderedEditProposal:
 class EditCompilationResult:
     spec: FlowDraftSpecCore
     approval: FlowBuilderEditApproval
+
+
+def _with_preserved_document_body_writer_identity(
+    spec: FlowDraftSpecCore,
+) -> FlowDraftSpecCore:
+    body_writer_refs = tuple(
+        step.plan_step_ref
+        for step, next_step in zip(spec.steps, spec.steps[1:], strict=False)
+        if step.output_mode == OutputMode.COMPOSE_TEXT
+        and next_step.output_mode == OutputMode.RENDER_VERBATIM
+    )
+    if not body_writer_refs:
+        return spec
+    return spec.model_copy(update={"document_body_writer_step_refs": body_writer_refs})
 
 
 def compile_edit_proposal(
@@ -116,17 +131,19 @@ def compile_edit_proposal(
         primary_runtime_input_type=primary_runtime_input_type,
     )
     base_form_fields = extract_form_fields_from_metadata(current_metadata_json)
-    base_spec = current_flow_authoring_spec(
-        current_steps=current_steps,
-        flow_name=flow_name,
-        flow_description=flow_description,
-        assistant_snapshots=assistant_snapshots,
-        assistant_snapshot_projector=(
-            resource_catalog.assistant_spec_from_snapshot
-            if resource_catalog is not None
-            else None
-        ),
-        form_fields=base_form_fields,
+    base_spec = _with_preserved_document_body_writer_identity(
+        current_flow_authoring_spec(
+            current_steps=current_steps,
+            flow_name=flow_name,
+            flow_description=flow_description,
+            assistant_snapshots=assistant_snapshots,
+            assistant_snapshot_projector=(
+                resource_catalog.assistant_spec_from_snapshot
+                if resource_catalog is not None
+                else None
+            ),
+            form_fields=base_form_fields,
+        )
     )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=base_spec,
@@ -141,6 +158,9 @@ def compile_edit_proposal(
             flow_description=compiled_spec.flow_description,
             steps=compiled_steps,
             form_fields=compiled_spec.form_fields,
+            document_body_writer_step_refs=(
+                compiled_spec.document_body_writer_step_refs
+            ),
         ),
         ui_language=ui_language,
     )
@@ -155,6 +175,7 @@ def compile_edit_proposal(
         flow_description=final_description,
         steps=compiled_steps,
         form_fields=compiled_form_fields,
+        document_body_writer_step_refs=(normalized_spec.document_body_writer_step_refs),
     )
 
     advisories: list[EditAdvisory] = _build_normalization_advisories(

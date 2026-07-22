@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
 from eneo.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
     step_references_form_field,
@@ -39,6 +40,9 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     degrades_document_entry_to_generic_file,
     has_real_audio_transcription_step,
     uses_pseudo_transcription_without_audio_step,
+)
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -94,10 +98,12 @@ class CriticContext:
     requested_output_sections: RequestedOutputSections
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
+    source_reader_required_field_names: frozenset[str] = frozenset()
     resource_catalog: "AIBuilderResourceCatalog | None" = None
 
 
 CriticCheck = Callable[[CriticContext], bool]
+CriticRemediation = str | Callable[[CriticContext], str]
 CriticInvariantKind = Literal["architecture", "semantic"]
 
 
@@ -106,6 +112,7 @@ class CriticIssue:
     id: str
     kind: CriticInvariantKind
     remediation: str
+    edit_topology: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +127,8 @@ class CriticInvariant:
     kind: CriticInvariantKind
     description: str
     evidence: CriticCheck
-    remediation: str
+    remediation: CriticRemediation
+    edit_topology: bool = False
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────
@@ -661,6 +669,63 @@ _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
 )
 
 
+# ── Source-reader obligations ────────────────────────────────────────────
+
+
+def _source_reader_required_fields_must_be_captured_evidence(
+    context: CriticContext,
+) -> bool:
+    return bool(_missing_source_reader_required_field_names(context))
+
+
+def _missing_source_reader_required_field_names(
+    context: CriticContext,
+) -> tuple[str, ...]:
+    required_names = context.source_reader_required_field_names
+    if not required_names:
+        return ()
+
+    captured_names: set[str] = set()
+    for step in context.spec.steps:
+        if not _is_structured_source_reader(step) or step.output_contract is None:
+            continue
+        captured_names.update(schema_leaf_property_names(step.output_contract))
+    return tuple(sorted(required_names - captured_names))
+
+
+def _source_reader_required_fields_remediation(context: CriticContext) -> str:
+    missing_names = ", ".join(
+        f"`{name}`" for name in _missing_source_reader_required_field_names(context)
+    )
+    return (
+        "Källäsarens output_contract saknar obligatoriska källfält: "
+        f"{missing_names}. Behåll alla source_reader_required_fields i ett "
+        "strukturerat källäsarsteg innan ändringen kan sparas."
+    )
+
+
+def _is_structured_source_reader(step: StepSpec) -> bool:
+    return (
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type in SOURCE_READER_INPUT_TYPES
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    )
+
+
+_SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED = CriticInvariant(
+    id="source_reader_required_fields_must_be_captured",
+    kind="architecture",
+    description=(
+        "Source-reader output contracts must retain the server-owned fields "
+        "required by the accepted planning result contract."
+    ),
+    evidence=_source_reader_required_fields_must_be_captured_evidence,
+    remediation=_source_reader_required_fields_remediation,
+    edit_topology=True,
+)
+
+
 # ── Outcome contract invariants ──────────────────────────────────────────
 
 _ACTION_FOLLOWUP_REQUIRED_MARKER_GROUPS: tuple[tuple[str, ...], ...] = (
@@ -810,6 +875,7 @@ _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN = CriticInvariant(
         "Använd riktade `input_bindings.source_refs` till de tidigare stegen "
         'eller, för äldre manuella specifikationer, `input_source="all_previous_steps"`.'
     ),
+    edit_topology=True,
 )
 
 
@@ -954,6 +1020,34 @@ def is_document_body_writer(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
     return step.plan_step_ref in (spec.document_body_writer_step_refs or ())
 
 
+def _document_renderer_must_immediately_follow_body_writer_evidence(
+    context: CriticContext,
+) -> bool:
+    for index, step in enumerate(context.spec.steps):
+        if not is_document_body_writer(context.spec, step):
+            continue
+        if index + 1 >= len(context.spec.steps):
+            return True
+        if not _is_renderer_step(context.spec.steps[index + 1]):
+            return True
+    return False
+
+
+_DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER = CriticInvariant(
+    id="document_renderer_must_immediately_follow_body_writer",
+    kind="semantic",
+    description=(
+        "A document body writer must remain immediately adjacent to its renderer."
+    ),
+    evidence=_document_renderer_must_immediately_follow_body_writer_evidence,
+    remediation=(
+        "Dokumentets body_writer måste följas direkt av DOCX/PDF-renderaren. "
+        "Flytta mellanliggande steg före body_writer-steget eller efter renderaren."
+    ),
+    edit_topology=True,
+)
+
+
 def _looks_like_review_only_text_step(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
     if is_document_body_writer(spec, step):
         return False
@@ -983,6 +1077,7 @@ _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
         "granskningssteget så att det skriver en reviderad slutversion av "
         "hela dokumentet som renderern kan använda."
     ),
+    edit_topology=True,
 )
 
 
@@ -1458,11 +1553,13 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP,
     _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP,
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
+    _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
     _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
+    _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER,
     _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
     _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS,
     _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
@@ -1485,10 +1582,27 @@ def evaluate_critic_invariants(
         CriticIssue(
             id=invariant.id,
             kind=invariant.kind,
-            remediation=invariant.remediation,
+            remediation=(
+                invariant.remediation(context)
+                if callable(invariant.remediation)
+                else invariant.remediation
+            ),
+            edit_topology=invariant.edit_topology,
         )
         for invariant in invariants
         if invariant.evidence(context)
+    )
+
+
+def evaluate_edit_topology_invariants(
+    context: CriticContext,
+) -> tuple[CriticIssue, ...]:
+    """Evaluate the edit subset owned by the canonical critic registry."""
+    return evaluate_critic_invariants(
+        context,
+        invariants=tuple(
+            invariant for invariant in CRITIC_INVARIANTS if invariant.edit_topology
+        ),
     )
 
 

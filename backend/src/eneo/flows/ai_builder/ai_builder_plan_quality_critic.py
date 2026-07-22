@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from eneo.flows.ai_builder.ai_builder_create_compiler import (
+    create_compile_context_from_planning_state,
+)
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
     evaluate_critic_invariants,
@@ -20,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
+)
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     EMPTY_REQUESTED_OUTPUT_SECTIONS,
@@ -56,6 +62,7 @@ def build_conversation_aware_quality_feedback(
     requested_output_sections: RequestedOutputSections = (
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
+    include_edit_topology_advisories: bool = True,
 ) -> str | None:
     context = build_conversation_critic_context(
         conversation,
@@ -69,6 +76,7 @@ def build_conversation_aware_quality_feedback(
     return build_quality_feedback_from_critic_context(
         context,
         include_architecture=True,
+        include_edit_topology_advisories=include_edit_topology_advisories,
     )
 
 
@@ -77,7 +85,7 @@ def build_conversation_critic_context(
     spec: FlowDraftSpecCore,
     *,
     flow: Flow | None = None,
-    aggregation_intent: AggregationIntent = "linear",
+    aggregation_intent: AggregationIntent | None = None,
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
     planning_state: PlanningState | None = None,
     requested_output_sections: RequestedOutputSections = (
@@ -107,6 +115,7 @@ def build_conversation_critic_context(
     )
     output_intent = resolve_output_intent(text, answer_signals)
     input_intent = resolve_input_intent(text, answer_signals, flow=flow)
+    compile_context = create_compile_context_from_planning_state(planning_state)
 
     return CriticContext(
         spec=spec,
@@ -119,7 +128,31 @@ def build_conversation_critic_context(
         output_intent=output_intent,
         mixed_audio_doc_input=input_intent.needs_architecture_clarification,
         primary_runtime_input=input_intent.primary_runtime_input,
-        aggregation_intent=aggregation_intent,
+        aggregation_intent=(
+            aggregation_intent
+            if aggregation_intent is not None
+            else (
+                compile_context.aggregation_intent
+                if compile_context is not None
+                else "linear"
+            )
+        ),
+        source_reader_required_field_names=frozenset(
+            {
+                field.name
+                for field in (
+                    compile_context.source_reader_required_fields
+                    if compile_context is not None
+                    else ()
+                )
+            }
+            | (
+                set(schema_leaf_property_names(compile_context.terminal_output_schema))
+                if compile_context is not None
+                and compile_context.terminal_output_schema is not None
+                else set()
+            )
+        ),
         resource_catalog=resource_catalog,
         requested_output_sections=requested_output_sections,
     )
@@ -129,11 +162,15 @@ def build_quality_feedback_from_critic_context(
     context: CriticContext,
     *,
     include_architecture: bool = False,
+    include_edit_topology_advisories: bool = True,
 ) -> str | None:
     issues = [
         issue.remediation
         for issue in evaluate_critic_invariants(context)
         if include_architecture or issue.kind == "semantic"
+        if include_edit_topology_advisories
+        or issue.kind == "architecture"
+        or not issue.edit_topology
     ]
     if not issues:
         return None

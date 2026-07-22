@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
+    evaluate_edit_topology_policy,
     resolve_ui_language,
     terminal_output_type_for_conversation,
 )
@@ -149,6 +150,28 @@ async def process_edit_arguments(
             failure_kind="validation",
         )
 
+    topology_policy = evaluate_edit_topology_policy(
+        conversation=conversation,
+        spec=compiled_spec,
+        flow=flow,
+        planning_state=planning_state,
+        resource_catalog=resource_catalog,
+    )
+    if topology_policy.rejection_feedback is not None:
+        return ToolProcessingResult(
+            feedback=topology_policy.rejection_feedback,
+            failure_kind="validation",
+            failure_codes=topology_policy.failure_codes,
+        )
+    edit_approval = edit_result.approval.model_copy(
+        update={
+            "advisories": [
+                *edit_result.approval.advisories,
+                *topology_policy.advisories,
+            ]
+        }
+    )
+
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,
         prior_spec=(
@@ -183,7 +206,7 @@ async def process_edit_arguments(
                 spec=compiled_spec,
                 assumptions=proposal.assumptions,
                 plan_rationale=proposal.plan_rationale,
-                edit=edit_result.approval,
+                edit=edit_approval,
             ),
             validation=validation,
             resource_bindings=(

@@ -13,7 +13,9 @@ from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_critic_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
+    CriticIssue,
     enforce_architecture_critic_invariants,
+    evaluate_edit_topology_invariants,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -21,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintWarning,
 )
 from eneo.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
+from eneo.flows.ai_builder.ai_builder_edit_preview_models import EditAdvisory
 from eneo.flows.ai_builder.ai_builder_feedback_formatting import (
     format_revision_feedback,
 )
@@ -65,6 +68,13 @@ _PRESERVED_PLAN_EDIT_TERMINAL_TYPES = frozenset(
 class CreateContextualQualityFeedback:
     feedback: str | None
     failure_codes: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class EditTopologyPolicyResult:
+    rejection_feedback: str | None
+    failure_codes: frozenset[str]
+    advisories: tuple[EditAdvisory, ...]
 
 
 def warnings_for_quality_retry(
@@ -161,6 +171,50 @@ def format_contextual_quality_feedback(
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
+        include_edit_topology_advisories=False,
+    )
+
+
+def evaluate_edit_topology_policy(
+    *,
+    conversation: list[ConversationMessage],
+    spec: FlowDraftSpecCore,
+    flow: "Flow",
+    planning_state: PlanningState | None,
+    resource_catalog: "AIBuilderResourceCatalog | None" = None,
+) -> EditTopologyPolicyResult:
+    context = build_conversation_critic_context(
+        conversation,
+        spec,
+        flow=flow,
+        resource_catalog=resource_catalog,
+        planning_state=planning_state,
+    )
+    issues = evaluate_edit_topology_invariants(context)
+    rejected = tuple(issue for issue in issues if issue.kind == "architecture")
+    advisories = tuple(
+        _edit_topology_advisory(issue) for issue in issues if issue.kind == "semantic"
+    )
+    return EditTopologyPolicyResult(
+        rejection_feedback=(
+            format_revision_feedback(
+                "Edit topology validation failed",
+                [issue.remediation for issue in rejected],
+            )
+            if rejected
+            else None
+        ),
+        failure_codes=frozenset(issue.id for issue in rejected),
+        advisories=advisories,
+    )
+
+
+def _edit_topology_advisory(issue: CriticIssue) -> EditAdvisory:
+    return EditAdvisory(
+        code=issue.id,
+        message=issue.remediation,
+        severity="warning",
+        field="steps",
     )
 
 
