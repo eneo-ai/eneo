@@ -76,6 +76,25 @@ def test_redact_string_redacts_secrets_in_nested_url_query_values() -> None:
     assert "request_id=case-123" in redacted
 
 
+def test_redact_string_fails_closed_for_malformed_url_candidates() -> None:
+    value = "POST https:///hook?token=secret-value failed"
+
+    redacted = redact_string(value, key="message")
+
+    assert "secret-value" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_redact_url_secrets_preserves_ipv6_host_syntax() -> None:
+    value = "https://user:pass@[2001:db8::1]:8443/hook?token=secret-value"
+
+    redacted = redact_url_secrets(value)
+
+    assert redacted.startswith("https://[2001:db8::1]:8443/hook?")
+    assert "user:pass" not in redacted
+    assert "secret-value" not in redacted
+
+
 def test_redact_string_fails_closed_for_excessively_nested_url_values() -> None:
     nested_url = "https://receiver.example/cb?token=secret-value"
     for _ in range(1_100):

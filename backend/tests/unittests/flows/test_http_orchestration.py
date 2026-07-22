@@ -442,6 +442,13 @@ async def test_deliver_webhook_sets_idempotency_key() -> None:
         output_config={
             "url": "https://example.org/webhook",
             "auth": {"mode": "none"},
+            "custom_headers": [
+                {
+                    "name": "idempotency-key",
+                    "value": "authored-key-must-not-escape",
+                    "secret": False,
+                }
+            ],
         },
     )
     run = _Run(id="run-5", flow_id="flow-1", tenant_id="tenant-1")
@@ -463,6 +470,7 @@ async def test_deliver_webhook_sets_idempotency_key() -> None:
         kwargs["headers"]["Idempotency-Key"]
         == hashlib.sha256(b"run-5:step-5:3:webhook").hexdigest()
     )
+    assert [name.lower() for name in kwargs["headers"]].count("idempotency-key") == 1
 
 
 @pytest.mark.asyncio

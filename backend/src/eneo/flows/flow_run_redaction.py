@@ -122,10 +122,14 @@ def _redact_url_secrets(value: str, *, nested_depth: int) -> str:
 
     try:
         parsed = urlsplit(value)
-        if not parsed.scheme or not parsed.netloc:
+        if not parsed.scheme:
             return value
+        if not parsed.netloc:
+            return _REDACTED_VALUE
 
         host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
         port = f":{parsed.port}" if parsed.port is not None else ""
         netloc = f"{host}{port}"
 
@@ -178,11 +182,9 @@ def _is_sensitive_url_query_key(key: str) -> bool:
 
 def _redact_embedded_url(match: re.Match[str]) -> str:
     url = match.group(0)
-    trailing_punctuation = ""
-    while url and url[-1] in _URL_TRAILING_PROSE_PUNCTUATION:
-        trailing_punctuation = url[-1] + trailing_punctuation
-        url = url[:-1]
-    return f"{redact_url_secrets(url)}{trailing_punctuation}"
+    trimmed_url = url.rstrip(_URL_TRAILING_PROSE_PUNCTUATION)
+    trailing_punctuation = url[len(trimmed_url) :]
+    return f"{redact_url_secrets(trimmed_url)}{trailing_punctuation}"
 
 
 def redact_string(value: str, *, key: str | None) -> str:

@@ -360,7 +360,11 @@ async def deliver_webhook(
     if not url:
         raise BadRequestException("Webhook output mode requires output_config.url.")
     timeout_seconds = effective_request.timeout
-    headers = dict(effective_request.headers)
+    headers = {
+        name: value
+        for name, value in effective_request.headers.items()
+        if name.lower() != "idempotency-key"
+    }
     body_bytes = effective_request.body
     json_body = effective_request.json_body
     if body_bytes is None and json_body is None:
