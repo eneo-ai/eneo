@@ -17,9 +17,9 @@ Related docs:
 
 | Concept                | Source of truth                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ---------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Draft Flow             | `flows` and `flow_steps`                   | Mutable authoring state. `flows.published_version` points at the active published snapshot when the flow is published, and draft updates increment `flows.draft_revision`. See `backend/src/eneo/database/tables/flow_tables.py:141` and `backend/src/eneo/flows/infrastructure/flow_repo.py:539`.                                                                                                                      |
-| Published Flow Version | `flow_versions.definition_json`            | Immutable runtime snapshot. It stores ordered step definitions, assistant execution snapshots, review policy, input/output policy, and the checksum used by runtime validation. See `backend/src/eneo/database/tables/flow_tables.py:333` and `backend/src/eneo/flows/application/flow_service.py:786`.                                                                                                                 |
-| Run                    | `flow_runs` plus step/runtime child tables | One execution of a published version. The run stores principal identity, input payload, lifecycle status, revision, and output/error payloads. Step results and attempts use published snapshot step identity, not mutable draft identity. See `backend/src/eneo/database/tables/flow_tables.py:568`, `backend/src/eneo/database/tables/flow_tables.py:699`, and `backend/src/eneo/database/tables/flow_tables.py:890`. |
+| Draft Flow             | `flows` and `flow_steps`                   | Mutable authoring state. `flows.published_version` points at the active published snapshot when the flow is published, and draft updates increment `flows.draft_revision`. See `backend/src/eneo/database/tables/flow_tables.py` and `backend/src/eneo/flows/infrastructure/flow_repo.py::FlowRepository.update`.                                                                                                                      |
+| Published Flow Version | `flow_versions.definition_json`            | Immutable runtime snapshot. It stores ordered step definitions, assistant execution snapshots, review policy, input/output policy, and the checksum used by runtime validation. See `backend/src/eneo/database/tables/flow_tables.py` and `backend/src/eneo/flows/application/flow_service.py::FlowService._build_definition`.                                                                                                                 |
+| Run                    | `flow_runs` plus step/runtime child tables | One execution of a published version. The run stores principal identity, input payload, lifecycle status, revision, and output/error payloads. Step results and attempts use published snapshot step identity, not mutable draft identity. See `backend/src/eneo/database/tables/flow_tables.py`. |
 
 Use this split when changing code:
 
@@ -36,34 +36,34 @@ Use this split when changing code:
 
 | Concept                        | Canonical owner                                                                                                               | Main source evidence                                                                                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Draft flow lifecycle           | `FlowService`                                                                                                                 | `backend/src/eneo/flows/application/flow_service.py:70`                                                                                                                                                               | Creates, updates, validates, publishes, and unpublishes flows. It should not leak FastAPI or frontend concepts.                                                                                                                                                                                                                                                                                                                              |
-| Draft flow persistence         | `FlowRepository` and `flow_tables.py`                                                                                         | `backend/src/eneo/flows/infrastructure/flow_repo.py:529`, `backend/src/eneo/database/tables/flow_tables.py:141`                                                                                                       | `FlowRepository.update` owns optimistic draft revision writes.                                                                                                                                                                                                                                                                                                                                                                               |
+| Draft flow lifecycle           | `FlowService`                                                                                                                 | `backend/src/eneo/flows/application/flow_service.py::FlowService`                                                                                                                                                               | Creates, updates, validates, publishes, and unpublishes flows. It should not leak FastAPI or frontend concepts.                                                                                                                                                                                                                                                                                                                              |
+| Draft flow persistence         | `FlowRepository` and `flow_tables.py`                                                                                         | `backend/src/eneo/flows/infrastructure/flow_repo.py::FlowRepository.update`, `backend/src/eneo/database/tables/flow_tables.py`                                                                                                       | `FlowRepository.update` owns optimistic draft revision writes.                                                                                                                                                                                                                                                                                                                                                                               |
 | Package import lifecycle       | `FlowPackageEnvelope`, import planner/resolver, `FlowPackageInstallService`, `FlowPackageImportRepository`, and central audit | `backend/src/eneo/flow_packages/`, `backend/src/eneo/database/tables/flow_tables.py`                                                                                                                                  | One reviewed checksum, target state, and mapping decision reaches mutation; successful operational rows follow their Flow, failed rows follow their space, and central audit owns post-deletion provenance.                                                                                                                                                                                                                                  |
-| Published snapshot shape       | `published_definition.py`                                                                                                     | `backend/src/eneo/flows/published_definition.py:46`, `backend/src/eneo/flows/published_definition.py:112`, `backend/src/eneo/flows/published_definition.py:131`, `backend/src/eneo/flows/published_definition.py:191` | Build and parse published definitions here. Do not read mutable draft steps during runtime.                                                                                                                                                                                                                                                                                                                                                  |
-| Runtime consumer contract      | `FlowRunContractService`                                                                                                      | `backend/src/eneo/flows/flow_run_contract_service.py:60`, `backend/src/eneo/flows/flow_run_contract_service.py:66`                                                                                                    | The run contract owns final output, form fields, runtime step inputs, upload limits, review requirements, and template readiness.                                                                                                                                                                                                                                                                                                            |
-| Runtime-safe Flow projection   | `FlowAssembler.to_runtime_public`                                                                                             | `backend/src/eneo/flows/api/flow_assembler.py:77`                                                                                                                                                                     | Adds paths for run contract, uploads, run creation, review, evidence, and artifacts.                                                                                                                                                                                                                                                                                                                                                         |
-| Flow API permission checks     | `flow_access_policy.py` and `flow_api_common.py`                                                                              | `backend/src/eneo/flows/flow_access_policy.py:17`, `backend/src/eneo/flows/api/flow_api_common.py:128`                                                                                                                | Action policy decides who may call an endpoint. API helpers translate scope errors into `GeneralError` responses.                                                                                                                                                                                                                                                                                                                            |
-| Run creation and dispatch      | `FlowRunService`                                                                                                              | `backend/src/eneo/flows/application/flow_run_service.py:107`, `backend/src/eneo/flows/application/flow_run_service.py:173`                                                                                            | Loads the published definition, validates input, enforces idempotency and concurrency, persists run and preseeded steps.                                                                                                                                                                                                                                                                                                                     |
-| Worker entry point             | `runtime/tasks.py`                                                                                                            | `backend/src/eneo/flows/runtime/tasks.py:81`                                                                                                                                                                          | Resolves user or service-key principal and constructs the executor in the task process.                                                                                                                                                                                                                                                                                                                                                      |
-| Runtime execution loop         | `FlowRunExecutor`                                                                                                             | `backend/src/eneo/flows/runtime/executor.py:534`                                                                                                                                                                      | Parses published runtime steps, claims step results, creates attempts, invokes StepHandlers, opens review, inserts webhook delivery intents, and finalizes runs.                                                                                                                                                                                                                                                                             |
-| Output-mode behavior           | `FlowRunExecutor._build_step_handler` and the `runtime/step_handlers` classes                                                  | `backend/src/eneo/flows/runtime/executor.py::_build_step_handler`, `backend/src/eneo/flows/runtime/step_handlers/`                                                                                                    | The executor constructs a handler by matching the closed `FlowOutputMode` enum; there is no handler registry. Add a handler class and an exhaustive match case, then update the construction guard.                                                                                                                                                                                                                                           |
-| Output-type policy             | `runtime/output_formats`                                                                                                      | `backend/src/eneo/flows/runtime/output_formats/__init__.py:19`, `backend/src/eneo/flows/runtime/output_formats/base.py:84`                                                                                            | `output_type` owns prompt instructions, native JSON-mode preference, validation/rendering requirements, and renderer selection.                                                                                                                                                                                                                                                                                                              |
+| Published snapshot shape       | `published_definition.py`                                                                                                     | `backend/src/eneo/flows/published_definition.py::build_published_definition_json`, `backend/src/eneo/flows/published_definition.py::parse_verified_published_definition`, `backend/src/eneo/flows/published_definition.py::parse_published_runtime_steps` | Build and parse published definitions here. Do not read mutable draft steps during runtime.                                                                                                                                                                                                                                                                                                                                                  |
+| Runtime consumer contract      | `FlowRunContractService`                                                                                                      | `backend/src/eneo/flows/flow_run_contract_service.py::FlowRunContractService.get_run_contract`                                                                                                    | The run contract owns final output, form fields, runtime step inputs, upload limits, review requirements, and template readiness.                                                                                                                                                                                                                                                                                                            |
+| Runtime-safe Flow projection   | `FlowAssembler.to_runtime_public`                                                                                             | `backend/src/eneo/flows/api/flow_assembler.py::FlowAssembler.to_runtime_public`                                                                                                                                                                     | Adds paths for run contract, uploads, run creation, review, evidence, and artifacts.                                                                                                                                                                                                                                                                                                                                                         |
+| Flow API access context and action policy | `FlowAccessContext`, `resolve_flow_access_context`, and `flow_access_policy.py`                                  | `backend/src/eneo/flows/api/flow_access_context.py::FlowAccessContext`, `backend/src/eneo/flows/api/flow_access_context.py::resolve_flow_access_context`, `backend/src/eneo/flows/flow_access_policy.py::FlowActionRequirement` | The request-scoped access owner loads the Flow, applies tenant/space scope and optional actor context, and delegates action eligibility to the canonical policy. Routers translate typed failures; `flow_api_common.py` does not own access resolution. |
+| Run creation and dispatch      | `FlowRunService`                                                                                                              | `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService.create_run`                                                                                            | Loads the published definition, validates input, enforces idempotency and concurrency, persists run and preseeded steps.                                                                                                                                                                                                                                                                                                                     |
+| Worker entry point             | `runtime/tasks.py`                                                                                                            | `backend/src/eneo/flows/runtime/tasks.py::execute_flow_run`, `backend/src/eneo/flows/runtime/tasks.py::_execute_flow_run_task`                                                                                                                                                                          | The Celery boundary parses the typed dispatch payload, binds the task process to the persisted run/principal, invokes the runtime, and contains escaped failures through secondary terminalization. It does not own run semantics.                                                                                                                                                                                                                                                                                                                                                      |
+| Runtime execution loop         | `FlowRunExecutor`                                                                                                             | `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute`, `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`                                                                                                                                                                      | Parses published runtime steps, claims step results, creates attempts, invokes StepHandlers, opens review, inserts webhook delivery intents, and finalizes runs.                                                                                                                                                                                                                                                                             |
+| Output-mode behavior           | `FlowRunExecutor._build_step_handler` and the `runtime/step_handlers` classes                                                  | `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor._build_step_handler`, `backend/src/eneo/flows/runtime/step_handlers/`                                                                                                    | The executor constructs a handler by matching the closed `FlowOutputMode` enum; there is no handler registry. Add a handler class and an exhaustive match case, then update the construction guard.                                                                                                                                                                                                                                           |
+| Output-type policy             | `runtime/output_formats`                                                                                                      | `backend/src/eneo/flows/runtime/output_formats/__init__.py`, `backend/src/eneo/flows/runtime/output_formats/base.py::OutputFormatSpec`                                                                                            | `output_type` owns prompt instructions, native JSON-mode preference, validation/rendering requirements, and renderer selection.                                                                                                                                                                                                                                                                                                              |
 | Persisted step text interpretation | `domain/step_output.py`                                                                                                   | `backend/src/eneo/flows/domain/step_output.py`                                                                                                                                                                       | Owns inline-versus-file-backed text metadata and rejects malformed overflow markers. It performs no file I/O; complete file-backed text remains behind the existing result-file owner.                                                                                                                                                                                                                                                       |
-| Byte rendering                 | `runtime/document_rendering` and renderer deps                                                                                | `backend/src/eneo/flows/runtime/output_formats/base.py:34`, `backend/src/eneo/flows/runtime/output_runtime.py:59`                                                                                                     | Renderer functions are leaf adapters. Keep DOCX/PDF/Markdown libraries out of executor and step handlers.                                                                                                                                                                                                                                                                                                                                    |
-| Runtime output artifacts       | `output_runtime.py`                                                                                                           | `backend/src/eneo/flows/runtime/output_runtime.py:71`, `backend/src/eneo/flows/runtime/output_runtime.py:112`                                                                                                         | Persists rendered artifact bytes through the runtime principal owner fields.                                                                                                                                                                                                                                                                                                                                                                 |
+| Byte rendering                 | `runtime/document_rendering` and renderer deps                                                                                | `backend/src/eneo/flows/runtime/output_formats/base.py::RenderDocumentFn`, `backend/src/eneo/flows/runtime/output_runtime.py::OutputRuntimeDeps`                                                                                                     | Renderer functions are leaf adapters. Keep DOCX/PDF/Markdown libraries out of executor and step handlers.                                                                                                                                                                                                                                                                                                                                    |
+| Runtime output artifacts       | `output_runtime.py`                                                                                                           | `backend/src/eneo/flows/runtime/output_runtime.py::process_typed_output`, `backend/src/eneo/flows/runtime/output_runtime.py::_persist_rendered_artifact`                                                                                                         | Persists rendered artifact bytes through the runtime principal owner fields.                                                                                                                                                                                                                                                                                                                                                                 |
 | Webhook delivery outbox        | `FlowRunWebhookDeliveryRepository` and `FlowRunWebhookDeliveryService`                                                        | `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py`, `backend/src/eneo/flows/runtime/flow_webhook_delivery.py`                                                                                  | Executor only inserts delivery intents. The repository owns the tenant-scoped, ordered, secret-free public read projection; the outbox worker owns claims, delivery, retries, dead-lettering, and finalization.                                                                                                                                                                                                                                |
 | Runtime lifecycle audit outbox | `FlowRunAuditOutboxRepository` and `FlowRunAuditOutboxDeliveryService`                                                        | `backend/src/eneo/flows/infrastructure/flow_run_audit_outbox_repo.py`, `backend/src/eneo/flows/application/flow_run_audit_outbox_delivery.py`                                                                          | Lifecycle audit is committed runtime state and is delivered outside tenant audit feature flags. The repository owns bounded dead-letter listing plus the locked generation compare-and-swap; the service owns the atomic redrive and operator audit.                                                                                                                                      |
-| Evidence and artifacts         | `FlowRunEvidenceService`, `application/flow_run_evidence.py`, `application/flow_run_export_json.py`                           | `backend/src/eneo/flows/application/flow_run_evidence_service.py::FlowRunEvidenceService`, `backend/src/eneo/flows/application/flow_run_evidence.py::build_debug_export`, `backend/src/eneo/flows/application/flow_run_export_json.py::render_evidence_json_export`              | Evidence assembly, export, redaction, artifact availability, and retention summaries belong here.                                                                                                                                                                                                                                                                                                                                            |
+| Evidence and artifacts         | `FlowRunEvidenceService`, `flow_run_evidence_bundle.py`, `flow_run_evidence.py`, and `flow_run_export_json.py`                 | `backend/src/eneo/flows/application/flow_run_evidence_service.py::FlowRunEvidenceService`, `backend/src/eneo/flows/application/flow_run_evidence_bundle.py::build_evidence_bundle`, `backend/src/eneo/flows/application/flow_run_evidence_bundle.py::redact_evidence_bundle`, `backend/src/eneo/flows/application/flow_run_evidence.py::build_debug_export`, `backend/src/eneo/flows/application/flow_run_export_json.py::render_evidence_json_export` | The service owns access checks, coherent loading, artifact availability, and export orchestration. The bundle module owns canonical assembly and redaction; debug and JSON export modules own their typed projections. |
 | Retention control plane        | Nullable tenant columns, `FlowClassificationRetentionPolicyService`, and `DataRetentionService`                               | `backend/src/eneo/database/tables/tenant_table.py`, `backend/src/eneo/flows/application/flow_classification_retention_policy_service.py`, `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`  | Tenant and classification rows own independent delete-after, minimum-retention, and no-purge inputs. Settings, Space, and Flow services are adapters that expose configured and effective state. `DataRetentionService` owns one set-based SQL envelope for purge, preview, and effective reads, plus exact-preview/CAS confirmation. Automatic Flow deletion is Off until an organization or matching-classification delete-after value activates the envelope; minimum-retention and no-purge values only block it. |
-| Retention tombstones           | `flow_retention_tombstone.py`                                                                                                 | `backend/src/eneo/flows/flow_retention_tombstone.py:8`, `backend/src/eneo/flows/flow_retention_tombstone.py:50`                                                                                                       | Tombstones preserve cleanup evidence. They do not activate the tenant retention control plane or replace its preview/confirmation contract.                                                                                                                                                                                                                                                                                                  |
-| Review checkpoints             | `FlowRunReviewCheckpointService` and `FlowRunReviewCheckpointRepository`                                                      | `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py:28`, `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py:115`                                                         | Service owns active checkpoint use cases and API translation. Repository owns checkpoint persistence, state transitions, audit outbox writes, expiry reconciliation, and run-first lock ordering.                                                                                                                                                                                                                                            |
-| Step rerun                     | `FlowRunRerunService`                                                                                                         | `backend/src/eneo/flows/application/flow_run_rerun_service.py:52`, `backend/src/eneo/database/tables/flow_tables.py:777`                                                                                              | Rerun remains user-principal-only in persistence and API policy.                                                                                                                                                                                                                                                                                                                                                                             |
-| Frontend draft editing         | `FlowEditor.ts`                                                                                                               | `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:77`, `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:479`                                                                                             | Owns editable fields, step order mutations, active step selection, and metadata writes.                                                                                                                                                                                                                                                                                                                                                      |
-| Frontend draft form schema     | `flowFormSchema.ts`, `FlowEditor.ts`, `FlowFormSchemaEditor.svelte`                                                           | `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:73`, `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:114`, `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:517`                       | `flowFormSchema.ts` owns field normalization and metadata shape. `FlowEditor` writes metadata. The editor component owns transient local editing state.                                                                                                                                                                                                                                                                                      |
-| Frontend run contract payload  | `flowRunContract.ts`                                                                                                          | `frontend/apps/web/src/lib/features/flows/flowRunContract.ts:51`, `frontend/apps/web/src/lib/features/flows/flowRunContract.ts:171`                                                                                   | Builds step file payloads, required field checks, reused input, and create-run intent from generated contract types.                                                                                                                                                                                                                                                                                                                         |
-| Frontend run wizard            | `flowRunWizard.ts`                                                                                                            | `frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:78`, `frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:145`                                                                                       | Derives wizard pages and blockers from the backend run contract and file state.                                                                                                                                                                                                                                                                                                                                                              |
-| Frontend runtime files         | `FlowRunFileInputState.svelte.ts` and `FlowRunDialog.svelte`                                                                  | `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts:19`, `frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:507`                                              | State lives in `FlowRunFileInputState`; browser upload side effects still live in the dialog. Moving that boundary needs a design gate.                                                                                                                                                                                                                                                                                                      |
-| Frontend recording lifecycle   | `RecordingSession` and `flowRunRecordingSession.ts`                                                                           | `frontend/apps/web/src/lib/features/audio/recordingSession.ts:1`, `frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts:1`                                                                             | `RecordingSession` owns recorder lifecycle and retry. `flowRunRecordingSession` owns segment filenames, IndexedDB persistence, and resume recovery helpers.                                                                                                                                                                                                                                                                                  |
+| Retention tombstones           | `flow_retention_tombstone.py`                                                                                                 | `backend/src/eneo/flows/flow_retention_tombstone.py::FlowRetentionTombstone`, `backend/src/eneo/flows/flow_retention_tombstone.py::append_retention_tombstone`                                                                                                       | Tombstones preserve cleanup evidence. They do not activate the tenant retention control plane or replace its preview/confirmation contract.                                                                                                                                                                                                                                                                                                  |
+| Review checkpoints             | `FlowRunReviewCheckpointService` and `FlowRunReviewCheckpointRepository`                                                      | `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py::FlowRunReviewCheckpointService`, `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py::FlowRunReviewCheckpointRepository`                                                         | Service owns active checkpoint use cases and API translation. Repository owns checkpoint persistence, state transitions, audit outbox writes, expiry reconciliation, and run-first lock ordering.                                                                                                                                                                                                                                            |
+| Step rerun                     | `FlowRunRerunService`                                                                                                         | `backend/src/eneo/flows/application/flow_run_rerun_service.py::FlowRunRerunService`, `backend/src/eneo/database/tables/flow_tables.py`                                                                                              | User and service-key principals may rerun their own runs. Persistence records exactly one typed requester (`requested_by_user_id` or `requested_by_service_id`), and the API policy admits the requested service-key capability while own-run access remains enforced.                                                                                                                                                                                                                                                                                                                                                                             |
+| Frontend draft editing         | `FlowEditor.ts`                                                                                                               | `frontend/apps/web/src/lib/features/flows/FlowEditor.ts`                                                                                             | Owns editable fields, step order mutations, active step selection, and metadata writes.                                                                                                                                                                                                                                                                                                                                                      |
+| Frontend draft form schema     | `flowFormSchema.ts`, `FlowEditor.ts`, `FlowFormSchemaEditor.svelte`                                                           | `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts`, `frontend/apps/web/src/lib/features/flows/FlowEditor.ts`, `frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte`                       | `flowFormSchema.ts` owns field normalization and metadata shape. `FlowEditor` writes metadata. The editor component owns transient local editing state.                                                                                                                                                                                                                                                                                      |
+| Frontend run contract payload  | `flowRunContract.ts`                                                                                                          | `frontend/apps/web/src/lib/features/flows/flowRunContract.ts`                                                                                   | Builds step file payloads, required field checks, reused input, and create-run intent from generated contract types.                                                                                                                                                                                                                                                                                                                         |
+| Frontend run wizard            | `flowRunWizard.ts`                                                                                                            | `frontend/apps/web/src/lib/features/flows/flowRunWizard.ts`                                                                                       | Derives wizard pages and blockers from the backend run contract and file state.                                                                                                                                                                                                                                                                                                                                                              |
+| Frontend runtime files         | `FlowRunFileInputState.svelte.ts` and `FlowRunDialog.svelte`                                                                  | `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts`, `frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte`                                              | State lives in `FlowRunFileInputState`; browser upload side effects still live in the dialog under the recorded ownership decision.                                                                                                                                                                                                                                                                                                      |
+| Frontend recording lifecycle   | `RecordingSession` and `flowRunRecordingSession.ts`                                                                           | `frontend/apps/web/src/lib/features/audio/recordingSession.ts`, `frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts`                                                                             | `RecordingSession` owns recorder lifecycle and retry. `flowRunRecordingSession` owns segment filenames, IndexedDB persistence, and resume recovery helpers.                                                                                                                                                                                                                                                                                  |
 
 ## Runtime Consumer Journey
 
@@ -72,38 +72,33 @@ Use this journey for public API, SDK, and frontend changes:
 1. Discover the published flow through `GET /api/v1/flows/{id}/published/`.
    The response is a runtime-safe projection, including runtime path templates
    from `FlowAssembler.to_runtime_public`. See
-   `backend/src/eneo/flows/api/flow_authoring_router.py:445` and
-   `backend/src/eneo/flows/api/flow_assembler.py:85`.
+   `backend/src/eneo/flows/api/flow_authoring_router.py` and
+   `backend/src/eneo/flows/api/flow_assembler.py::FlowAssembler.to_runtime_public`.
    This consumer projection currently lives in the authoring router file. Run
    routes are feature-owned by the lifecycle, review, rerun, steps, and evidence
    routers registered through `flow_run_router.py`.
 2. Load `GET /api/v1/flows/{id}/run-contract/`. This is the canonical runtime
    input contract. The endpoint describes form fields, runtime input steps,
    upload limits, review steps, final output, and template readiness. See
-   `backend/src/eneo/flows/api/flow_upload_router.py:44` and
-   `backend/src/eneo/flows/flow_run_contract_service.py:66`.
+   `backend/src/eneo/flows/api/flow_upload_router.py` and
+   `backend/src/eneo/flows/flow_run_contract_service.py::FlowRunContractService.get_run_contract`.
 3. Upload files through the flow or step runtime-file endpoints. Service-key
    callers may use published runtime uploads only. See
-   `backend/src/eneo/flows/api/flow_upload_router.py:128` and
-   `backend/src/eneo/flows/api/flow_upload_router.py:231`.
+   `backend/src/eneo/flows/api/flow_upload_router.py`.
 4. Create the run with `expected_flow_version` from the run contract. `FlowRunService`
    rejects stale versions before it persists the run. See
-   `backend/src/eneo/flows/application/flow_run_service.py:173` and
-   `backend/src/eneo/flows/application/flow_run_service.py:227`.
+   `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService.create_run` and
+   `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService._prepare_run_creation`.
 5. Poll run status and step output. The router documents polling and terminal
    status capability semantics. See
-   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:80` and
-   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:207`.
+   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py`.
 6. If a run pauses at `awaiting_review`, use the active checkpoint endpoint, then
    edit, approve, reject, or resume through the checkpoint paths. See
-   `backend/src/eneo/flows/api/flow_run_review_router.py:73`,
-   `backend/src/eneo/flows/api/flow_run_review_router.py:401`,
-   `backend/src/eneo/flows/api/flow_run_review_router.py:471`, and
-   `backend/src/eneo/flows/api/flow_run_review_router.py:709`.
+   `backend/src/eneo/flows/api/flow_run_review_router.py`.
 7. Download artifacts or evidence through the run artifact/evidence endpoints.
    Artifact content may return gone after retention purges file content. See
-   `backend/src/eneo/flows/api/flow_run_evidence_router.py:67` and
-   `backend/src/eneo/flows/application/flow_run_evidence_service.py:80`.
+   `backend/src/eneo/flows/api/flow_run_evidence_router.py` and
+   `backend/src/eneo/flows/application/flow_run_evidence_service.py::FlowRunEvidenceService.get_run_artifact_file`.
 
 ## Authoring And Publish Journey
 
@@ -114,18 +109,18 @@ The authoring path edits draft state and then freezes a runtime snapshot:
 2. `FlowService.create_flow` and `FlowService.update_flow` normalize metadata,
    validate steps, validate assistant scope, validate security classification,
    and persist through `FlowRepository`. See
-   `backend/src/eneo/flows/application/flow_service.py:100` and
-   `backend/src/eneo/flows/application/flow_service.py:197`.
+   `backend/src/eneo/flows/application/flow_service.py::FlowService.create_flow` and
+   `backend/src/eneo/flows/application/flow_service.py::FlowService.update_flow`.
 3. `FlowRepository.update` owns the SQL update and draft revision increment. See
-   `backend/src/eneo/flows/infrastructure/flow_repo.py:539`.
+   `backend/src/eneo/flows/infrastructure/flow_repo.py::FlowRepository.update`.
 4. `FlowService.publish_flow` validates publishability, chooses the next version,
    builds `definition_json`, writes `flow_versions`, and updates
    `flows.published_version`. See
-   `backend/src/eneo/flows/application/flow_service.py:391`.
+   `backend/src/eneo/flows/application/flow_service.py::FlowService.publish_flow`.
 5. Published `definition_json` stores ordered runtime steps and assistant snapshots.
    Do not make runtime code reach back to mutable `flow_steps`. See
-   `backend/src/eneo/flows/application/flow_service.py:786` and
-   `backend/src/eneo/flows/published_definition.py:191`.
+   `backend/src/eneo/flows/application/flow_service.py::FlowService._build_definition` and
+   `backend/src/eneo/flows/published_definition.py::parse_published_runtime_steps`.
 
 ### Package import ownership
 
@@ -192,43 +187,41 @@ The run lifecycle is database-first:
 1. The API calls `FlowRunService.create_run`, which loads the published flow,
    validates the submitted payload, precomputes runtime step input file
    projections, and persists the run with a typed principal identity. See
-   `backend/src/eneo/flows/application/flow_run_service.py:213`,
-   `backend/src/eneo/flows/application/flow_run_service.py:255`, and
-   `backend/src/eneo/flows/application/flow_run_service.py:374`.
+   `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService.create_run`,
+   `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService._prepare_run_creation`,
+   and `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService._create_persisted_run`.
 2. The router commits before dispatching the worker task, so Celery starts from
    committed run state. See
-   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py:275` and
-   `backend/src/eneo/flows/api/flow_api_common.py:47`.
+   `backend/src/eneo/flows/api/flow_run_lifecycle_router.py` and
+   `backend/src/eneo/flows/api/flow_api_common.py::commit_flow_runtime_write_before_response`.
 3. The Celery task resolves the principal from `flow_runs.principal_type`,
-   `principal_user_id`, or `principal_api_key_id`, then constructs the executor.
-   See `backend/src/eneo/flows/runtime/tasks.py:81`.
+   `principal_user_id`, or `principal_api_key_id`, validates that the dispatch
+   matches persisted run state, and invokes the runtime through the task process
+   boundary. See `backend/src/eneo/flows/runtime/tasks.py::_execute_flow_run_task`.
 4. The executor parses the published runtime steps, validates assistant snapshots,
    and rebuilds execution state from persisted step results. See
-   `backend/src/eneo/flows/runtime/executor.py:534` and
-   `backend/src/eneo/flows/runtime/executor.py:553`.
+   `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`.
 5. For each step, the executor checks cancellation/deletion, claims a step result,
    starts an attempt, invokes the resolved StepHandler, persists success or
    failure, and updates the in-memory execution state from persisted results. See
-   `backend/src/eneo/flows/runtime/executor.py:596`,
-   `backend/src/eneo/flows/runtime/executor.py:640`,
-   `backend/src/eneo/flows/runtime/executor.py:697`,
-   `backend/src/eneo/flows/runtime/executor.py:727`, and
-   `backend/src/eneo/flows/runtime/executor.py:822`.
+   `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`
+   and `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor._execute_step`.
 6. Review policy pauses the run after the completed step result is persisted.
    HTTP post steps insert webhook delivery intents and return with the run still
-   running. See `backend/src/eneo/flows/runtime/executor.py:858` and
-   `backend/src/eneo/flows/runtime/executor.py:868`.
+   running. See
+   `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`.
 7. When all steps complete, `finalize_run_from_current_results` terminalizes the
    run from persisted result state. See
-   `backend/src/eneo/flows/runtime/executor.py:881`.
+   `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`.
 
 `FlowRunRepository` locks the matching `flow_runs` parent before claiming a
 step result or opening a step attempt, then rechecks that the run is still
 `queued` or `running` after any lock wait. This parent-before-child order keeps
 terminalization and child mutation serialized: a child writer that loses the
 race cannot recreate active work after the run becomes terminal. See
-`backend/src/eneo/flows/infrastructure/flow_run_repo.py:1119` and
-`backend/src/eneo/flows/infrastructure/flow_run_repo.py:1182`.
+`backend/src/eneo/flows/infrastructure/flow_run_repo.py::FlowRunRepository.claim_step_result`
+and
+`backend/src/eneo/flows/infrastructure/flow_run_repo.py::FlowRunRepository.create_or_get_attempt_started`.
 
 ## Large Runtime Input And Context-Window Policy
 
@@ -241,7 +234,7 @@ Use two different designs:
 
 | Case                                                                                      | Correct shape                                                                           | Owner                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Exhaustive work where every uploaded source must be read, extracted, cited, or summarized | Map the reader over bounded source units, then compose typed outputs downstream.        | `PassThroughStepHandler` dispatches valid per-source readers and fails closed for invalid `per_source` configuration. See `backend/src/eneo/flows/runtime/step_handlers/pass_through.py:38` and `backend/src/eneo/flows/runtime/step_handlers/pass_through.py:50`. |
+| Exhaustive work where every uploaded source must be read, extracted, cited, or summarized | Map the reader over bounded source units, then compose typed outputs downstream.        | `PassThroughStepHandler` dispatches valid per-source readers and fails closed for invalid `per_source` configuration. See `backend/src/eneo/flows/runtime/step_handlers/pass_through.py::PassThroughStepHandler.execute`. |
 | Selective question answering over a large library where only relevant passages matter     | Use knowledge retrieval/RAG so the model receives selected chunks, not the full corpus. | Retrieval stays an assistant/knowledge concern, not a Flow step-input transport.                                                                                                                                                                                   |
 
 For Flow AI Builder-generated multi-source document readers, the current
@@ -249,24 +242,23 @@ runtime map is explicit:
 
 1. Builder lowering carries `runtime_input_execution_mode` from the planned step
    into the compiled step draft. See
-   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:167`.
+   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py::_new_step_draft_from_planned_step`.
 2. Builder lowering removes runtime-owned source identity fields from the
    model-facing output guidance while preserving them in the persisted step
    contract. See
-   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:177` and
-   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py:189`.
+   `backend/src/eneo/flows/ai_builder/ai_builder_assembly/lower.py::_assistant_output_fields_for_planned_step`.
 3. `PerSourceReader` lists the bound runtime file ids and executes one model
    call per source file. See
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:73` and
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:106`.
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::execute_per_source_reader`
+   and `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_execute_one_source`.
 4. The runtime stamps `source_label` and `source_file_id` after each call, so the
    model does not own source identity. See
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:365`.
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_source_document_items`.
 5. Per-source diagnostics preserve source count, token totals, per-source token
    records, input text previews, and extraction diagnostics. See
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:221`,
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:250`, and
-   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py:502`.
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_assemble_per_source_output`,
+   `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_per_source_runtime_metadata`,
+   and `backend/src/eneo/flows/runtime/step_handlers/per_source_reader.py::_per_source_call_metadata`.
 
 `Underlag till text` / source-material bindings are bounded inter-step dataflow.
 They are not the mechanism for transporting a large corpus through one prompt.
@@ -279,8 +271,8 @@ fail with `typed_io_input_exceeds_model_window` and an actionable message naming
 the step and token limit. Keep this as an execution-time guard, not a compile-time
 token estimator; the same published Flow can run later with different files and
 different model settings. See
-`backend/src/eneo/flows/runtime/step_execution_runtime.py:377` and
-`backend/src/eneo/flows/flow_error_taxonomy.py:611`.
+`backend/src/eneo/flows/runtime/step_execution_runtime.py::_typed_context_window_error`
+and `backend/src/eneo/flows/flow_error_taxonomy.py`.
 
 ## Step Behavior And Output Format
 
@@ -289,16 +281,16 @@ Flows separate the two axes that used to drift together:
 | Axis                | Owner                                                                  | What it owns                                                                                                                                                                                     | What it must not own                                                                     |
 | ------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
 | `output_mode`       | `FlowRunExecutor._build_step_handler` and StepHandler classes          | Runtime behavior: the executor matches `FlowOutputMode` and constructs the corresponding handler to call the LLM, skip it for transcription, run template fill, or queue a webhook delivery intent. | Prompt instructions, JSON-mode policy, document rendering, or output-type validation.    |
-| `output_type`       | OutputFormatSpec registry and specs                                    | Prompt instructions, native JSON object-mode preference, output validation, document rendering requirement, and renderer choice. See `backend/src/eneo/flows/runtime/output_formats/base.py:84`. | Step behavior dispatch, run lifecycle, webhook delivery, or review checkpoint lifecycle. |
-| OutputRenderer role | `runtime/document_rendering` leaves passed through `OutputRuntimeDeps` | Byte rendering for DOCX/PDF/Markdown-derived artifacts. See `backend/src/eneo/flows/runtime/output_formats/base.py:34` and `backend/src/eneo/flows/runtime/output_runtime.py:59`.                | Business policy, persistence ownership, or a plugin SDK.                                 |
+| `output_type`       | OutputFormatSpec registry and specs                                    | Prompt instructions, native JSON object-mode preference, output validation, document rendering requirement, and renderer choice. See `backend/src/eneo/flows/runtime/output_formats/base.py::OutputFormatSpec`. | Step behavior dispatch, run lifecycle, webhook delivery, or review checkpoint lifecycle. |
+| OutputRenderer role | `runtime/document_rendering` leaves passed through `OutputRuntimeDeps` | Byte rendering for DOCX/PDF/Markdown-derived artifacts. See `backend/src/eneo/flows/runtime/output_formats/base.py::RenderDocumentFn` and `backend/src/eneo/flows/runtime/output_runtime.py::OutputRuntimeDeps`.                | Business policy, persistence ownership, or a plugin SDK.                                 |
 
 `FlowRunExecutor._execute_step` resolves the StepHandler from `output_mode`.
 `step_execution_runtime.py` prepares the assistant call and calls
 `process_typed_output`. `output_runtime.py` resolves the OutputFormatSpec from
 `output_type` and persists rendered artifacts. See
-`backend/src/eneo/flows/runtime/executor.py:1007`,
-`backend/src/eneo/flows/runtime/step_execution_runtime.py:175`, and
-`backend/src/eneo/flows/runtime/output_runtime.py:71`.
+`backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor._execute_step`,
+`backend/src/eneo/flows/runtime/step_execution_runtime.py::prepare_step_execution`,
+and `backend/src/eneo/flows/runtime/output_runtime.py::process_typed_output`.
 
 ## Webhook Outbox Lifecycle
 
@@ -306,15 +298,15 @@ HTTP post is durable outbox work:
 
 1. `HttpPostStepHandler` wraps pass-through execution and emits one
    `WebhookDeliveryIntent` with a run, step, attempt, and idempotency key. See
-   `backend/src/eneo/flows/runtime/step_handlers/http_post.py:16` and
-   `backend/src/eneo/flows/runtime/step_handlers/http_post.py:39`.
+   `backend/src/eneo/flows/runtime/step_handlers/http_post.py::HttpPostStepHandler.execute`.
 2. The executor inserts pending delivery rows after the step result is persisted
    and commits before returning `running`. See
-   `backend/src/eneo/flows/runtime/executor.py:868`.
+   `backend/src/eneo/flows/runtime/executor.py::FlowRunExecutor.execute_claimed`.
 3. The webhook repository uses `ON CONFLICT DO NOTHING` for idempotent insert and
    `FOR UPDATE SKIP LOCKED` for delivery claims. See
-   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:38`
-   and `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:76`.
+   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py::FlowRunWebhookDeliveryRepository.insert_pending_delivery`
+   and
+   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py::FlowRunWebhookDeliveryRepository.claim_due_delivery_rows`.
 4. `FlowRunWebhookDeliveryService.deliver_due` provides an at-least-once sender
    contract. A claim atomically charges one of five attempts and commits before
    HTTP. An expired below-budget claim can be reclaimed with the same
@@ -327,22 +319,23 @@ HTTP post is durable outbox work:
    `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py::FlowRunWebhookDeliveryRepository.claim_due_delivery_rows`.
 5. The data model enforces one delivery per `(flow_run_id, step_id, attempt_no)`
    and uses the shared outbox delivery status vocabulary. See
-   `backend/src/eneo/database/tables/flow_tables.py:1982` and
-   `backend/src/eneo/database/tables/flow_tables.py:2026`.
+   `backend/src/eneo/database/tables/flow_tables.py`.
 6. `DataRetentionService` excludes a run from history purge while any delivery
    remains `pending`. An unclaimed, actively claimed, or expired-claim row is
    still unresolved; claim expiry only makes it recoverable by the existing
    delivery claimant. `delivered` and `dead_lettered` rows are terminal and do
    not block purge. See
-   `backend/src/eneo/data_retention/infrastructure/data_retention_service.py:668`
+   `backend/src/eneo/data_retention/infrastructure/data_retention_service.py`
    and
-   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py:76`.
+   `backend/src/eneo/flows/infrastructure/flow_run_webhook_delivery_repo.py::FlowRunWebhookDeliveryRepository.claim_due_delivery_rows`.
 
-The sender may repeat a POST after a timeout, connection loss, worker crash, or
-claim expiry because remote success may have occurred before the local receipt
-commit. The opaque header value is stable only for one Flow run, output step,
-and step attempt; Eneo does not verify the receiver's retention or replay
-semantics. Receivers must deduplicate repeated requests carrying that key.
+This is an at-least-once sender contract: the sender may repeat a POST after a
+timeout, connection loss, worker crash, or claim expiry because remote success
+may have occurred before the local receipt commit. The opaque `Idempotency-Key`
+value is stable only for one Flow run, output step, and step attempt. Eneo does
+not verify the receiver's retention or replay semantics, so this wording does
+not claim receiver-side idempotency. Receivers must deduplicate repeated requests
+carrying that key.
 
 ## Lifecycle Audit Outbox Recovery
 
@@ -378,15 +371,12 @@ Runtime step identity is snapshot-owned:
 
 1. Published definitions contain step ids and ordered runtime steps. Runtime code
    parses these through `parse_published_runtime_steps`. See
-   `backend/src/eneo/flows/published_definition.py:191`.
+   `backend/src/eneo/flows/published_definition.py::parse_published_runtime_steps`.
 2. Run creation pre-seeds step results from published step identities. See
-   `backend/src/eneo/flows/application/flow_run_service.py:277`.
+   `backend/src/eneo/flows/application/flow_run_service.py::FlowRunService._create_persisted_run`.
 3. `flow_step_results.step_id` and `flow_step_attempts.step_id` are non-null,
    with uniqueness per run/step and per run/step/attempt. See
-   `backend/src/eneo/database/tables/flow_tables.py:715`,
-   `backend/src/eneo/database/tables/flow_tables.py:768`,
-   `backend/src/eneo/database/tables/flow_tables.py:906`, and
-   `backend/src/eneo/database/tables/flow_tables.py:976`.
+   `backend/src/eneo/database/tables/flow_tables.py`.
 4. Rerun, review, evidence, webhook, result-file, and audit rows all refer to the
    runtime snapshot step, not to a mutable draft step lookup at execution time.
 
@@ -400,11 +390,10 @@ Runtime file ownership is principal-aware:
 
 1. Run creation stores a typed principal identity on `flow_runs`. The database
    check requires either a user principal or a service-key principal, not both.
-   See `backend/src/eneo/database/tables/flow_tables.py:575` and
-   `backend/src/eneo/database/tables/flow_tables.py:635`.
+   See `backend/src/eneo/database/tables/flow_tables.py`.
 2. Rendered output artifacts are stored by `output_runtime.py` with
    `deps.principal.file_owner_fields()` and the run tenant. See
-   `backend/src/eneo/flows/runtime/output_runtime.py:112`.
+   `backend/src/eneo/flows/runtime/output_runtime.py::_persist_rendered_artifact`.
 3. `FlowRunEvidenceService` owns artifact file access, redacted evidence bundles,
    and evidence JSON export. It returns `flow_run_artifact_content_unavailable`
    when retention has purged artifact content. See
@@ -420,7 +409,7 @@ Runtime file ownership is principal-aware:
    `backend/src/eneo/flows/application/flow_run_export_json.py::render_evidence_json_export`.
 6. `flow_retention_tombstone.py` defines the tombstone payloads used when run
    evidence or generated artifacts are purged. See
-   `backend/src/eneo/flows/flow_retention_tombstone.py:50`.
+   `backend/src/eneo/flows/flow_retention_tombstone.py::FlowRetentionTombstone`.
 
 Run-history retention eligibility is owned by one SQL envelope in
 `DataRetentionService`. Let `A` be the shortest configured organization value
@@ -457,29 +446,26 @@ Review and rerun are separate runtime features:
 
 1. `FlowRunReviewCheckpointService` owns active checkpoint lookup, payload edit,
    approval, rejection, resume, revision checks, and expiry behavior. See
-   `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py:28`.
+   `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py::FlowRunReviewCheckpointService`.
 2. Review checkpoint API docs tell clients to render from immutable checkpoint
    step snapshots rather than mutable draft definitions. See
-   `backend/src/eneo/flows/api/flow_run_review_router.py:73`.
+   `backend/src/eneo/flows/api/flow_run_review_router.py`.
 3. `FlowRunRerunService` owns step rerun acceptance, invalidation graph logic,
    input validation, request fingerprinting, and idempotent replay. See
-   `backend/src/eneo/flows/application/flow_run_rerun_service.py:52` and
-   `backend/src/eneo/flows/application/flow_run_rerun_service.py:86`.
-4. Rerun persistence currently requires a human actor. The table check enforces
-   `requested_by_principal_type = 'user'`. See
-   `backend/src/eneo/database/tables/flow_tables.py:823` and
-   `backend/src/eneo/database/tables/flow_tables.py:843`.
+   `backend/src/eneo/flows/application/flow_run_rerun_service.py::FlowRunRerunService`.
+4. D1 is resolved in favor of the implemented typed attribution model. Rerun
+   persistence accepts either a user requester or a service-key requester and
+   requires exactly the matching identity field. See
+   `backend/src/eneo/database/tables/flow_tables.py`.
 5. API policy allows service-key principals for published runtime view/run and
-   for own-run review/resume when requested, but not for rerun. See
-   `backend/src/eneo/flows/flow_access_policy.py:82`,
-   `backend/src/eneo/flows/flow_access_policy.py:179`, and
-   `backend/src/eneo/flows/flow_access_policy.py:191`.
+   for own-run review, resume, and rerun when the capability is requested. A
+   service key cannot rerun another principal's run. See
+   `backend/src/eneo/flows/flow_access_policy.py::FlowActionRequirement` and
+   `backend/tests/unittests/flows/test_flow_run_rerun_service.py::test_service_principal_reruns_own_run`.
 
 Current service-key posture: service keys can use the published runtime surface
-and own-run review/resume paths. Rerun and broader service-key identity semantics
-remain blocked by product/data decisions. Because there are no production Flow
-users, the next approved task should prefer the cleaner long-term model over a
-legacy-preserving compromise.
+and their own-run review, resume, and rerun paths with typed service-principal
+attribution. Broader cross-principal access remains forbidden.
 
 ## API And Frontend Contract Ownership
 
@@ -499,8 +485,7 @@ API rules:
 
 1. Public errors go through `GeneralError` response metadata and Flow API error
    helpers. Shared run forbidden-response metadata lives in the same owner. See
-   `backend/src/eneo/flows/api/flow_api_common.py:24` and
-   `backend/src/eneo/flows/api/flow_api_common.py:57`.
+   `backend/src/eneo/flows/api/flow_api_common.py::error_response`.
 2. Scope and published-flow requirements belong in `enforce_flow_scope`,
    `resolve_flow_access_context`, and `flow_access_policy.py`. See
    `backend/src/eneo/flows/api/flow_access_context.py` and
@@ -508,11 +493,10 @@ API rules:
 3. Frontend runtime input payload construction belongs in `flowRunContract.ts`,
    not in Svelte components. Components should consume the generated contract
    and call these helpers. See
-   `frontend/apps/web/src/lib/features/flows/flowRunContract.ts:51`.
+   `frontend/apps/web/src/lib/features/flows/flowRunContract.ts`.
 4. Frontend draft step order and metadata writes belong in `FlowEditor.ts`, not
    in step-list components. See
-   `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:479` and
-   `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:510`.
+   `frontend/apps/web/src/lib/features/flows/FlowEditor.ts`.
 
 ## Architecture Guard Tests
 
@@ -521,25 +505,26 @@ Run these when changing the named surface:
 | Surface                                                     | Guard or test                                                                                                                                      |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Flow root package layout and root-growth freeze             | `backend/tests/unittests/flows/test_flow_package_layout.py::test_flow_root_layout_decision_matches_filesystem`                                     |
-| No FastAPI exceptions from Flow application/runtime modules | `backend/tests/unittests/flows/test_flow_architecture_guards.py:476`                                                                               |
-| `output_mode` dispatch remains in StepHandlers              | `backend/tests/unittests/flows/test_flow_architecture_guards.py:497` and `backend/tests/unittests/flows/test_flow_runtime_step_handlers.py:161`    |
-| `output_type` policy remains in OutputFormatSpecs           | `backend/tests/unittests/flows/test_flow_architecture_guards.py:507` and `backend/tests/unittests/flows/test_flow_runtime_output_formats.py:25`    |
-| Removed typed-output helpers do not come back               | `backend/tests/unittests/flows/test_flow_architecture_guards.py:554`                                                                               |
-| Webhook delivery stays out of the executor                  | `backend/tests/unittests/flows/test_flow_architecture_guards.py:571`                                                                               |
-| Shared outbox delivery status vocabulary                    | `backend/tests/unittests/flows/test_flow_architecture_guards.py:596` and `backend/tests/unittests/flows/test_flow_architecture_guards.py:666`      |
-| Document rendering dependencies stay in leaves              | `backend/tests/unittests/flows/test_flow_runtime_output_renderers.py:120`                                                                          |
-| Runtime output format prompt/JSON-mode behavior             | `backend/tests/unittests/flows/test_flow_runtime_output_formats.py:59` and `backend/tests/unittests/flows/test_flow_runtime_output_formats.py:180` |
-| Published definition contract                               | `backend/tests/unittests/flows/test_published_definition_contract.py`                                                                              |
-| Run contract service                                        | `backend/tests/unittests/flows/test_flow_run_contract_service.py`                                                                                  |
-| Consumer API contract                                       | `backend/tests/integration/flows/test_flow_consumer_api_contract.py`                                                                               |
-| Worker runtime contract                                     | `backend/tests/integration/flows/test_flow_runtime_worker_contract.py`                                                                             |
-| Webhook outbox delivery                                     | `backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py`                                                                             |
-| Evidence API contracts                                      | `backend/tests/integration/flows/test_flow_evidence_api_contracts.py`                                                                              |
-| Frontend run contract payload helpers                       | `frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts`                                                                                 |
-| Frontend run wizard and blockers                            | `frontend/apps/web/src/lib/features/flows/flowRunWizard.test.ts`                                                                                   |
-| Frontend file input state                                   | `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.test.ts`                                                                |
-| Frontend recording persistence/recovery                     | `frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.test.ts` and `frontend/apps/web/src/lib/features/audio/recordingSession.test.ts` |
-| Frontend draft editor ownership                             | `frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts`                                                                                      |
+| No FastAPI exceptions from Flow application/runtime modules | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_flow_non_api_modules_do_not_raise_fastapi_http_exception` |
+| `output_mode` dispatch remains in StepHandlers              | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_output_mode_literal_branches_only_appear_in_allowlisted_call_sites` and `backend/tests/unittests/flows/test_flow_runtime_step_handlers.py::test_executor_builds_expected_step_handler` |
+| `output_type` policy remains in OutputFormatSpecs           | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_output_type_literal_branches_only_appear_in_allowlisted_call_sites` and `backend/tests/unittests/flows/test_flow_runtime_output_formats.py::test_output_format_registry_is_total_for_flow_output_types` |
+| Removed typed-output helpers do not come back               | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_removed_typed_output_helpers_do_not_reappear` |
+| Webhook delivery stays out of the executor                  | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_executor_does_not_own_webhook_delivery_side_effects` |
+| Shared outbox delivery status vocabulary                    | `backend/tests/unittests/flows/test_flow_architecture_guards.py::test_flow_outbox_delivery_status_vocabulary_is_canonical` |
+| Document rendering dependencies stay in leaves              | `backend/tests/unittests/flows/test_flow_runtime_output_renderers.py::test_document_rendering_dependencies_stay_in_rendering_leaves` |
+| Runtime output format prompt/JSON-mode behavior             | `backend/tests/unittests/flows/test_flow_runtime_output_formats.py::test_native_json_object_mode_matches_current_schema_matrix` |
+| Published definition contract                               | `backend/tests/unittests/flows/test_published_definition_contract.py::test_parser_round_trips_definition_and_runtime_steps` |
+| Run contract service                                        | `backend/tests/unittests/flows/test_flow_run_contract_service.py::test_get_run_contract_returns_published_inputs_final_output_and_templates` |
+| Consumer API contract                                       | `backend/tests/integration/flows/test_flow_consumer_api_contract.py::test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps` |
+| Worker runtime contract                                     | `backend/tests/integration/flows/test_flow_runtime_worker_contract.py::test_flow_run_created_by_service_executes_to_terminal_worker_state` |
+| Webhook outbox delivery                                     | `backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py::test_flow_webhook_delivery_sends_outside_transaction_and_completes_run` |
+| Evidence API contracts                                      | `backend/tests/integration/flows/test_flow_evidence_api_contracts.py::test_completed_verified_evidence_projects_redacted_structured_result` |
+| Frontend run contract payload helpers                       | `frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts::flowRunContract helpers` |
+| Frontend run wizard and blockers                            | `frontend/apps/web/src/lib/features/flows/flowRunWizard.test.ts::flowRunWizard` |
+| Frontend file input state                                   | `frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.test.ts::FlowRunFileInputState` |
+| Frontend recording persistence/recovery                     | `frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.test.ts::buildContractSnapshotFromStep` and `frontend/apps/web/src/lib/features/audio/recordingSession.test.ts::RecordingSession lifecycle` |
+| Frontend draft editor ownership                             | `frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts::FlowEditor metadata commands` |
+| Form-schema dirty-edit warn-and-choose behavior (TEST-6)    | `frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.test.ts::FlowFormSchemaEditor conflicts` |
 
 ## Where To Change X
 
@@ -564,15 +549,15 @@ Run these when changing the named surface:
 | Change recording retry/lifecycle              | `RecordingSession`                                                                             | `recordingSession.test.ts`                                                                                            |
 | Change recording persistence or resume        | `flowRunRecordingSession.ts`, `FlowRunFileInputState`, `FlowRunDialog`                         | `flowRunRecordingSession.test.ts`, `FlowRunFileInputState.test.ts`, run dialog focused tests                          |
 
-## Known Open Decisions And Compatibility Paths
+## Known Decisions And Compatibility Paths
 
 | Item                                           | Current owner                                                                                             | Status                                                                                                                                                                                                       | Deletion or decision trigger                                                                                                                                           |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Remaining runtime-retention implementation     | `DataRetentionService`, retention policy files, tombstone schema, evidence export                         | Launch policy is recorded. Pending terminal-webhook intent already blocks run-history purge; delivered and dead-lettered intent is purge-permitted at the horizon.                                           | Complete safe candidate locking, whole-run/file finalization, and the recorded retention horizons through focused changes with data/schema preflight.                  |
-| Service-key identity for review/rerun          | `flow_access_policy.py`, `FlowRunReviewCheckpointService`, `FlowRunRerunService`, rerun table constraints | Review/resume supports service-key own-run paths. Rerun is still human-user-only.                                                                                                                            | Product decides whether machine clients may rerun and how audit attribution should work. With no production Flow users, prefer a clean typed model over compatibility. |
-| Form-schema dirty local edit conflict behavior | `flowFormSchema`, `FlowEditor`, `FlowFormSchemaEditor`                                                    | Blocked by product/UX decision.                                                                                                                                                                              | Decide whether local dirty edits merge, overwrite, warn, or discard when persisted metadata changes. Then deepen or delete the local buffering path.                   |
+| Service-key identity for review/rerun (D1)     | `flow_access_policy.py`, `FlowRunReviewCheckpointService`, `FlowRunRerunService`, rerun table constraints | Resolved: review, resume, and rerun support service-key own-run paths; rerun audit state persists exactly one typed requester identity. | Preserve own-run enforcement and typed attribution when changing service-key capabilities; this is not an open data-model decision. |
+| Form-schema dirty local edit conflict behavior (TEST-6) | `flowFormSchema`, `FlowEditor`, `FlowFormSchemaEditor`                                             | Resolved: when persisted metadata changes during meaningful local edits, the editor warns and requires the user to choose either **Keep local edits** or **Reload latest persisted fields**. `frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.test.ts` proves both branches. | Revisit only through an explicit product/UX decision with replacement behavior tests; this is not an open launch gate. |
 | Browser upload/audio side-effect ownership     | `FlowRunDialog`, `FlowRunFileInputState`, `flowRunRecordingSession`, `RecordingSession`                   | Current split is source-backed: `RecordingSession` is lifecycle/retry only, while persistence/upload remains in the dialog and recording ledger helpers. Moving side effects needs a design gate.            | Approve a single browser-side owner with behavior tests, then move behavior rather than copying it.                                                                    |
-| Evidence export raw/detail policy              | Evidence router and `FlowRunEvidenceService`                                                              | Raw export requires an explicit reason and separate access kind. See `backend/src/eneo/flows/api/flow_run_evidence_router.py:141` and `backend/src/eneo/flows/application/flow_run_evidence_service.py:131`. | Product/security decides whether raw export remains, narrows, or is removed before public launch.                                                                      |
+| Evidence export raw/detail policy              | Evidence router and `FlowRunEvidenceService`                                                              | Raw export requires an explicit reason and separate access kind. See `backend/src/eneo/flows/api/flow_run_evidence_router.py` and `backend/src/eneo/flows/application/flow_run_evidence_service.py::FlowRunEvidenceService.export_evidence_json`. | Product/security decides whether raw export remains, narrows, or is removed before public launch.                                                                      |
 
 Compatibility paths are not architecture goals. Keep one only when a current
 caller, current data, or recorded product decision requires it. Otherwise, create

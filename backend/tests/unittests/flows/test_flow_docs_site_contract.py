@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import re
@@ -141,6 +142,7 @@ FLOW_CONSUMER_DELETED_FLAT_HREFS = (
     "/guides/flows-faq",
 )
 FLOW_OVERVIEW = DOCS_SITE_CONTENT_ROOT / "docs" / "flows.mdx"
+FLOW_ARCHITECTURE_GUIDE = REPO_ROOT / "docs" / "flows" / "architecture.md"
 AI_BUILDER_DOC = DOCS_SITE_CONTENT_ROOT / "docs" / "ai-builder.mdx"
 API_KEY_MANAGEMENT = DOCS_SITE_CONTENT_ROOT / "docs" / "api-key-management.mdx"
 FLOW_DEVELOPER_DOCS_DIR = DOCS_SITE_CONTENT_ROOT / "docs" / "flows-for-developers"
@@ -271,6 +273,12 @@ BACKTICKED_TOKEN_PATTERN = re.compile(r"`([^`]+)`")
 BACKEND_SOURCE_FILE_REF_PATTERN = re.compile(r"`(backend/src/[^`]+\.py)`")
 FLOW_DEVELOPER_SOURCE_FILE_REF_PATTERN = re.compile(
     r"`((?:backend|docs|frontend)/[^`]+)`"
+)
+FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN = re.compile(
+    r"`(?P<reference>(?:backend|docs|frontend)/[^`]+)`"
+)
+NUMERIC_SOURCE_LINE_REFERENCE_PATTERN = re.compile(
+    r"`(?:backend|docs|frontend)/[^`\s]+:\d+(?:-\d+)?`"
 )
 
 
@@ -575,8 +583,91 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_flow_architecture_uses_durable_existing_repository_references() -> None:
+    architecture = _read(FLOW_ARCHITECTURE_GUIDE)
+
+    guard_table = architecture.split("## Architecture Guard Tests", maxsplit=1)[
+        1
+    ].split("## Where To Change X", maxsplit=1)[0]
+    path_only_guard_references = sorted(
+        reference
+        for reference in FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN.findall(
+            guard_table
+        )
+        if "::" not in reference and Path(reference).suffix in {".py", ".svelte", ".ts"}
+    )
+    assert not path_only_guard_references, (
+        "Architecture guard rows must cite the exact test symbol, not only its "
+        f"file: {path_only_guard_references}"
+    )
+
+    numeric_line_references = sorted(
+        set(NUMERIC_SOURCE_LINE_REFERENCE_PATTERN.findall(architecture))
+    )
+    assert not numeric_line_references, (
+        "Use path plus `::qualified_symbol` references, or path-only references "
+        f"for declarative evidence: {numeric_line_references}"
+    )
+
+    repository_references = {
+        match.group("reference").split("::", maxsplit=1)[0]
+        for match in FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN.finditer(
+            architecture
+        )
+    }
+    assert repository_references
+    missing_paths = sorted(
+        path for path in repository_references if not (REPO_ROOT / path).exists()
+    )
+    assert not missing_paths, f"Architecture references missing paths: {missing_paths}"
+
+    missing_symbols: list[str] = []
+    for reference in sorted(
+        match.group("reference")
+        for match in FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN.finditer(
+            architecture
+        )
+        if "::" in match.group("reference")
+    ):
+        path, qualified_symbol = reference.split("::", maxsplit=1)
+        source_path = REPO_ROOT / path
+        if not _source_symbol_exists(source_path, qualified_symbol):
+            missing_symbols.append(reference)
+    assert not missing_symbols, (
+        f"Architecture references missing source symbols: {missing_symbols}"
+    )
+
+
+def _python_symbol_exists(source_path: Path, qualified_symbol: str) -> bool:
+    scope: list[ast.stmt] = ast.parse(
+        source_path.read_text(encoding="utf-8"), filename=str(source_path)
+    ).body
+    for part in qualified_symbol.split("."):
+        matching_definition = next(
+            (
+                node
+                for node in scope
+                if isinstance(
+                    node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                )
+                and node.name == part
+            ),
+            None,
+        )
+        if matching_definition is None:
+            return False
+        scope = matching_definition.body
+    return True
+
+
+def _source_symbol_exists(source_path: Path, qualified_symbol: str) -> bool:
+    if source_path.suffix == ".py":
+        return _python_symbol_exists(source_path, qualified_symbol)
+    return qualified_symbol in source_path.read_text(encoding="utf-8")
+
+
 def test_flow_webhook_docs_disclose_at_least_once_sender_contract() -> None:
-    architecture = _read(REPO_ROOT / "docs" / "flows" / "architecture.md")
+    architecture = _read(FLOW_ARCHITECTURE_GUIDE)
     reliability = _read(
         REPO_ROOT / "docs" / "engineering" / "runtime-reliability-standard.md"
     )
