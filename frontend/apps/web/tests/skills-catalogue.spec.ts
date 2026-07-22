@@ -16,11 +16,15 @@ test("organisation Skills catalogue and create form are visible in the app shell
     })
   ).toBeVisible();
 
-  await page.getByRole("link", { name: /^(Create Skill|Skapa Skill)$/ }).click();
+  await page
+    .getByRole("link", {
+      name: /^(Create Skill|Create the first Skill|Skapa Skill|Skapa den första Skillen)$/
+    })
+    .click();
 
   await expect(page).toHaveURL(/\/spaces\/organization\/skills\/new$/);
   await expect(
-    page.getByRole("heading", { name: /^(Create Skill|Skapa Skill)$/, level: 2 })
+    page.getByRole("heading", { name: /^(Create Skill|Skapa Skill)$/, level: 1 })
   ).toBeVisible();
   await expect(page.getByLabel(/^(Name|Namn)$/)).toBeVisible();
   await expect(page.getByLabel(/^(Description|Beskrivning)$/)).toBeVisible();
