@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         GovernancePolicy,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.skills.domain.skill import ResolvedSkillBinding
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,9 @@ class EffectiveConfig:
     # only — the user can still enable them per conversation).
     default_disabled_mcp_server_ids: list[UUID] = field(
         default_factory=lambda: []  # noqa: C408
+    )
+    governance_skill_bindings: tuple["ResolvedSkillBinding", ...] = field(
+        default_factory=tuple
     )
 
 
@@ -64,6 +68,7 @@ def resolve(
     tenant_completion_models: list["CompletionModel"],
     tenant_mcp_servers: list["MCPServer"],
     library_prompt_text: str | None,
+    governance_skill_bindings: tuple["ResolvedSkillBinding", ...] = (),
 ) -> EffectiveConfig:
     """Compute the effective config for a personal assistant.
 
@@ -152,6 +157,7 @@ def resolve(
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
+        governance_skill_bindings=governance_skill_bindings,
     )
 
 

@@ -249,6 +249,24 @@ class SpaceAssembler:
 
         return permissions
 
+    def _get_skill_permissions(self, space: Space) -> list[ResourcePermission]:
+        if getattr(self.user, "active_api_key", None) is not None:
+            return []
+
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        permissions: list[ResourcePermission] = []
+
+        if actor.can_read_skills():
+            permissions.append(ResourcePermission.READ)
+        if actor.can_create_skills():
+            permissions.append(ResourcePermission.CREATE)
+        if actor.can_edit_skills():
+            permissions.append(ResourcePermission.EDIT)
+        if actor.can_delete_skills():
+            permissions.append(ResourcePermission.DELETE)
+
+        return permissions
+
     def _get_collection_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         permissions: list[ResourcePermission] = []
@@ -600,6 +618,7 @@ class SpaceAssembler:
             knowledge=knowledge,
             members=members,
             group_members=group_members,
+            skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._cap_space_permissions(self._get_space_permissions(space)),

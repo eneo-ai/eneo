@@ -29,6 +29,7 @@ from eneo.sessions.session import (
     SessionUpdate,
 )
 from eneo.sessions.sessions_repo import SessionRepository
+from eneo.skills.domain.skill import SkillExecutionReference
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -317,6 +318,7 @@ class SessionService:
         session_id: UUID,
         assistant_id: UUID | None,
         completion_model: CompletionModel | None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
     ) -> QuestionAdd:
         completion_model_id = completion_model.id if completion_model else None
         completion_model_name = completion_model.name if completion_model else None
@@ -331,6 +333,7 @@ class SessionService:
             logging_details=None,
             assistant_id=assistant_id,
             tool_calls=None,
+            skill_provenance=list(skill_provenance) if skill_provenance else None,
         )
 
     @staticmethod
@@ -361,6 +364,7 @@ class SessionService:
         question_assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
     ) -> tuple[SessionInDB, UUID]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
@@ -375,6 +379,7 @@ class SessionService:
                 session_id=session_record.id,
                 assistant_id=question_assistant_id,
                 completion_model=completion_model,
+                skill_provenance=skill_provenance,
             )
             question_id = await self._insert_question_placeholder(
                 QuestionRepository(db_session), question_add, files
@@ -389,6 +394,7 @@ class SessionService:
         files: Sequence[File] | None = None,
         assistant_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
     ) -> UUID:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
@@ -410,6 +416,7 @@ class SessionService:
             session_id=session.id,
             assistant_id=assistant_id,
             completion_model=completion_model,
+            skill_provenance=skill_provenance,
         )
 
         async with sessionmanager.session() as db_session, db_session.begin():

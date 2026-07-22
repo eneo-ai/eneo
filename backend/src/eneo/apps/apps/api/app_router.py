@@ -2,7 +2,7 @@ import logging
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
@@ -28,6 +28,10 @@ from eneo.prompts.api.prompt_models import PromptSparse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -66,8 +70,18 @@ async def get_app(
 async def update_app(
     id: UUID,
     update_service_req: AppUpdateRequest,
+    request: Request,
     container: Container = USER_CONTAINER,
 ):
+    if (
+        update_service_req.skill_bindings is not None
+        and getattr(request.state, "api_key", None) is not None
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Skill binding changes require a session token.",
+        )
+
     service = container.app_service()
     assembler = container.app_assembler()
     current_user = container.user()
@@ -75,6 +89,11 @@ async def update_app(
 
     # Get old state
     old_app, _ = await service.get_app(id)
+    before_skill_entries: list[dict[str, object]] | None = None
+    if update_service_req.skill_bindings is not None:
+        before_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_app_bindings(app_id=id)
+        )
 
     completion_model_id = (
         update_service_req.completion_model.id
@@ -103,6 +122,12 @@ async def update_app(
     if "icon_id" in request_dict:
         icon_id = update_service_req.icon_id
 
+    skill_references = None
+    if update_service_req.skill_bindings is not None:
+        skill_references = skill_binding_references_from_input(
+            update_service_req.skill_bindings
+        )
+
     app, permissions = await service.update_app(
         app_id=id,
         name=update_service_req.name,
@@ -116,6 +141,7 @@ async def update_app(
         transcription_model_id=transcription_model_id,
         data_retention_days=update_service_req.data_retention_days,
         icon_id=icon_id,
+        skill_references=skill_references,
     )
 
     # Get space for context (after app is updated)
@@ -311,6 +337,17 @@ async def update_app(
             else None,
         }
         change_summary.append("transcription model")
+
+    if before_skill_entries is not None:
+        after_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_app_bindings(app_id=id)
+        )
+        if before_skill_entries != after_skill_entries:
+            changes["skills"] = {
+                "old": before_skill_entries,
+                "new": after_skill_entries,
+            }
+            change_summary.append("Skills")
 
     # Build extra context
     extra = {

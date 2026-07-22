@@ -2,6 +2,7 @@ from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter
 from sqlalchemy.orm import defer, selectinload
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.base import ExecutableOption
@@ -12,6 +13,20 @@ from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles
 from eneo.database.tables.files_table import Files
 from eneo.files.file_models import FileInfo
+from eneo.skills.domain.skill import SkillExecutionReference
+
+_SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
+
+
+def _serialize_skill_provenance(
+    provenance: tuple[SkillExecutionReference, ...] | None,
+) -> list[dict[str, object]] | None:
+    if provenance is None:
+        return None
+    return cast(
+        list[dict[str, object]],
+        _SKILL_PROVENANCE_ADAPTER.dump_python(provenance, mode="json"),
+    )
 
 
 class AppRunRepository:
@@ -86,6 +101,7 @@ class AppRunRepository:
                 output_text=app_run.output,
                 num_tokens_input=app_run.num_tokens_input,
                 num_tokens_output=app_run.num_tokens_output,
+                skill_provenance=_serialize_skill_provenance(app_run.skill_provenance),
                 tenant_id=app_run.tenant_id,
                 user_id=app_run.user_id,
                 app_id=app_run.app_id,
@@ -111,6 +127,7 @@ class AppRunRepository:
                 output_text=app_run.output,
                 num_tokens_input=app_run.num_tokens_input,
                 num_tokens_output=app_run.num_tokens_output,
+                skill_provenance=_serialize_skill_provenance(app_run.skill_provenance),
             )
             .returning(AppRuns)
         )

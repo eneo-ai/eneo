@@ -24,6 +24,8 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -39,6 +41,10 @@
   } = untrack(() =>
     initAppEditor({
       app: data.app,
+      skillBindings: data.skillBindings.map((binding) => ({
+        skill_id: binding.skill_id,
+        skill_revision_id: binding.skill_revision_id
+      })),
       eneo: data.eneo,
       onUpdateDone() {
         refreshCurrentSpace("applications");
@@ -47,6 +53,10 @@
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  async function createSkill(value: SkillFormValue) {
+    return data.eneo.skills.create({ spaceId: $currentSpace.id, ...value });
+  }
 
   let hasBehaviorChanges = $derived.by(() => {
     if (!$currentChanges.diff.completion_model_kwargs) return false;
@@ -163,7 +173,7 @@
               $update.completion_model_kwargs,
               $update.completion_model
             );
-            await saveChanges();
+            if (!(await saveChanges())) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;
@@ -274,6 +284,27 @@
             class="border-stronger bg-primary text-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
           ></textarea>
         </Settings.Row>
+
+        {#if $currentSpace.hasPermission("read", "skill")}
+          <Settings.Row
+            title={m.skills()}
+            description={m.skills_editor_description()}
+            hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+            revertFn={() => discardChanges("skill_bindings")}
+            fullWidth
+          >
+            <SkillBindingsEditor
+              bind:bindings={$update.skill_bindings}
+              initialSkillPage={data.skills}
+              bindingSummaries={data.skillBindings}
+              canEditBindings={data.app.permissions?.includes("edit") ?? false}
+              canCreateSkills={$currentSpace.hasPermission("create", "skill")}
+              onListSkills={(params) =>
+                data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
+              onCreateSkill={createSkill}
+            />
+          </Settings.Row>
+        {/if}
 
         <Settings.Row
           title={m.attachments()}

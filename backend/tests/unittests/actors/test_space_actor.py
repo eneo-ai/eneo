@@ -1221,3 +1221,131 @@ def test_personal_chat_does_not_gate_shared_space_default_assistant(
     shared_space.members = {member.id: member}
     actor = SpaceActor(member, shared_space)
     assert actor.can_read_default_assistant() is True
+
+
+# --- Skill permissions ---------------------------------------------------------
+
+
+_ALL_SKILL_ACTIONS = (True, True, True, True)
+_READ_ONLY_SKILL_ACTIONS = (True, False, False, False)
+_NO_SKILL_ACTIONS = (False, False, False, False)
+
+
+def _skill_actions(actor: SpaceActor) -> tuple[bool, bool, bool, bool]:
+    return (
+        actor.can_read_skills(),
+        actor.can_create_skills(),
+        actor.can_edit_skills(),
+        actor.can_delete_skills(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("space_kind", "role", "permissions", "expected"),
+    [
+        (
+            "shared",
+            MockSpaceRole.VIEWER,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "shared",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "personal",
+            "owner",
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.VIEWER,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _NO_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.EDITOR,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _NO_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS},
+            _READ_ONLY_SKILL_ACTIONS,
+        ),
+        (
+            "organization",
+            MockSpaceRole.ADMIN,
+            {Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+            _ALL_SKILL_ACTIONS,
+        ),
+    ],
+)
+def test_skill_actions_follow_space_role(
+    space_kind: str,
+    role: str,
+    permissions: set[Permission],
+    expected: tuple[bool, bool, bool, bool],
+):
+    user = MockUser(id=70, role=role, permissions=permissions)
+
+    if space_kind == "personal":
+        space = MockSpace(user_id=user.id, personal=True, id="personal-skills")
+    else:
+        space = MockSpace(
+            user_id=None,
+            personal=False,
+            tenant_space_id="org-1" if space_kind == "shared" else None,
+            id=f"{space_kind}-skills",
+            members={user.id: user},
+        )
+
+    assert _skill_actions(SpaceActor(user, space)) == expected
+
+
+@pytest.mark.parametrize(
+    ("space_kind", "role", "permissions"),
+    [
+        ("shared", MockSpaceRole.EDITOR, {Permission.ASSISTANTS}),
+        ("organization", MockSpaceRole.ADMIN, {Permission.ADMIN}),
+        ("personal", "owner", {Permission.ASSISTANTS}),
+        ("personal", "owner", {Permission.SKILLS_MANAGEMENT}),
+    ],
+)
+def test_skill_actions_require_tenant_skill_permission(
+    space_kind: str,
+    role: str,
+    permissions: set[Permission],
+):
+    user = MockUser(id=71, role=role, permissions=permissions)
+
+    if space_kind == "personal":
+        space = MockSpace(user_id=user.id, personal=True, id="personal-no-skills")
+    else:
+        space = MockSpace(
+            user_id=None,
+            personal=False,
+            tenant_space_id="org-1" if space_kind == "shared" else None,
+            id=f"{space_kind}-no-skills",
+            members={user.id: user},
+        )
+
+    assert _skill_actions(SpaceActor(user, space)) == _NO_SKILL_ACTIONS

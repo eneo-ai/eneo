@@ -53,6 +53,10 @@ from eneo.sessions.session_protocol import (
     to_session_public,
     to_sessions_paginated_response,
 )
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 from eneo.spaces.api.space_models import TransferApplicationRequest
 
 if TYPE_CHECKING:
@@ -568,14 +572,29 @@ def _build_assistant_update_changes(
 async def update_assistant(
     id: UUID,
     assistant: AssistantUpdatePublic,
+    request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated"""
+    if (
+        assistant.skill_bindings is not None
+        and getattr(request.state, "api_key", None) is not None
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Skill binding changes require a session token.",
+        )
+
     service = container.assistant_service()
     current_user = container.user()
 
     # Get old state for change tracking
     old_assistant, _ = await service.get_assistant(assistant_id=id)
+    before_skill_entries: list[dict[str, object]] | None = None
+    if assistant.skill_bindings is not None:
+        before_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_assistant_bindings(assistant_id=id)
+        )
 
     # Snapshot old MCP tool overrides before update (not on domain entity)
     old_mcp_tool_overrides = None
@@ -625,6 +644,10 @@ async def update_assistant(
     if assistant.completion_model_kwargs is not None:
         completion_model_kwargs = assistant.completion_model_kwargs
 
+    skill_references = None
+    if assistant.skill_bindings is not None:
+        skill_references = skill_binding_references_from_input(assistant.skill_bindings)
+
     # get original request dict to check if description was actually provided
     # (@partial_model overrides NOT_PROVIDED with None)
     request_dict = assistant.model_dump(exclude_unset=True)
@@ -665,6 +688,7 @@ async def update_assistant(
         data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
+        skill_references=skill_references,
     )
 
     changes, change_summary = _build_assistant_update_changes(
@@ -675,6 +699,16 @@ async def update_assistant(
         description=description,
         old_mcp_tool_overrides=old_mcp_tool_overrides,
     )
+    if before_skill_entries is not None:
+        after_skill_entries = skill_binding_audit_entries(
+            await container.skill_repo().list_assistant_bindings(assistant_id=id)
+        )
+        if before_skill_entries != after_skill_entries:
+            changes["skills"] = {
+                "old": before_skill_entries,
+                "new": after_skill_entries,
+            }
+            change_summary.append("Skills")
 
     # Get space for context
     space = None

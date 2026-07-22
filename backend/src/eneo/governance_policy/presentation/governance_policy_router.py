@@ -6,7 +6,7 @@
 from typing import Annotated, Iterable
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -23,6 +23,11 @@ from eneo.governance_policy.presentation.governance_policy_models import (
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.presentation.skill_assembler import (
+    skill_binding_audit_entries,
+    skill_binding_references_from_input,
+)
 
 router = APIRouter()
 
@@ -34,7 +39,11 @@ def _ids(ids: Iterable[UUID]) -> list[str]:
 
 
 def _policy_changes(
-    before: GovernancePolicy, after: GovernancePolicy
+    before: GovernancePolicy,
+    after: GovernancePolicy,
+    *,
+    before_skills: list[ResolvedSkillBinding],
+    after_skills: list[ResolvedSkillBinding],
 ) -> dict[str, object]:
     changes: dict[str, object] = {}
 
@@ -105,6 +114,14 @@ def _policy_changes(
             else None,
         }
 
+    before_skill_entries = skill_binding_audit_entries(before_skills)
+    after_skill_entries = skill_binding_audit_entries(after_skills)
+    if before_skill_entries != after_skill_entries:
+        changes["skills"] = {
+            "old": before_skill_entries,
+            "new": after_skill_entries,
+        }
+
     return changes
 
 
@@ -117,7 +134,8 @@ async def get_governance_policy(container: _ContainerWithUser):
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
     policy = await service.get_policy()
-    return assembler.to_public(policy)
+    skill_bindings = await service.get_skill_bindings(policy)
+    return assembler.to_public(policy, skill_bindings)
 
 
 @router.put(
@@ -128,11 +146,22 @@ async def get_governance_policy(container: _ContainerWithUser):
 )
 async def update_governance_policy(
     payload: GovernancePolicyUpdate,
+    request: Request,
     container: _ContainerWithUser,
 ):
+    if (
+        payload.skills is not None
+        and getattr(request.state, "api_key", None) is not None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Skill policy changes require a session token.",
+        )
+
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
     before = await service.get_policy_for_update()
+    before_skills = await service.get_skill_bindings(before)
 
     models_restriction = None
     if payload.models_restriction is not None:
@@ -169,13 +198,31 @@ async def update_governance_policy(
             payload.prompt_enforcement.prompt_library_id,
         )
 
+    skill_references = None
+    if payload.skills is not None:
+        skill_references = skill_binding_references_from_input(payload.skills.bindings)
+
     policy = await service.update_policy(
         models_restriction=models_restriction,
         mcp_restriction=mcp_restriction,
         prompt_enforcement=prompt_enforcement,
+        skill_references=skill_references,
     )
+    if (
+        models_restriction is not None
+        or prompt_enforcement is not None
+        or skill_references is not None
+    ):
+        assistant_service = container.assistant_service()
+        await assistant_service.assert_personal_default_governance_context_fit()
     assert policy.id is not None
-    changes = _policy_changes(before, policy)
+    after_skills = await service.get_skill_bindings(policy)
+    changes = _policy_changes(
+        before,
+        policy,
+        before_skills=before_skills,
+        after_skills=after_skills,
+    )
     if changes:
         user = container.user()
         await container.audit_service().log_async(
@@ -192,4 +239,4 @@ async def update_governance_policy(
                 extra={"scope": policy.scope.value},
             ),
         )
-    return assembler.to_public(policy)
+    return assembler.to_public(policy, after_skills)

@@ -131,7 +131,7 @@ class App:
 
         return 0
 
-    def _get_prompt_text(self) -> str:
+    def get_prompt_text(self) -> str:
         if self.prompt is None:
             return ""
 
@@ -278,6 +278,7 @@ class App:
         text: str | None,
         completion_service: CompletionService,
         transcriber: Transcriber,
+        prompt_override: str | None = None,
     ) -> CompletionModelResponse:
         if text is None:
             text = ""
@@ -319,7 +320,11 @@ class App:
             transcription_inputs=transcriptions,
             files=image_files + text_files,
             model=cast(AICompletionModel, self.completion_model),
-            prompt=self._get_prompt_text(),
+            prompt=(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text()
+            ),
             prompt_files=self.attachments,
             model_kwargs=self.completion_model_kwargs,
         )

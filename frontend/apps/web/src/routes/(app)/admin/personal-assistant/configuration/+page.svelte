@@ -12,6 +12,7 @@
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
   import PolicySaveBar from "./PolicySaveBar.svelte";
   import PromptEnforcementSection from "./PromptEnforcementSection.svelte";
+  import SkillsPolicySection from "./SkillsPolicySection.svelte";
   import { PolicyDraft } from "./policyDraft.svelte";
 
   let { data } = $props();
@@ -66,6 +67,16 @@
         promptOptions={draft.promptOptions}
         promptSummary={draft.promptSummary}
         badgeVariant={draft.badgeVariant}
+      />
+      <SkillsPolicySection
+        bind:skillBindings={draft.skillBindings}
+        initialSkillPage={draft.skillCatalog}
+        bindingSummaries={draft.skillBindingSummaries}
+        summary={draft.skillsSummary}
+        canUseSkills={draft.canUseSkills}
+        canCreateSkills={draft.canCreateSkills}
+        onListSkills={draft.listSkills}
+        onCreateSkill={draft.createSkill}
       />
     </div>
   </Settings.Page>

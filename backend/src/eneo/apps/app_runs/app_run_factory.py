@@ -2,12 +2,17 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
+from pydantic import TypeAdapter
+
 from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.apps.app import App
 from eneo.database.tables.app_table import AppRuns
 from eneo.files.file_models import FileInfo
 from eneo.jobs.job_models import JobInDb
+from eneo.skills.domain.skill import SkillExecutionReference
 from eneo.users.user import UserSparse
+
+_SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
 
 
 class AppRunFactory:
@@ -18,6 +23,7 @@ class AppRunFactory:
         text: str | None,
         user_id: UUID,
         tenant_id: UUID,
+        skill_provenance: tuple[SkillExecutionReference, ...],
     ) -> AppRun:
         if app.id is None:
             raise ValueError("App must have an id before creating an app run")
@@ -41,6 +47,7 @@ class AppRunFactory:
             user=None,
             num_tokens_input=None,
             num_tokens_output=None,
+            skill_provenance=skill_provenance,
             job=None,
             completion_model_id=app.completion_model.id,
         )
@@ -68,6 +75,13 @@ class AppRunFactory:
             user=user,
             num_tokens_input=app_run_in_db.num_tokens_input,
             num_tokens_output=app_run_in_db.num_tokens_output,
+            skill_provenance=(
+                _SKILL_PROVENANCE_ADAPTER.validate_python(
+                    app_run_in_db.skill_provenance
+                )
+                if app_run_in_db.skill_provenance is not None
+                else None
+            ),
             job=job,
             completion_model_id=app_run_in_db.completion_model_id,
         )

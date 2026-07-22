@@ -321,6 +321,9 @@ from eneo.sessions.sessions_repo import SessionRepository
 from eneo.settings.encryption_service import EncryptionService
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings_repo import SettingsRepository
+from eneo.skills.application.skill_service import SkillService
+from eneo.skills.infrastructure.skill_repo_impl import SkillRepoImpl
+from eneo.skills.presentation.skill_assembler import SkillAssembler
 from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.domain.resource_mover_service import ResourceMoverService
 from eneo.spaces.space_factory import SpaceFactory
@@ -634,6 +637,8 @@ class Container(containers.DeclarativeContainer):
     )
     prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
     prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
+    skill_repo = providers.Factory(SkillRepoImpl, session=session)
+    skill_assembler = providers.Factory(SkillAssembler)
     governance_policy_repo = providers.Factory(
         GovernancePolicyRepoImpl, session=session
     )
@@ -974,6 +979,13 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
     )
+    skill_service = providers.Factory(
+        SkillService,
+        user=user,
+        repo=skill_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+    )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
         space_service=space_service,
@@ -1155,6 +1167,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         group_service=group_service,
+        skill_repo=skill_repo,
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into
@@ -1173,6 +1186,8 @@ class Container(containers.DeclarativeContainer):
         mcp_server_settings_service=mcp_server_settings_service,
         prompt_library_service=prompt_library_service,
         model_provider_repository=model_provider_repository,
+        skill_service=skill_service,
+        space_service=space_service,
     )
     effective_config_service = providers.Factory(
         EffectiveConfigService,
@@ -1181,6 +1196,7 @@ class Container(containers.DeclarativeContainer):
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
+        skill_repo=skill_repo,
     )
     assistant_service = providers.Factory(
         AssistantService,
@@ -1205,6 +1221,7 @@ class Container(containers.DeclarativeContainer):
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
+        skill_service=skill_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1556,6 +1573,7 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        skill_service=skill_service,
     )
     app_run_service = providers.Factory(
         AppRunService,

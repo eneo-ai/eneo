@@ -22,6 +22,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.skills.domain.skill import SkillBindingReference
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -95,6 +96,7 @@ def setup_fixture():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
+        skill_service=AsyncMock(),
     )
 
     # Attachment fit validation needs a real model + token counts; it is
@@ -271,6 +273,74 @@ async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
     await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
 
     setup.service._validate_attachments_fit.assert_not_awaited()
+    setup.service.skill_service.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    setup.service.space_repo.update.return_value = space
+    references = [
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+    ]
+    events: list[str] = []
+
+    assistant.update.side_effect = lambda **_: events.append("parent_update")
+
+    async def replace_bindings(**_):
+        events.append("binding_replace")
+
+    async def validate_fit(*_, **__):
+        events.append("fit")
+
+    async def persist_parent(*_, **__):
+        events.append("persist")
+        return space
+
+    setup.service.skill_service.replace_assistant_bindings.side_effect = (
+        replace_bindings
+    )
+    setup.service._validate_attachments_fit.side_effect = validate_fit
+    setup.service.space_repo.update.side_effect = persist_parent
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        skill_references=references,
+    )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        references=references,
+    )
+    assert events == ["parent_update", "binding_replace", "fit", "persist"]
+
+
+async def test_update_assistant_binding_fit_failure_skips_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    setup.service._validate_attachments_fit.side_effect = BadRequestException(
+        "Composed context is too large"
+    )
+
+    with pytest.raises(BadRequestException, match="too large"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            skill_references=[],
+        )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        references=[],
+    )
+    setup.service.space_repo.update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -333,6 +403,7 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
+        {"skill_references": []},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(

@@ -378,6 +378,11 @@ class Settings(BaseSettings):
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
 
+    # Abuse guardrail for ordered Skill references on one Assistant, App, or
+    # governance policy. Actual usable content is constrained by the selected
+    # model's context window, not by a fixed instruction length.
+    skill_max_bindings: int = Field(default=100, ge=1)
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 

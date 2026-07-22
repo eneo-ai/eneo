@@ -1,19 +1,35 @@
 import { redirect } from "@sveltejs/kit";
 import { resolve } from "$app/paths";
+import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 
 export const load = async (event) => {
-  const { eneo } = await event.parent();
-  const [assistant, mcpServers, promptGuideAvailability] = await Promise.all([
-    eneo.assistants.get({ id: event.params.assistantId }),
-    eneo.assistants.listMCPServers({ id: event.params.assistantId }),
-    // Prefetch so the toolbar's Prompt Guide button can render with the
-    // correct enabled/disabled state on first paint — same cadence as the
-    // History button next to it. Fail-closed: a thrown availability check
-    // hides the button rather than risking a misleading enabled state.
-    eneo.helpAssistants.runs
-      .availability({ kind: "prompt_guide", target_id: event.params.assistantId })
-      .catch(() => null)
-  ]);
+  event.depends("space:skills");
+  const { eneo, currentSpace } = await event.parent();
+  const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
+  const supportsDirectSkills =
+    !currentSpace.personal || currentSpace.default_assistant?.id !== event.params.assistantId;
+  const [assistant, mcpServers, promptGuideAvailability, skills, skillBindings] = await Promise.all(
+    [
+      eneo.assistants.get({ id: event.params.assistantId }),
+      eneo.assistants.listMCPServers({ id: event.params.assistantId }),
+      // Prefetch so the toolbar's Prompt Guide button can render with the
+      // correct enabled/disabled state on first paint — same cadence as the
+      // History button next to it. Fail-closed: a thrown availability check
+      // hides the button rather than risking a misleading enabled state.
+      eneo.helpAssistants.runs
+        .availability({ kind: "prompt_guide", target_id: event.params.assistantId })
+        .catch(() => null),
+      canReadSkills && supportsDirectSkills
+        ? eneo.skills.list({ spaceId: currentSpace.id, limit: SKILL_CATALOG_PAGE_SIZE })
+        : Promise.resolve(emptySkillCatalogPage()),
+      canReadSkills && supportsDirectSkills
+        ? eneo.skills.listAssistantBindings({
+            spaceId: currentSpace.id,
+            assistantId: event.params.assistantId
+          })
+        : Promise.resolve([])
+    ]
+  );
 
   // Help assistants are edited in the admin UI, not in a space. If someone
   // lands here via a stale link, send them to the help-assistants admin page.
@@ -24,6 +40,9 @@ export const load = async (event) => {
   return {
     assistant,
     mcpServers: mcpServers.items || [],
-    promptGuideAvailability
+    promptGuideAvailability,
+    skills,
+    skillBindings,
+    supportsDirectSkills
   };
 };

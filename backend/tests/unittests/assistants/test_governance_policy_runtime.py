@@ -8,6 +8,11 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.main.exceptions import BadRequestException
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillComposition,
+    SkillExecutionReference,
+)
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_MODEL_GPT4, TEST_USER
 
 
@@ -21,6 +26,16 @@ def _not_helper_history_repo():
     repo = AsyncMock()
     repo.exists_for_assistant.return_value = False
     return repo
+
+
+def _empty_skill_service():
+    service = AsyncMock()
+    service.compose_for_assistant.side_effect = (
+        lambda *, assistant_id, base_instructions: SkillComposition(
+            prompt=base_instructions, provenance=()
+        )
+    )
+    return service
 
 
 def _service_with_effective_config(effective_config_service: AsyncMock):
@@ -44,6 +59,7 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
         effective_config_service=effective_config_service,
     )
 
@@ -85,6 +101,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        governance_skill_bindings=(),
     )
     session_service = AsyncMock(
         create_session=AsyncMock(return_value=session),
@@ -116,6 +133,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -133,6 +151,13 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
             "completion_model"
         ]
         is TEST_MODEL_GPT4
+    )
+    assert assistant.ask.await_args.kwargs["prompt_override"] is None
+    assert (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "skill_provenance"
+        ]
+        is None
     )
     effective_config_service.resolve_for.assert_awaited_once_with(
         assistant, space_is_personal=True
@@ -167,6 +192,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        governance_skill_bindings=(),
     )
     session_service = AsyncMock(
         create_session=AsyncMock(),
@@ -195,6 +221,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
         effective_config_service=effective_config_service,
     )
 
@@ -249,6 +276,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         available_mcp_servers=[policy_server],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        governance_skill_bindings=(),
     )
 
     service = AssistantService(
@@ -279,6 +307,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -326,6 +355,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         available_mcp_servers=[server_a, server_b],
         prompt_enforced=False,
         enforced_prompt_text=None,
+        governance_skill_bindings=(),
     )
 
     service = AssistantService(
@@ -356,6 +386,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -620,3 +651,222 @@ async def test_get_effective_completion_model_allows_personal_default_for_baseli
 
     model = await service.get_effective_completion_model(assistant.id)
     assert model is TEST_MODEL_CHATGPT
+
+
+def _skill_reference(*, position: int = 0) -> SkillExecutionReference:
+    return SkillExecutionReference(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        revision_number=3,
+        content_digest="a" * 64,
+        position=position,
+    )
+
+
+def _runtime_service(
+    *,
+    personal_default: bool,
+    skill_service: AsyncMock,
+    effective_config: SimpleNamespace | None = None,
+):
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    assistant.name = "Assistant"
+    assistant.description = None
+    assistant.is_default = personal_default
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.tool_assistants = []
+    assistant.mcp_servers = []
+    assistant.attachments = []
+    assistant.get_prompt_text.return_value = "Stored base"
+    assistant.ask = AsyncMock(
+        return_value=(
+            MagicMock(),
+            DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[]),
+        )
+    )
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = personal_default
+    space.default_assistant = assistant if personal_default else None
+
+    actor = MagicMock()
+    actor.can_read_assistant.return_value = True
+    actor.can_read_default_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = effective_config
+    session = SessionInDB(
+        id=uuid4(),
+        name="hello",
+        user_id=TEST_USER.id,
+        questions=[],
+    )
+    session_service = AsyncMock(
+        create_session=AsyncMock(return_value=session),
+        create_question_placeholder=AsyncMock(return_value=uuid4()),
+        create_session_with_question_placeholder=AsyncMock(
+            return_value=(session, uuid4())
+        ),
+        get_session_by_uuid=AsyncMock(return_value=session),
+    )
+    service = _service_with_effective_config(effective_config_service)
+    service.skill_service = skill_service
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.actor_manager.get_space_actor_from_space.return_value = actor
+    service.file_service.get_files_by_ids.return_value = []
+    service.session_service = session_service
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+    return service, assistant, session_service
+
+
+async def test_ordinary_assistant_uses_composed_prompt_and_persists_provenance():
+    reference = _skill_reference()
+    skill_service = AsyncMock()
+    skill_service.compose_for_assistant.return_value = SkillComposition(
+        prompt="Stored base\n\nSkill instructions",
+        provenance=(reference,),
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert (
+        assistant.ask.await_args.kwargs["prompt_override"]
+        == "Stored base\n\nSkill instructions"
+    )
+    assert session_service.create_session_with_question_placeholder.await_args.kwargs[
+        "skill_provenance"
+    ] == (reference,)
+
+
+async def test_existing_session_persists_composed_skill_provenance():
+    reference = _skill_reference()
+    skill_service = AsyncMock()
+    skill_service.compose_for_assistant.return_value = SkillComposition(
+        prompt="Stored base\n\nSkill instructions",
+        provenance=(reference,),
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+    existing_session = session_service.get_session_by_uuid.return_value
+
+    await service.ask(
+        question="hello",
+        assistant_id=assistant.id,
+        session_id=existing_session.id,
+    )
+
+    session_service.create_session_with_question_placeholder.assert_not_awaited()
+    assert session_service.create_question_placeholder.await_args.kwargs[
+        "skill_provenance"
+    ] == (reference,)
+
+
+async def test_personal_default_rejects_invalid_direct_bindings_before_history():
+    reference = _skill_reference()
+    skill_service = AsyncMock()
+    skill_service.compose_for_assistant.return_value = SkillComposition(
+        prompt="invalid",
+        provenance=(reference,),
+    )
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_bindings=(),
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=effective_config,
+    )
+
+    with pytest.raises(BadRequestException, match="invalid direct Skill bindings"):
+        await service.ask(question="hello", assistant_id=assistant.id)
+
+    session_service.create_session.assert_not_awaited()
+    session_service.create_session_with_question_placeholder.assert_not_awaited()
+    session_service.create_question_placeholder.assert_not_awaited()
+    assistant.ask.assert_not_awaited()
+
+
+async def test_governance_skill_composes_after_enforced_prompt():
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        slug="payroll",
+        revision_number=4,
+        current_revision_number=4,
+        display_name="Payroll",
+        instructions="Use the approved payroll rules.",
+        content_digest="b" * 64,
+        position=0,
+    )
+    skill_service = _empty_skill_service()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=True,
+        enforced_prompt_text="Enforced tenant base",
+        governance_skill_bindings=(binding,),
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=effective_config,
+    )
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    prompt_override = assistant.ask.await_args.kwargs["prompt_override"]
+    assert prompt_override.startswith("Enforced tenant base\n\n")
+    assert "Use the approved payroll rules." in prompt_override
+    assert "Stored base" not in prompt_override
+    provenance = (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "skill_provenance"
+        ]
+    )
+    assert provenance[0].skill_revision_id == binding.skill_revision_id
+
+
+async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
+    skill_service = _empty_skill_service()
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=True,
+        enforced_prompt_text="Enforced tenant base",
+        governance_skill_bindings=(),
+    )
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=effective_config,
+    )
+    service._assert_message_attachments_fit = AsyncMock()
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert (
+        service._assert_message_attachments_fit.await_args.kwargs[
+            "validate_persistent_baseline"
+        ]
+        is True
+    )

@@ -248,11 +248,16 @@ class QuestionRepository:
         web_search_results: list["WebSearchResult"] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
     ):
-        stmt = (
-            sa.insert(Questions)
-            .values(**question.model_dump(exclude={"info_blobs", "logging_details"}))
-            .returning(Questions)
+        question_values = question.model_dump(
+            exclude={"info_blobs", "logging_details", "skill_provenance"}
         )
+        if question.skill_provenance:
+            question_values["skill_provenance"] = question.model_dump(
+                mode="json", include={"skill_provenance"}
+            )["skill_provenance"]
+        else:
+            question_values["skill_provenance"] = None
+        stmt = sa.insert(Questions).values(**question_values).returning(Questions)
 
         stmt = self._add_options(stmt)
 
