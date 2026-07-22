@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -60,6 +61,58 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
     assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
     assert result.compiled_proposal.content.edit is not None
     assert result.compiled_proposal.content.edit.base_flow_revision == 7
+
+
+@pytest.mark.asyncio
+async def test_english_edit_compiles_input_reference_hint_in_english() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract source facts",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Compare all source facts",
+            input_source="all_previous_steps",
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Update the comparison step.",
+                metadata={"ui_language": "en"},
+            )
+        ],
+        arguments={
+            "plan_rationale": "Focus the comparison on the source summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
+                },
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    instructions = result.compiled_proposal.content.spec.steps[
+        1
+    ].assistant_spec.instructions
+    assert "Pay particular attention to these structured source fields:" in instructions
+    assert (
+        "Beakta särskilt följande strukturerade fält i underlaget:" not in instructions
+    )
 
 
 @pytest.mark.asyncio
@@ -1245,13 +1298,14 @@ async def _process(
     *,
     flow: SimpleNamespace,
     arguments: dict[str, object],
+    conversation: list[ConversationMessage] | None = None,
     assistant_snapshots=None,
     resource_catalog=None,
     planning_state: PlanningState | None = None,
 ):
     return await process_edit_arguments(
         turn=_make_turn(),
-        conversation=[],
+        conversation=conversation or [],
         arguments=arguments,
         available_model_refs=None,
         available_kb_refs=None,

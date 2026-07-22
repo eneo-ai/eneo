@@ -374,6 +374,44 @@ def test_edit_overlay_add_step_preserves_explicit_all_previous_steps() -> None:
     assert result.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
 
 
+def test_edit_overlay_add_step_uses_ui_language_for_input_reference_hint() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Extract",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+            )
+        ),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                AddStep(
+                    step=_new_step(
+                        "Compare summaries",
+                        input_source=InputSource.ALL_PREVIOUS_STEPS,
+                        uses_previous_fields=[
+                            PreviousFieldRef(from_step=1, field_path="summary")
+                        ],
+                    )
+                ),
+            ],
+        ),
+        ui_language="en",
+    )
+
+    instructions = result.steps[1].assistant_spec.instructions
+    assert "Pay particular attention to these structured source fields:" in instructions
+    assert (
+        "Beakta särskilt följande strukturerade fält i underlaget:" not in instructions
+    )
+
+
 def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(

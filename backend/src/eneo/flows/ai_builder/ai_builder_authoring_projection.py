@@ -143,6 +143,7 @@ def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
     proposal: MaterializedOrderedEditProposal,
+    ui_language: str | None = None,
 ) -> FlowDraftSpecCore:
     base_by_ref = {
         step.existing_step_ref: step
@@ -160,6 +161,7 @@ def compile_ordered_edit_proposal(
                     step_draft=item.step,
                     plan_step_ref=plan_ref,
                     prior_steps=compiled_steps,
+                    ui_language=ui_language,
                     require_declared_previous_fields=True,
                 )
             )
@@ -174,6 +176,7 @@ def compile_ordered_edit_proposal(
             base_step,
             item,
             prior_steps=compiled_steps,
+            ui_language=ui_language,
         )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
@@ -236,6 +239,7 @@ def _compile_existing_step_modification(
     patch: ModifyExistingStep,
     *,
     prior_steps: list[StepSpec],
+    ui_language: str | None,
 ) -> StepSpec:
     step = apply_existing_step_patch(existing, patch)
     fields = patch.model_fields_set
@@ -271,6 +275,7 @@ def _compile_existing_step_modification(
             hint = compile_input_reference_instruction_hint(
                 uses_previous_fields=uses_previous_fields,
                 uses_form_fields=uses_form_fields,
+                ui_language=ui_language,
             )
             if hint:
                 updates["assistant_spec"] = step.assistant_spec.model_copy(

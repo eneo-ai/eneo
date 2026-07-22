@@ -148,6 +148,7 @@ def compile_edit_proposal(
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=base_spec,
         proposal=prepared.proposal,
+        ui_language=ui_language,
     )
     compiled_steps = compiled_spec.steps
 
