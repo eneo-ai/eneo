@@ -2,24 +2,25 @@ import { getErrorMessage } from "$lib/core/errors";
 import {
   SKILL_CATALOG_PAGE_SIZE,
   SKILL_CATALOG_SEARCH_DEBOUNCE_MS,
-  mergeSkillPages,
-  type ListSkills,
-  type SkillCatalogPage
+  mergeCatalogPages,
+  type CatalogItem,
+  type CatalogPage,
+  type ListCatalogPage
 } from "./skillCatalog";
 
-export class SkillCatalogQuery {
-  #list: ListSkills;
+export class SkillCatalogQuery<T extends CatalogItem> {
+  #list: ListCatalogPage<T>;
   #requestId = 0;
   #debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  items = $state<SkillCatalogPage["items"]>([]);
+  items = $state<T[]>([]);
   nextCursor = $state<string | null>(null);
   query = $state("");
   loading = $state(false);
   loadingMore = $state(false);
   error = $state<string | null>(null);
 
-  constructor(initialPage: SkillCatalogPage, list: ListSkills) {
+  constructor(initialPage: CatalogPage<T>, list: ListCatalogPage<T>) {
     this.#list = list;
     this.#applyPage(initialPage, false);
   }
@@ -28,7 +29,7 @@ export class SkillCatalogQuery {
     return this.nextCursor !== null;
   }
 
-  reset(page: SkillCatalogPage): void {
+  reset(page: CatalogPage<T>): void {
     clearTimeout(this.#debounceTimer);
     this.#requestId += 1;
     this.query = "";
@@ -99,8 +100,8 @@ export class SkillCatalogQuery {
     }
   }
 
-  #applyPage(page: SkillCatalogPage, append: boolean): void {
-    this.items = append ? mergeSkillPages(this.items, page.items) : [...page.items];
+  #applyPage(page: CatalogPage<T>, append: boolean): void {
+    this.items = append ? mergeCatalogPages(this.items, page.items) : [...page.items];
     this.nextCursor = page.next_cursor ?? null;
   }
 }

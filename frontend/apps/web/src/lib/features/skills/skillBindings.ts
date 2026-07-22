@@ -82,7 +82,7 @@ export function upgradeSkillBinding(
   if (
     !binding ||
     binding.skill_id !== currentSkill.id ||
-    !isSkillCandidateActive(currentSkill) ||
+    !currentSkill.is_active ||
     binding.skill_revision_id === currentRevisionId
   ) {
     return bindings;

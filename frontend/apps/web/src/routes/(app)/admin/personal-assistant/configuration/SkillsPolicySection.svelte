@@ -5,26 +5,29 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
-  import type { SkillBindingCandidate } from "$lib/features/skills/skillBindings";
+  import type {
+    ListSkillBindingCatalog,
+    SkillBindingCatalogPage
+  } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
   import PolicySection from "./PolicySection.svelte";
 
   type Props = {
     skillBindings: SkillBindingReferenceInput[];
-    availableSkills: SkillBindingCandidate[];
+    initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     summary: string;
     canUseSkills: boolean;
-    onSearchSkills: (query: string) => Promise<SkillBindingCandidate[]>;
+    onListCatalog: ListSkillBindingCatalog;
   };
 
   let {
     skillBindings = $bindable(),
-    availableSkills,
+    initialCatalogPage,
     bindingSummaries,
     summary,
     canUseSkills,
-    onSearchSkills
+    onListCatalog
   }: Props = $props();
 </script>
 
@@ -56,9 +59,10 @@
 
   <SkillBindingsEditor
     bind:bindings={skillBindings}
-    {availableSkills}
+    {initialCatalogPage}
     {bindingSummaries}
     canEditBindings={canUseSkills}
-    {onSearchSkills}
+    canCreateSkills={false}
+    {onListCatalog}
   />
 </PolicySection>

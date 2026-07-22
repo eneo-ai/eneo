@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
+import { emptySkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { PolicyDraft } from "./policyDraft.svelte";
 
 vi.mock("$app/navigation", () => ({
@@ -25,7 +25,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read"]
       },
-      skills: emptySkillCatalogPage()
+      skills: emptySkillBindingCatalogPage()
     });
 
     expect(draft.canUseSkills).toBe(true);
@@ -59,7 +59,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read"]
       },
-      skills: emptySkillCatalogPage()
+      skills: emptySkillBindingCatalogPage()
     });
 
     draft.selectedPromptId = "prompt-2";
@@ -119,7 +119,7 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read"]
       },
-      skills: emptySkillCatalogPage()
+      skills: emptySkillBindingCatalogPage()
     });
 
     draft.skillBindings = [
@@ -141,7 +141,7 @@ describe("PolicyDraft", () => {
     });
   });
 
-  it("searches only the approved organisation catalogue", async () => {
+  it("seeds the bounded Skill catalogue supplied by the page loader", () => {
     const approved = {
       id: "skill-1",
       slug: "leave",
@@ -152,17 +152,15 @@ describe("PolicyDraft", () => {
       content_digest: "digest-2",
       first_published_at: "2026-07-20T12:00:00Z"
     };
-    const list = vi.fn(async () => ({
+    const skills = {
       items: [approved],
-      limit: 100,
+      count: 1,
+      limit: 25,
       next_cursor: null
-    }));
+    };
     const draft = new PolicyDraft();
     draft.sync({
-      eneo: {
-        governancePolicy: { update: vi.fn(async () => {}) },
-        skills: { catalogue: { list } }
-      } as never,
+      eneo: { governancePolicy: { update: vi.fn(async () => {}) } } as never,
       policy: {
         models_restriction: { enabled: false, models: [], provider_ids: [] },
         mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
@@ -177,10 +175,9 @@ describe("PolicyDraft", () => {
         id: "organization-space",
         skill_permissions: ["read"]
       },
-      skills: []
+      skills
     });
 
-    await expect(draft.searchSkills("leave")).resolves.toEqual([approved]);
-    expect(list).toHaveBeenCalledWith({ limit: 100, search: "leave" });
+    expect(draft.skillCatalogPage).toEqual(skills);
   });
 });

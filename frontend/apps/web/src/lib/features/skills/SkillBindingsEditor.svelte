@@ -11,7 +11,7 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
-  import type { ListSkills, SkillCatalogPage } from "./skillCatalog";
+  import type { ListSkillBindingCatalog, SkillBindingCatalogPage } from "./skillBindingCatalog";
   import { SkillCatalogQuery } from "./skillCatalogQuery.svelte";
   import {
     appendSkillBinding,
@@ -29,21 +29,21 @@
 
   type Props = {
     bindings: SkillBindingReferenceInput[];
-    initialSkillPage: SkillCatalogPage;
+    initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     canEditBindings: boolean;
     canCreateSkills: boolean;
-    onListSkills: ListSkills;
+    onListCatalog: ListSkillBindingCatalog;
     onCreateSkill?: (value: SkillFormValue) => Promise<SkillPublic>;
   };
 
   let {
     bindings = $bindable(),
-    initialSkillPage,
+    initialCatalogPage,
     bindingSummaries,
     canEditBindings,
     canCreateSkills,
-    onListSkills,
+    onListCatalog,
     onCreateSkill
   }: Props = $props();
 
@@ -57,14 +57,16 @@
   let createdSkills = $state<SkillPublic[]>([]);
   let announcement = $state("");
 
-  let loadedInitialPage = untrack(() => initialSkillPage);
-  const skillCatalog = new SkillCatalogQuery(loadedInitialPage, (params) => onListSkills(params));
+  let loadedInitialPage = untrack(() => initialCatalogPage);
+  const skillCatalog = new SkillCatalogQuery<SkillBindingCandidate>(loadedInitialPage, (params) =>
+    onListCatalog(params)
+  );
   onDestroy(() => skillCatalog.dispose());
 
   $effect(() => {
-    if (initialSkillPage === loadedInitialPage) return;
-    loadedInitialPage = initialSkillPage;
-    skillCatalog.reset(initialSkillPage);
+    if (initialCatalogPage === loadedInitialPage) return;
+    loadedInitialPage = initialCatalogPage;
+    skillCatalog.reset(initialCatalogPage);
   });
 
   const matchingCreatedSkills = $derived.by(() => {

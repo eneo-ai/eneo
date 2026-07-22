@@ -7,9 +7,7 @@ export const load = async (event) => {
   const { user } = await event.parent();
   const userHasPermission = hasPermission(user);
   const access = resolveOrganizationSkillsAccess({
-    admin: userHasPermission("admin"),
-    skills: userHasPermission("skills"),
-    skillsManagement: userHasPermission("skills_management")
+    admin: userHasPermission("admin")
   });
 
   if (!access.canBrowse) {

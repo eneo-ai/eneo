@@ -1,7 +1,7 @@
 """add governed Skill publication lifecycle
 
-Revision ID: 202607151400
-Revises: 202607151300
+Revision ID: 202607221500
+Revises: 202607221400
 Create Date: 2026-07-20 12:00:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202607151400"
-down_revision: str | None = "202607151300"
+revision: str = "202607221500"
+down_revision: str | None = "202607221400"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -50,10 +50,7 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
-  const canBrowseOrganizationSkills = user.hasPermission("admin") || user.hasPermission("skills");
-  const organizationHref = user.hasPermission("admin")
-    ? "/spaces/organization/knowledge"
-    : "/spaces/organization/skills";
+  const canBrowseOrganization = user.hasPermission("admin");
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
@@ -115,9 +112,10 @@
       <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
         >{m.spaces()}</a
       >
-      {#if canBrowseOrganizationSkills}
-        <a href={localizeHref(organizationHref)} data-current={isOrganization ? "page" : undefined}
-          >{m.organization()}</a
+      {#if canBrowseOrganization}
+        <a
+          href={localizeHref("/spaces/organization/knowledge")}
+          data-current={isOrganization ? "page" : undefined}>{m.organization()}</a
         >
       {/if}
       <!-- eslint-enable svelte/no-navigation-without-resolve -->

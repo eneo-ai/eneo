@@ -25,6 +25,7 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import { loadSkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
@@ -296,13 +297,18 @@
             >
               <SkillBindingsEditor
                 bind:bindings={$update.skill_bindings}
-                initialSkillPage={data.skills}
+                initialCatalogPage={data.skills}
                 bindingSummaries={data.skillBindings}
                 canEditBindings={data.app.permissions?.includes("edit") ?? false}
                 canCreateSkills={$currentSpace.organization !== true &&
                   $currentSpace.hasPermission("create", "skill")}
-                onListSkills={(params) =>
-                  data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
+                onListCatalog={(params) =>
+                  loadSkillBindingCatalogPage({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    organizationSpace: data.currentSpace.organization === true,
+                    ...params
+                  })}
                 onCreateSkill={createSkill}
               />
             </Settings.Row>

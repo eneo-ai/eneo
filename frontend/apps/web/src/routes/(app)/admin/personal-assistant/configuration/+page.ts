@@ -5,6 +5,10 @@
 */
 
 import type { ResourcePermission } from "@eneo/eneo-js";
+import {
+  emptySkillBindingCatalogPage,
+  loadSkillBindingCatalogPage
+} from "$lib/features/skills/skillBindingCatalog";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
 
@@ -16,8 +20,12 @@ export const load = async (event) => {
   const organizationSpacePromise = eneo.spaces.getOrganizationSpace();
   const skillsPromise = organizationSpacePromise.then(async (space) =>
     space.skill_permissions.includes(READ_SKILL_PERMISSION)
-      ? (await eneo.skills.catalogue.list({ limit: 100 })).items
-      : []
+      ? loadSkillBindingCatalogPage({
+          eneo,
+          spaceId: space.id,
+          organizationSpace: true
+        })
+      : emptySkillBindingCatalogPage()
   );
   const [policy, models, mcpSettings, promptLibrary, modelProviders, organizationSpace, skills] =
     await Promise.all([

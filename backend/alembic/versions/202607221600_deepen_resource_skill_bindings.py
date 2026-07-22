@@ -1,7 +1,7 @@
 """allow tenant-safe organisation Skill bindings on resources
 
-Revision ID: 202607201830
-Revises: 202607151400
+Revision ID: 202607221600
+Revises: 202607221500
 Create Date: 2026-07-20 18:30:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202607201830"
-down_revision: str | None = "202607151400"
+revision: str = "202607221600"
+down_revision: str | None = "202607221500"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

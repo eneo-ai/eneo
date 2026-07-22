@@ -50,14 +50,12 @@ describe("organisation Skills navigation", () => {
     await expect.element(page.getByRole("link", { name: m.settings() })).toBeVisible();
   });
 
-  test("shows delegated Skill editors only the reachable Skills destination", async () => {
+  test("does not show organisation destinations without administrator access", async () => {
     render(SpaceMenu, {
-      space: organizationContext((_action, resource) => resource === "skill")
+      space: organizationContext(() => false)
     });
 
-    await expect
-      .element(page.getByRole("link", { name: m.skills() }))
-      .toHaveAttribute("href", "/spaces/organization/skills");
+    await expect.element(page.getByRole("link", { name: m.skills() })).not.toBeInTheDocument();
     await expect.element(page.getByRole("link", { name: m.knowledge() })).not.toBeInTheDocument();
     await expect.element(page.getByRole("link", { name: m.settings() })).not.toBeInTheDocument();
   });

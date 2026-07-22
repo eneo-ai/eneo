@@ -19,8 +19,10 @@ function binding({
   return {
     skill_id: id,
     skill_revision_id: `${id}-revision-${revision}`,
+    current_revision_id: `${id}-revision-${revision}`,
     slug: id,
     revision_number: revision,
+    current_revision_number: revision,
     display_name: name,
     description: `${name} description`,
     content_digest: `${id}-digest`,

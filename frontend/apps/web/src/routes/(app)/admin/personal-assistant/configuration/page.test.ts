@@ -39,8 +39,12 @@ describe("personal assistant configuration loader", () => {
     const result = await load(event as never);
 
     expect(listSkills).toHaveBeenCalledOnce();
-    expect(listSkills).toHaveBeenCalledWith({ limit: 100 });
-    expect(result.skills).toEqual(skills);
+    expect(listSkills).toHaveBeenCalledWith({
+      limit: 25,
+      cursor: null,
+      search: null
+    });
+    expect(result.skills.items).toEqual(skills);
     expect(result.organizationSpace).toEqual(organizationSpace);
     expect(event.depends).toHaveBeenCalledWith("organization:skills");
   });
@@ -51,6 +55,6 @@ describe("personal assistant configuration loader", () => {
     const result = await load(event as never);
 
     expect(listSkills).not.toHaveBeenCalled();
-    expect(result.skills).toEqual([]);
+    expect(result.skills.items).toEqual([]);
   });
 });

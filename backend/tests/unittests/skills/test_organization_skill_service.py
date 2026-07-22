@@ -125,7 +125,7 @@ async def test_use_permission_reads_only_the_published_revision():
     )
 
 
-async def test_manage_permission_lists_organisation_drafts():
+async def test_non_admin_cannot_list_organisation_drafts():
     organization = _organization()
     summaries = [SimpleNamespace(slug="payroll")]
     repo = AsyncMock()
@@ -136,29 +136,24 @@ async def test_manage_permission_lists_organisation_drafts():
         repo=repo,
     )
 
-    page = await service.list_organization_skills(
-        limit=25,
-        cursor=None,
-        search=" payroll ",
-    )
+    with pytest.raises(UnauthorizedException):
+        await service.list_organization_skills(
+            limit=25,
+            cursor=None,
+            search=" payroll ",
+        )
 
-    assert page.items == tuple(summaries)
-    repo.list_organization_for_tenant.assert_awaited_once_with(
-        tenant_id=organization.tenant_id,
-        limit=26,
-        after_slug=None,
-        search="payroll",
-    )
+    repo.list_organization_for_tenant.assert_not_awaited()
 
 
-async def test_manage_permission_creates_in_the_tenant_organisation_space():
+async def test_admin_creates_in_the_tenant_organisation_space():
     organization = _organization()
     created = SimpleNamespace(id=uuid4())
     repo = AsyncMock()
     repo.create.return_value = created
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -184,7 +179,7 @@ async def test_invalid_organisation_space_fails_closed():
     organization.is_organization.return_value = False
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
     )
 
     with pytest.raises(RuntimeError, match="organisation Space is invalid"):
@@ -202,7 +197,7 @@ async def test_organisation_slug_collision_has_a_stable_application_error():
     repo.create.side_effect = SkillSlugConflictError
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -215,7 +210,7 @@ async def test_organisation_slug_collision_has_a_stable_application_error():
         )
 
 
-async def test_manage_permission_creates_an_immutable_revision():
+async def test_admin_creates_an_immutable_revision():
     organization = _organization()
     skill = SimpleNamespace(id=uuid4())
     revision = _revision(skill_id=skill.id, revision_number=2)
@@ -230,7 +225,7 @@ async def test_manage_permission_creates_an_immutable_revision():
     repo.create_revision.return_value = change
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -245,7 +240,7 @@ async def test_manage_permission_creates_an_immutable_revision():
     repo.create_revision.assert_awaited_once()
 
 
-async def test_manage_permission_lists_tenant_skill_history_with_a_stable_cursor():
+async def test_admin_lists_tenant_skill_history_with_a_stable_cursor():
     organization = _organization()
     skill = SimpleNamespace(id=uuid4())
     revisions = [
@@ -277,7 +272,7 @@ async def test_manage_permission_lists_tenant_skill_history_with_a_stable_cursor
     repo.count_revisions.return_value = 3
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -306,7 +301,7 @@ async def test_organisation_history_rejects_invalid_cursors(cursor: str):
     repo.get_organization_for_tenant.return_value = skill
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -337,7 +332,7 @@ async def test_restore_copies_tenant_history_into_the_next_revision():
     repo.create_revision.return_value = change
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 
@@ -470,7 +465,7 @@ async def test_missing_tenant_skill_is_not_exposed():
     repo.get_organization_for_tenant.return_value = None
     service = _service(
         organization=organization,
-        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+        permissions={Permission.ADMIN},
         repo=repo,
     )
 

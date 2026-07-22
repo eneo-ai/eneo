@@ -23,13 +23,11 @@ import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type {
   Eneo,
-  PublishedSkillSummaryPublic,
   ResourcePermission,
   SkillBindingReferenceInput,
   SkillBindingSummary
 } from "@eneo/eneo-js";
-import { searchSkillBindingCatalog } from "$lib/features/skills/skillBindingCatalog";
-import type { SkillBindingCandidate } from "$lib/features/skills/skillBindings";
+import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -104,7 +102,7 @@ export type PolicyPageData = {
     id: string;
     skill_permissions: ResourcePermission[];
   };
-  skills: PublishedSkillSummaryPublic[];
+  skills: SkillBindingCatalogPage;
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
@@ -130,7 +128,12 @@ export class PolicyDraft {
   #allProviders = $state<ModelProvider[]>([]);
   #allMcpServers = $state<McpServer[]>([]);
   promptOptions = $state<PromptOption[]>([]);
-  availableSkills = $state<SkillBindingCandidate[]>([]);
+  skillCatalogPage = $state<SkillBindingCatalogPage>({
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null
+  });
   skillBindingSummaries = $state<SkillBindingSummary[]>([]);
   canUseSkills = $state(false);
 
@@ -165,7 +168,7 @@ export class PolicyDraft {
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
-    this.availableSkills = data.skills;
+    this.skillCatalogPage = data.skills;
     this.canUseSkills = data.organizationSpace.skill_permissions.includes(READ_SKILL_PERMISSION);
     this.#seed(data.policy, selectableModels);
   }
@@ -458,9 +461,6 @@ export class PolicyDraft {
       this.providerSelections.delete(pid);
     }
   };
-
-  searchSkills = (query: string): Promise<SkillBindingCandidate[]> =>
-    searchSkillBindingCatalog(this.#eneo, query);
 
   // ---- Confirm + save ------------------------------------------------------
   #buildConfirmations = (): string[] => {

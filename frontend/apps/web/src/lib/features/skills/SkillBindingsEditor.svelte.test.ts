@@ -4,7 +4,8 @@ import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import SkillBindingsEditor from "./SkillBindingsEditor.svelte";
-import { SKILL_CATALOG_PAGE_SIZE, type SkillCatalogPage } from "./skillCatalog";
+import type { SkillBindingCatalogPage } from "./skillBindingCatalog";
+import { SKILL_CATALOG_PAGE_SIZE } from "./skillCatalog";
 
 function makeSkill(id: string, revision = 1, isActive = true): SkillSparse {
   return {
@@ -39,14 +40,12 @@ function makeSummary(skill: SkillSparse, revision: number, position: number): Sk
   };
 }
 
-function makePage(items: SkillSparse[], nextCursor: string | null = null): SkillCatalogPage {
+function makePage(items: SkillSparse[], nextCursor: string | null = null): SkillBindingCatalogPage {
   return {
     items,
     count: items.length,
-    total_count: items.length,
     limit: SKILL_CATALOG_PAGE_SIZE,
-    next_cursor: nextCursor,
-    previous_cursor: null
+    next_cursor: nextCursor
   };
 }
 
@@ -84,11 +83,11 @@ describe("SkillBindingsEditor", () => {
 
     render(SkillBindingsEditor, {
       bindings: [],
-      initialSkillPage: makePage([first], "skill-first"),
+      initialCatalogPage: makePage([first], "skill-first"),
       bindingSummaries: [],
       canEditBindings: true,
       canCreateSkills: false,
-      onListSkills,
+      onListCatalog: onListSkills,
       onCreateSkill: vi.fn()
     });
 
@@ -124,11 +123,11 @@ describe("SkillBindingsEditor", () => {
 
     render(SkillBindingsEditor, {
       bindings: [{ skill_id: bound.id, skill_revision_id: summary.skill_revision_id }],
-      initialSkillPage: makePage([]),
+      initialCatalogPage: makePage([]),
       bindingSummaries: [summary],
       canEditBindings: true,
       canCreateSkills: false,
-      onListSkills: vi.fn(),
+      onListCatalog: vi.fn(),
       onCreateSkill: vi.fn()
     });
 
@@ -160,11 +159,11 @@ describe("SkillBindingsEditor", () => {
         { skill_id: first.id, skill_revision_id: firstSummary.skill_revision_id },
         { skill_id: second.id, skill_revision_id: secondSummary.skill_revision_id }
       ],
-      initialSkillPage: makePage([first, second]),
+      initialCatalogPage: makePage([first, second]),
       bindingSummaries: [firstSummary, secondSummary],
       canEditBindings: true,
       canCreateSkills: true,
-      onListSkills: vi.fn(),
+      onListCatalog: vi.fn(),
       onCreateSkill: vi.fn()
     });
 
@@ -218,11 +217,11 @@ describe("SkillBindingsEditor", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(SkillBindingsEditor, {
       bindings: [],
-      initialSkillPage: makePage([]),
+      initialCatalogPage: makePage([]),
       bindingSummaries: [],
       canEditBindings: true,
       canCreateSkills: true,
-      onListSkills: vi.fn(),
+      onListCatalog: vi.fn(),
       onCreateSkill: vi.fn()
     });
 
@@ -250,11 +249,11 @@ describe("SkillBindingsEditor", () => {
 
     render(SkillBindingsEditor, {
       bindings: [],
-      initialSkillPage: makePage([]),
+      initialCatalogPage: makePage([]),
       bindingSummaries: [],
       canEditBindings: true,
       canCreateSkills: true,
-      onListSkills: vi.fn(),
+      onListCatalog: vi.fn(),
       onCreateSkill
     });
 
@@ -294,9 +293,11 @@ describe("SkillBindingsEditor", () => {
         skill_id: summary.skill_id,
         skill_revision_id: summary.skill_revision_id
       })),
-      availableSkills: skills,
+      initialCatalogPage: makePage(skills),
       bindingSummaries: summaries,
-      canEditBindings: true
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn()
     });
 
     const region = page.getByRole("region", {
@@ -311,9 +312,11 @@ describe("SkillBindingsEditor", () => {
   test("explains when the existing-Skill picker has no available Skills", async () => {
     render(SkillBindingsEditor, {
       bindings: [],
-      availableSkills: [],
+      initialCatalogPage: makePage([]),
       bindingSummaries: [],
-      canEditBindings: true
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn()
     });
 
     const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });
@@ -327,9 +330,11 @@ describe("SkillBindingsEditor", () => {
     const attachedSummary = makeSummary(attached, 1, 0);
     render(SkillBindingsEditor, {
       bindings: [{ skill_id: attached.id, skill_revision_id: attachedSummary.skill_revision_id }],
-      availableSkills: [attached],
+      initialCatalogPage: makePage([attached]),
       bindingSummaries: [attachedSummary],
-      canEditBindings: true
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn()
     });
 
     const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });
@@ -342,9 +347,11 @@ describe("SkillBindingsEditor", () => {
     const searchable = makeSkill("searchable");
     render(SkillBindingsEditor, {
       bindings: [],
-      availableSkills: [searchable],
+      initialCatalogPage: makePage([searchable]),
       bindingSummaries: [],
-      canEditBindings: true
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn().mockResolvedValue(makePage([]))
     });
 
     const trigger = page.getByRole("combobox", { name: m.skills_add_existing() });

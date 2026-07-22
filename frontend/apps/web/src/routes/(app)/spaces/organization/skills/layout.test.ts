@@ -17,19 +17,19 @@ function eventWithPermissions(permissions: Permission[]) {
 }
 
 describe("organisation Skills layout", () => {
-  test("gives Use Skills users the approved catalogue only", async () => {
-    await expect(load(eventWithPermissions(["skills"]) as never)).resolves.toEqual({
-      canManage: false,
-      canPublish: false
+  test("does not expose the organisation workspace to Use Skills users", async () => {
+    await expect(load(eventWithPermissions(["skills"]) as never)).rejects.toMatchObject({
+      status: 307,
+      location: "/spaces/list"
     });
   });
 
-  test("gives Skill managers authoring without publication authority", async () => {
+  test("does not expose organisation authoring to delegated Skill managers", async () => {
     await expect(
       load(eventWithPermissions(["skills", "skills_management"]) as never)
-    ).resolves.toEqual({
-      canManage: true,
-      canPublish: false
+    ).rejects.toMatchObject({
+      status: 307,
+      location: "/spaces/list"
     });
   });
 
@@ -49,9 +49,7 @@ describe("organisation Skills layout", () => {
 
   test("shows administrators only the reachable organisation workspace destinations", () => {
     const access = resolveOrganizationSkillsAccess({
-      admin: true,
-      skills: false,
-      skillsManagement: false
+      admin: true
     });
 
     expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(true);
@@ -62,14 +60,12 @@ describe("organisation Skills layout", () => {
     expect(hasOrganizationNavigationPermission(access, "edit", "website")).toBe(false);
   });
 
-  test("limits delegated users to the Skills destination", () => {
+  test("does not project organisation navigation for delegated users", () => {
     const access = resolveOrganizationSkillsAccess({
-      admin: false,
-      skills: true,
-      skillsManagement: true
+      admin: false
     });
 
-    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(true);
+    expect(hasOrganizationNavigationPermission(access, "read", "skill")).toBe(false);
     expect(hasOrganizationNavigationPermission(access, "read", "website")).toBe(false);
     expect(hasOrganizationNavigationPermission(access, "read", "collection")).toBe(false);
     expect(hasOrganizationNavigationPermission(access, "edit", "space")).toBe(false);

@@ -44,7 +44,7 @@ function deferred<T>() {
 describe("SkillCatalogQuery", () => {
   test("uses bounded server search and ignores an older response", async () => {
     vi.useFakeTimers();
-    let catalog: SkillCatalogQuery | undefined;
+    let catalog: SkillCatalogQuery<SkillSparse> | undefined;
     try {
       const older = deferred<SkillCatalogPage>();
       const newer = deferred<SkillCatalogPage>();

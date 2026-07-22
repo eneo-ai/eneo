@@ -32,9 +32,9 @@ PRE_SKILLS_REVISION = "202607221000"
 SKILLS_SCHEMA_REVISION = "202607221200"
 SKILLS_PERMISSION_REVISION = "202607221300"
 SKILLS_PROVENANCE_INDEX_REVISION = "202607221400"
-PRE_RESOURCE_BINDING_SCOPE_REVISION = "202607151400"
-PRE_PERMISSION_CONVERGENCE_REVISION = "202607201830"
-SKILLS_HEAD_REVISION = "202607211000"
+PRE_RESOURCE_BINDING_SCOPE_REVISION = "202607221500"
+PRE_PERMISSION_CONVERGENCE_REVISION = "202607221600"
+SKILLS_HEAD_REVISION = "202607221700"
 
 
 @dataclass(frozen=True)
@@ -1579,7 +1579,7 @@ def test_binding_scope_downgrade_fails_without_losing_cross_space_bindings(
         )
 
     with pytest.raises(DBAPIError, match="Cannot downgrade Skill bindings"):
-        command.downgrade(config, "202607151400")
+        command.downgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
 
     assert _current_revision(connection) == SKILLS_HEAD_REVISION
     with connection.cursor() as cursor:
@@ -1598,8 +1598,8 @@ def test_binding_scope_downgrade_fails_without_losing_cross_space_bindings(
         )
 
     assert binding_count == (1,)
-    command.downgrade(config, "202607151400")
-    assert _current_revision(connection) == "202607151400"
+    command.downgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+    assert _current_revision(connection) == PRE_RESOURCE_BINDING_SCOPE_REVISION
     command.upgrade(config, SKILLS_HEAD_REVISION)
 
 
@@ -1608,7 +1608,7 @@ def test_binding_scope_upgrade_keeps_legacy_binding_writes_compatible(
 ):
     connection = pre_skills_database.connection
     config = pre_skills_database.alembic_config
-    command.upgrade(config, "202607151400")
+    command.upgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
 
     tenant_id = _insert_tenant(connection, "rolling")
     user_id = _insert_user(connection, tenant_id, "rolling")

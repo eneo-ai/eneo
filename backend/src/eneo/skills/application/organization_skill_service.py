@@ -55,19 +55,13 @@ class OrganizationSkillService:
             )
 
     def _require_management(self) -> None:
-        if Permission.ADMIN in self.user.permissions:
-            return
-        required = {Permission.SKILLS, Permission.SKILLS_MANAGEMENT}
-        if not required.issubset(self.user.permissions):
-            raise UnauthorizedException(
-                "You do not have permission to manage organisation Skills"
-            )
+        self._require_admin()
 
     def _require_admin(self) -> None:
         if Permission.ADMIN not in self.user.permissions:
             raise UnauthorizedException(
                 "Tenant administrator permission is required to publish "
-                "organisation Skills"
+                "or manage organisation Skills"
             )
 
     async def list_catalogue(

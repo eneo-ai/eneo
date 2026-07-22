@@ -1,7 +1,7 @@
 """converge predefined Skill permissions to Owner only
 
-Revision ID: 202607211000
-Revises: 202607201830
+Revision ID: 202607221700
+Revises: 202607221600
 Create Date: 2026-07-21 10:00:00.000000
 
 The earlier Skills migration was exercised by development environments before
@@ -13,8 +13,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "202607211000"
-down_revision: str | None = "202607201830"
+revision: str = "202607221700"
+down_revision: str | None = "202607221600"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

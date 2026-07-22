@@ -40,7 +40,7 @@ describe("organisation Skills page loader", () => {
     expect(fixture.organizationList).not.toHaveBeenCalled();
   });
 
-  test("Skill managers receive publication-aware drafts", async () => {
+  test("administrators receive publication-aware drafts", async () => {
     const fixture = event({ canManage: true });
 
     await expect(load(fixture.input as never)).resolves.toEqual({

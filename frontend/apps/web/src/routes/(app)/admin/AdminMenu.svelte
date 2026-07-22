@@ -45,7 +45,7 @@
   const groups = $derived<NavGroup[]>([
     {
       label: m.admin_section_overview(),
-      items: [navItem("/admin", IconLibrary, m.organisation())]
+      items: [navItem("/admin", IconLibrary, m.overview())]
     },
     {
       label: m.admin_section_governance(),

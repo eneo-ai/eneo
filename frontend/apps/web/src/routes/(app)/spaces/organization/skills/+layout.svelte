@@ -14,9 +14,7 @@
 
   const { user } = getAppContext();
   const access = resolveOrganizationSkillsAccess({
-    admin: user.hasPermission("admin"),
-    skills: user.hasPermission("skills"),
-    skillsManagement: user.hasPermission("skills_management")
+    admin: user.hasPermission("admin")
   });
   let mobileNavigationOpen = false;
 
