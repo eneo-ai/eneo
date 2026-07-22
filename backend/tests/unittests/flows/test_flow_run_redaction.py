@@ -88,6 +88,40 @@ def test_redact_string_redacts_url_secrets_embedded_in_prose() -> None:
     assert redacted.endswith("; retry later.")
 
 
+def test_redact_string_redacts_standalone_authorization_credentials() -> None:
+    for scheme in ("Basic", "Bearer", "Digest", "Token"):
+        redacted = redact_string(
+            f"Audit delivery failed with {scheme} credential-value",
+            key="message",
+        )
+
+        assert redacted == f"Audit delivery failed with {scheme} [REDACTED]"
+
+
+def test_redact_payload_matches_camel_case_sensitive_keys() -> None:
+    payload = {
+        "clientSecret": "client-secret-value",
+        "accessToken": "access-token-value",
+        "passwordHash": "password-hash-value",
+    }
+
+    assert redact_payload(payload) == {
+        "clientSecret": "[REDACTED]",
+        "accessToken": "[REDACTED]",
+        "passwordHash": "[REDACTED]",
+    }
+
+
+def test_redact_url_secrets_redacts_short_signature_parameter() -> None:
+    redacted = redact_url_secrets(
+        "https://storage.example/object?sig=signature-value&request_id=case-1"
+    )
+
+    assert "signature-value" not in redacted
+    assert "sig=%5BREDACTED%5D" in redacted
+    assert "request_id=case-1" in redacted
+
+
 def test_redact_string_redacts_secrets_in_nested_url_query_values() -> None:
     value = (
         "Request failed for https://gateway.example/hook?"

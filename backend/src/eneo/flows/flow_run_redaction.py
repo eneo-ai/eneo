@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 _REDACTED_VALUE = "[REDACTED]"
 REDACTION_POLICY_VERSION = "flow-evidence-redaction.v3"
 _MAX_NESTED_URL_REDACTION_DEPTH = 8
-_SENSITIVE_URL_QUERY_EXACT_KEYS = {"code", "state"}
+_SENSITIVE_URL_QUERY_EXACT_KEYS = {"code", "sig", "state"}
 _SENSITIVE_EXACT_KEYS = {
     "authorization",
     "api_key",
@@ -50,7 +50,9 @@ _SENSITIVE_SUFFIXES = (
     "_signature",
     "_signed_url",
 )
-_BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[a-z0-9._\-~+/]+=*")
+_AUTHORIZATION_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\b(?P<scheme>basic|bearer|digest|token)\s+[^\s,;]+"
+)
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     r"""
     (?<![a-z0-9_.?&-])
@@ -138,6 +140,8 @@ def is_sensitive_key(key: str | None) -> bool:
     if any(pair.issubset(key_tokens) for pair in token_pairs):
         return True
     if "authorization" in key_tokens:
+        return True
+    if "password" in key_tokens or "passwd" in key_tokens:
         return True
     if "cookie" in key_tokens:
         return True
@@ -243,6 +247,10 @@ def _redact_sensitive_assignment(match: re.Match[str]) -> str:
     )
 
 
+def _redact_authorization_credential(match: re.Match[str]) -> str:
+    return f"{match.group('scheme')} {_REDACTED_VALUE}"
+
+
 def redact_string(value: str, *, key: str | None) -> str:
     return redact_string_with_reason(value, key=key).value
 
@@ -267,10 +275,13 @@ def redact_string_with_reason(value: str, *, key: str | None) -> StringRedaction
             redacted_value = url_redacted
             reason = "sensitive_url"
 
-    bearer_redacted = _BEARER_TOKEN_PATTERN.sub("Bearer [REDACTED]", redacted_value)
-    if bearer_redacted != redacted_value:
-        redacted_value = bearer_redacted
-        reason = reason or "bearer_token"
+    authorization_redacted = _AUTHORIZATION_CREDENTIAL_PATTERN.sub(
+        _redact_authorization_credential,
+        redacted_value,
+    )
+    if authorization_redacted != redacted_value:
+        redacted_value = authorization_redacted
+        reason = reason or "authorization_credential"
 
     return StringRedactionResult(value=redacted_value, reason=reason)
 
@@ -346,5 +357,7 @@ def redact_payload_with_manifest(
 
 
 def _normalize_key(key: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "_", key.lower())
+    snake_key = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    snake_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", snake_key)
+    normalized = re.sub(r"[^a-z0-9]+", "_", snake_key.lower())
     return normalized.strip("_")
