@@ -131,6 +131,8 @@ def _new_step_draft_from_semantic_intent(
         model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
         uses_form_fields=list(step.uses_form_fields),
+        uses_previous_fields=list(step.uses_previous_fields),
+        uses_previous_outputs=list(step.uses_previous_outputs),
         citations_requested=step.citations_requested,
         review_mode=step.review_mode,
         output_fields=step.output_fields,

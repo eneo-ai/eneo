@@ -16,6 +16,10 @@ from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     compile_ordered_edit_proposal,
     materialize_ordered_edit_proposal,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_step_input_bindings,
 )
@@ -673,10 +677,11 @@ def test_step_input_bindings_fall_back_to_question_for_template_labels() -> None
     assert bindings == {"question": "{{ bad }}: {{ step_a.output.structured.answer }}"}
 
 
-def test_edit_intent_add_step_drops_create_only_previous_refs() -> None:
+def test_edit_overlay_add_step_rejects_unresolvable_previous_output_ref() -> None:
     proposal = IntentOrderedEditProposal(
         plan_rationale="Add a step.",
         steps=[
+            ModifyExistingStep(existing_step_ref="existing_step_1"),
             IntentAddStep(
                 step=SemanticStepIntent(
                     name="Use prior result",
@@ -684,17 +689,24 @@ def test_edit_intent_add_step_drops_create_only_previous_refs() -> None:
                     uses_previous_fields=[
                         PreviousFieldRef(from_step=1, field_path="answer")
                     ],
-                    uses_previous_outputs=[PreviousOutputRef(from_step=1)],
+                    uses_previous_outputs=[PreviousOutputRef(from_step=2)],
                 )
-            )
+            ),
         ],
     )
 
-    materialized = materialize_ordered_edit_proposal(proposal)
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=materialize_ordered_edit_proposal(proposal),
+        )
 
-    assert isinstance(materialized.steps[0], AddStep)
-    assert materialized.steps[0].step.uses_previous_fields == []
-    assert materialized.steps[0].step.uses_previous_outputs == []
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_PLAN_STEP_REF
+    assert exc_info.value.context == {
+        "ref_kind": "uses_previous_outputs",
+        "from_step": 2,
+        "prior_step_count": 1,
+    }
 
 
 def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder() -> (
@@ -740,6 +752,49 @@ def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder()
         _lowered_question(result.steps[1].input_bindings)
         == "answer: {{ step_a.output.structured.answer }}"
     )
+
+
+def test_edit_overlay_rejects_unresolvable_previous_field_ref_before_hint_compilation() -> (
+    None
+):
+    base = _base_spec(
+        _step(
+            "step_a",
+            "existing_step_1",
+            "Extract",
+            output_type=OutputType.JSON,
+        ),
+        _step(
+            "step_b",
+            "existing_step_2",
+            "Summarize",
+            input_source=InputSource.ALL_PREVIOUS_STEPS,
+        ),
+    )
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        compile_ordered_edit_proposal(
+            base_spec=base,
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(existing_step_ref="existing_step_1"),
+                    ModifyExistingStep(
+                        existing_step_ref="existing_step_2",
+                        uses_previous_fields=[
+                            PreviousFieldRef(from_step=2, field_path="phantom")
+                        ],
+                    ),
+                ],
+            ),
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_PLAN_STEP_REF
+    assert exc_info.value.context == {
+        "ref_kind": "uses_previous_fields",
+        "from_step": 2,
+        "prior_step_count": 1,
+    }
+    assert base.steps[1].assistant_spec.instructions == "Original prompt"
 
 
 def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() -> None:

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import logging
 import string
-from collections.abc import Mapping
-from typing import Any, cast
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, cast
 
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -273,6 +277,16 @@ def compile_step_input_bindings(
     prior_steps: list[StepSpec],
 ) -> dict[str, Any] | None:
     """Compile explicit "Underlag till text" for a step in plan-ref order."""
+    _require_resolvable_previous_refs(
+        uses_previous_fields,
+        ref_kind="uses_previous_fields",
+        prior_steps=prior_steps,
+    )
+    _require_resolvable_previous_refs(
+        uses_previous_outputs,
+        ref_kind="uses_previous_outputs",
+        prior_steps=prior_steps,
+    )
     if input_source.value == "all_previous_steps":
         return None
 
@@ -707,8 +721,6 @@ def _compile_previous_field_source_refs(
     )
     emitted_collapsed_steps: set[int] = set()
     for field_ref in uses_previous_fields:
-        if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
-            continue
         source_step = prior_steps[field_ref.from_step - 1]
         if field_ref.from_step in collapsed_steps:
             if field_ref.from_step not in emitted_collapsed_steps:
@@ -732,6 +744,26 @@ def _compile_previous_field_source_refs(
     return refs
 
 
+def _require_resolvable_previous_refs(
+    refs: Sequence[PreviousFieldRef | PreviousOutputRef],
+    *,
+    ref_kind: Literal["uses_previous_fields", "uses_previous_outputs"],
+    prior_steps: list[StepSpec],
+) -> None:
+    for ref in refs:
+        if 1 <= ref.from_step <= len(prior_steps):
+            continue
+        raise AIBuilderBadRequestException(
+            "A previous-step reference points outside the compiled prior-step frame.",
+            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
+            context={
+                "ref_kind": ref_kind,
+                "from_step": ref.from_step,
+                "prior_step_count": len(prior_steps),
+            },
+        )
+
+
 def _collapsible_previous_field_ref_steps(
     uses_previous_fields: list[PreviousFieldRef],
     prior_steps: list[StepSpec],
@@ -739,8 +771,6 @@ def _collapsible_previous_field_ref_steps(
     fields_by_step: dict[int, set[str]] = {}
     for field_ref in uses_previous_fields:
         if "." in field_ref.field_path:
-            continue
-        if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
             continue
         fields_by_step.setdefault(field_ref.from_step, set()).add(field_ref.field_path)
 
@@ -777,8 +807,6 @@ def _compile_previous_output_source_refs(
 ) -> list[SourceRefBinding]:
     refs: list[SourceRefBinding] = []
     for output_ref in uses_previous_outputs:
-        if output_ref.from_step < 1 or output_ref.from_step > len(prior_steps):
-            continue
         source_step = prior_steps[output_ref.from_step - 1]
         label = output_ref.label or f"Step {output_ref.from_step} output"
         refs.append(

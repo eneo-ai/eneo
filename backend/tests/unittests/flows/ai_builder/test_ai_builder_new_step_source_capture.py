@@ -145,6 +145,15 @@ def test_input_reference_hint_uses_english_when_requested() -> None:
 
 
 def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
+    source_step = compile_new_step_draft(
+        step_draft=NewStepDraft(
+            name="Decide",
+            instructions="Produce a structured decision.",
+            output_type=OutputType.JSON,
+        ),
+        plan_step_ref="step_a",
+        prior_steps=[],
+    )
     step = compile_new_step_draft(
         step_draft=NewStepDraft(
             name="Summarize all prior work",
@@ -156,7 +165,7 @@ def test_compile_new_step_passes_ui_language_to_input_reference_hint() -> None:
             ],
         ),
         plan_step_ref="step_b",
-        prior_steps=[],
+        prior_steps=[source_step],
         ui_language="en",
     )
 
