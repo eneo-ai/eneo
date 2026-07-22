@@ -21,6 +21,7 @@ from uuid import uuid4
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request, Response
+from mcp import types as mcp_types
 from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -241,6 +242,206 @@ class TestMCPClientListToolsErrorPropagation:
 
         await asyncio.wait_for(stream_cancelled.wait(), timeout=1)
         assert chunks_sent < total_chunks
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
+    async def test_tool_count_is_bounded_before_sdk_model_validation(
+        self, monkeypatch: pytest.MonkeyPatch, response_mode: str
+    ) -> None:
+        app = FastAPI()
+        sdk_materialized_catalog = False
+        original_model_validate = mcp_types.ListToolsResult.model_validate
+
+        def record_model_validation(
+            cls: type[mcp_types.ListToolsResult],
+            value: object,
+            *args: object,
+            **kwargs: object,
+        ) -> mcp_types.ListToolsResult:
+            nonlocal sdk_materialized_catalog
+            sdk_materialized_catalog = True
+            return original_model_validate(value, *args, **kwargs)
+
+        monkeypatch.setattr(
+            mcp_types.ListToolsResult,
+            "model_validate",
+            classmethod(record_model_validation),
+        )
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "count-test", "version": "1"},
+                        },
+                    },
+                    headers={"Mcp-Session-Id": "count-session"},
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                tools = [
+                    {
+                        "name": f"tool_{index}",
+                        "description": "small",
+                        "inputSchema": {"type": "object"},
+                    }
+                    for index in range(4)
+                ]
+                # JSON decoders retain the last duplicate object member. The
+                # guard must inspect that same result instead of accepting the
+                # earlier harmless-looking catalog.
+                body = (
+                    b'{"jsonrpc":"2.0","id":'
+                    + json.dumps(payload["id"]).encode()
+                    + b',"result":{"tools":[]},"result":{"tools":'
+                    + json.dumps(tools, separators=(",", ":")).encode()
+                    + b"}}"
+                )
+
+                if response_mode == "json":
+                    framed_body = body
+                    media_type = "application/json"
+                else:
+                    newline = b"\n" if response_mode == "sse_lf" else b"\r\n"
+                    framed_body = (
+                        b"event: message"
+                        + newline
+                        + b"data: "
+                        + body
+                        + newline
+                        + newline
+                    )
+                    media_type = "text/event-stream"
+
+                async def streamed_response() -> AsyncIterator[bytes]:
+                    midpoint = len(framed_body) // 2
+                    yield framed_body[:midpoint]
+                    yield framed_body[midpoint:]
+
+                return StreamingResponse(streamed_response(), media_type=media_type)
+            return Response(status_code=400)
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="count-test",
+                http_url=url,
+                tool_catalog_max_count=3,
+                tool_catalog_max_bytes=1024 * 1024,
+                tool_definition_max_bytes=1024,
+            )
+            async with MCPClient(server) as client:
+                with pytest.raises(
+                    MCPClientError, match="configured maximum of 3 definitions"
+                ):
+                    await client.list_tools()
+
+        assert sdk_materialized_catalog is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response_mode", ["json", "sse_lf", "sse_crlf"])
+    async def test_predecode_count_accepts_nested_and_escaped_tool_definitions(
+        self, response_mode: str
+    ) -> None:
+        app = FastAPI()
+
+        @app.post("/mcp")
+        async def mcp_endpoint(request: Request) -> Response:
+            payload = await request.json()
+            method = payload.get("method")
+            if method == "initialize":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "syntax-test", "version": "1"},
+                        },
+                    }
+                )
+            if method == "notifications/initialized":
+                return Response(status_code=202)
+            if method == "tools/list":
+                response_payload = {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "tools": [{"not": "the result catalog"}] * 8,
+                    "result": {
+                        "metadata": {"tools": [1, 2, 3, 4]},
+                        "tools": [
+                            {
+                                "name": f"tool_{index}",
+                                "description": 'escaped \\" quote ] }, comma,',
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "nested": {
+                                            "type": "array",
+                                            "items": {"type": "object"},
+                                        }
+                                    },
+                                },
+                            }
+                            for index in range(3)
+                        ],
+                    },
+                }
+                if response_mode == "json":
+                    return JSONResponse(response_payload)
+
+                body = json.dumps(response_payload, separators=(",", ":")).encode()
+                split_at = body.index(b'"tools":[') + len(b'"tools":[')
+                newline = b"\n" if response_mode == "sse_lf" else b"\r\n"
+                framed_body = (
+                    b"event: message"
+                    + newline
+                    + b"data: "
+                    + body[:split_at]
+                    + newline
+                    + b"data: "
+                    + body[split_at:]
+                    + newline
+                    + newline
+                )
+
+                async def streamed_response() -> AsyncIterator[bytes]:
+                    midpoint = len(framed_body) // 2
+                    yield framed_body[:midpoint]
+                    yield framed_body[midpoint:]
+
+                return StreamingResponse(
+                    streamed_response(), media_type="text/event-stream"
+                )
+            return Response(status_code=400)
+
+        async with _serve_test_app(app) as url:
+            server = MCPServer(
+                tenant_id=uuid4(),
+                name="syntax-test",
+                http_url=url,
+                tool_catalog_max_count=3,
+                tool_catalog_max_bytes=1024 * 1024,
+                tool_definition_max_bytes=1024,
+            )
+            async with MCPClient(server) as client:
+                tools = await client.list_tools()
+
+        assert [tool["name"] for tool in tools] == [
+            "tool_0",
+            "tool_1",
+            "tool_2",
+        ]
 
 
 class TestMCPToolCatalogPolicyValidation:

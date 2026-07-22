@@ -90,6 +90,7 @@ class MCPProxySession:
         self.auth_credentials_map = auth_credentials_map or {}
         self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
+        self._durable_session_requested = chat_session_id is not None
         self._mcp_server_tool_repo = mcp_server_tool_repo
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
@@ -321,6 +322,8 @@ class MCPProxySession:
     ) -> str | None:
         if assigned_id is None:
             return assigned_id
+        if not self._durable_session_requested:
+            return assigned_id
         if self._mcp_state_repo is None or self.chat_session_id is None:
             return None
 
@@ -376,7 +379,7 @@ class MCPProxySession:
                     if winner is None:
                         return []
                     if winner == assigned_id:
-                        session_is_durable = True
+                        session_is_durable = self._durable_session_requested
                         return live_tools
 
                     await client.terminate_protocol_session(assigned_id)
@@ -435,6 +438,21 @@ class MCPProxySession:
         if self._mcp_server_tool_repo is None or not live_tools:
             return True
 
+        approved_by_name = {tool.name: tool for tool in server.tools}
+        staging_candidates: list[dict[str, Any]] = []
+        for live_tool in live_tools:
+            approved = approved_by_name.get(live_tool["name"])
+            if approved is None or (
+                not approved.requires_approval
+                and approved.has_definition_drift(
+                    description=live_tool.get("description"),
+                    input_schema=live_tool.get("input_schema"),
+                )
+            ):
+                staging_candidates.append(live_tool)
+        if not staging_candidates:
+            return True
+
         observations = [
             MCPServerTool.pending_discovery(
                 mcp_server_id=server.id,
@@ -443,7 +461,7 @@ class MCPProxySession:
                 description=live_tool.get("description"),
                 input_schema=live_tool.get("input_schema"),
             )
-            for live_tool in live_tools
+            for live_tool in staging_candidates
         ]
         try:
             staged = await self._mcp_server_tool_repo.stage_observed(observations)
@@ -1029,6 +1047,17 @@ class MCPProxySession:
         # task's current cancel scope" and silently leaks the underlying
         # HTTP read/write TaskGroup children.
         for server_id, client in reversed(self._clients.items()):
+            assigned_id = client.assigned_mcp_session_id
+            if not self._durable_session_requested and assigned_id is not None:
+                try:
+                    await client.terminate_protocol_session(assigned_id)
+                except Exception as exc:
+                    logger.warning(
+                        "[MCPProxy] Failed to terminate ephemeral protocol "
+                        "session for '%s': %s",
+                        server_id,
+                        exc,
+                    )
             try:
                 await client.disconnect()
             except Exception as e:

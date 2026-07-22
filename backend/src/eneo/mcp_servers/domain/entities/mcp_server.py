@@ -83,6 +83,15 @@ class MCPServerTool(Entity):
             requires_approval=True,
         )
 
+    def has_definition_drift(
+        self,
+        *,
+        description: str | None,
+        input_schema: dict[str, Any] | None,
+    ) -> bool:
+        """Return whether a live contract differs from the approved contract."""
+        return self.description != description or self.input_schema != input_schema
+
 
 class MCPServer(Entity):
     """Domain entity for MCP server (tenant-scoped, HTTP-only)."""

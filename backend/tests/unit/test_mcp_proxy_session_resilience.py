@@ -410,6 +410,41 @@ async def test_identity_scoped_catalog_is_intersected_with_each_users_live_tools
 
 
 @pytest.mark.asyncio
+async def test_stable_approved_catalog_skips_runtime_staging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = _make_identity_scoped_server()
+    _install_fake_client(
+        monkeypatch,
+        live_tools_by_user={
+            "ordinary": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                }
+                for tool in server.tools
+            ]
+        },
+    )
+    tool_repo = _InMemoryToolRepo(server.tools)
+    proxy = MCPProxySession(
+        [server],
+        identity_headers={"X-Eneo-User-Id": "ordinary"},
+        mcp_server_tool_repo=tool_repo,
+    )
+
+    await proxy.prepare_tools_for_context()
+
+    assert tool_repo.batch_observation_count == 0
+    assert proxy.get_allowed_tool_names() == {
+        "identity-server__admin_only",
+        "identity-server__ordinary_only",
+        "identity-server__shared",
+    }
+
+
+@pytest.mark.asyncio
 async def test_user_only_tool_is_staged_then_requires_admin_approval_before_exposure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -745,6 +780,84 @@ async def test_identity_discovery_and_tool_calls_resume_one_protocol_session(
         "protocol-1": {"admin_only", "shared"}
     }
     assert _StatefulMCPClient.terminated_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_global_session_executes_and_terminates_assigned_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    proxy = MCPProxySession([_make_server()])
+
+    [result] = await proxy.call_tools_parallel([("server__tool", {})])
+
+    assert result["is_error"] is False
+    assert set(_StatefulMCPClient.protocol_sessions) == {"protocol-1"}
+
+    await proxy.close()
+
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+    assert _StatefulMCPClient.instances[0].disconnect_task is not None
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_identity_session_exposes_calls_and_terminates_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    server = _make_identity_scoped_server()
+    proxy = MCPProxySession([server], identity_headers={"X-Eneo-User-Id": "ordinary"})
+
+    await proxy.prepare_tools_for_context()
+
+    assert proxy.get_allowed_tool_names() == {"identity-server__shared"}
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+
+    [result] = await proxy.call_tools_parallel([("identity-server__shared", {})])
+
+    assert result["is_error"] is False
+    assert set(_StatefulMCPClient.protocol_sessions) == {"protocol-2"}
+
+    await proxy.close()
+
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == [
+        "protocol-1",
+        "protocol-2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_close_disconnects_when_termination_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    _StatefulMCPClient.fail_termination = True
+    proxy = MCPProxySession([_make_server()])
+
+    [result] = await proxy.call_tools_parallel([("server__tool", {})])
+    await proxy.close()
+
+    assert result["is_error"] is False
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+    assert _StatefulMCPClient.instances[0].disconnect_task is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_call_fails_closed_when_durable_session_has_no_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stateful_client(monkeypatch)
+    proxy = MCPProxySession([_make_server()], chat_session_id=uuid4())
+
+    [result] = await proxy.call_tools_parallel([("server__tool", {})])
+
+    assert result["is_error"] is True
+    assert _StatefulMCPClient.protocol_sessions == {}
+    assert _StatefulMCPClient.terminated_session_ids == ["protocol-1"]
+    assert _StatefulMCPClient.instances[0].disconnect_task is not None
 
 
 @pytest.mark.asyncio

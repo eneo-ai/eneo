@@ -50,6 +50,159 @@ class _SessionIdTransport(Protocol):
     session_id: str | None
 
 
+def _skip_json_whitespace(data: bytes | bytearray | memoryview, offset: int) -> int:
+    while offset < len(data) and data[offset] in b" \t\r\n":
+        offset += 1
+    return offset
+
+
+def _skip_json_string(data: bytes | bytearray | memoryview, offset: int) -> int:
+    if offset >= len(data) or data[offset] != ord('"'):
+        return offset
+    offset += 1
+    while offset < len(data):
+        current = data[offset]
+        if current == ord("\\"):
+            offset += 2
+            continue
+        offset += 1
+        if current == ord('"'):
+            return offset
+    return offset
+
+
+def _skip_json_value(data: bytes | bytearray | memoryview, offset: int) -> int:
+    offset = _skip_json_whitespace(data, offset)
+    if offset >= len(data):
+        return offset
+    if data[offset] == ord('"'):
+        return _skip_json_string(data, offset)
+    if data[offset] not in (ord("{"), ord("[")):
+        while offset < len(data) and data[offset] not in b",]} \t\r\n":
+            offset += 1
+        return offset
+
+    depth = 0
+    while offset < len(data):
+        current = data[offset]
+        if current == ord('"'):
+            offset = _skip_json_string(data, offset)
+            continue
+        if current in (ord("{"), ord("[")):
+            depth += 1
+        elif current in (ord("}"), ord("]")):
+            depth -= 1
+            if depth == 0:
+                return offset + 1
+        offset += 1
+    return offset
+
+
+def _json_key_matches(
+    data: bytes | bytearray | memoryview,
+    start: int,
+    end: int,
+    expected: str,
+) -> bool:
+    # Any ASCII key spelling equal to ``expected`` needs at most one six-byte
+    # Unicode escape per character. Refuse larger keys without allocating.
+    if end - start > 2 + (6 * len(expected)):
+        return False
+    try:
+        decoded = json.loads(bytes(data[start:end]))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return decoded == expected
+
+
+def _find_json_object_member(
+    data: bytes | bytearray | memoryview,
+    object_start: int,
+    member_name: str,
+) -> int | None:
+    if object_start >= len(data) or data[object_start] != ord("{"):
+        return None
+    offset = object_start + 1
+    matched_value_start: int | None = None
+    while True:
+        offset = _skip_json_whitespace(data, offset)
+        if offset >= len(data) or data[offset] == ord("}"):
+            return matched_value_start
+        if data[offset] != ord('"'):
+            return None
+        key_start = offset
+        key_end = _skip_json_string(data, offset)
+        offset = _skip_json_whitespace(data, key_end)
+        if offset >= len(data) or data[offset] != ord(":"):
+            return None
+        value_start = _skip_json_whitespace(data, offset + 1)
+        if _json_key_matches(data, key_start, key_end, member_name):
+            # JSON decoders retain the last duplicate object member. Keep
+            # scanning so the pre-decode guard applies to the same value.
+            matched_value_start = value_start
+        offset = _skip_json_whitespace(data, _skip_json_value(data, value_start))
+        if offset >= len(data) or data[offset] == ord("}"):
+            return matched_value_start
+        if data[offset] != ord(","):
+            return None
+        offset += 1
+
+
+def _tools_list_exceeds_max_count(
+    data: bytes | bytearray | memoryview, max_count: int
+) -> bool:
+    """Count direct ``result.tools`` elements without decoding definitions."""
+    root_start = _skip_json_whitespace(data, 0)
+    result_start = _find_json_object_member(data, root_start, "result")
+    if result_start is None:
+        return False
+    tools_start = _find_json_object_member(data, result_start, "tools")
+    if tools_start is None or data[tools_start] != ord("["):
+        return False
+
+    offset = _skip_json_whitespace(data, tools_start + 1)
+    if offset < len(data) and data[offset] == ord("]"):
+        return False
+    count = 0
+    while offset < len(data):
+        count += 1
+        if count > max_count:
+            return True
+        offset = _skip_json_whitespace(data, _skip_json_value(data, offset))
+        if offset >= len(data) or data[offset] == ord("]"):
+            return False
+        if data[offset] != ord(","):
+            return False
+        offset = _skip_json_whitespace(data, offset + 1)
+    return False
+
+
+def _extract_sse_data(buffer: bytearray, event_end: int) -> bytearray | None:
+    """Extract one complete SSE event's joined data fields."""
+    read_offset = 0
+    data = bytearray()
+    found_data = False
+    while read_offset < event_end:
+        line_end = buffer.find(b"\n", read_offset, event_end)
+        if line_end < 0:
+            line_end = event_end
+        content_end = (
+            line_end - 1
+            if line_end > read_offset and buffer[line_end - 1] == ord("\r")
+            else line_end
+        )
+        if buffer.startswith(b"data:", read_offset, content_end):
+            value_start = read_offset + len(b"data:")
+            if value_start < content_end and buffer[value_start] == ord(" "):
+                value_start += 1
+            if found_data:
+                data.append(ord("\n"))
+            data.extend(memoryview(buffer)[value_start:content_end])
+            found_data = True
+        read_offset = line_end + 1
+    return data if found_data else None
+
+
 class _BoundedToolListStream(httpx.AsyncByteStream):
     """Stop a tools/list body before the MCP SDK can decode an unsafe payload."""
 
@@ -58,21 +211,24 @@ class _BoundedToolListStream(httpx.AsyncByteStream):
         stream: httpx.AsyncByteStream,
         *,
         max_bytes: int,
+        max_count: int,
         request_id: object,
         content_type: str,
         reject_immediately: bool = False,
     ) -> None:
         self._stream = stream
         self._max_bytes = max_bytes
+        self._max_count = max_count
         self._request_id = request_id
         self._is_sse = content_type.lower().startswith("text/event-stream")
         self._reject_immediately = reject_immediately
 
-    def _error_response(self) -> bytes:
-        message = (
-            "MCP tools/list wire response exceeds the configured "
-            f"maximum of {self._max_bytes} bytes"
-        )
+    def _error_response(self, message: str | None = None) -> bytes:
+        if message is None:
+            message = (
+                "MCP tools/list wire response exceeds the configured "
+                f"maximum of {self._max_bytes} bytes"
+            )
         payload = json.dumps(
             {
                 "jsonrpc": "2.0",
@@ -118,10 +274,28 @@ class _BoundedToolListStream(httpx.AsyncByteStream):
                         break
                     delimiter, delimiter_size = min(candidates)
                     event_end = delimiter + delimiter_size
-                    yield bytes(buffered[:event_end])
+                    event_data = _extract_sse_data(buffered, event_end)
+                    if event_data is not None and _tools_list_exceeds_max_count(
+                        event_data, self._max_count
+                    ):
+                        await self._stream.aclose()
+                        yield self._error_response(
+                            "MCP tool catalog exceeds the configured maximum of "
+                            f"{self._max_count} definitions"
+                        )
+                        return
+                    yield bytes(memoryview(buffered)[:event_end])
                     del buffered[:event_end]
 
         if buffered:
+            if not self._is_sse and _tools_list_exceeds_max_count(
+                buffered, self._max_count
+            ):
+                yield self._error_response(
+                    "MCP tool catalog exceeds the configured maximum of "
+                    f"{self._max_count} definitions"
+                )
+                return
             yield bytes(buffered)
 
     async def aclose(self) -> None:
@@ -139,7 +313,7 @@ def _json_rpc_request_payload(request: httpx.Request) -> dict[str, object] | Non
 
 
 async def _bound_tools_list_response(
-    response: httpx.Response, *, max_bytes: int
+    response: httpx.Response, *, max_bytes: int, max_count: int
 ) -> None:
     """Install a streaming ceiling on tools/list responses, with or without CL."""
     request_payload = _json_rpc_request_payload(response.request)
@@ -171,6 +345,7 @@ async def _bound_tools_list_response(
         response.stream = _BoundedToolListStream(
             response.stream,
             max_bytes=max_bytes,
+            max_count=max_count,
             request_id=request_payload.get("id"),
             content_type=response.headers.get("content-type", "application/json"),
             reject_immediately=reject_immediately,
@@ -239,6 +414,7 @@ async def _open_streamable_http_client(
     headers: dict[str, str],
     timeout_seconds: float,
     terminate_on_close: bool,
+    tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=MCP_SSE_READ_TIMEOUT_SECONDS)
@@ -252,7 +428,11 @@ async def _open_streamable_http_client(
         # budget. The fixed allowance covers JSON-RPC and SSE framing.
 
         async def bound_tools_list(response: httpx.Response) -> None:
-            await _bound_tools_list_response(response, max_bytes=wire_max_bytes)
+            await _bound_tools_list_response(
+                response,
+                max_bytes=wire_max_bytes,
+                max_count=tool_catalog_max_count,
+            )
 
         http_client.event_hooks["response"].append(bound_tools_list)
         async with streamable_http_client(
@@ -575,6 +755,7 @@ class MCPClient:
             headers=headers,
             timeout_seconds=float(self.timeout),
             terminate_on_close=False,
+            tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
         )
 
@@ -962,12 +1143,14 @@ class MCPClient:
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
 
     async def terminate_protocol_session(self, mcp_session_id: str) -> None:
-        """Terminate a persisted server-side MCP session.
+        """Terminate a server-side MCP protocol session.
 
         Transport teardown keeps protocol sessions alive so later chat turns
         can resume them. Conversation deletion must therefore explicitly send
-        HTTP DELETE with the persisted ``Mcp-Session-Id``. HTTP 404 is treated
-        as idempotent success because the server has already forgotten it.
+        HTTP DELETE with the persisted ``Mcp-Session-Id``. One-shot proxy
+        lifecycles use the same operation for their ephemeral assigned IDs.
+        HTTP 404 is treated as idempotent success because the server has
+        already forgotten it.
         """
         headers = await self._build_auth_headers()
         headers["Mcp-Session-Id"] = mcp_session_id

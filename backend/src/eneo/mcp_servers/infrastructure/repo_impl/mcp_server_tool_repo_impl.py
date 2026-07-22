@@ -187,9 +187,9 @@ class MCPServerToolRepoImpl(
                 continue
             if existing.requires_approval:
                 continue
-            if (
-                existing.description == observed.pending_description
-                and existing.input_schema == observed.pending_input_schema
+            if not existing.has_definition_drift(
+                description=observed.pending_description,
+                input_schema=observed.pending_input_schema,
             ):
                 continue
             existing.pending_description = observed.pending_description
