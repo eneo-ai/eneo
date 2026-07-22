@@ -11144,7 +11144,8 @@ export interface components {
       | 9039
       | 9040
       | 9041
-      | 9042;
+      | 9042
+      | 9043;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15715,6 +15716,14 @@ export interface components {
       restored_from_revision_id: string;
       /** Restored From Revision Number */
       restored_from_revision_number: number;
+    };
+    /** SkillRevisionRestoreRequest */
+    SkillRevisionRestoreRequest: {
+      /**
+       * Reviewed Current Revision Id
+       * Format: uuid
+       */
+      reviewed_current_revision_id: string;
     };
     /** SkillRevisionSummaryPublic */
     SkillRevisionSummaryPublic: {
@@ -38415,7 +38424,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRevisionRestoreRequest"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -38437,6 +38450,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

@@ -142,7 +142,8 @@ test("restore copies a selected revision through its scoped action route", async
   const result = await skills.restoreRevision({
     spaceId: "space-1",
     skillId: "skill-1",
-    sourceRevisionId: "revision-2"
+    sourceRevisionId: "revision-2",
+    reviewed_current_revision_id: "revision-3"
   });
 
   assert.equal(result, outcome);
@@ -157,6 +158,11 @@ test("restore copies a selected revision through its scoped action route", async
             space_id: "space-1",
             skill_id: "skill-1",
             source_revision_id: "revision-2"
+          }
+        },
+        requestBody: {
+          "application/json": {
+            reviewed_current_revision_id: "revision-3"
           }
         }
       }

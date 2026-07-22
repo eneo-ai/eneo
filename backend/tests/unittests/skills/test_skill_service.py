@@ -391,11 +391,13 @@ async def test_editor_restores_exact_historical_content_as_a_new_revision():
     repo.get_revision.return_value = source
     repo.create_revision.return_value = change
     service = _service(space=space, repo=repo)
+    reviewed_current_revision_id = uuid4()
 
     outcome = await service.restore_revision(
         space_id=space.id,
         skill_id=skill.id,
         source_revision_id=source.id,
+        reviewed_current_revision_id=reviewed_current_revision_id,
     )
 
     assert outcome.skill is skill
@@ -412,6 +414,7 @@ async def test_editor_restores_exact_historical_content_as_a_new_revision():
         instructions=source.instructions,
         content_digest=source.content_digest,
         created_by_user_id=service.user.id,
+        expected_current_revision_id=reviewed_current_revision_id,
     )
 
 
@@ -427,6 +430,7 @@ async def test_restore_rejects_a_different_space_before_reading_the_source():
             space_id=uuid4(),
             skill_id=skill.id,
             source_revision_id=uuid4(),
+            reviewed_current_revision_id=uuid4(),
         )
 
     repo.get_revision.assert_not_awaited()
@@ -449,6 +453,7 @@ async def test_reader_cannot_restore_a_skill_revision():
             space_id=space.id,
             skill_id=skill.id,
             source_revision_id=uuid4(),
+            reviewed_current_revision_id=uuid4(),
         )
 
     repo.get_revision.assert_not_awaited()
@@ -468,6 +473,7 @@ async def test_missing_or_cross_skill_restore_source_is_not_found():
             space_id=space.id,
             skill_id=skill.id,
             source_revision_id=uuid4(),
+            reviewed_current_revision_id=uuid4(),
         )
 
     repo.create_revision.assert_not_awaited()

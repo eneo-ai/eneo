@@ -702,7 +702,7 @@ async def test_restore_appends_history_without_repointing_existing_bindings(
             description="Second revision description",
             instructions="Second revision instructions",
         )
-        await service.create_revision(
+        third = await service.create_revision(
             skill_id=resources.first_skill_id,
             display_name="Third revision",
             description="Third revision description",
@@ -718,6 +718,7 @@ async def test_restore_appends_history_without_repointing_existing_bindings(
             space_id=resources.space_id,
             skill_id=resources.first_skill_id,
             source_revision_id=second.revision.id,
+            reviewed_current_revision_id=third.revision.id,
         )
         first_page = await service.list_revision_summaries(
             space_id=resources.space_id,

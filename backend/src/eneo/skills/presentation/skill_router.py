@@ -27,6 +27,7 @@ from eneo.skills.presentation.skill_models import (
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
+    SkillRevisionRestoreRequest,
     SkillRevisionSummaryPublic,
     SkillSparse,
 )
@@ -280,18 +281,20 @@ async def create_skill_revision(
         "Copy an immutable historical revision into the next revision. Existing "
         "revision-pinned bindings are unchanged."
     ),
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def restore_skill_revision(
     space_id: UUID,
     skill_id: UUID,
     source_revision_id: UUID,
+    payload: SkillRevisionRestoreRequest,
     container: _ContainerWithUser,
 ) -> SkillRevisionRestorePublic:
     outcome = await container.skill_service().restore_revision(
         space_id=space_id,
         skill_id=skill_id,
         source_revision_id=source_revision_id,
+        reviewed_current_revision_id=payload.reviewed_current_revision_id,
     )
     source = outcome.source_revision
     change = outcome.change

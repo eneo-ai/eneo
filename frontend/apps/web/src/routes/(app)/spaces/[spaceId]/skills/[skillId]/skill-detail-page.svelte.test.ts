@@ -1,9 +1,4 @@
-import type {
-  SkillPublic,
-  SkillRevisionPublic,
-  SkillRevisionRestorePublic,
-  SkillRevisionSummaryPage
-} from "@eneo/eneo-js";
+import type { SkillPublic, SkillRevisionPublic, SkillRevisionSummaryPage } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -85,16 +80,16 @@ describe("Skill detail page", () => {
     invalidate.mockClear();
   });
 
-  test("refreshes when restore reports a concurrent newer current revision", async () => {
+  test("keeps dirty form content and reloads the comparison after a restore conflict", async () => {
     const visibleCurrent = revision(2);
     const historical = revision(1);
     const newerCurrent = revision(3);
-    const outcome: SkillRevisionRestorePublic = {
-      revision: newerCurrent,
-      created: false,
-      restored_from_revision_id: historical.id,
-      restored_from_revision_number: historical.revision_number
-    };
+    const restoreRevision = vi.fn().mockRejectedValue(
+      Object.assign(new Error("The Skill changed after you reviewed it."), {
+        status: 409
+      })
+    );
+    const get = vi.fn(async () => skill(newerCurrent));
 
     render(SkillDetailPage, {
       data: {
@@ -109,14 +104,18 @@ describe("Skill detail page", () => {
         eneo: {
           skills: {
             createRevision: vi.fn(),
+            get,
             getRevision: vi.fn(async () => historical),
             listRevisionSummaries: vi.fn(),
-            restoreRevision: vi.fn(async () => outcome),
+            restoreRevision,
             setActive: vi.fn()
           }
         }
       } as never
     });
+
+    const nameInput = page.getByLabelText(m.skills_display_name_label());
+    await nameInput.fill("Unsaved editor draft");
 
     await page
       .getByRole("button", {
@@ -128,6 +127,18 @@ describe("Skill detail page", () => {
       .click();
     await page.getByRole("button", { name: m.skills_library_restore_action() }).click();
 
-    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));
+    await vi.waitFor(() =>
+      expect(restoreRevision).toHaveBeenCalledWith({
+        spaceId: "space-1",
+        skillId: "skill-1",
+        sourceRevisionId: historical.id,
+        reviewed_current_revision_id: visibleCurrent.id
+      })
+    );
+    await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+    await expect.element(nameInput).toHaveValue("Unsaved editor draft");
+    await expect.element(page.getByText(newerCurrent.instructions)).toBeVisible();
+    await expect.element(page.getByText(historical.instructions)).toBeVisible();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });

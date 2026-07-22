@@ -3248,6 +3248,7 @@
   "skills_library_restore_success": "Revision {sourceRevision} was restored as revision {newRevision}.",
   "skills_library_restore_noop": "The selected revision already matches the current content. No new revision was created.",
   "skills_library_restore_refresh_error": "The revision was restored, but the latest history could not be loaded. Reload the page.",
+  "eneo_error_9043": "This Skill changed after you reviewed it. Compare the latest revision before restoring again.",
   "skills_library_load_older": "Load older revisions",
   "skills_library_loading_older": "Loading revisions…",
   "skills_library_load_older_error": "Older revisions could not be loaded.",

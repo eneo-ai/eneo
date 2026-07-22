@@ -26,6 +26,7 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionConflictError,
     SkillRevisionSummary,
     SkillStatusChange,
 )
@@ -302,6 +303,7 @@ class SkillRepoImpl:
         instructions: str,
         content_digest: str,
         created_by_user_id: UUID,
+        expected_current_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None:
         skill_row = await self.session.scalar(
             sa.select(Skills).where(Skills.id == skill_id).with_for_update()
@@ -316,6 +318,11 @@ class SkillRepoImpl:
         )
         if current_row is None:
             raise RuntimeError("Skill current revision is missing")
+        if (
+            expected_current_revision_id is not None
+            and current_row.id != expected_current_revision_id
+        ):
+            raise SkillRevisionConflictError
         previous_revision_number = current_row.revision_number
         if (
             current_row.display_name == display_name

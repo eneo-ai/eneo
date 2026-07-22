@@ -435,7 +435,17 @@ async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies
         space_id=skill.space_id,
         skill_id=skill.id,
         source_revision_id=source.id,
+        payload=skill_models.SkillRevisionRestoreRequest(
+            reviewed_current_revision_id=skill.current_revision.id
+        ),
         container=container,
+    )
+
+    service.restore_revision.assert_awaited_once_with(
+        space_id=skill.space_id,
+        skill_id=skill.id,
+        source_revision_id=source.id,
+        reviewed_current_revision_id=skill.current_revision.id,
     )
 
     assert response.created is True
@@ -477,6 +487,9 @@ async def test_restore_noop_does_not_emit_a_restored_audit_event():
         space_id=skill.space_id,
         skill_id=skill.id,
         source_revision_id=skill.current_revision.id,
+        payload=skill_models.SkillRevisionRestoreRequest(
+            reviewed_current_revision_id=skill.current_revision.id
+        ),
         container=container,
     )
 

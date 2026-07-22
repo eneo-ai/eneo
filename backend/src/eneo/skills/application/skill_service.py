@@ -9,6 +9,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
+    SkillRevisionConflictException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission, validate_permission
@@ -25,6 +26,7 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillRevision,
     SkillRevisionChange,
+    SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillStatusChange,
@@ -269,6 +271,7 @@ class SkillService:
         space_id: UUID,
         skill_id: UUID,
         source_revision_id: UUID,
+        reviewed_current_revision_id: UUID,
     ) -> SkillRevisionRestore:
         skill = await self.get_skill(skill_id=skill_id)
         if skill.space_id != space_id:
@@ -285,14 +288,21 @@ class SkillService:
         )
         if source_revision is None:
             raise NotFoundException()
-        change = await self.repo.create_revision(
-            skill_id=skill.id,
-            display_name=source_revision.display_name,
-            description=source_revision.description,
-            instructions=source_revision.instructions,
-            content_digest=source_revision.content_digest,
-            created_by_user_id=self.user.id,
-        )
+        try:
+            change = await self.repo.create_revision(
+                skill_id=skill.id,
+                display_name=source_revision.display_name,
+                description=source_revision.description,
+                instructions=source_revision.instructions,
+                content_digest=source_revision.content_digest,
+                created_by_user_id=self.user.id,
+                expected_current_revision_id=reviewed_current_revision_id,
+            )
+        except SkillRevisionConflictError as error:
+            raise SkillRevisionConflictException(
+                "This Skill changed after you reviewed it. Compare the latest "
+                "revision before restoring again."
+            ) from error
         if change is None:
             raise NotFoundException()
         return SkillRevisionRestore(

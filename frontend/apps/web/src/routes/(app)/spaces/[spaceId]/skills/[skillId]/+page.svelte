@@ -58,12 +58,21 @@
     });
   }
 
-  async function restoreRevision(sourceRevisionId: string) {
+  async function restoreRevision(sourceRevisionId: string, reviewedCurrentRevisionId: string) {
     return data.eneo.skills.restoreRevision({
       spaceId: data.currentSpace.id,
       skillId: data.skill.id,
-      sourceRevisionId
+      sourceRevisionId,
+      reviewed_current_revision_id: reviewedCurrentRevisionId
     });
+  }
+
+  async function loadCurrentRevision() {
+    const skill = await data.eneo.skills.get({
+      spaceId: data.currentSpace.id,
+      skillId: data.skill.id
+    });
+    return skill.current_revision;
   }
 
   async function refreshAfterRestore() {
@@ -228,6 +237,7 @@
             onLoadMore={loadMoreRevisions}
             onView={getRevision}
             onRestore={restoreRevision}
+            onLoadCurrent={loadCurrentRevision}
             onAnnounce={announceRestore}
             onRestored={refreshAfterRestore}
           />

@@ -24,6 +24,10 @@ class SkillRevisionCreateRequest(SkillContentInput):
     pass
 
 
+class SkillRevisionRestoreRequest(BaseModel):
+    reviewed_current_revision_id: UUID
+
+
 class SkillActiveUpdateRequest(BaseModel):
     is_active: bool
 

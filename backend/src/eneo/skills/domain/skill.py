@@ -180,6 +180,10 @@ class SkillHasActiveAppRunsError(Exception):
     pass
 
 
+class SkillRevisionConflictError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class SkillBindingReference:
     skill_id: UUID

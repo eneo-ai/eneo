@@ -110,11 +110,11 @@ export function initSkills(client) {
     /**
      * Copy one historical revision into the next immutable revision.
      * Existing revision-pinned bindings remain unchanged.
-     * @param {{spaceId: string, skillId: string, sourceRevisionId: string}} params
+     * @param {{spaceId: string, skillId: string} & {sourceRevisionId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/">} params
      * @returns {Promise<SkillRevisionRestorePublic>}
      * @throws {EneoError}
      */
-    restoreRevision: async ({ spaceId, skillId, sourceRevisionId }) => {
+    restoreRevision: async ({ spaceId, skillId, sourceRevisionId, ...restore }) => {
       return await client.fetch(
         "/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{source_revision_id}/restore/",
         {
@@ -125,7 +125,8 @@ export function initSkills(client) {
               skill_id: skillId,
               source_revision_id: sourceRevisionId
             }
-          }
+          },
+          requestBody: { "application/json": restore }
         }
       );
     },

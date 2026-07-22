@@ -25,7 +25,11 @@
     hasUnsavedChanges: boolean;
     onLoadMore: (cursor: string) => Promise<SkillRevisionSummaryPage>;
     onView: (revisionId: string) => Promise<SkillRevisionPublic>;
-    onRestore: (revisionId: string) => Promise<SkillRevisionRestorePublic>;
+    onRestore: (
+      revisionId: string,
+      reviewedCurrentRevisionId: string
+    ) => Promise<SkillRevisionRestorePublic>;
+    onLoadCurrent: () => Promise<SkillRevisionPublic>;
     onAnnounce?: (message: string) => Promise<void> | void;
     onRestored?: (outcome: SkillRevisionRestorePublic) => Promise<void>;
   };
@@ -38,11 +42,13 @@
     onLoadMore,
     onView,
     onRestore,
+    onLoadCurrent,
     onAnnounce,
     onRestored
   }: Props = $props();
 
   let revisions = $state(untrack(() => [...initialPage.items]));
+  let comparisonCurrentRevision = $state(untrack(() => currentRevision));
   let nextCursor = $state(untrack(() => initialPage.next_cursor ?? null));
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
@@ -72,11 +78,25 @@
     restoreError = null;
   }
 
+  function isConflict(error: unknown): error is { status: number } {
+    return typeof error === "object" && error !== null && "status" in error && error.status === 409;
+  }
+
+  function asSummary(revision: SkillRevisionPublic): SkillRevisionSummaryPublic {
+    return {
+      id: revision.id,
+      skill_id: revision.skill_id,
+      revision_number: revision.revision_number,
+      display_name: revision.display_name,
+      created_at: revision.created_at
+    };
+  }
+
   async function viewRevision(revision: SkillRevisionSummaryPublic) {
     if (viewingRevisionId !== null) return;
     previewError = null;
-    if (revision.id === currentRevision.id) {
-      viewedRevision = currentRevision;
+    if (revision.id === comparisonCurrentRevision.id) {
+      viewedRevision = comparisonCurrentRevision;
       return;
     }
     viewingRevisionId = revision.id;
@@ -112,9 +132,23 @@
     restoreError = null;
     let outcome: SkillRevisionRestorePublic;
     try {
-      outcome = await onRestore(source.id);
+      outcome = await onRestore(source.id, comparisonCurrentRevision.id);
     } catch (error) {
       restoreError = getErrorMessage(error) || m.skills_library_restore_error();
+      if (isConflict(error)) {
+        try {
+          const latest = await onLoadCurrent();
+          comparisonCurrentRevision = latest;
+          revisions = [
+            asSummary(latest),
+            ...revisions.filter((revision) => revision.id !== latest.id)
+          ];
+          restoreTarget = null;
+          viewedRevision = source;
+        } catch (refreshError) {
+          restoreError = getErrorMessage(refreshError) || m.skills_library_restore_refresh_error();
+        }
+      }
       restoring = false;
       return;
     }
@@ -129,7 +163,7 @@
     restoreTarget = null;
     restoring = false;
     await tick();
-    if (outcome.created || outcome.revision.id !== currentRevision.id) {
+    if (outcome.created || outcome.revision.id !== comparisonCurrentRevision.id) {
       try {
         await onRestored?.(outcome);
       } catch {
@@ -191,7 +225,7 @@
     </Table.Header>
     <Table.Body>
       {#each revisions as revision (revision.id)}
-        {@const isCurrent = revision.id === currentRevision.id}
+        {@const isCurrent = revision.id === comparisonCurrentRevision.id}
         <Table.Row>
           <Table.Cell>
             <div class="flex flex-wrap items-center gap-2">
@@ -263,7 +297,7 @@
   >
     <Dialog.Header>
       <Dialog.Title>
-        {viewedRevision?.id === currentRevision.id
+        {viewedRevision?.id === comparisonCurrentRevision.id
           ? m.skills_library_view_revision_title({
               revision: String(viewedRevision.revision_number)
             })
@@ -271,22 +305,34 @@
               revision: String(viewedRevision?.revision_number ?? "")
             })}
       </Dialog.Title>
-      {#if viewedRevision?.id !== currentRevision.id}
+      {#if viewedRevision?.id !== comparisonCurrentRevision.id}
         <Dialog.Description>{m.skills_library_compare_revision_description()}</Dialog.Description>
       {/if}
     </Dialog.Header>
+    {#if restoreError}
+      <Alert.Root variant="destructive">
+        <Alert.Title>{m.skills_library_restore_error()}</Alert.Title>
+        <Alert.Description>{restoreError}</Alert.Description>
+      </Alert.Root>
+      {#if hasUnsavedChanges}
+        <Alert.Root>
+          <Alert.Title>{m.skills_library_restore_unsaved_title()}</Alert.Title>
+          <Alert.Description>{m.skills_library_restore_unsaved_warning()}</Alert.Description>
+        </Alert.Root>
+      {/if}
+    {/if}
     {#if viewedRevision}
-      {#if viewedRevision.id === currentRevision.id}
+      {#if viewedRevision.id === comparisonCurrentRevision.id}
         {@render revisionPreview(viewedRevision, true)}
       {:else}
         <div class="grid gap-4 md:grid-cols-2">
           {@render revisionPreview(viewedRevision)}
-          {@render revisionPreview(currentRevision, true)}
+          {@render revisionPreview(comparisonCurrentRevision, true)}
         </div>
       {/if}
     {/if}
     <Dialog.Footer>
-      {#if canRestore && viewedRevision && viewedRevision.id !== currentRevision.id}
+      {#if canRestore && viewedRevision && viewedRevision.id !== comparisonCurrentRevision.id}
         <Button variant="outline" onclick={() => viewedRevision && requestRestore(viewedRevision)}>
           <RotateCcw aria-hidden="true" />
           {m.skills_library_restore_revision_from_preview()}

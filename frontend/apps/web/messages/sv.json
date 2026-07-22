@@ -3281,6 +3281,7 @@
   "skills_library_restore_success": "Revision {sourceRevision} återställdes som revision {newRevision}.",
   "skills_library_restore_noop": "Den valda revisionen har redan samma innehåll som den aktuella. Ingen ny revision skapades.",
   "skills_library_restore_refresh_error": "Revisionen återställdes, men den senaste historiken kunde inte läsas in. Ladda om sidan.",
+  "eneo_error_9043": "Skillen ändrades efter att du granskade den. Jämför den senaste revisionen innan du återställer igen.",
   "skills_library_load_older": "Visa äldre revisioner",
   "skills_library_loading_older": "Läser in revisioner…",
   "skills_library_load_older_error": "Äldre revisioner kunde inte läsas in.",

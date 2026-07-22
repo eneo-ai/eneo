@@ -61,7 +61,8 @@ describe("SkillRevisionHistory", () => {
       hasUnsavedChanges: false,
       onLoadMore: vi.fn(),
       onView,
-      onRestore: vi.fn()
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
     });
 
     await page
@@ -106,6 +107,7 @@ describe("SkillRevisionHistory", () => {
       onLoadMore: vi.fn(),
       onView,
       onRestore,
+      onLoadCurrent: vi.fn(async () => current),
       onAnnounce,
       onRestored
     });
@@ -128,7 +130,7 @@ describe("SkillRevisionHistory", () => {
     await expect.element(page.getByText(m.skills_library_restore_unsaved_warning())).toBeVisible();
     await page.getByRole("button", { name: m.skills_library_restore_action() }).click();
 
-    await vi.waitFor(() => expect(onRestore).toHaveBeenCalledWith(historical.id));
+    await vi.waitFor(() => expect(onRestore).toHaveBeenCalledWith(historical.id, current.id));
     await vi.waitFor(() =>
       expect(onAnnounce).toHaveBeenCalledWith(
         m.skills_library_restore_success({
@@ -160,6 +162,7 @@ describe("SkillRevisionHistory", () => {
       onLoadMore: vi.fn(),
       onView: vi.fn(async () => historical),
       onRestore: vi.fn(async () => outcome),
+      onLoadCurrent: vi.fn(async () => current),
       onAnnounce,
       onRestored
     });
@@ -200,6 +203,7 @@ describe("SkillRevisionHistory", () => {
       onLoadMore: vi.fn(),
       onView: vi.fn(async () => historical),
       onRestore: vi.fn(async () => outcome),
+      onLoadCurrent: vi.fn(async () => newerCurrent),
       onRestored
     });
 
@@ -229,7 +233,8 @@ describe("SkillRevisionHistory", () => {
       hasUnsavedChanges: false,
       onLoadMore,
       onView: vi.fn(),
-      onRestore: vi.fn()
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
     });
 
     await page.getByRole("button", { name: m.skills_library_load_older() }).click();
@@ -255,7 +260,8 @@ describe("SkillRevisionHistory", () => {
       hasUnsavedChanges: false,
       onLoadMore,
       onView: vi.fn(),
-      onRestore: vi.fn()
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
     });
 
     await page.getByRole("button", { name: m.skills_library_load_older() }).click();
@@ -277,7 +283,8 @@ describe("SkillRevisionHistory", () => {
       hasUnsavedChanges: false,
       onLoadMore: vi.fn(),
       onView: vi.fn(async () => historical),
-      onRestore: vi.fn().mockRejectedValue(new Error("Restore unavailable"))
+      onRestore: vi.fn().mockRejectedValue(new Error("Restore unavailable")),
+      onLoadCurrent: vi.fn(async () => current)
     });
 
     await page
@@ -300,6 +307,46 @@ describe("SkillRevisionHistory", () => {
       .toBeVisible();
   });
 
+  test("reloads the comparison after a restore conflict without discarding dirty edits", async () => {
+    const visibleCurrent = revision(2);
+    const historical = revision(1);
+    const latestCurrent = revision(3);
+    const conflict = Object.assign(new Error("The Skill changed after you reviewed it."), {
+      status: 409
+    });
+    const onRestore = vi.fn().mockRejectedValue(conflict);
+    const onLoadCurrent = vi.fn(async () => latestCurrent);
+
+    render(SkillRevisionHistory, {
+      currentRevision: visibleCurrent,
+      initialPage: revisionPage([summary(visibleCurrent), summary(historical)], null),
+      canRestore: true,
+      hasUnsavedChanges: true,
+      onLoadMore: vi.fn(),
+      onView: vi.fn(async () => historical),
+      onRestore,
+      onLoadCurrent
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.skills_library_view_revision_aria({ revision: "1" })
+      })
+      .click();
+    await page
+      .getByRole("button", { name: m.skills_library_restore_revision_from_preview() })
+      .click();
+    await page.getByRole("button", { name: m.skills_library_restore_action() }).click();
+
+    await vi.waitFor(() =>
+      expect(onRestore).toHaveBeenCalledWith(historical.id, visibleCurrent.id)
+    );
+    await vi.waitFor(() => expect(onLoadCurrent).toHaveBeenCalledOnce());
+    await expect.element(page.getByText(latestCurrent.instructions)).toBeVisible();
+    await expect.element(page.getByText(historical.instructions)).toBeVisible();
+    await expect.element(page.getByText(m.skills_library_restore_unsaved_warning())).toBeVisible();
+  });
+
   test("keeps history usable when one revision preview cannot be loaded", async () => {
     const current = revision(2);
     const historical = revision(1);
@@ -311,7 +358,8 @@ describe("SkillRevisionHistory", () => {
       hasUnsavedChanges: false,
       onLoadMore: vi.fn(),
       onView: vi.fn().mockRejectedValue(new Error("Preview unavailable")),
-      onRestore: vi.fn()
+      onRestore: vi.fn(),
+      onLoadCurrent: vi.fn(async () => current)
     });
 
     await page
