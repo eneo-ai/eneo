@@ -28,7 +28,7 @@ env:
   BACKEND_IMAGE_NAME: eneo-ai/eneo-backend
   FRONTEND_IMAGE_NAME: eneo-ai/eneo-frontend
   SEAWEEDFS_IMAGE_NAME: eneo-ai/eneo-seaweedfs
-  SEAWEEDFS_VERSION: 4.39-eneo.1
+  SEAWEEDFS_VERSION: 4.40-eneo.1
   BUILDX_VERSION: v0.33.0
   BUILDKIT_IMAGE: moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
   QEMU_IMAGE: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
@@ -289,6 +289,8 @@ jobs:
           persist-credentials: false
 
       - name: Verify pinned source, licenses, and reachable vulnerabilities
+        env:
+          GITHUB_API_TOKEN: ${{ github.token }}
         run: docker/seaweedfs/verify-supply-chain.sh source seaweedfs-source-evidence
 
       - name: Upload source policy evidence
@@ -355,7 +357,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: false
           sbom: false
-          build-args: SOURCE_DATE_EPOCH=1783656494
+          build-args: SOURCE_DATE_EPOCH=1784519823
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.SEAWEEDFS_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true
           cache-from: type=gha,scope=seaweedfs-${{ matrix.slug }}
           cache-to: type=gha,mode=max,scope=seaweedfs-${{ matrix.slug }}
@@ -379,7 +381,7 @@ jobs:
           provenance: false
           sbom: false
           no-cache: true
-          build-args: SOURCE_DATE_EPOCH=1783656494
+          build-args: SOURCE_DATE_EPOCH=1784519823
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.SEAWEEDFS_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true
 
       - name: Verify reproducible platform digest

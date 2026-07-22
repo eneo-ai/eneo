@@ -24,7 +24,7 @@ env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
   SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
-  SEAWEEDFS_VERSION: 4.39-eneo.1
+  SEAWEEDFS_VERSION: 4.40-eneo.1
   PLATFORM: linux/amd64
   PLATFORM_OS: linux
   PLATFORM_ARCH: amd64
