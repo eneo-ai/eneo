@@ -154,7 +154,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     )
     assert assistant.ask.await_args.kwargs["prompt_override"] is None
     assert (
-        session_service.create_question_placeholder.await_args.kwargs[
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
             "skill_provenance"
         ]
         is None
@@ -698,16 +698,19 @@ def _runtime_service(
 
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = effective_config
+    session = SessionInDB(
+        id=uuid4(),
+        name="hello",
+        user_id=TEST_USER.id,
+        questions=[],
+    )
     session_service = AsyncMock(
-        create_session=AsyncMock(
-            return_value=SessionInDB(
-                id=uuid4(),
-                name="hello",
-                user_id=TEST_USER.id,
-                questions=[],
-            )
-        ),
+        create_session=AsyncMock(return_value=session),
         create_question_placeholder=AsyncMock(return_value=uuid4()),
+        create_session_with_question_placeholder=AsyncMock(
+            return_value=(session, uuid4())
+        ),
+        get_session_by_uuid=AsyncMock(return_value=session),
     )
     service = _service_with_effective_config(effective_config_service)
     service.skill_service = skill_service
@@ -737,6 +740,31 @@ async def test_ordinary_assistant_uses_composed_prompt_and_persists_provenance()
         assistant.ask.await_args.kwargs["prompt_override"]
         == "Stored base\n\nSkill instructions"
     )
+    assert session_service.create_session_with_question_placeholder.await_args.kwargs[
+        "skill_provenance"
+    ] == (reference,)
+
+
+async def test_existing_session_persists_composed_skill_provenance():
+    reference = _skill_reference()
+    skill_service = AsyncMock()
+    skill_service.compose_for_assistant.return_value = SkillComposition(
+        prompt="Stored base\n\nSkill instructions",
+        provenance=(reference,),
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+    existing_session = session_service.get_session_by_uuid.return_value
+
+    await service.ask(
+        question="hello",
+        assistant_id=assistant.id,
+        session_id=existing_session.id,
+    )
+
+    session_service.create_session_with_question_placeholder.assert_not_awaited()
     assert session_service.create_question_placeholder.await_args.kwargs[
         "skill_provenance"
     ] == (reference,)
@@ -768,6 +796,7 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
         await service.ask(question="hello", assistant_id=assistant.id)
 
     session_service.create_session.assert_not_awaited()
+    session_service.create_session_with_question_placeholder.assert_not_awaited()
     session_service.create_question_placeholder.assert_not_awaited()
     assistant.ask.assert_not_awaited()
 
@@ -805,9 +834,11 @@ async def test_governance_skill_composes_after_enforced_prompt():
     assert prompt_override.startswith("Enforced tenant base\n\n")
     assert "Use the approved payroll rules." in prompt_override
     assert "Stored base" not in prompt_override
-    provenance = session_service.create_question_placeholder.await_args.kwargs[
-        "skill_provenance"
-    ]
+    provenance = (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "skill_provenance"
+        ]
+    )
     assert provenance[0].skill_revision_id == binding.skill_revision_id
 
 

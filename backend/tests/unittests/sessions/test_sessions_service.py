@@ -1,8 +1,10 @@
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+import eneo.sessions.session_service as session_service_module
 from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.sessions.session import SessionInDB, SessionUpdate
@@ -144,6 +146,7 @@ async def test_delete_terminates_remote_mcp_sessions_before_local_delete():
 
 async def test_question_placeholder_persists_selected_skill_revision(
     service: SessionService,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     reference = SkillExecutionReference(
         skill_id=uuid4(),
@@ -153,8 +156,30 @@ async def test_question_placeholder_persists_selected_skill_revision(
         position=0,
     )
     question_id = uuid4()
-    service.session_repo.session.in_transaction = MagicMock(return_value=True)
-    service.question_repo.add.return_value = MagicMock(id=question_id)
+    fresh_session = MagicMock()
+    fresh_question_repo = AsyncMock()
+    fresh_question_repo.add.return_value = MagicMock(id=question_id)
+
+    @asynccontextmanager
+    async def _fresh_session_scope():
+        yield fresh_session
+
+    @asynccontextmanager
+    async def _begin():
+        yield
+
+    fresh_session.begin.return_value = _begin()
+    monkeypatch.setattr(
+        session_service_module.sessionmanager,
+        "session",
+        _fresh_session_scope,
+    )
+    question_repo_factory = MagicMock(return_value=fresh_question_repo)
+    monkeypatch.setattr(
+        session_service_module,
+        "QuestionRepository",
+        question_repo_factory,
+    )
     session = SessionInDB(
         user_id=TEST_USER.id,
         name="test_session",
@@ -167,6 +192,7 @@ async def test_question_placeholder_persists_selected_skill_revision(
         skill_provenance=(reference,),
     )
 
-    question_add = service.question_repo.add.await_args.args[0]
+    question_repo_factory.assert_called_once_with(fresh_session)
+    question_add = fresh_question_repo.add.await_args.args[0]
     assert question_add.skill_provenance == [reference]
     assert result == question_id
