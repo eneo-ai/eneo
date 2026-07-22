@@ -3516,6 +3516,22 @@ def test_flow_api_guide_documents_closed_final_result_without_raw_run_payload() 
     assert "URLs, headers, credentials, or the sent" in guide
 
 
+def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_export = guide.split("#### Evidence export", maxsplit=1)[1].split(
+        "#### Service keys and evidence",
+        maxsplit=1,
+    )[0]
+
+    assert "`flow-evidence-export.v9`" in evidence_export
+    assert "`actor.type`" in evidence_export
+    assert "`user_id`" in evidence_export
+    assert "`key_id`" in evidence_export
+    assert "caller that performed the export" in evidence_export
+    assert "run owner" in evidence_export
+    assert "exported_by_user_id" not in evidence_export
+
+
 def test_flow_api_guide_documents_step_output_text_overflow() -> None:
     guide = _read(FLOW_API_GUIDE)
     integrating = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)

@@ -617,11 +617,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v8",
+  schema_version: "flow-evidence-export.v9",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v8",
+    schema_version: "flow-evidence-export.v9",
     app_version: "DEV",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
@@ -634,7 +634,10 @@ const validFlowEvidenceExport: FlowRunEvidenceExport = {
     trace_id: validFlowRun.trace_id,
     flow_id: flowId,
     flow_version: validFlowRun.flow_version,
-    exported_by_user_id: null,
+    actor: {
+      type: "service_key",
+      key_id: "00000000-0000-0000-0000-000000000040"
+    },
     export_reason: "support_debug",
     detail_mode: "redacted",
     redaction_applied: false,

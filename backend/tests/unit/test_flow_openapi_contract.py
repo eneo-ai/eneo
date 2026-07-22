@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 from fastapi.routing import APIRoute
@@ -386,6 +387,8 @@ REQUIRED_SCHEMAS = {
     "FlowRunRerunOperationPublic",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
+    "EvidenceExportUserActor",
+    "EvidenceExportServiceKeyActor",
     "FlowFinalOutputContractPublic",
     "FlowOutputDelivery",
     "FlowRuntimeUploadPolicyPublic",
@@ -3245,6 +3248,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         "run_id",
         "trace_id",
         "flow_id",
+        "actor",
         "export_reason",
         "detail_mode",
         "retention_state_summary",
@@ -3253,7 +3257,35 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v8"}
+    ) == {"flow-evidence-export.v9"}
+    assert "actor" in manifest.get("required", [])
+    assert "exported_by_user_id" not in manifest_properties
+    actor_schema = cast(dict[str, Any], manifest_properties["actor"])
+    assert actor_schema.get("discriminator", {}).get("propertyName") == "type"
+    actor_variants = cast(list[dict[str, Any]], actor_schema.get("oneOf", []))
+    assert len(actor_variants) == 2
+    resolved_actor_variants: list[dict[str, Any]] = [
+        _resolve_component_ref(openapi_spec, variant) for variant in actor_variants
+    ]
+    actor_variant_by_type: dict[str, dict[str, Any]] = {}
+    for variant in resolved_actor_variants:
+        type_values = _extract_enum_values(
+            openapi_spec,
+            variant.get("properties", {}).get("type", {}),
+        )
+        assert len(type_values) == 1
+        actor_variant_by_type[next(iter(type_values))] = variant
+    assert set(actor_variant_by_type) == {"user", "service_key"}
+    user_actor = actor_variant_by_type["user"]
+    service_key_actor = actor_variant_by_type["service_key"]
+    assert user_actor.get("additionalProperties") is False
+    assert set(user_actor.get("required", [])) == {"type", "user_id"}
+    _assert_required_uuid_property(user_actor, "user_id")
+    assert "key_id" not in user_actor.get("properties", {})
+    assert service_key_actor.get("additionalProperties") is False
+    assert set(service_key_actor.get("required", [])) == {"type", "key_id"}
+    _assert_required_uuid_property(service_key_actor, "key_id")
+    assert "user_id" not in service_key_actor.get("properties", {})
     assert _extract_enum_values(
         openapi_spec, manifest_properties["content_hash_input"]
     ) == {

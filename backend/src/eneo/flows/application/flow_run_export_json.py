@@ -204,7 +204,7 @@ def _build_manifest(
         trace_id=str(run["trace_id"]),
         flow_id=str(run["flow_id"]),
         flow_version=cast(int, run["flow_version"]),
-        exported_by_user_id=context.exported_by_user_id,
+        actor=context.actor,
         export_reason=context.export_reason,
         detail_mode=context.detail_mode,
         redaction_applied=redaction_applied,

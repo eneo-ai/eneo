@@ -12985,7 +12985,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v8";
+      schema_version: "flow-evidence-export.v9";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -13020,8 +13020,10 @@ export interface components {
       flow_id: string;
       /** Flow Version */
       flow_version: number;
-      /** Exported By User Id */
-      exported_by_user_id: string | null;
+      /** Actor */
+      actor:
+        | components["schemas"]["EvidenceExportUserActor"]
+        | components["schemas"]["EvidenceExportServiceKeyActor"];
       /** Export Reason */
       export_reason: string;
       /**
@@ -13038,6 +13040,19 @@ export interface components {
       retention_state_summary: components["schemas"]["EvidenceRetentionStateSummary"];
       artifact_availability_summary: components["schemas"]["EvidenceArtifactAvailabilitySummary"];
       review_checkpoint_summary: components["schemas"]["EvidenceReviewCheckpointSummary"];
+    };
+    /** EvidenceExportServiceKeyActor */
+    EvidenceExportServiceKeyActor: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "service_key";
+      /**
+       * Key Id
+       * Format: uuid
+       */
+      key_id: string;
     };
     /** EvidenceExportSummary */
     EvidenceExportSummary: {
@@ -13084,6 +13099,19 @@ export interface components {
       final_output: components["schemas"]["EvidenceFinalOutputSummary"];
       /** Step Overview */
       step_overview: components["schemas"]["EvidenceStepOverview"][];
+    };
+    /** EvidenceExportUserActor */
+    EvidenceExportUserActor: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "user";
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
     };
     /** EvidenceFinalOutputSummary */
     EvidenceFinalOutputSummary: {
@@ -16363,6 +16391,10 @@ export interface components {
      *       "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
+     *         "actor": {
+     *           "type": "user",
+     *           "user_id": "00000000-0000-0000-0000-000000000030"
+     *         },
      *         "app_version": "DEV",
      *         "artifact_availability_summary": {
      *           "artifact_count": 1,
@@ -16397,7 +16429,6 @@ export interface components {
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
      *         "exported_at": "2026-03-31T12:00:00Z",
-     *         "exported_by_user_id": "00000000-0000-0000-0000-000000000030",
      *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
      *         "flow_version": 3,
      *         "masked_fields_count": 2,
@@ -16430,7 +16461,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v8",
+     *         "schema_version": "flow-evidence-export.v9",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -16450,7 +16481,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v8",
+     *       "schema_version": "flow-evidence-export.v9",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -16768,7 +16799,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v8";
+      schema_version: "flow-evidence-export.v9";
       /**
        * Generated At
        * Format: date-time

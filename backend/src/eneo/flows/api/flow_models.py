@@ -1859,11 +1859,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v8",
+                "schema_version": "flow-evidence-export.v9",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v8",
+                    "schema_version": "flow-evidence-export.v9",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -1876,7 +1876,10 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
-                    "exported_by_user_id": "00000000-0000-0000-0000-000000000030",
+                    "actor": {
+                        "type": "user",
+                        "user_id": "00000000-0000-0000-0000-000000000030",
+                    },
                     "export_reason": "support_debug",
                     "detail_mode": "redacted",
                     "redaction_applied": True,
@@ -2236,7 +2239,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v8"]
+    schema_version: Literal["flow-evidence-export.v9"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

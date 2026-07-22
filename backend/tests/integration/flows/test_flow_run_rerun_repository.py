@@ -28,6 +28,7 @@ from eneo.flows.application.flow_run_evidence_bundle import (
 )
 from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceExportContext,
+    EvidenceExportUserActor,
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
@@ -1697,6 +1698,10 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             context=EvidenceExportContext(
                 detail_mode="raw",
                 export_reason="rerun-superseded-evidence-test",
+                actor=EvidenceExportUserActor(
+                    type="user",
+                    user_id=UUID("00000000-0000-0000-0000-000000000030"),
+                ),
             ),
         )
         redacted_export = render_evidence_json_export(
@@ -1704,6 +1709,10 @@ async def test_rerun_export_preserves_superseded_attempt_payloads(
             context=EvidenceExportContext(
                 detail_mode="redacted",
                 export_reason="rerun-superseded-evidence-test",
+                actor=EvidenceExportUserActor(
+                    type="user",
+                    user_id=UUID("00000000-0000-0000-0000-000000000030"),
+                ),
             ),
         )
 

@@ -985,7 +985,10 @@ async def test_evidence_response_accepts_redacted_service_key_credential_id(
         headers=flow_process_auth_headers,
     )
     assert key_response.status_code == 201, key_response.text
-    service_key = key_response.json()["secret"]
+    created_key = cast(dict[str, Any], cast(Any, key_response).json())
+    service_key = cast(str, created_key["secret"])
+    created_api_key = cast(dict[str, Any], created_key["api_key"])
+    service_key_id = cast(str, created_api_key["id"])
     create_response = await client.post(
         f"/api/v1/flows/{flow.flow_id}/runs/",
         json={
@@ -1011,9 +1014,14 @@ async def test_evidence_response_accepts_redacted_service_key_credential_id(
     )
 
     assert export_response.status_code == 200, export_response.text
-    assert (
-        export_response.json()["bundle"]["run"]["created_by_api_key_id"] == "[REDACTED]"
-    )
+    export_payload = cast(dict[str, Any], cast(Any, export_response).json())
+    assert export_payload["manifest"]["actor"] == {
+        "type": "service_key",
+        "key_id": service_key_id,
+    }
+    assert "user_id" not in export_payload["manifest"]["actor"]
+    assert "exported_by_user_id" not in export_payload["manifest"]
+    assert export_payload["bundle"]["run"]["created_by_api_key_id"] == "[REDACTED]"
     assert evidence_response.status_code == 200, evidence_response.text
     evidence_run = evidence_response.json()["run"]
     assert evidence_run["id"] == run_id
@@ -1378,7 +1386,12 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["manifest"]["exported_at"] == payload["generated_at"]
     assert payload["manifest"]["detail_mode"] == "redacted"
     assert payload["manifest"]["export_reason"] == "support_debug"
-    assert payload["manifest"]["exported_by_user_id"] == str(trace_user.id)
+    assert payload["manifest"]["actor"] == {
+        "type": "user",
+        "user_id": str(trace_user.id),
+    }
+    assert "key_id" not in payload["manifest"]["actor"]
+    assert "exported_by_user_id" not in payload["manifest"]
     assert payload["manifest"]["redaction_applied"] is True
     assert payload["manifest"]["provenance_persisted_version_status"] == "tracked"
     assert payload["manifest"]["retention_state_summary"]["tracking_state"] == (

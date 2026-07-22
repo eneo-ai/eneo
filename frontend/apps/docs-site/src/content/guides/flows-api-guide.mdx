@@ -1086,6 +1086,13 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
+The JSON response uses manifest schema `flow-evidence-export.v9`. Its required
+`actor` identifies the caller that performed the export, not the run owner.
+Branch on `actor.type`: a user actor contains only `user_id`, while a
+`service_key` actor contains only `key_id`. Both actor variants reject additional
+fields. The content hash continues to cover only the exported `bundle`, so audit
+metadata such as the actor does not change the hash.
+
 ```js
 const evidence = await client.flows.runs.exportEvidence({
   id: runId,

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
 )
+from eneo.flows.principal import FlowPrincipal
 
-EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v8"] = (
-    "flow-evidence-export.v8"
+EVIDENCE_EXPORT_SCHEMA_VERSION: Literal["flow-evidence-export.v9"] = (
+    "flow-evidence-export.v9"
 )
 
 EvidenceExportContentHashInput: TypeAlias = Literal["raw", "redacted"]
@@ -24,12 +27,52 @@ EvidenceRetentionTrackingState: TypeAlias = Literal["not_tracked", "tracked"]
 EvidenceArtifactAvailabilityTrackingState: TypeAlias = Literal["tracked"]
 
 
+class EvidenceExportUserActor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["user"]
+    user_id: UUID
+
+
+class EvidenceExportServiceKeyActor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["service_key"]
+    key_id: UUID
+
+
+EvidenceExportActor: TypeAlias = Annotated[
+    EvidenceExportUserActor | EvidenceExportServiceKeyActor,
+    Field(discriminator="type"),
+]
+
+
+def evidence_export_actor_from_principal(
+    principal: FlowPrincipal,
+) -> EvidenceExportActor:
+    if principal.principal_type == PrincipalType.USER:
+        if principal.principal_user_id is None:
+            raise ValueError("principal_user_id required for evidence export actor")
+        return EvidenceExportUserActor(
+            type="user",
+            user_id=principal.principal_user_id,
+        )
+    if principal.principal_type == PrincipalType.SERVICE_KEY:
+        if principal.actor_api_key_id is None:
+            raise ValueError("actor_api_key_id required for evidence export actor")
+        return EvidenceExportServiceKeyActor(
+            type="service_key",
+            key_id=principal.actor_api_key_id,
+        )
+    raise ValueError("unsupported evidence export principal type")
+
+
 class EvidenceExportContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     detail_mode: EvidenceExportDetailMode
     export_reason: str
-    exported_by_user_id: str | None = None
+    actor: EvidenceExportActor
 
 
 class EvidenceRetentionStateSummary(BaseModel):
@@ -90,7 +133,7 @@ class EvidenceReviewCheckpointSummary(BaseModel):
 class EvidenceExportManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["flow-evidence-export.v8"]
+    schema_version: Literal["flow-evidence-export.v9"]
     app_version: str
     provenance_schema_version_min: str
     provenance_schema_version_current: str
@@ -103,7 +146,7 @@ class EvidenceExportManifest(BaseModel):
     trace_id: str
     flow_id: str
     flow_version: int
-    exported_by_user_id: str | None
+    actor: EvidenceExportActor
     export_reason: str
     detail_mode: EvidenceExportDetailMode
     redaction_applied: bool

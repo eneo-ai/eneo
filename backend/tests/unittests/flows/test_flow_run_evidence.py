@@ -24,6 +24,8 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
     EvidenceExportContext,
     EvidenceExportManifest,
+    EvidenceExportServiceKeyActor,
+    EvidenceExportUserActor,
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.domain.flow import (
@@ -75,7 +77,10 @@ def _redacted_export_context() -> EvidenceExportContext:
     return EvidenceExportContext(
         detail_mode="redacted",
         export_reason="support_debug",
-        exported_by_user_id="00000000-0000-0000-0000-000000000030",
+        actor=EvidenceExportUserActor(
+            type="user",
+            user_id=UUID("00000000-0000-0000-0000-000000000030"),
+        ),
     )
 
 
@@ -83,7 +88,10 @@ def _raw_export_context() -> EvidenceExportContext:
     return EvidenceExportContext(
         detail_mode="raw",
         export_reason="regulatory_audit",
-        exported_by_user_id="00000000-0000-0000-0000-000000000030",
+        actor=EvidenceExportUserActor(
+            type="user",
+            user_id=UUID("00000000-0000-0000-0000-000000000030"),
+        ),
     )
 
 
@@ -1154,7 +1162,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         "content_hash",
         "content_hash_input",
         "exported_at",
-        "exported_by_user_id",
+        "actor",
         "export_reason",
         "detail_mode",
         "redaction_applied",
@@ -1175,6 +1183,10 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     assert export["manifest"]["content_hash_input"] == "redacted"
     assert export["manifest"]["detail_mode"] == "redacted"
     assert export["manifest"]["export_reason"] == "support_debug"
+    assert export["manifest"]["actor"] == {
+        "type": "user",
+        "user_id": "00000000-0000-0000-0000-000000000030",
+    }
     assert export["manifest"]["exported_at"] == export["generated_at"]
     assert export["manifest"]["content_hash"] == export["content_hash"]
     assert export["manifest"]["redaction_applied"] is True
@@ -1249,6 +1261,35 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
         separators=(",", ":"),
     ).encode("utf-8")
     assert export["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+
+
+def test_evidence_export_content_hash_excludes_actor_metadata() -> None:
+    run, version = _evidence_run_and_version()
+    bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+    )
+    user_export = render_evidence_json_export(
+        bundle=bundle,
+        context=_raw_export_context(),
+    )
+    service_key_export = render_evidence_json_export(
+        bundle=bundle,
+        context=EvidenceExportContext(
+            detail_mode="raw",
+            export_reason="regulatory_audit",
+            actor=EvidenceExportServiceKeyActor(
+                type="service_key",
+                key_id=UUID("00000000-0000-0000-0000-000000000040"),
+            ),
+        ),
+    )
+
+    assert user_export["manifest"]["actor"] != service_key_export["manifest"]["actor"]
+    assert user_export["bundle"] == service_key_export["bundle"]
+    assert user_export["content_hash"] == service_key_export["content_hash"]
 
 
 def test_evidence_export_marks_corrupt_attempt_provenance_raw_and_redacted() -> None:
@@ -2201,7 +2242,7 @@ def test_evidence_export_redacts_review_checkpoint_payloads_without_resume_key()
 
 
 def test_evidence_export_manifest_rejects_unknown_fields() -> None:
-    payload = {
+    payload: dict[str, Any] = {
         "schema_version": EVIDENCE_EXPORT_SCHEMA_VERSION,
         "app_version": get_settings().app_version,
         "provenance_schema_version_min": "flow-attempt-provenance.v1",
@@ -2215,7 +2256,7 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
         "trace_id": str(uuid4()),
         "flow_id": str(uuid4()),
         "flow_version": 1,
-        "exported_by_user_id": str(uuid4()),
+        "actor": {"type": "user", "user_id": str(uuid4())},
         "export_reason": "support_debug",
         "detail_mode": "redacted",
         "redaction_applied": True,
@@ -2268,12 +2309,67 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
         EvidenceExportManifest.model_validate(payload_without_review_summary)
 
 
+def test_evidence_export_context_requires_closed_typed_actor() -> None:
+    user_id = str(uuid4())
+
+    context = EvidenceExportContext.model_validate(
+        {
+            "detail_mode": "redacted",
+            "export_reason": "support_debug",
+            "actor": {"type": "user", "user_id": user_id},
+        }
+    )
+
+    assert context.model_dump(mode="json")["actor"] == {
+        "type": "user",
+        "user_id": user_id,
+    }
+    with pytest.raises(ValueError):
+        EvidenceExportContext.model_validate(
+            {
+                "detail_mode": "redacted",
+                "export_reason": "support_debug",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "actor",
+    [
+        {"type": "user", "key_id": "00000000-0000-0000-0000-000000000040"},
+        {
+            "type": "service_key",
+            "key_id": "00000000-0000-0000-0000-000000000040",
+            "user_id": "00000000-0000-0000-0000-000000000030",
+        },
+        {
+            "type": "user",
+            "user_id": "00000000-0000-0000-0000-000000000030",
+            "unexpected": "blocked",
+        },
+    ],
+)
+def test_evidence_export_context_rejects_malformed_actor(actor: dict[str, str]) -> None:
+    with pytest.raises(ValueError):
+        EvidenceExportContext.model_validate(
+            {
+                "detail_mode": "redacted",
+                "export_reason": "support_debug",
+                "actor": actor,
+            }
+        )
+
+
 def test_evidence_export_context_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError):
         EvidenceExportContext.model_validate(
             {
                 "detail_mode": "redacted",
                 "export_reason": "support_debug",
+                "actor": {
+                    "type": "user",
+                    "user_id": "00000000-0000-0000-0000-000000000030",
+                },
                 "unexpected": "blocked",
             }
         )

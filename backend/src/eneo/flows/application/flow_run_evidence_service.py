@@ -17,6 +17,7 @@ from eneo.flows.application.flow_run_evidence_bundle import (
 )
 from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceExportContext,
+    evidence_export_actor_from_principal,
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRun
@@ -28,6 +29,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.principal import FlowPrincipal
 from eneo.main.exceptions import (
     NotFoundException,
     ResourceGoneException,
@@ -140,6 +142,7 @@ class FlowRunEvidenceService:
         run: FlowRun | None = None,
         export_reason: str = "support_debug",
     ) -> FlowPersistedJsonObject:
+        actor = evidence_export_actor_from_principal(FlowPrincipal.from_user(self.user))
         if detail == "raw":
             bundle = await self._get_evidence_bundle(
                 run_id=run_id,
@@ -151,7 +154,7 @@ class FlowRunEvidenceService:
                 context=EvidenceExportContext(
                     detail_mode="raw",
                     export_reason=export_reason,
-                    exported_by_user_id=str(self.user.id),
+                    actor=actor,
                 ),
             )
         bundle = await self._get_redacted_evidence_bundle(
@@ -164,7 +167,7 @@ class FlowRunEvidenceService:
             context=EvidenceExportContext(
                 detail_mode="redacted",
                 export_reason=export_reason,
-                exported_by_user_id=str(self.user.id),
+                actor=actor,
             ),
         )
 

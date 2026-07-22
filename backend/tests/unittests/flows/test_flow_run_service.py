@@ -4089,7 +4089,10 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
-    run = _run(user=user, flow_id=flow.id)
+    run_owner_user_id = uuid4()
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"principal_user_id": run_owner_user_id}
+    )
     flow_repo.get.return_value = flow
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(
@@ -4106,6 +4109,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
     )
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = []
+    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
 
     service = FlowRunEvidenceService(
         user=user,
@@ -4115,12 +4119,14 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
+        access_policy=access_policy,
     )
 
-    redacted_export = await service.export_evidence_json(run_id=run.id)
+    redacted_export = await service.export_evidence_json(run_id=run.id, run=run)
     raw_export = await service.export_evidence_json(
         run_id=run.id,
         detail="raw",
+        run=run,
         export_reason="government_audit_request",
     )
 
@@ -4130,7 +4136,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v8"
+        assert export["schema_version"] == "flow-evidence-export.v9"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]
@@ -4141,7 +4147,12 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         assert export["manifest"]["tenant_id"] == str(user.tenant_id)
         assert export["manifest"]["trace_id"] == str(run.trace_id)
         assert export["manifest"]["flow_id"] == str(flow.id)
-        assert export["manifest"]["exported_by_user_id"] == str(user.id)
+        assert export["manifest"]["actor"] == {
+            "type": "user",
+            "user_id": str(user.id),
+        }
+        assert export["manifest"]["actor"]["user_id"] != str(run_owner_user_id)
+        assert "exported_by_user_id" not in export["manifest"]
         assert export["manifest"]["redaction_applied"] == export["redaction"]["applied"]
         assert (
             export["manifest"]["masked_fields_count"]
@@ -4157,6 +4168,56 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
 
     assert redacted_export["manifest"]["export_reason"] == "support_debug"
     assert raw_export["manifest"]["export_reason"] == "government_audit_request"
+
+
+@pytest.mark.asyncio
+async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user):
+    service_user = _service_key_user(user)
+    principal = FlowPrincipal.from_user(service_user)
+    assert principal.actor_api_key_id is not None
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=service_user, published_version=1)
+    run = _run(user=service_user, flow_id=flow.id)
+    flow_version_repo.get.return_value = _published_flow_version(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=service_user.tenant_id,
+        definition_checksum=None,
+        definition_json=_published_definition_json(
+            flow,
+            [_published_runtime_step(flow.steps[0])],
+        ),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = []
+    access_policy = AsyncMock(spec=FlowRunAccessPolicy)
+    service = FlowRunEvidenceService(
+        user=service_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        access_policy=access_policy,
+    )
+
+    export = await service.export_evidence_json(run_id=run.id, run=run)
+
+    assert export["manifest"]["actor"] == {
+        "type": "service_key",
+        "key_id": str(principal.actor_api_key_id),
+    }
+    assert "user_id" not in export["manifest"]["actor"]
+    assert "exported_by_user_id" not in export["manifest"]
+    access_policy.ensure_can_access_run.assert_awaited_once_with(
+        run,
+        access_kind="evidence_export_redacted",
+    )
 
 
 @pytest.mark.asyncio

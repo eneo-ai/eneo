@@ -190,8 +190,8 @@ def _result_file(*, run: FlowRun, step_result_id=None) -> FlowRunStepResultFile:
 def _evidence_export_payload(run: FlowRun) -> dict:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
-    exported_by_user_id = run.principal_user_id
-    assert exported_by_user_id is not None
+    actor_user_id = run.principal_user_id
+    assert actor_user_id is not None
     review_checkpoint_summary = EvidenceReviewCheckpointSummary(
         count=0,
         by_state={state: 0 for state in FlowRunReviewCheckpointState},
@@ -204,11 +204,11 @@ def _evidence_export_payload(run: FlowRun) -> dict:
         mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v8",
+        "schema_version": "flow-evidence-export.v9",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v8",
+            "schema_version": "flow-evidence-export.v9",
             "app_version": "DEV",
             "provenance_schema_version_min": "flow-attempt-provenance.v1",
             "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -221,7 +221,7 @@ def _evidence_export_payload(run: FlowRun) -> dict:
             "content_hash": content_hash,
             "content_hash_input": "redacted",
             "exported_at": generated_at,
-            "exported_by_user_id": str(exported_by_user_id),
+            "actor": {"type": "user", "user_id": str(actor_user_id)},
             "export_reason": "support_debug",
             "detail_mode": "redacted",
             "redaction_applied": True,
