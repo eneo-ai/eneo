@@ -36,10 +36,10 @@
 #                           their calls go to backend:8000, and user login is
 #                           handed off from the Eneo session (SSO) rather than
 #                           the module talking to an IdP itself.
-#   object_content_net (internal) - the bundled S3-compatible endpoint,
-#                           backend, and worker. It is never routed publicly.
-#   Backend is the only service on all four networks - the single gateway
-#   between the outside world, the data layers, and modules.
+#   object_content_net (internal) - added by docker-compose.object-content.yml
+#                           only for the optional bundled endpoint.
+#   Backend is the single gateway between the outside world, the data layers,
+#   optional object content, and modules.
 #
 # Full documentation: ../DEPLOYMENT.md
 # ============================================================================
@@ -109,13 +109,15 @@ services:
     container_name: eneo_backend
     restart: unless-stopped
     environment:
-      OBJECT_CONTENT_ENDPOINT_URL: ${OBJECT_CONTENT_ENDPOINT_URL:-http://object-content:8333}
-      OBJECT_CONTENT_REGION: ${OBJECT_CONTENT_REGION:-local}
-      OBJECT_CONTENT_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content}
-      OBJECT_CONTENT_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:?Set object-content access key in .env}
-      OBJECT_CONTENT_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:?Set object-content secret key in .env}
-      OBJECT_CONTENT_DEPLOYMENT_ID: ${OBJECT_CONTENT_DEPLOYMENT_ID:?Set one stable UUID in .env}
-      OBJECT_CONTENT_ALLOW_INSECURE_HTTP: ${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+      # List form passes these through only when the deployment .env defines
+      # them. With every value absent, Eneo runs the PostgreSQL-inline backend.
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     env_file:
       - env_backend.env
     volumes:
@@ -125,7 +127,6 @@ services:
       - proxy_tier
       - data_net
       - module_net
-      - object_content_net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.eneo-backend.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/scim`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
@@ -162,14 +163,14 @@ services:
     container_name: eneo_worker
     restart: unless-stopped
     environment:
-      RUN_AS_WORKER: "true"  # Runs today's ARQ adapter; task logic is queue-neutral
-      OBJECT_CONTENT_ENDPOINT_URL: ${OBJECT_CONTENT_ENDPOINT_URL:-http://object-content:8333}
-      OBJECT_CONTENT_REGION: ${OBJECT_CONTENT_REGION:-local}
-      OBJECT_CONTENT_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content}
-      OBJECT_CONTENT_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:?Set object-content access key in .env}
-      OBJECT_CONTENT_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:?Set object-content secret key in .env}
-      OBJECT_CONTENT_DEPLOYMENT_ID: ${OBJECT_CONTENT_DEPLOYMENT_ID:?Set one stable UUID in .env}
-      OBJECT_CONTENT_ALLOW_INSECURE_HTTP: ${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+      - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     env_file:
       - env_backend.env
     volumes:
@@ -178,42 +179,8 @@ services:
     networks:
       - proxy_tier
       - data_net
-      - object_content_net
     depends_on:
       - backend
-
-  object-content:
-    image: ${ENEO_SEAWEEDFS_IMAGE:?Set the verified ghcr.io/eneo-ai/eneo-seaweedfs digest in .env}
-    restart: unless-stopped
-    command:
-      - mini
-      - -dir=/data
-      - -webdav=false
-      - -admin.ui=false
-      - -master.telemetry=false
-      - -s3.iam=false
-      - -master.volumeSizeLimitMB=${SEAWEEDFS_VOLUME_SIZE_LIMIT_MB:-30000}
-      - -master.garbageThreshold=${SEAWEEDFS_GARBAGE_THRESHOLD:-0.3}
-    environment:
-      # SeaweedFS uses these conventional S3 gateway variable names. No AWS
-      # service is selected or contacted.
-      AWS_ACCESS_KEY_ID: ${OBJECT_CONTENT_ACCESS_KEY_ID:?Set object-content access key in .env}
-      AWS_SECRET_ACCESS_KEY: ${OBJECT_CONTENT_SECRET_ACCESS_KEY:?Set object-content secret key in .env}
-      S3_BUCKET: ${OBJECT_CONTENT_BUCKET:-eneo-object-content}
-    volumes:
-      - eneo_object_content_data:/data
-    networks:
-      - object_content_net
-    expose:
-      - "8333"
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    stop_grace_period: 1m
 
   db:
     image: pgvector/pgvector:pg16
@@ -271,14 +238,9 @@ networks:
   module_net:
     driver: bridge
     internal: true  # modules have no internet egress; ingress arrives via Traefik
-  object_content_net:
-    driver: bridge
-    internal: true  # only backend/worker reach the bundled S3-compatible endpoint
-
 volumes:
   eneo_postgres_data:
   eneo_redis_data:
   eneo_backend_data:
   traefik_letsencrypt:
   eneo_temp_files:  # Also stores audit log exports (/tmp/exports, auto-cleaned after 24h)
-  eneo_object_content_data:

@@ -25,14 +25,17 @@ fi
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 deployment_compose="$repository_root/docs/deployment/docker-compose.yml"
+object_content_compose="$repository_root/docs/deployment/docker-compose.object-content.yml"
 work_directory="$(mktemp -d)"
 project_name="eneo-object-content-smoke-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$"
 network_name="${project_name}_object_content_net"
 
 compose=(
     docker compose
+    --profile object-content
     --project-name "$project_name"
     --file "$work_directory/docker-compose.yml"
+    --file "$work_directory/docker-compose.object-content.yml"
     --file "$work_directory/smoke.override.yml"
 )
 
@@ -43,6 +46,7 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$deployment_compose" "$work_directory/docker-compose.yml"
+cp "$object_content_compose" "$work_directory/docker-compose.object-content.yml"
 touch \
     "$work_directory/env_backend.env" \
     "$work_directory/env_db.env" \

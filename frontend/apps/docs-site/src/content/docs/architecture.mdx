@@ -17,12 +17,14 @@ Eneo follows a modern microservices architecture with clean separation of concer
 ### Frontend (SvelteKit)
 
 **Technology Stack:**
+
 - **Framework**: SvelteKit with TypeScript
 - **Styling**: Tailwind CSS
 - **State Management**: Svelte stores
 - **HTTP Client**: Fetch API with type-safe wrappers
 
 **Responsibilities:**
+
 - User interface and user experience
 - Client-side routing and navigation
 - Form handling and validation
@@ -30,6 +32,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 - State management and caching
 
 **Key Features:**
+
 - Server-side rendering (SSR) for SEO
 - Hot module replacement for development
 - Type-safe API client generation
@@ -37,6 +40,7 @@ Eneo follows a modern microservices architecture with clean separation of concer
 - Dark mode support
 
 **Directory Structure:**
+
 ```
 frontend/apps/client/
 ├── src/
@@ -54,6 +58,7 @@ frontend/apps/client/
 ### Backend (FastAPI)
 
 **Technology Stack:**
+
 - **Framework**: FastAPI (Python 3.11+)
 - **ORM**: SQLAlchemy 2.0
 - **Validation**: Pydantic v2
@@ -61,6 +66,7 @@ frontend/apps/client/
 - **API Documentation**: OpenAPI/Swagger
 
 **Responsibilities:**
+
 - RESTful API endpoints
 - Business logic and validation
 - Authentication and authorization
@@ -69,12 +75,14 @@ frontend/apps/client/
 - WebSocket connections
 
 **Architecture Pattern:**
+
 - **Domain-Driven Design** (DDD)
 - **Repository Pattern** for data access
 - **Service Layer** for business logic
 - **Dependency Injection** for modularity
 
 **Directory Structure:**
+
 ```
 backend/
 ├── app/
@@ -99,6 +107,7 @@ backend/
 **Key Design Patterns:**
 
 **Repository Pattern:**
+
 ```python
 class UserRepository:
     def __init__(self, db: Session):
@@ -115,6 +124,7 @@ class UserRepository:
 ```
 
 **Service Layer:**
+
 ```python
 class AIService:
     def __init__(self, user_repo: UserRepository, ai_provider: AIProvider):
@@ -132,6 +142,7 @@ class AIService:
 ### Database (PostgreSQL + pgvector)
 
 **Technology:**
+
 - **Database**: PostgreSQL 13+
 - **Extension**: pgvector for vector similarity search
 - **Migrations**: Alembic
@@ -139,6 +150,7 @@ class AIService:
 **Schema Design:**
 
 **Core Tables:**
+
 - `users` - User accounts and profiles
 - `organizations` - Organization/tenant data
 - `spaces` - Collaborative workspaces
@@ -149,6 +161,7 @@ class AIService:
 - `document_chunks` - Chunked document text with embeddings
 
 **Key Relationships:**
+
 ```
 organizations (1) ─── (N) users
 organizations (1) ─── (N) spaces
@@ -160,6 +173,7 @@ documents (1) ─── (N) document_chunks
 ```
 
 **Vector Search:**
+
 ```sql
 -- Example vector similarity search
 SELECT id, content,
@@ -171,6 +185,7 @@ LIMIT 5;
 ```
 
 **Indexes:**
+
 - B-tree indexes on foreign keys
 - IVFFlat index on vector embeddings
 - GiST indexes for full-text search
@@ -179,23 +194,25 @@ LIMIT 5;
 
 ### Durable Object Content
 
-Durable file data has two canonical owners:
+Durable content has one PostgreSQL control plane and one explicit byte backend
+per record:
 
-| PostgreSQL control plane | Private S3-compatible byte plane |
-| --- | --- |
-| Content identity and lifecycle state | Original and derived byte streams |
-| Canonical SHA-256, exact size, and media type | Images, audio, previews, pages, and generated artifacts |
-| Concrete authorization references, holds, and retention | Full extracted text or transcription when it is not a bounded searchable fact |
-| Audit and bounded reconciliation/query facts | No authorization, tenant routing, or lifecycle decisions |
+| PostgreSQL control plane                                | Byte backend                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Content identity and lifecycle state                    | Bounded `postgres_inline` payload or private `object_store` object |
+| Canonical SHA-256, exact size, and media type           | Payload bytes only                                                 |
+| Concrete authorization references, holds, and retention | Backend-specific transport/deletion state                          |
+| Audit and bounded reconciliation/query facts            | No authorization, routing, or product policy                       |
 
-PostgreSQL records durable intent before remote work. Eneo verifies the
-PostgreSQL-owned SHA-256 before returning full or range responses, and a bounded
-reconciler resolves process and network failures. A durable binding prevents a
-database from silently adopting the wrong bucket.
+Inline bytes, control state, and the first owner reference commit atomically.
+Object-store intent and the first reference commit before remote work. Eneo
+verifies the PostgreSQL-owned SHA-256 before returning full or range responses,
+and a bounded reconciler resolves process and network failures.
 
-The application uses one vendor-neutral S3-compatible contract. The reference
-deployment bundles an Eneo-built and attested SeaweedFS image; external
-endpoints such as MinIO use the same path.
+Object storage is optional. The default reference deployment is inline-capable
+without another service. Administrators can enable an Eneo-built and attested
+SeaweedFS profile or use external endpoints such as MinIO through one
+vendor-neutral contract.
 
 Read [Object Content Architecture](/docs/object-content-architecture) for the
 complete lifecycle, integrity, reconciliation, binding, and image publication
@@ -207,11 +224,13 @@ covers deployment and operations.
 ### Worker Service (ARQ today)
 
 **Technology:**
+
 - **Queue**: Redis-based ARQ (Async Redis Queue)
 - **Language**: Python with async/await
 - **Concurrency**: Configurable worker pool
 
 **Responsibilities:**
+
 - Document processing (PDF, Word, etc.)
 - Web crawling and content extraction
 - Embedding generation
@@ -225,6 +244,7 @@ contract, and Eneo avoids a speculative generic queue framework in the meantime.
 **Task Types:**
 
 **Document Processing:**
+
 ```python
 @worker.task
 async def process_document(ctx, document_id: int):
@@ -242,6 +262,7 @@ async def process_document(ctx, document_id: int):
 ```
 
 **Web Crawling:**
+
 ```python
 @worker.task
 async def crawl_website(ctx, url: str, max_depth: int):
@@ -264,6 +285,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 ### Redis (Cache & Queue)
 
 **Responsibilities:**
+
 - Session storage
 - Task queue for ARQ
 - Caching frequently accessed data
@@ -271,6 +293,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 - WebSocket pub/sub
 
 **Cache Strategy:**
+
 - **Session data**: 24-hour TTL
 - **API responses**: 5-minute TTL
 - **Embeddings**: 1-hour TTL
@@ -281,6 +304,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 ### Reverse Proxy (Traefik)
 
 **Responsibilities:**
+
 - SSL/TLS termination
 - Load balancing
 - Request routing
@@ -288,6 +312,7 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 - Health checks
 
 **Configuration:**
+
 ```yaml
 # Route HTTP to HTTPS
 - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
@@ -373,11 +398,13 @@ Save conversation to database
 ### Authorization Model
 
 **Role-Based Access Control (RBAC):**
+
 - **Global Roles**: Admin, User
 - **Space Roles**: Owner, Editor, Viewer
 - **Resource-level**: Per-assistant, per-document permissions
 
 **Permission Checks:**
+
 ```python
 def check_permission(user: User, resource: Space, action: str) -> bool:
     membership = get_membership(user.id, resource.id)
@@ -398,11 +425,13 @@ def check_permission(user: User, resource: Space, action: str) -> bool:
 ### Horizontal Scaling
 
 **Stateless Services:**
+
 - Frontend and Backend are stateless
 - Can run multiple instances behind load balancer
 - Session state in Redis (shared)
 
 **Scaling Strategy:**
+
 ```yaml
 # Docker Compose scaling
 docker compose up -d --scale backend=3 --scale worker=2
@@ -411,17 +440,20 @@ docker compose up -d --scale backend=3 --scale worker=2
 ### Database Scaling
 
 **Read Replicas:**
+
 - Primary for writes
 - Replicas for reads
 - Connection pooling (PgBouncer)
 
 **Partitioning:**
+
 - Partition large tables by date
 - Separate hot and cold data
 
 ### Caching Strategy
 
 **Multi-Level Cache:**
+
 1. Browser cache (static assets)
 2. CDN cache (public content)
 3. Redis cache (dynamic data)
@@ -434,6 +466,7 @@ docker compose up -d --scale backend=3 --scale worker=2
 ### Single Server (Small Organizations)
 
 All services on one server with Docker Compose:
+
 - Frontend, Backend, Worker
 - PostgreSQL, Redis
 - Traefik
@@ -443,6 +476,7 @@ All services on one server with Docker Compose:
 ### Multi-Server (Medium Organizations)
 
 Separate servers for different roles:
+
 - **Web Server**: Frontend + Backend
 - **Database Server**: PostgreSQL
 - **Worker Server**: Background processing
@@ -453,6 +487,7 @@ Separate servers for different roles:
 ### Kubernetes (Large Organizations)
 
 Fully orchestrated with K8s:
+
 - Auto-scaling pods
 - Service discovery
 - Rolling updates
@@ -467,6 +502,7 @@ Fully orchestrated with K8s:
 ### Logging
 
 **Structured Logging:**
+
 ```json
 {
   "timestamp": "2025-09-30T10:30:45Z",
@@ -482,6 +518,7 @@ Fully orchestrated with K8s:
 ### Metrics
 
 **Key Metrics:**
+
 - Request rate and latency
 - Error rates (4xx, 5xx)
 - Database query performance
@@ -491,6 +528,7 @@ Fully orchestrated with K8s:
 ### Health Checks
 
 **Endpoints:**
+
 - `GET /api/health` - Basic health
 - `GET /api/health/db` - Database connectivity
 - `GET /api/health/redis` - Redis connectivity

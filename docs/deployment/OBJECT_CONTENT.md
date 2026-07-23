@@ -1,28 +1,36 @@
 # Durable object content
 
-Eneo separates durable file identity from durable file bytes. PostgreSQL is the
-control plane: it owns typed content identity, media type, canonical SHA-256,
-exact size, authorization references, holds, retention, lifecycle state, audit,
-and reconciliation facts. One private S3-compatible bucket is the byte plane.
-It owns original and derived byte streams, but it never becomes the source of
-truth for authorization or lifecycle.
+The primary, navigable operator guide is [Choose Content
+Storage](https://docs.eneo.ai/guides/object-content-storage). This file is the
+offline reference shipped beside the Compose templates.
 
-The separation is mandatory for consumers that adopt object content. There is
-no production filesystem backend, PostgreSQL byte fallback, dual write, public
-object URL, provider registry, or provider-specific product branch. Object keys
-are opaque, deployment-scoped values; they contain neither tenant nor filename.
-The bucket and key are never returned by ordinary APIs.
+Eneo keeps one common content identity and lifecycle in PostgreSQL. Each content
+record then names exactly one byte authority:
 
-The foundation can remain disabled during rollout while no durable
-object-content records exist. Disable it only by omitting **every**
-`OBJECT_CONTENT_*` application setting. Setting one or more values activates
-strict validation; a blank, partial, or invalid configuration stops startup.
-This is a deployment capability, not a tenant or administrator feature toggle.
+- `postgres_inline` stores bounded bytes in a one-to-one PostgreSQL row;
+- `object_store` stores bytes behind one private S3-compatible endpoint.
+
+PostgreSQL always owns the typed content identity, media type, canonical
+SHA-256, exact size, authorization references, holds, retention, lifecycle
+state, audit, and reconciliation facts. The chosen byte backend owns only the
+payload. Selection is explicit when content is created and never changes
+silently after a failure.
+
+The default deployment uses PostgreSQL-inline storage and does not start
+SeaweedFS or require S3-compatible configuration. Operators can enable the
+bundled profile or connect an external endpoint when object size, capacity, or
+availability requirements justify it. There is no production filesystem
+backend, automatic fallback, dual write, public object URL, provider registry,
+or provider-specific product branch.
+
+This slice establishes the shared storage foundation. Existing File, InfoBlob,
+Icon, and Flow byte producers are not migrated by this change; each producer
+will adopt the common service in a separate, copy-and-verify cutover.
 
 ## Choose the endpoint
 
-The reference Compose deployment starts an Eneo-built SeaweedFS 4.40 service on
-the private `object_content_net`. The image is built from upstream commit
+The optional `object-content` Compose profile starts an Eneo-built SeaweedFS
+4.40 service on the private `object_content_net`. The image is built from upstream commit
 `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`, not from an upstream image. Eneo
 pins the source archive, build image, runtime image, and GitHub Actions; scans
 the exact amd64 and arm64 image digests; publishes CycloneDX 1.6 and SPDX SBOMs;
@@ -54,15 +62,15 @@ reconciliation must be fully streamed back and rehashed before it becomes
 available.
 
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
-signing region, bucket, and credentials in `.env`, then start the stack with:
+signing region, bucket, credentials, and the stable deployment ID in `.env`,
+then start the normal stack:
 
 ```bash
-docker compose up -d --scale object-content=0
+docker compose up -d
 ```
 
-Keep `ENEO_SEAWEEDFS_IMAGE` set to the release's verified digest because Compose
-validates the complete file during configuration. At scale zero that image is
-not started and Eneo connects only to the explicit external endpoint.
+Do not enable the `object-content` profile. Eneo connects only to the explicit
+external endpoint.
 
 Do not route either endpoint through the public reverse proxy. Give Eneo access
 to one dedicated bucket; do not use bucket-per-tenant or cross-deployment
@@ -144,10 +152,10 @@ configured virtual-host buckets and matching wildcard DNS/TLS. For a private
 CA, mount its certificate read-only into both backend and worker and set
 `OBJECT_CONTENT_CA_BUNDLE` in `env_backend.env` to the in-container path.
 
-Start Eneo without the bundled service, then verify readiness:
+Start Eneo without the bundled profile, then verify readiness:
 
 ```bash
-docker compose up -d --scale object-content=0
+docker compose up -d
 curl --fail https://eneo.example.eu/api/readyz
 ```
 
@@ -162,26 +170,36 @@ purged content longer than approved.
 
 ## Configuration states
 
-The reference Compose installation enables the bundled service, so copy
-`.env.template`, set mode `0600`, and fill every blank. Pin
-`ENEO_SEAWEEDFS_IMAGE` to the exact manifest digest recorded in the Eneo
-release's `IMAGE-DIGESTS.txt`. Copy the digest reference from its single
-`seaweedfs manifest` row, not either architecture-specific SBOM row. There is
-deliberately no mutable-tag default.
+The default Compose installation leaves every remote-only setting absent.
+Backend and worker start the common module, serve PostgreSQL-inline content,
+and report `object_content.code=object_store_not_configured`. Local lifecycle,
+reference audit, retention, and deletion reconciliation continue to run.
 
-A custom deployment that has not adopted an object-backed feature may omit all
-`OBJECT_CONTENT_*` settings. Backend and worker then start with the capability
-disabled, `/api/readyz` reports `object_content.code=disabled`, reconciliation
-performs no S3 work, and authenticated settings expose
-`object_content_enabled=false`. Eneo verifies PostgreSQL before accepting this
-state. If any non-tombstoned object-content row exists, startup and subsequent
-probes fail closed until the complete configuration is restored. This prevents
-pending uploads, retention work, or deletes from being silently stranded.
+To enable bundled SeaweedFS, copy `.env.template`, set mode `0600`, uncomment
+the complete object-store block, and pin `ENEO_SEAWEEDFS_IMAGE` to the exact
+manifest digest in the release's `IMAGE-DIGESTS.txt`. Then run:
 
-Do not model disabled with blank values. Omit the variables entirely. Once a
-producer stores its first durable object-content record, the compatible byte
-plane is required for that deployment and there is no filesystem or PostgreSQL
-byte fallback.
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  --profile object-content up -d
+```
+
+The backend and worker receive the same variables through Compose pass-through;
+the optional service receives the matching credentials. There is deliberately
+no usable mutable-tag default.
+
+Remote-only settings are all-or-nothing. Do not model “off” with blank values:
+leave every remote-only variable absent. Core settings such as
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` and reconciliation bounds are valid
+without an endpoint. Any remote endpoint, credential, transport, multipart, or
+object-inventory value activates strict object-store validation.
+
+If active `object_store` rows exist, removing the endpoint configuration fails
+closed with `configuration_required`. Inline rows remain healthy without a
+remote endpoint. Eneo never moves an individual record from one backend to the
+other as an outage fallback.
 
 `OBJECT_CONTENT_DEPLOYMENT_ID` is generated once with `uuidgen`. It scopes
 opaque keys and must survive upgrades and paired restores. Changing it does not
@@ -202,10 +220,16 @@ external private CA read-only into both backend and worker, then set
 `OBJECT_CONTENT_CA_BUNDLE` in `env_backend.env`. Do not put credentials in the
 endpoint URL, command line, image, repository, logs, or backup manifest.
 
-Transport, bounded-memory, multipart, and reconciliation tuning lives in
-`env_backend.env`. These are operator settings, not product policy. Eneo does
-not impose a hidden object-content file-size cap; user-facing upload limits are
-business settings owned by the application/admin configuration.
+Inline capacity and common reconciliation tuning live in `env_backend.env`.
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
+bounds PostgreSQL row and process memory exposure; it is documented and
+configurable, not a hidden business limit. Lowering it affects new writes, not
+reads of existing rows. User-facing upload limits remain business settings
+owned by application/admin configuration.
+
+Object-store transport, bounded-memory spool, multipart, deletion, and orphan
+tuning is optional and should remain commented out until the endpoint is
+enabled. These are deployment controls, not tenant policy.
 `OBJECT_CONTENT_BINDING_CLAIM_SECONDS` bounds first-start coordination and must
 cover the configured readiness request window; increase it only when a measured
 endpoint requires longer readiness timeouts. This is liveness tuning that avoids
@@ -217,30 +241,25 @@ logs.
 
 ## Runtime and health
 
-Object content has four explicit runtime outcomes:
+Object content has five explicit runtime outcomes:
 
 | Deployment state | Process | Readiness / operations |
 | --- | --- | --- |
-| All application settings absent and no active rows | Starts disabled | Healthy `disabled`; dependent operations return typed `object_content_disabled` 503 |
-| Any blank, partial, or invalid settings | Startup fails | Clear configuration validation error |
-| Complete valid settings; PostgreSQL and bucket available | Starts enabled | Healthy `ready` |
-| Complete valid settings; PostgreSQL or bucket unavailable | Stays alive | Unhealthy readiness and typed 503; no fallback |
+| Remote settings absent; no active object-store rows | Starts inline-capable | Healthy `object_store_not_configured`; local work continues |
+| Remote settings absent; active object-store rows exist | Starts fail-closed | `configuration_required`; remote content is not stranded silently |
+| Any blank, partial, or invalid remote settings | Startup fails | Clear configuration validation error |
+| Complete settings; PostgreSQL and endpoint available | Starts inline + object-store capable | Healthy `ready` |
+| Complete settings; endpoint temporarily unavailable | Stays live | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
 | Reachable bucket not paired with this PostgreSQL database | Startup fails | `configuration_required`; reconciliation does not mutate rows or objects |
 
-Disabled with active PostgreSQL content is an invalid fifth state: startup,
-readiness, and the scheduled safety check fail closed with
-`configuration_required`. Each API and worker process evaluates its deployment
-environment independently, so supply the same settings to all of them. Before
-the first active row, mixed process configuration is visible through the
-capability/readiness projection; after a row exists, the disabled process fails
-the guard. Process liveness itself does not depend on the object store.
-Readiness uses a separate short-timeout S3 client when enabled. Health output
-includes only a status and stable code, never endpoint, bucket, key,
-credentials, or provider details. Each process coalesces concurrent
-object-content probes and caches the latest result for at most one second. This
-protects PostgreSQL and the object store from probe bursts; an outage or
-recovery may therefore take up to one second to appear. `/api/livez` remains
-dependency-free and uncached.
+Each API and worker process evaluates its deployment environment independently,
+so supply the same settings to all of them. Process liveness and core readiness
+do not depend on an optional endpoint. Health output includes only a status and
+stable code, never endpoint, bucket, key, credentials, or provider details.
+Each process coalesces concurrent object-store probes and caches the latest
+result for at most one second. This protects PostgreSQL and the endpoint from
+probe bursts; an outage or recovery may therefore take up to one second to
+appear. `/api/livez` remains dependency-free and uncached.
 
 The first enabled startup creates one random database identity in PostgreSQL.
 PostgreSQL grants one process a bounded bootstrap claim; other API or worker
@@ -268,10 +287,12 @@ two-sided reconciliation converge after a process or network failure. Delete
 intent is irreversible. A final reference cannot delete content while a hold or
 minimum-retention boundary blocks it.
 
-A newly prepared `pending` record must commit with its first concrete File,
-InfoBlob, or Icon reference in the same transaction. A deferred PostgreSQL
-constraint rejects an ownerless pending commit, so an idempotency key cannot be
-stranded in a state that no later transaction may attach.
+A new inline record commits its verified payload, immediately available control
+row, and exactly one first File, InfoBlob, or Icon reference in the same
+transaction. A new object-store record commits its descriptor, `pending`
+control row, and exactly one first reference before remote upload begins. Later
+references require `available`. Deferred PostgreSQL constraints reject an
+ownerless record, a mismatched backend, or multiple first references.
 
 Hard deletion is also fenced in PostgreSQL. Active holds cannot be removed with
 a direct row delete, and retained content cannot bypass the lifecycle. A
@@ -290,7 +311,7 @@ Every inventory page must provide a complete, advancing pagination cursor.
 Malformed or non-advancing pages fail that reconciliation run without
 completing the inventory cycle or marking unseen rows missing. A complete
 inventory marks absent `available` content failed; absent `retained` content
-keeps its retention state while health reports `remote_missing`.
+keeps its retention state while health reports `backend_missing`.
 For multipart inventories, a truncated page must include both the next-key and
 next-upload-ID markers, and the marker pair must advance.
 
@@ -308,6 +329,11 @@ finishes. A range read verifies and spools the full object before serving the
 requested interval, so size temporary disk for the largest permitted objects
 multiplied by measured peak read concurrency.
 
+For PostgreSQL-inline content, monitor database size, WAL generation, backup
+duration, connection-pool pressure, and the documented inline admission
+ceiling. Reads are linear in payload size and use bounded chunks after the
+database driver returns the bounded BYTEA value.
+
 For the bundled single-node reference, durable capacity is the
 `eneo_object_content_data` volume. Change `SEAWEEDFS_VOLUME_SIZE_LIMIT_MB` and
 `SEAWEEDFS_GARBAGE_THRESHOLD` in `.env` when measured operations justify it;
@@ -318,8 +344,10 @@ controls.
 
 ## Paired backup and restore
 
-PostgreSQL and the byte plane form one recovery unit. Never call a database-only
-or object-only backup complete.
+An inline-only deployment needs the normal PostgreSQL backup: the control row
+and payload are in the same transactional backup. Once any object-store content
+exists, PostgreSQL and that byte plane form one recovery unit. Never call a
+database-only or object-only backup complete in that state.
 
 For the bundled reference service:
 
