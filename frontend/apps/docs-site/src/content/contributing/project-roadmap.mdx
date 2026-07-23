@@ -15,7 +15,9 @@ Eneo tracks product planning in one GitHub Project:
 Use the project for roadmap epics, active development tasks, findings, bugs, and chores. The roadmap export reads the same project data and turns epics into Markdown, Mermaid, or SVG snapshots.
 
 <Callout type="info">
-  Project #5 has the roadmap fields listed below. The Actions workflows also run a setup script that recreates missing fields when the project configuration drifts.
+  Project #5 has the roadmap fields listed below. Project intake and manual
+  roadmap exports also run a setup script that recreates missing fields when the
+  project configuration drifts.
 </Callout>
 
 ## Planning Model
@@ -148,6 +150,47 @@ Choose:
 
 The workflow uploads the result as an Actions artifact. It does not commit generated SVG files to the repository.
 
+### Public Website Feed
+
+The same workflow generates a public JSON projection every six hours:
+
+```text
+Artifact: eneo-roadmap-public-json
+Schema: 1
+Retention: 30 days
+```
+
+The feed includes only issue-backed epics from `eneo-ai/eneo`. Project draft
+items and issues from other repositories are excluded. Its four groups are
+`in_progress`, `next`, `later`, and `delivered`.
+
+`unpublishedItemCount` reports how many epic-level Project items are not public
+issues. A non-zero value should be surfaced or alerted on until those items are
+converted to public epic issues or reclassified. The feed still updates so the
+website does not become stale.
+
+Run the same export locally with:
+
+```bash
+GH_TOKEN=... node scripts/export_github_roadmap.mjs \
+  --owner eneo-ai \
+  --project 5 \
+  --repository eneo-ai/eneo \
+  --format json \
+  --audience default \
+  --output roadmap.json
+```
+
+JSON is an allowlisted public contract. Adding another Project field does not
+publish that field automatically. Manual Markdown, Mermaid, and SVG artifacts
+may contain Project-only planning metadata and are retained for one day; do not
+use them as public website inputs.
+
+The website repository needs its own read-only `ROADMAP_ARTIFACT_TOKEN` with
+Actions access to `eneo-ai/eneo` because the automatic `GITHUB_TOKEN` cannot
+read another repository's artifacts. It does not need direct Project access
+when it consumes this feed.
+
 ## Version Rules
 
 The project does not hardcode future versions. Add the version string to the epic's `Roadmap version` field.
@@ -191,7 +234,7 @@ Priority
 Kind
 ```
 
-The workflows run the script after they validate `ADD_TO_PROJECT_PAT`. You only need to run it by hand after changing Project #5 outside the repo workflow.
+Project intake and manual roadmap exports run the script after they validate `ADD_TO_PROJECT_PAT`. You only need to run it by hand after changing Project #5 outside the repo workflow.
 
 `ADD_TO_PROJECT_PAT` must be a repository secret with organization Projects read/write access for Project #5 and read access to issues and pull requests in `eneo-ai/eneo`.
 
