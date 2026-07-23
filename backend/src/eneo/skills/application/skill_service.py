@@ -437,6 +437,21 @@ class SkillService:
             raise BadRequestException(
                 "One or more existing Skill bindings are no longer available"
             )
+        # Re-resolution rebuilds bindings from catalogue state, which would
+        # silently reset a stored activation mode; a retained binding must
+        # keep the mode the parent already saved.
+        existing_by_reference = {
+            self._binding_reference(binding): binding for binding in existing
+        }
+        retained = [
+            replace(
+                binding,
+                activation_mode=existing_by_reference[
+                    self._binding_reference(binding)
+                ].activation_mode,
+            )
+            for binding in retained
+        ]
         return (
             {self._binding_reference(binding): binding for binding in retained},
             [
