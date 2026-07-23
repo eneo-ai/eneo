@@ -201,7 +201,15 @@ def content_request_fingerprint(
 ) -> bytes:
     """Bind idempotency to owner intent, byte authority, and content facts."""
     fingerprint = sha256()
-    fingerprint.update(b"eneo-object-content-request-v2\0")
+    if storage_kind is StorageKind.OBJECT_STORE:
+        # Object-store rows created before the backend split persist this exact
+        # v1 encoding. Their storage_kind column independently fences attempts
+        # to replay the same key through the inline backend.
+        fingerprint.update(b"eneo-object-content-request-v1\0")
+        storage_kind_field: tuple[bytes, ...] = ()
+    else:
+        fingerprint.update(b"eneo-object-content-request-v2\0")
+        storage_kind_field = (storage_kind.value.encode(),)
     created_by = (
         b"" if intent.created_by_user_id is None else intent.created_by_user_id.bytes
     )
@@ -216,7 +224,7 @@ def content_request_fingerprint(
         intent.producer_receipt.encode(),
         created_by,
         intent.access_class.value.encode(),
-        storage_kind.value.encode(),
+        *storage_kind_field,
         minimum_retain_until,
         content.sha256,
         content.size_bytes.to_bytes(8, "big", signed=False),

@@ -156,8 +156,12 @@ Start Eneo without the bundled profile, then verify readiness:
 
 ```bash
 docker compose up -d
-curl --fail https://eneo.example.eu/api/readyz
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
+
+HTTP 200 alone can also represent degraded remote storage while inline content
+remains available, so deployment checks must verify the explicit code.
 
 Before production traffic, validate a staging Eneo deployment against the exact
 MinIO version and configuration you will operate. Exercise single and multipart

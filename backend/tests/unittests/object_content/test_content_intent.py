@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from io import BytesIO
 from uuid import uuid4
 
@@ -36,6 +37,39 @@ def _intent() -> ContentIntent:
     )
 
 
+def _legacy_object_store_fingerprint(
+    intent: ContentIntent,
+    content: CapturedContent,
+) -> bytes:
+    """Reproduce the persisted object-store request-v1 encoding."""
+    fingerprint = sha256()
+    fingerprint.update(b"eneo-object-content-request-v1\0")
+    created_by = (
+        b"" if intent.created_by_user_id is None else intent.created_by_user_id.bytes
+    )
+    minimum_retain_until = (
+        b""
+        if intent.minimum_retain_until is None
+        else intent.minimum_retain_until.astimezone(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .encode()
+    )
+    fields = (
+        intent.producer_receipt.encode(),
+        created_by,
+        intent.access_class.value.encode(),
+        minimum_retain_until,
+        content.sha256,
+        content.size_bytes.to_bytes(8, "big", signed=False),
+        content.declared_media_type.encode(),
+        content.verified_media_type.encode(),
+    )
+    for field in fields:
+        fingerprint.update(len(field).to_bytes(8, "big", signed=False))
+        fingerprint.update(field)
+    return fingerprint.digest()
+
+
 def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
     intent = _intent()
     content = _content()
@@ -46,6 +80,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
     )
 
     assert len(baseline) == 32
+    assert baseline == _legacy_object_store_fingerprint(intent, content)
     assert (
         content_request_fingerprint(intent, content, StorageKind.OBJECT_STORE)
         == baseline

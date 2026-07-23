@@ -156,10 +156,12 @@ docker compose \
   -f docker-compose.object-content.yml \
   --profile object-content up -d
 docker compose ps
-curl --fail https://eneo.example.eu/api/readyz
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
 
-Readiness should report object content as ready. If it reports
+The explicit code check matters because HTTP 200 can also represent degraded
+remote storage while inline content remains available. If readiness reports
 `configuration_required`, stop writers and check the endpoint, bucket,
 deployment ID, and restored backup pair before retrying. Do not create a new
 bucket marker by hand.
@@ -248,7 +250,8 @@ readiness:
 
 ```bash
 docker compose up -d
-curl --fail https://eneo.example.eu/api/readyz
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
 
 Before production traffic, test the exact endpoint version and configuration in

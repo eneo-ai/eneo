@@ -798,19 +798,60 @@ Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
 
 ### Review network changes
 
-If your current deployment predates the three-network template, `docker compose up -d` recreates containers with the new network membership. External backup jobs or admin tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or attach to `eneo_data_net`.
+If your current deployment predates the isolated-network template, recreating
+the containers changes their network membership. External backup jobs or admin
+tools that connected to `db:5432` or `redis:6379` over `proxy_tier` must run
+through `docker exec` or attach to `eneo_data_net`.
+
+Before the first recreate, choose the Compose invocation that matches the
+deployment and keep it in both the deployment and rollback runbooks. Use plain
+`docker compose` for PostgreSQL-inline content or an external S3-compatible
+endpoint. If the retained `.env` points to
+`http://object-content:8333`, use the bundled-store overlay and profile on
+every command.
 
 ### Pull and deploy
 
+For PostgreSQL-inline content or an external endpoint:
+
 ```bash
-# Pull new images
 docker compose pull
-
-# Deploy updated version
 docker compose up -d
-
-# Verify services are running
 docker compose ps
+```
+
+For the bundled store:
+
+```bash
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  config --quiet
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  pull
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  up -d
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  ps
+```
+
+When any object-store endpoint is configured, verify its explicit readiness
+code. HTTP 200 alone can also represent an intentionally degraded object store
+while inline content remains available:
+
+```bash
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
 
 ### Clean up old images
@@ -822,10 +863,34 @@ docker image prune -a
 </Steps>
 
 <Callout type="info">
-  **Rollback procedure:** If issues occur after an update, restore from your
-  backup: ```bash docker compose down gunzip -c backup_YYYYMMDD.sql.gz | docker
-  compose exec -T db psql -U eneo eneo docker compose up -d ``` If using pinned
-  versions, also revert the version tags in `docker-compose.yml`.
+
+**Rollback:** Revert pinned version tags, stop writes, and restore the paired
+backup. PostgreSQL-inline and external-endpoint deployments use plain
+`docker compose`. A bundled-store deployment must use the overlay and profile
+for stop, restore, and `up`; otherwise the store and its private network are
+omitted.
+
+```bash
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  stop backend worker object-content
+# Restore the matching PostgreSQL dump and object-store snapshot as described
+# in the linked procedure, then start the pinned versions:
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  up -d
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
+```
+
+Restore the matching object-store snapshot before reopening traffic. See
+[Back up and restore](/guides/object-content-storage#back-up-and-restore) for
+skew recovery.
+
 </Callout>
 
 ### Scaling

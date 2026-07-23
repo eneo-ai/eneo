@@ -92,10 +92,36 @@ Traefik containers and have no outbound internet access.
 
 ### Upgrading an existing installation
 
-Installations created from an earlier version of this file had every service on `proxy_tier`. The new topology is applied by recreating the containers:
+Installations created from an earlier version of this file had every service on
+`proxy_tier`. Choose the Compose invocation that matches the deployment
+**before the first recreate**, and keep that same invocation in the deployment
+and rollback runbooks:
 
 ```bash
+# PostgreSQL-inline or an external S3-compatible endpoint:
 docker compose up -d
+```
+
+If the retained `.env` points to `http://object-content:8333`, the installation
+uses Eneo's bundled store. Preserve both its overlay and profile on every
+Compose command:
+
+```bash
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  config --quiet
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  pull
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  up -d
 ```
 
 Containers are recreated with new network membership; the Compose-managed PostgreSQL and Redis volumes are untouched (normally `eneo_eneo_postgres_data` and `eneo_eneo_redis_data` as Docker volumes). Expected downtime is a few seconds.
@@ -111,7 +137,17 @@ docker exec eneo_frontend getent hosts db
 # Should succeed:
 docker exec eneo_backend python -c "import socket; socket.getaddrinfo('db', 5432)"
 curl -fsS https://your-domain.com/version
+
+# Required when an object-store endpoint is configured:
+curl -fsS https://your-domain.com/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
+
+An HTTP 200 alone is not sufficient for an object-store deployment: it can
+also describe the intentionally degraded state in which inline content remains
+available. A bundled deployment must additionally show `object-content` in
+`docker compose ps`; backend, worker, and the store must share
+`object_content_net`.
 
 ## Troubleshooting
 

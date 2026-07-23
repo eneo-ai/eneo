@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import ANY
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
@@ -14,6 +16,16 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from eneo.database.database import DatabaseSessionManager
+from eneo.object_content.content import (
+    CapturedContent,
+    ContentAccessClass,
+    ContentIntent,
+    ContentState,
+    StorageKind,
+    content_request_fingerprint,
+)
+from eneo.object_content.content_repository import ObjectContentRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -23,6 +35,8 @@ _POSTGRES_13_IMAGE = (
 )
 _PREVIOUS_REVISION = "202607221700"
 _SPLIT_REVISION = "202607231200"
+_LEGACY_PAYLOAD = b"legacy remote content"
+_LEGACY_PRODUCER_RECEIPT = "file:legacy-owner:original:0"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -73,11 +87,30 @@ def _connect(database_url: str):
     return psycopg2.connect(database_url.replace("+psycopg2", ""))
 
 
+def _legacy_request_fingerprint(digest: bytes) -> bytes:
+    fingerprint = sha256()
+    fingerprint.update(b"eneo-object-content-request-v1\0")
+    fields = (
+        _LEGACY_PRODUCER_RECEIPT.encode(),
+        b"",
+        ContentAccessClass.PRIVATE_RESOURCE.value.encode(),
+        b"",
+        digest,
+        len(_LEGACY_PAYLOAD).to_bytes(8, "big", signed=False),
+        b"text/plain",
+        b"text/plain",
+    )
+    for field in fields:
+        fingerprint.update(len(field).to_bytes(8, "big", signed=False))
+        fingerprint.update(field)
+    return fingerprint.digest()
+
+
 def _insert_legacy_content(database_url: str) -> tuple[str, str, str]:
     tenant_id = str(uuid4())
     content_id = str(uuid4())
     tombstoned_content_id = str(uuid4())
-    digest = sha256(b"legacy remote content").digest()
+    digest = sha256(_LEGACY_PAYLOAD).digest()
     with _connect(database_url) as connection, connection.cursor() as cursor:
         cursor.execute(
             """
@@ -106,7 +139,7 @@ def _insert_legacy_content(database_url: str) -> tuple[str, str, str]:
                 "v1/legacy-object",
                 digest,
                 "legacy-object",
-                digest,
+                _legacy_request_fingerprint(digest),
             ),
         )
         cursor.execute(
@@ -132,6 +165,50 @@ def _insert_legacy_content(database_url: str) -> tuple[str, str, str]:
             ),
         )
     return tenant_id, content_id, tombstoned_content_id
+
+
+async def _assert_legacy_object_store_retry_replays(
+    database_url: str,
+    *,
+    tenant_id: str,
+    content_id: str,
+) -> None:
+    digest = sha256(_LEGACY_PAYLOAD).digest()
+    content = CapturedContent(
+        file=BytesIO(_LEGACY_PAYLOAD),
+        sha256=digest,
+        size_bytes=len(_LEGACY_PAYLOAD),
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+        part_sha256=(digest,),
+    )
+    intent = ContentIntent(
+        tenant_id=UUID(tenant_id),
+        created_by_user_id=None,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        idempotency_key="legacy-object",
+        producer_receipt=_LEGACY_PRODUCER_RECEIPT,
+    )
+    database = DatabaseSessionManager()
+    database.init(database_url.replace("psycopg2", "asyncpg"))
+    try:
+        async with database.session() as session, session.begin():
+            replay = await ObjectContentRepository(session).prepare_object_store(
+                intent=intent,
+                content=content,
+                object_key="v1/retry-must-not-replace-existing-key",
+                request_fingerprint=content_request_fingerprint(
+                    intent,
+                    content,
+                    StorageKind.OBJECT_STORE,
+                ),
+            )
+        assert replay.id == UUID(content_id)
+        assert replay.storage_kind is StorageKind.OBJECT_STORE
+        assert replay.state is ContentState.FAILED
+        assert replay.created is False
+    finally:
+        await database.close()
 
 
 def _insert_inline_content(database_url: str, tenant_id: str) -> str:
@@ -254,6 +331,14 @@ def test_populated_object_store_round_trip_and_inline_downgrade_fence(
             True,
             "v1/legacy-tombstone",
         )
+
+    asyncio.run(
+        _assert_legacy_object_store_retry_replays(
+            database_url,
+            tenant_id=tenant_id,
+            content_id=content_id,
+        )
+    )
 
     command.downgrade(config, _PREVIOUS_REVISION)
     with _connect(database_url) as connection, connection.cursor() as cursor:
