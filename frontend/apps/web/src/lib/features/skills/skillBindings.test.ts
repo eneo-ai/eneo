@@ -176,6 +176,46 @@ describe("Skill binding draft state", () => {
     ).toBe(bindings);
   });
 
+  test("shows the attachable revision metadata immediately after an organisation binding upgrade", () => {
+    const skill = makeSkill("renamed", 1);
+    skill.display_name = "Previous name";
+    skill.description = "Previous description";
+    const pinnedSummary = makeSummary(skill, 1);
+    pinnedSummary.source = "organization";
+    pinnedSummary.attachable_revision_id = "renamed-revision-2";
+    pinnedSummary.attachable_revision_number = 2;
+    const publishedRevision: SkillBindingCandidate = {
+      id: skill.id,
+      slug: "renamed-skill",
+      revision_id: "renamed-revision-2",
+      revision_number: 2,
+      display_name: "Current name",
+      description: "Current description",
+      content_digest: "digest-renamed-2",
+      first_published_at: "2026-07-20T12:00:00Z",
+      source: "organization"
+    };
+    const pinnedBindings = [
+      {
+        skill_id: skill.id,
+        skill_revision_id: pinnedSummary.skill_revision_id
+      }
+    ];
+
+    const upgradedBindings = upgradeSkillBinding(pinnedBindings, 0, {
+      id: skill.id,
+      attachableRevisionId: publishedRevision.revision_id,
+      isActive: true
+    });
+    const [row] = getSkillBindingRows(upgradedBindings, [pinnedSummary], [publishedRevision]);
+
+    expect(row.reference.skill_revision_id).toBe(publishedRevision.revision_id);
+    expect(row.pinnedRevision).toBe(2);
+    expect(row.displayName).toBe(publishedRevision.display_name);
+    expect(row.description).toBe(publishedRevision.description);
+    expect(row.slug).toBe(publishedRevision.slug);
+  });
+
   test("offers only the published organisation revision and no draft or unpublished upgrade", () => {
     const skill = makeSkill("organization", 3);
     const pinned = makeSummary(skill, 1);

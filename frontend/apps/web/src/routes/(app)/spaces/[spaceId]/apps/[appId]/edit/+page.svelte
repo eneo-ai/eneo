@@ -311,11 +311,11 @@
                     organizationSpace: data.currentSpace.organization === true,
                     ...params
                   })}
-                onGetSkillPreview={(skill) =>
+                onGetSkillPreview={(target) =>
                   loadSkillBindingPreview({
                     eneo: data.eneo,
                     spaceId: data.currentSpace.id,
-                    skill
+                    target
                   })}
                 onCreateSkill={createSkill}
               />

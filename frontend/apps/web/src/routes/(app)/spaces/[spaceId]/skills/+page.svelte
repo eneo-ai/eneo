@@ -96,19 +96,26 @@
       </p>
 
       {#if skillCatalog.items.length === 0 && !skillCatalog.query && !skillCatalog.loading && !skillCatalog.error}
-        <div class="border-border max-w-3xl border-y py-10 text-center">
-          <h2 class="text-foreground text-base font-medium">
-            {m.skills_library_empty_title()}
-          </h2>
-          <p class="text-muted-foreground mt-2 max-w-md text-center text-sm leading-6">
-            {m.skills_library_empty_description()}
-          </p>
-          {#if canCreate}
-            <Button class="mt-5" href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
-              <Plus data-icon="inline-start" aria-hidden="true" />
-              {m.skills_library_create_first()}
-            </Button>
-          {/if}
+        <div class="border-border max-w-3xl border-y py-8">
+          <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div class="max-w-lg">
+              <h2 class="text-foreground text-base font-medium">
+                {m.skills_library_empty_title()}
+              </h2>
+              <p class="text-muted-foreground mt-1.5 text-sm leading-6">
+                {m.skills_library_empty_description()}
+              </p>
+            </div>
+            {#if canCreate}
+              <Button
+                class="shrink-0 sm:mt-0.5"
+                href={resolve(`/spaces/${spaceRouteId}/skills/new`)}
+              >
+                <Plus data-icon="inline-start" aria-hidden="true" />
+                {m.skills_library_create_first()}
+              </Button>
+            {/if}
+          </div>
         </div>
       {:else}
         <InputGroup.Root class="mb-3 max-w-sm">

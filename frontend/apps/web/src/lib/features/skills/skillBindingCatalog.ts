@@ -1,6 +1,11 @@
 import type { Eneo, PublishedSkillPublic } from "@eneo/eneo-js";
 import { SKILL_CATALOG_PAGE_SIZE, type CatalogPage } from "./skillCatalog";
-import { mergeSkillCatalog, type SkillBindingCandidate } from "./skillBindings";
+import {
+  getSkillCandidateRevisionId,
+  mergeSkillCatalog,
+  type SkillBindingCandidate,
+  type SkillBindingRevisionMetadata
+} from "./skillBindings";
 
 type CatalogSource = "published" | "space";
 type CatalogCursor = { source: CatalogSource; cursor: string | null };
@@ -16,18 +21,29 @@ export type ListSkillBindingCatalog = (params: {
   query?: string | null;
 }) => Promise<SkillBindingCatalogPage>;
 
-export type SkillBindingPreview = {
-  id: string;
-  source: "space" | "organization";
-  slug: string;
-  revisionId: string;
-  revisionNumber: number;
-  displayName: string;
-  description: string;
+export type SkillBindingPreviewTarget = Pick<
+  SkillBindingRevisionMetadata,
+  "id" | "source" | "slug" | "revisionId" | "displayName" | "description"
+>;
+
+export type SkillBindingPreview = SkillBindingRevisionMetadata & {
   instructions: string;
 };
 
-export type GetSkillBindingPreview = (skill: SkillBindingCandidate) => Promise<SkillBindingPreview>;
+export type GetSkillBindingPreview = (
+  target: SkillBindingPreviewTarget
+) => Promise<SkillBindingPreview>;
+
+export function skillBindingPreviewTarget(skill: SkillBindingCandidate): SkillBindingPreviewTarget {
+  return {
+    id: skill.id,
+    source: skill.source,
+    slug: skill.slug,
+    revisionId: getSkillCandidateRevisionId(skill),
+    displayName: skill.display_name,
+    description: skill.description
+  };
+}
 
 export function emptySkillBindingCatalogPage(): SkillBindingCatalogPage {
   return {
@@ -112,25 +128,25 @@ export async function loadSkillBindingCatalogPage({
 export async function loadSkillBindingPreview({
   eneo,
   spaceId,
-  skill
+  target
 }: {
   eneo: Eneo;
   spaceId: string;
-  skill: SkillBindingCandidate;
+  target: SkillBindingPreviewTarget;
 }): Promise<SkillBindingPreview> {
-  if (skill.source === "organization") {
-    return publishedSkillPreview(await eneo.skills.catalogue.get({ skillId: skill.id }));
+  if (target.source === "organization") {
+    return publishedSkillPreview(await eneo.skills.catalogue.get({ skillId: target.id }));
   }
 
   const revision = await eneo.skills.getRevision({
     spaceId,
-    skillId: skill.id,
-    revisionId: skill.current_revision_id
+    skillId: target.id,
+    revisionId: target.revisionId
   });
   return {
-    id: skill.id,
+    id: target.id,
     source: "space",
-    slug: skill.slug,
+    slug: target.slug,
     revisionId: revision.id,
     revisionNumber: revision.revision_number,
     displayName: revision.display_name,

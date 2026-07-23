@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { loadSkillBindingCatalogPage, loadSkillBindingPreview } from "./skillBindingCatalog";
+import {
+  loadSkillBindingCatalogPage,
+  loadSkillBindingPreview,
+  skillBindingPreviewTarget
+} from "./skillBindingCatalog";
 
 const local = {
   id: "shared-skill",
@@ -153,7 +157,7 @@ describe("Skill binding catalog", () => {
       loadSkillBindingPreview({
         eneo: eneo as never,
         spaceId: "space-1",
-        skill: candidate as never
+        target: skillBindingPreviewTarget(candidate as never)
       })
     ).resolves.toEqual({
       id: detail.id,
@@ -198,7 +202,7 @@ describe("Skill binding catalog", () => {
       loadSkillBindingPreview({
         eneo: eneo as never,
         spaceId: "space-1",
-        skill: candidate
+        target: skillBindingPreviewTarget(candidate)
       })
     ).resolves.toEqual({
       id: candidate.id,

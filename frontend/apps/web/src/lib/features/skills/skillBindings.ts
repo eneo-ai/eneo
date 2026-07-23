@@ -17,6 +17,16 @@ export type SkillRevisionFormValue = Pick<
 
 export type SkillFormValue = Pick<SkillPublic, "slug"> & SkillRevisionFormValue;
 
+export type SkillBindingRevisionMetadata = {
+  id: string;
+  source: SkillBindingSource;
+  slug: string;
+  revisionId: string;
+  revisionNumber: number;
+  displayName: string;
+  description: string;
+};
+
 export type SkillBindingRow = {
   reference: SkillBindingReferenceInput;
   summary: SkillBindingSummary | undefined;
@@ -115,13 +125,20 @@ export function mergeSkillCatalog(
 export function getSkillBindingRows(
   bindings: SkillBindingReferenceInput[],
   summaries: SkillBindingSummary[],
-  catalog: SkillBindingCandidate[]
+  catalog: SkillBindingCandidate[],
+  loadedRevisionMetadata: SkillBindingRevisionMetadata[] = []
 ): SkillBindingRow[] {
   const summariesByReference = new Map(
     summaries.map((summary) => [bindingKey(summary.skill_id, summary.skill_revision_id), summary])
   );
   const summariesBySkillId = new Map(summaries.map((summary) => [summary.skill_id, summary]));
   const catalogById = new Map(catalog.map((skill) => [skill.id, skill]));
+  const metadataByReference = new Map(
+    loadedRevisionMetadata.map((metadata) => [
+      bindingKey(metadata.id, metadata.revisionId),
+      metadata
+    ])
+  );
 
   return bindings.map((reference) => {
     const summary = summariesByReference.get(
@@ -136,6 +153,35 @@ export function getSkillBindingRows(
       skillSummary?.attachable_revision_number ??
       (currentSkill === undefined ? undefined : getSkillCandidateRevisionNumber(currentSkill));
     const referencesAttachableRevision = attachableRevisionId === reference.skill_revision_id;
+    const loadedMetadata = metadataByReference.get(
+      bindingKey(reference.skill_id, reference.skill_revision_id)
+    );
+    const currentSkillMatchesReference =
+      currentSkill !== undefined &&
+      getSkillCandidateRevisionId(currentSkill) === reference.skill_revision_id;
+    const exactMetadata =
+      summary === undefined
+        ? (loadedMetadata ??
+          (currentSkillMatchesReference
+            ? {
+                id: currentSkill.id,
+                source: currentSkill.source,
+                slug: currentSkill.slug,
+                revisionId: getSkillCandidateRevisionId(currentSkill),
+                revisionNumber: getSkillCandidateRevisionNumber(currentSkill),
+                displayName: currentSkill.display_name,
+                description: currentSkill.description
+              }
+            : undefined))
+        : {
+            id: summary.skill_id,
+            source: summary.source,
+            slug: summary.slug,
+            revisionId: summary.skill_revision_id,
+            revisionNumber: summary.revision_number,
+            displayName: summary.display_name,
+            description: summary.description
+          };
 
     return {
       reference,
@@ -143,12 +189,13 @@ export function getSkillBindingRows(
       attachableRevisionId,
       attachableRevisionNumber,
       displayName:
-        summary?.display_name ?? skillSummary?.display_name ?? currentSkill?.display_name,
-      description: summary?.description ?? skillSummary?.description ?? currentSkill?.description,
-      slug: summary?.slug ?? skillSummary?.slug ?? currentSkill?.slug,
-      source: summary?.source ?? currentSkill?.source,
+        exactMetadata?.displayName ?? skillSummary?.display_name ?? currentSkill?.display_name,
+      description:
+        exactMetadata?.description ?? skillSummary?.description ?? currentSkill?.description,
+      slug: exactMetadata?.slug ?? skillSummary?.slug ?? currentSkill?.slug,
+      source: exactMetadata?.source ?? skillSummary?.source ?? currentSkill?.source,
       pinnedRevision:
-        summary?.revision_number ??
+        exactMetadata?.revisionNumber ??
         (referencesAttachableRevision ? attachableRevisionNumber : undefined),
       isActive:
         currentSkill !== undefined ? isSkillCandidateActive(currentSkill) : skillSummary?.is_active,

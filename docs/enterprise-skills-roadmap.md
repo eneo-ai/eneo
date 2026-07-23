@@ -1,7 +1,7 @@
 # Enterprise Skills roadmap
 
 - **Status:** Working plan
-- **Last verified:** 2026-07-22
+- **Last verified:** 2026-07-23
 - **Audience:** Product, engineering, security, operations, and Skill managers
 - **Decision owner:** Product and architecture
 - **Runtime contract:**
@@ -410,6 +410,7 @@ The UI should show:
 - token count for each bound revision;
 - descriptor tokens, required body tokens, and optional maximum;
 - configured percentage and resulting token allowance;
+- whether any advertised descriptions were shortened for this model and budget;
 - exact provider count or named estimate/fallback; and
 - the most restrictive result when an Assistant can use several models.
 
@@ -431,6 +432,29 @@ unavailable for models where that representative activation cannot fit. Keep one
 admin-controlled percentage unless production evidence earns a second budget.
 Derive on-demand capability from native tool support and the same LiteLLM budget
 calculation. Do not maintain a curated per-model availability table.
+
+### Descriptor shortening and operator guidance
+
+Eneo does not silently shorten the immutable Skill description. If Task #553
+later introduces a derived, per-turn compact descriptor so every attached Skill
+can remain discoverable within the configured share, the product must:
+
+- keep the full approved description unchanged in the catalogue and editor;
+- warn that descriptions were shortened, how many were affected, which model
+  and budget caused it, and that all attached Skills remain discoverable;
+- show affected revision IDs, original and advertised token counts, and the
+  compaction version in debug evidence without storing either description;
+- suggest concrete remedies: detach unused Skills, disable unused MCP/tool
+  integrations when the overall model context is constrained, select a
+  larger-context model, or let an administrator adjust the Skill share;
+- verify with positive and negative activation cases that each compact
+  descriptor still communicates what the Skill does and when it applies; and
+- use the documented `catalog_budget_exceeded` fallback instead of advertising
+  a descriptor that is too short to distinguish the Skill reliably.
+
+This is a progressive-disclosure optimization, not permission to truncate Skill
+bodies, mutate revisions, hide attached Skills, or silently select a prefix of
+the catalogue.
 
 ## Explainability, audit, and statistics
 
@@ -662,6 +686,9 @@ flowchart LR
   body, or the UI marks that model unavailable for on-demand mode.
 - Save-time validation prevents new descriptor overflow; a later model or policy
   change produces the documented all-or-nothing fallback and health evidence.
+- If descriptor shortening is introduced, it is derived and visible, preserves
+  every attached Skill in discovery, passes activation evaluations, and offers
+  the operator remedies listed in the context policy.
 - Models without tool calling run `always_only` and disclose that fallback.
 - Activation tests include positive and negative cases in every user-facing
   language the Skill author expects to support.

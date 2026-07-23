@@ -12,6 +12,7 @@
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
   import SkillPreview from "./SkillPreview.svelte";
+  import { skillBindingPreviewTarget } from "./skillBindingCatalog";
   import type {
     GetSkillBindingPreview,
     ListSkillBindingCatalog,
@@ -29,6 +30,7 @@
     removeSkillBinding,
     upgradeSkillBinding,
     type SkillBindingCandidate,
+    type SkillBindingRevisionMetadata,
     type SkillBindingRow,
     type SkillFormValue
   } from "./skillBindings";
@@ -69,6 +71,9 @@
   let previewLoading = $state(false);
   let previewError = $state<string | null>(null);
   let previewRequestGeneration = 0;
+  let loadedRevisionMetadata = $state<SkillBindingRevisionMetadata[]>([]);
+  let upgradeLoadingSkillId = $state<string | null>(null);
+  let upgradeError = $state<string | null>(null);
   let announcement = $state("");
 
   let loadedInitialPage = untrack(() => initialCatalogPage);
@@ -94,7 +99,9 @@
   });
   const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
-  const rows = $derived(getSkillBindingRows(bindings, bindingSummaries, catalog));
+  const rows = $derived(
+    getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
+  );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
     if (skillCatalog.query.trim()) return m.skills_search_no_results();
@@ -120,7 +127,7 @@
     previewOpen = true;
     previewLoading = true;
     try {
-      const loaded = await onGetSkillPreview(skill);
+      const loaded = await onGetSkillPreview(skillBindingPreviewTarget(skill));
       if (previewRequestGeneration === requestGeneration) preview = loaded;
     } catch {
       if (previewRequestGeneration === requestGeneration) {
@@ -176,24 +183,66 @@
     focusElement(nextFocusId ? rowId(nextFocusId) : addExistingTriggerId);
   }
 
-  function useLatestRevision(row: SkillBindingRow, index: number) {
+  async function useLatestRevision(row: SkillBindingRow, index: number) {
     if (
       !canEditBindings ||
       row.attachableRevisionId === undefined ||
       row.attachableRevisionNumber === undefined ||
-      row.isActive !== true
+      row.isActive !== true ||
+      row.source === undefined ||
+      row.slug === undefined ||
+      row.displayName === undefined ||
+      row.description === undefined ||
+      upgradeLoadingSkillId !== null
     )
       return;
-    bindings = upgradeSkillBinding(bindings, index, {
-      id: row.reference.skill_id,
-      attachableRevisionId: row.attachableRevisionId,
-      isActive: row.isActive
-    });
-    announcement = m.skills_revision_upgraded_announcement({
-      name: rowName(row),
-      revision: String(row.attachableRevisionNumber)
-    });
-    focusElement(rowId(row.reference.skill_id));
+    upgradeError = null;
+    upgradeLoadingSkillId = row.reference.skill_id;
+    try {
+      const catalogHasAttachableRevision = catalog.some(
+        (skill) =>
+          skill.id === row.reference.skill_id &&
+          skillBindingPreviewTarget(skill).revisionId === row.attachableRevisionId
+      );
+      if (!catalogHasAttachableRevision) {
+        const loaded = await onGetSkillPreview({
+          id: row.reference.skill_id,
+          source: row.source,
+          slug: row.slug,
+          revisionId: row.attachableRevisionId,
+          displayName: row.displayName,
+          description: row.description
+        });
+        if (
+          loaded.id !== row.reference.skill_id ||
+          loaded.revisionId !== row.attachableRevisionId
+        ) {
+          throw new Error("Skill preview did not match the requested revision");
+        }
+        loadedRevisionMetadata = [
+          ...loadedRevisionMetadata.filter(
+            (metadata) => metadata.id !== loaded.id || metadata.revisionId !== loaded.revisionId
+          ),
+          loaded
+        ];
+      }
+      const nextBindings = upgradeSkillBinding(bindings, index, {
+        id: row.reference.skill_id,
+        attachableRevisionId: row.attachableRevisionId,
+        isActive: row.isActive
+      });
+      if (nextBindings === bindings) return;
+      bindings = nextBindings;
+      announcement = m.skills_revision_upgraded_announcement({
+        name: rowName(row),
+        revision: String(row.attachableRevisionNumber)
+      });
+      focusElement(rowId(row.reference.skill_id));
+    } catch {
+      upgradeError = m.skills_preview_load_error();
+    } finally {
+      upgradeLoadingSkillId = null;
+    }
   }
 
   function setCreateOpen(open: boolean) {
@@ -243,6 +292,10 @@
       </Badge>
     {/if}
   </div>
+
+  {#if upgradeError}
+    <p class="text-destructive text-sm" role="alert">{upgradeError}</p>
+  {/if}
 
   {#if rows.length === 0}
     <p class="text-muted-foreground py-2 text-sm">{m.skills_no_bindings()}</p>
@@ -301,12 +354,12 @@
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={!canEditBindings}
+                  disabled={!canEditBindings || upgradeLoadingSkillId !== null}
                   aria-label={m.skills_use_latest_revision_aria({
                     name: rowName(row),
                     revision: String(row.attachableRevisionNumber)
                   })}
-                  onclick={() => useLatestRevision(row, index)}
+                  onclick={() => void useLatestRevision(row, index)}
                 >
                   <RefreshCw data-icon="inline-start" aria-hidden="true" />
                   {m.skills_use_latest_revision()}
@@ -379,7 +432,11 @@
         collisionPadding={16}
         class="w-[min(32rem,calc(100vw-2rem))] p-0"
       >
-        <Command.Root label={m.skills_search_existing()} shouldFilter={false}>
+        <Command.Root
+          label={m.skills_search_existing()}
+          shouldFilter={false}
+          class="p-0 [&_[data-slot=command-input-wrapper]]:border-border [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:p-2 [&_[data-slot=input-group]]:border-input [&_[data-slot=input-group]]:bg-background"
+        >
           <Command.Input
             value={skillCatalog.query}
             placeholder={m.skills_search_existing()}
@@ -417,7 +474,7 @@
                 {#each addExistingChoices as skill (skill.id)}
                   <Command.Item
                     value={`${skill.display_name} ${skill.description} ${skill.slug} ${skill.id}`}
-                    class="items-start px-3 py-3 [&_.cn-command-item-indicator]:hidden"
+                    class="data-selected:bg-accent-dimmer/40 items-start px-3 py-3 transition-colors duration-150 motion-reduce:transition-none [&_.cn-command-item-indicator]:hidden"
                     onSelect={() => openPreview(skill)}
                   >
                     <div class="min-w-0 flex-1">

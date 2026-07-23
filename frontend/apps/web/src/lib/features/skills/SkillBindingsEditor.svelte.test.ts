@@ -4,7 +4,12 @@ import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import SkillBindingsEditor from "./SkillBindingsEditor.svelte";
-import type { SkillBindingCatalogPage, SkillBindingPreview } from "./skillBindingCatalog";
+import {
+  skillBindingPreviewTarget,
+  type SkillBindingCatalogPage,
+  type SkillBindingPreview,
+  type SkillBindingPreviewTarget
+} from "./skillBindingCatalog";
 import { SKILL_CATALOG_PAGE_SIZE } from "./skillCatalog";
 import type { SkillBindingCandidate } from "./skillBindings";
 
@@ -56,23 +61,21 @@ function makePage(
 }
 
 function previewFor(skill: SkillBindingCandidate): SkillBindingPreview {
-  const revisionId = skill.source === "space" ? skill.current_revision_id : skill.revision_id;
-  const revisionNumber =
-    skill.source === "space" ? skill.current_revision_number : skill.revision_number;
+  const target = skillBindingPreviewTarget(skill);
   return {
-    id: skill.id,
-    source: skill.source,
-    slug: skill.slug,
-    revisionId,
-    revisionNumber,
-    displayName: skill.display_name,
-    description: skill.description,
+    ...target,
+    revisionNumber:
+      skill.source === "space" ? skill.current_revision_number : skill.revision_number,
     instructions: `Exact instructions for ${skill.slug}.`
   };
 }
 
-function getPreview(skill: SkillBindingCandidate): Promise<SkillBindingPreview> {
-  return Promise.resolve(previewFor(skill));
+function getPreview(target: SkillBindingPreviewTarget): Promise<SkillBindingPreview> {
+  return Promise.resolve({
+    ...target,
+    revisionNumber: Number(target.revisionId.match(/(\d+)$/)?.[1] ?? "1"),
+    instructions: `Exact instructions for ${target.slug}.`
+  });
 }
 
 function deferred<T>() {
@@ -194,7 +197,7 @@ describe("SkillBindingsEditor", () => {
     await expect
       .element(page.getByText("Exact instructions for approved-guidance.", { exact: true }))
       .toBeVisible();
-    expect(onGetSkillPreview).toHaveBeenCalledWith(published);
+    expect(onGetSkillPreview).toHaveBeenCalledWith(skillBindingPreviewTarget(published));
 
     await page.getByRole("button", { name: m.cancel() }).click();
     const pickerTrigger = page.getByRole("combobox", { name: m.skills_add_existing() });
@@ -255,7 +258,17 @@ describe("SkillBindingsEditor", () => {
 
   test("upgrades a bound Skill that is outside the current catalog page", async () => {
     const bound = makeSkill("bound", 2);
+    bound.display_name = "Previous name";
+    bound.description = "Previous description";
     const summary = makeSummary(bound, 1, 0);
+    const onGetSkillPreview = vi.fn(async (target: SkillBindingPreviewTarget) => ({
+      ...target,
+      slug: "current-slug",
+      revisionNumber: 2,
+      displayName: "Current name",
+      description: "Current description",
+      instructions: "Current instructions"
+    }));
 
     render(SkillBindingsEditor, {
       bindings: [{ skill_id: bound.id, skill_revision_id: summary.skill_revision_id }],
@@ -264,7 +277,7 @@ describe("SkillBindingsEditor", () => {
       canEditBindings: true,
       canCreateSkills: false,
       onListCatalog: vi.fn(),
-      onGetSkillPreview: getPreview,
+      onGetSkillPreview,
       onCreateSkill: vi.fn()
     });
 
@@ -282,6 +295,98 @@ describe("SkillBindingsEditor", () => {
       .toBeVisible();
     await expect
       .element(page.getByText(m.skills_newer_revision_available({ revision: "2" })))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText("Current name", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("Current description", { exact: true })).toBeVisible();
+    expect(onGetSkillPreview).toHaveBeenCalledWith({
+      id: bound.id,
+      source: "space",
+      slug: bound.slug,
+      revisionId: bound.current_revision_id,
+      displayName: bound.display_name,
+      description: bound.description
+    });
+  });
+
+  test("keeps the binding unchanged when the loaded preview is for another revision", async () => {
+    const bound = makeSkill("bound", 2);
+    const summary = makeSummary(bound, 1, 0);
+    const onGetSkillPreview = vi.fn(async (target: SkillBindingPreviewTarget) => ({
+      ...target,
+      revisionId: "another-revision",
+      revisionNumber: 2,
+      instructions: "Instructions from the wrong revision."
+    }));
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: bound.id, skill_revision_id: summary.skill_revision_id }],
+      initialCatalogPage: makePage([]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview,
+      onCreateSkill: vi.fn()
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.skills_use_latest_revision_aria({ name: bound.display_name, revision: "2" })
+      })
+      .click();
+
+    await expect.element(page.getByText(m.skills_preview_load_error())).toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_revision_label({ revision: "1" }), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_newer_revision_available({ revision: "2" })))
+      .toBeVisible();
+  });
+
+  test("does not announce an upgrade when the binding changes while its preview loads", async () => {
+    const bound = makeSkill("bound", 2);
+    const summary = makeSummary(bound, 1, 0);
+    const previewRequest = deferred<SkillBindingPreview>();
+    const onGetSkillPreview = vi.fn(() => previewRequest.promise);
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: bound.id, skill_revision_id: summary.skill_revision_id }],
+      initialCatalogPage: makePage([]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview,
+      onCreateSkill: vi.fn()
+    });
+
+    await page
+      .getByRole("button", {
+        name: m.skills_use_latest_revision_aria({ name: bound.display_name, revision: "2" })
+      })
+      .click();
+    expect(onGetSkillPreview).toHaveBeenCalledTimes(1);
+
+    await page
+      .getByRole("button", { name: m.skills_remove_aria({ name: bound.display_name }) })
+      .click();
+    previewRequest.resolve({
+      ...skillBindingPreviewTarget(bound),
+      revisionNumber: 2,
+      instructions: "Current instructions."
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect
+      .element(
+        page.getByText(
+          m.skills_revision_upgraded_announcement({
+            name: bound.display_name,
+            revision: "2"
+          })
+        )
+      )
       .not.toBeInTheDocument();
   });
 

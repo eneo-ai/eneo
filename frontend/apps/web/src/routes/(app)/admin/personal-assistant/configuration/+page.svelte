@@ -84,11 +84,11 @@
             organizationSpace: true,
             ...params
           })}
-        onGetSkillPreview={(skill) =>
+        onGetSkillPreview={(target) =>
           loadSkillBindingPreview({
             eneo: data.eneo,
             spaceId: data.organizationSpace.id,
-            skill
+            target
           })}
       />
     </div>
