@@ -169,8 +169,9 @@ class AssistantSkillBindings(BaseCrossReference):
             initially="DEFERRED",
         ),
         Index(
-            "ix_assistant_skill_bindings_skill_id",
+            "ix_assistant_skill_bindings_skill_id_assistant_id",
             "skill_id",
+            "assistant_id",
         ),
         Index(
             "ix_assistant_skill_bindings_tenant_skill_space",
@@ -237,8 +238,9 @@ class AppSkillBindings(BaseCrossReference):
             initially="DEFERRED",
         ),
         Index(
-            "ix_app_skill_bindings_skill_id",
+            "ix_app_skill_bindings_skill_id_app_id",
             "skill_id",
+            "app_id",
         ),
         Index(
             "ix_app_skill_bindings_tenant_skill_space",

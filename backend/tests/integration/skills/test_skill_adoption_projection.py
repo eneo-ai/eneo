@@ -1,13 +1,20 @@
 import asyncio
+from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.governance_policy_table import GovernancePolicies
-from eneo.database.tables.skill_table import AssistantSkillBindings
+from eneo.database.tables.skill_table import (
+    AppSkillBindings,
+    AssistantSkillBindings,
+)
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.skills.domain.skill import (
+    SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionResourceKind,
     SkillBindingReference,
@@ -24,6 +31,62 @@ async def _organization_space(session, *, tenant_id: UUID) -> Spaces:
     )
     assert organization is not None
     return organization
+
+
+def _walk_plan(node: Mapping[str, object]) -> list[Mapping[str, object]]:
+    nodes = [node]
+    children = node.get("Plans")
+    if not isinstance(children, list):
+        return nodes
+    for child in children:
+        if isinstance(child, dict):
+            nodes.extend(_walk_plan(child))
+    return nodes
+
+
+async def _explain_captured_statement(
+    session,
+    *,
+    statement: str,
+    parameters: tuple[object, ...],
+) -> list[Mapping[str, object]]:
+    connection = await session.connection()
+    await connection.exec_driver_sql("SET LOCAL enable_seqscan = off")
+    explained = await connection.exec_driver_sql(
+        f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
+        parameters,
+    )
+    document = explained.scalar_one()
+    assert isinstance(document, list)
+    assert len(document) == 1
+    root = document[0]
+    assert isinstance(root, dict)
+    plan = root.get("Plan")
+    assert isinstance(plan, dict)
+    return _walk_plan(plan)
+
+
+def _assert_bounded_composite_scan(
+    nodes: list[Mapping[str, object]],
+    *,
+    index_name: str,
+    range_column: str,
+    maximum_rows: int,
+) -> None:
+    index_node = next(
+        (node for node in nodes if node.get("Index Name") == index_name),
+        None,
+    )
+    assert index_node is not None
+    condition = index_node.get("Index Cond")
+    assert isinstance(condition, str)
+    assert "skill_id" in condition
+    assert range_column in condition
+    actual_rows = index_node.get("Actual Rows")
+    actual_loops = index_node.get("Actual Loops")
+    assert isinstance(actual_rows, int | float)
+    assert isinstance(actual_loops, int | float)
+    assert actual_rows * actual_loops <= maximum_rows
 
 
 async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
@@ -327,6 +390,200 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
                 }
             )
             == 3
+        )
+
+
+async def test_adoption_continuations_seek_composite_binding_indexes(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+):
+    page_limit = 5
+    resource_count = 40
+
+    async with db_container() as container:
+        session = container.session()
+        organization = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        model = await completion_model_factory(session, "skill-adoption-plan-model")
+        shared_space = await space_factory(
+            session,
+            "Skill adoption plan Space",
+            [model.id],
+        )
+        repo = container.skill_repo()
+        target = await repo.create(
+            space_id=organization.id,
+            slug=f"adoption-plan-{uuid4().hex[:8]}",
+            display_name="Adoption plan target",
+            description="Exercises bounded adoption continuations.",
+            instructions="Use the target Skill.",
+            content_digest="3" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        unrelated = await repo.create(
+            space_id=organization.id,
+            slug=f"adoption-plan-unrelated-{uuid4().hex[:8]}",
+            display_name="Unrelated adoption plan Skill",
+            description="Creates unrelated binding rows.",
+            instructions="Use the unrelated Skill.",
+            content_digest="4" * 64,
+            created_by_user_id=admin_user.id,
+        )
+
+        assistants = [
+            Assistants(
+                id=UUID(int=1_000 + offset),
+                name=f"Plan Assistant {offset:03}",
+                user_id=admin_user.id,
+                completion_model_id=model.id,
+                completion_model_kwargs={},
+                logging_enabled=True,
+                is_default=False,
+                published=False,
+                space_id=shared_space.id,
+            )
+            for offset in range(resource_count)
+        ]
+        apps = [
+            Apps(
+                id=UUID(int=2_000 + offset),
+                name=f"Plan App {offset:03}",
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                space_id=shared_space.id,
+                completion_model_id=model.id,
+                completion_model_kwargs={},
+                published=False,
+            )
+            for offset in range(resource_count)
+        ]
+        session.add_all([*assistants, *apps])
+        await session.flush()
+        session.add_all(
+            [
+                binding
+                for assistant in assistants
+                for binding in (
+                    AssistantSkillBindings(
+                        assistant_id=assistant.id,
+                        tenant_id=admin_user.tenant_id,
+                        space_id=shared_space.id,
+                        skill_space_id=organization.id,
+                        skill_id=target.id,
+                        skill_revision_id=target.current_revision.id,
+                        position=0,
+                    ),
+                    AssistantSkillBindings(
+                        assistant_id=assistant.id,
+                        tenant_id=admin_user.tenant_id,
+                        space_id=shared_space.id,
+                        skill_space_id=organization.id,
+                        skill_id=unrelated.id,
+                        skill_revision_id=unrelated.current_revision.id,
+                        position=1,
+                    ),
+                )
+            ]
+            + [
+                binding
+                for app in apps
+                for binding in (
+                    AppSkillBindings(
+                        app_id=app.id,
+                        tenant_id=admin_user.tenant_id,
+                        space_id=shared_space.id,
+                        skill_space_id=organization.id,
+                        skill_id=target.id,
+                        skill_revision_id=target.current_revision.id,
+                        position=0,
+                    ),
+                    AppSkillBindings(
+                        app_id=app.id,
+                        tenant_id=admin_user.tenant_id,
+                        space_id=shared_space.id,
+                        skill_space_id=organization.id,
+                        skill_id=unrelated.id,
+                        skill_revision_id=unrelated.current_revision.id,
+                        position=1,
+                    ),
+                )
+            ]
+        )
+        await session.flush()
+
+        captured_statements: list[tuple[str, tuple[object, ...]]] = []
+
+        def capture_statement(
+            _connection,
+            _cursor,
+            statement,
+            parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            assert isinstance(parameters, tuple)
+            if "organization_skill_adoption_" in statement:
+                captured_statements.append((statement, parameters))
+
+        assert session.bind is not None
+        sync_engine = session.bind.sync_engine
+        sa.event.listen(sync_engine, "before_cursor_execute", capture_statement)
+        try:
+            assistant_page = await repo.get_organization_adoption_projection_page(
+                tenant_id=admin_user.tenant_id,
+                skill_id=target.id,
+                limit=page_limit,
+                after=SkillAdoptionCursor(
+                    kind=SkillAdoptionResourceKind.ASSISTANT,
+                    resource_id=assistants[9].id,
+                ),
+            )
+        finally:
+            sa.event.remove(sync_engine, "before_cursor_execute", capture_statement)
+        assert assistant_page is not None
+        assert len(captured_statements) == 1
+        assistant_nodes = await _explain_captured_statement(
+            session,
+            statement=captured_statements[0][0],
+            parameters=captured_statements[0][1],
+        )
+        _assert_bounded_composite_scan(
+            assistant_nodes,
+            index_name="ix_assistant_skill_bindings_skill_id_assistant_id",
+            range_column="assistant_id",
+            maximum_rows=page_limit + 1,
+        )
+
+        captured_statements.clear()
+        sa.event.listen(sync_engine, "before_cursor_execute", capture_statement)
+        try:
+            app_page = await repo.get_organization_adoption_projection_page(
+                tenant_id=admin_user.tenant_id,
+                skill_id=target.id,
+                limit=page_limit,
+                after=SkillAdoptionCursor(
+                    kind=SkillAdoptionResourceKind.APP,
+                    resource_id=apps[9].id,
+                ),
+            )
+        finally:
+            sa.event.remove(sync_engine, "before_cursor_execute", capture_statement)
+        assert app_page is not None
+        assert len(captured_statements) == 1
+        app_nodes = await _explain_captured_statement(
+            session,
+            statement=captured_statements[0][0],
+            parameters=captured_statements[0][1],
+        )
+        _assert_bounded_composite_scan(
+            app_nodes,
+            index_name="ix_app_skill_bindings_skill_id_app_id",
+            range_column="app_id",
+            maximum_rows=page_limit + 1,
         )
 
 

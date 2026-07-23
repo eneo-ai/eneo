@@ -132,4 +132,37 @@ describe("organisation Skill detail loader", () => {
     expect(result.adoptionPage).toBe(adoptionPage);
     await expect(result.adoptionPage).rejects.toBe(failure);
   });
+
+  test("handles an early revision failure while preserving the Skill failure", async () => {
+    const fixture = event({ publishedRevisionNumber: 2 });
+    let rejectSkill!: (reason: Error) => void;
+    let rejectRevisionPage!: (reason: Error) => void;
+    const skill = new Promise<typeof fixture.skill>((_, reject) => {
+      rejectSkill = reject;
+    });
+    const revisionPage = new Promise<typeof fixture.revisionPage>((_, reject) => {
+      rejectRevisionPage = reject;
+    });
+    fixture.organizationGet.mockReturnValue(skill);
+    fixture.listRevisionSummaries.mockReturnValue(revisionPage);
+
+    const unhandledRejection = vi.fn();
+    process.on("unhandledRejection", unhandledRejection);
+    try {
+      const resultPromise = load(fixture.input as never);
+      await vi.waitFor(() => expect(fixture.listRevisionSummaries).toHaveBeenCalled());
+
+      rejectRevisionPage(new Error("revision summaries unavailable"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const skillFailure = new Error("Skill unavailable");
+      rejectSkill(skillFailure);
+      await expect(resultPromise).rejects.toBe(skillFailure);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandledRejection).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandledRejection);
+    }
+  });
 });

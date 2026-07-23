@@ -475,7 +475,7 @@ class SkillRepoImpl:
             )
             .cte("organization_skill_adoption_scope")
         )
-        resources = sa.union_all(
+        assistant_resources = (
             sa.select(
                 sa.literal(0).label("kind_rank"),
                 sa.literal(SkillAdoptionResourceKind.ASSISTANT.value).label("kind"),
@@ -504,7 +504,9 @@ class SkillRepoImpl:
                 AssistantSkillBindings.tenant_id == tenant_id,
                 AssistantSkillBindings.skill_id == skill_id,
                 Spaces.tenant_id == tenant_id,
-            ),
+            )
+        )
+        app_resources = (
             sa.select(
                 sa.literal(1).label("kind_rank"),
                 sa.literal(SkillAdoptionResourceKind.APP.value).label("kind"),
@@ -531,24 +533,30 @@ class SkillRepoImpl:
                 AppSkillBindings.skill_id == skill_id,
                 Apps.tenant_id == tenant_id,
                 Spaces.tenant_id == tenant_id,
+            )
+        )
+        if after is not None:
+            if after.kind is SkillAdoptionResourceKind.ASSISTANT:
+                assistant_resources = assistant_resources.where(
+                    AssistantSkillBindings.assistant_id > after.resource_id
+                )
+            else:
+                assistant_resources = assistant_resources.where(sa.false())
+                app_resources = app_resources.where(
+                    AppSkillBindings.app_id > after.resource_id
+                )
+        branch_limit = limit + 1
+        resources = sa.union_all(
+            assistant_resources.order_by(AssistantSkillBindings.assistant_id).limit(
+                branch_limit
             ),
+            app_resources.order_by(AppSkillBindings.app_id).limit(branch_limit),
         ).cte("organization_skill_adoption_resources")
         resource_page_statement = (
             sa.select(resources)
             .order_by(resources.c.kind_rank, resources.c.resource_id)
             .limit(limit + 1)
         )
-        if after is not None:
-            after_rank = 0 if after.kind is SkillAdoptionResourceKind.ASSISTANT else 1
-            resource_page_statement = resource_page_statement.where(
-                sa.or_(
-                    resources.c.kind_rank > after_rank,
-                    sa.and_(
-                        resources.c.kind_rank == after_rank,
-                        resources.c.resource_id > after.resource_id,
-                    ),
-                )
-            )
         resource_page = resource_page_statement.cte(
             "organization_skill_adoption_resource_page"
         )
