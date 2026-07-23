@@ -113,6 +113,46 @@ def test_count_message_tokens_fallback_when_litellm_fails():
     assert tokens == 100 + 4 + 1105 + 4
 
 
+def test_count_message_tokens_fallback_counts_tool_call_identity_and_arguments():
+    short_call = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-short",
+                    "type": "function",
+                    "function": {"name": "propose_flow", "arguments": "{}"},
+                }
+            ],
+        }
+    ]
+    long_call = [
+        {
+            **short_call[0],
+            "tool_calls": [
+                {
+                    "id": "call-long",
+                    "type": "function",
+                    "function": {
+                        "name": "propose_flow",
+                        "arguments": "x" * 800,
+                    },
+                }
+            ],
+        }
+    ]
+
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ):
+        short_tokens = count_message_tokens(short_call)
+        long_tokens = count_message_tokens(long_call)
+
+    assert long_tokens >= short_tokens + 200
+
+
 def test_count_tool_tokens_fallback_when_litellm_fails():
     with patch(
         "eneo.tokens.token_utils.litellm.token_counter",

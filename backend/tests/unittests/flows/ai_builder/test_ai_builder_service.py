@@ -1392,6 +1392,81 @@ class TestSendMessage:
         assert mock_litellm.acompletion.await_count == 1
 
     @pytest.mark.anyio
+    async def test_context_limit_commits_without_ack_or_provider_work(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = _make_user()
+        repo = _make_repo_mock()
+        session = _make_session(
+            status=SessionStatus.CHATTING,
+            tenant_id=user.tenant_id,
+            conversation=_make_confirmed_requirements_conversation(),
+        )
+        repo.get_session.return_value = session
+        completion_service = AsyncMock()
+        completion_service._get_adapter.return_value = _make_adapter()
+        service = _make_service(
+            user=user,
+            repo=repo,
+            completion_service=completion_service,
+        )
+        repo.load_planning_state.return_value = _make_committed_planning_state()
+        monkeypatch.setattr(
+            "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
+            lambda _messages, _model: 1_000_000_000,
+        )
+        monkeypatch.setattr(
+            "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+            lambda _tools, _model: 0,
+        )
+
+        async def resolve_without_auxiliary_provider(**kwargs: Any) -> SimpleNamespace:
+            prepared = kwargs["prepared"]
+            return SimpleNamespace(
+                metadata=prepared.metadata,
+                is_requirements_confirmation=prepared.is_requirements_confirmation,
+                used_auxiliary_llm=True,
+            )
+
+        monkeypatch.setattr(
+            "eneo.flows.ai_builder.ai_builder_planner.resolve_user_question_metadata",
+            resolve_without_auxiliary_provider,
+        )
+
+        with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock()
+            events = await _collect_events(
+                service.send_message(
+                    session_id=session.id,
+                    client_turn_id=_TEST_CLIENT_TURN_ID,
+                    request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                    request_snapshot=_test_request_snapshot("Hello"),
+                    message="Hello",
+                    question_answer=_make_requirements_confirmation(),
+                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                )
+            )
+
+        assert [event["event"] for event in events] == [SSE_EVENT_ERROR, SSE_EVENT_DONE]
+        public_error = json.loads(events[0]["data"])
+        assert public_error["code"] == "planner_context_limit_exceeded"
+        assert public_error["details"] == {
+            "another_call_permitted": False,
+            "retry_scope": "new_turn",
+        }
+        repo.complete_session_turn.assert_awaited_once()
+        assert (
+            repo.complete_session_turn.await_args.kwargs["error"].model_dump(
+                mode="json", exclude_none=True
+            )
+            == public_error
+        )
+        acceptance = repo.accept_session_turn.await_args.kwargs["acceptance"]
+        assert acceptance.acknowledge_duplicate_provider_spend is False
+        mock_litellm.acompletion.assert_not_awaited()
+
+    @pytest.mark.anyio
     async def test_llm_error_preserves_provider_outcome_unknown(self):
         user = _make_user()
         repo = _make_repo_mock()

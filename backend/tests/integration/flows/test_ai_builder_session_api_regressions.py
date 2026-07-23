@@ -1866,11 +1866,10 @@ async def test_ai_builder_committed_error_replays_exactly_without_provider_work(
         ui_language="sv",
     )
     committed_error = build_ai_builder_error(
-        message="The proposal did not satisfy the required source contract.",
-        code=AIBuilderErrorCode.PLANNER_REJECTED,
-        request_id="committed-error-request",
-        diagnostic_context={"outcome_kind": "server_confirm_requirements"},
-        details={"quality_failure_codes": "missing_source_refs"},
+        message="The AI planner request exceeds the available context window.",
+        code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
+        request_id="committed-context-limit-request",
+        details={"another_call_permitted": False, "retry_scope": "new_turn"},
     )
 
     async with db_container() as container:
@@ -1920,6 +1919,13 @@ async def test_ai_builder_committed_error_replays_exactly_without_provider_work(
     assert before_replay.status_code == 200, before_replay.text
     assert before_replay.json()["latest_turn"]["error"] == committed_error.model_dump(
         mode="json",
+    )
+    assert before_replay.json()["latest_turn"]["state"] == "committed"
+    assert (
+        before_replay.json()["latest_turn"]["retry_request"][
+            "acknowledge_duplicate_provider_spend"
+        ]
+        is False
     )
 
     completion = AsyncMock(side_effect=AssertionError("Provider work must not replay."))

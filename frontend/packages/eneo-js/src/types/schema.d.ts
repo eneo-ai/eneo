@@ -8780,6 +8780,7 @@ export interface components {
       | "planner_budget_missing"
       | "planner_model_missing_context_window"
       | "planner_model_missing_output_tokens"
+      | "planner_context_limit_exceeded"
       | "planner_invalid_repair_response"
       | "planner_output_too_long"
       | "planner_parse_error"

@@ -28,7 +28,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_submission import (
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import LLMMessageParam
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalMessageGroup,
+    ProposalRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -94,7 +97,7 @@ class AIBuilderProposalProcessor:
         turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        llm_messages: list[LLMMessageParam],
+        message_groups: tuple[ProposalMessageGroup, ...],
         completion_model_route: ResolvedCompletionModelRoute,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
@@ -112,6 +115,7 @@ class AIBuilderProposalProcessor:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
+        proposal_request_budget: ProposalRequestBudget | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         """Run the server-selected plan proposal task.
 
@@ -152,7 +156,7 @@ class AIBuilderProposalProcessor:
             turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            llm_messages=llm_messages,
+            message_groups=message_groups,
             completion_model_route=completion_model_route,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
@@ -168,5 +172,6 @@ class AIBuilderProposalProcessor:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
             before_provider_call=before_provider_call,
+            proposal_request_budget=proposal_request_budget,
         ):
             yield event

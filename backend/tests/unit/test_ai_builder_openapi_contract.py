@@ -386,6 +386,7 @@ def test_openapi_ai_builder_turn_retry_errors_and_recovery_are_documented(
     description = operation["description"]
 
     assert {
+        "planner_context_limit_exceeded",
         "session_turn_idempotency_conflict",
         "session_turn_provider_outcome_unknown",
     }.issubset(error_codes)

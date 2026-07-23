@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from eneo.flows.ai_builder import ai_builder_token_usage
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_ESTIMATE,
@@ -45,12 +47,16 @@ def test_completion_token_usage_prefers_provider_usage() -> None:
 
 
 def test_completion_token_usage_estimates_when_provider_usage_is_missing(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_count_tokens(text: str, model_name: str = "") -> int:
-        return len(text)
+    def fake_count_message_tokens(
+        messages: list[dict[str, object]], model_name: str = ""
+    ) -> int:
+        return len(messages)
 
-    monkeypatch.setattr(ai_builder_token_usage, "count_tokens", fake_count_tokens)
+    monkeypatch.setattr(
+        ai_builder_token_usage, "count_message_tokens", fake_count_message_tokens
+    )
 
     usage = completion_token_usage_from_response(
         SimpleNamespace(usage=None),
@@ -63,7 +69,7 @@ def test_completion_token_usage_estimates_when_provider_usage_is_missing(
     )
 
     assert usage.prompt_tokens > 0
-    assert usage.completion_tokens == len("done")
+    assert usage.completion_tokens == 1
     assert usage.total_tokens == usage.prompt_tokens + usage.completion_tokens
     assert usage.source == TOKEN_USAGE_SOURCE_ESTIMATE
     assert usage.estimated is True
@@ -86,3 +92,50 @@ def test_completion_token_usage_derives_missing_provider_total() -> None:
     assert usage.total_tokens == 19
     assert usage.source == TOKEN_USAGE_SOURCE_PROVIDER
     assert usage.estimated is False
+
+
+def test_completion_token_usage_fallback_counts_normalized_tool_call_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counted_messages: list[list[dict[str, object]]] = []
+
+    def fake_count_message_tokens(
+        messages: list[dict[str, object]], model_name: str = ""
+    ) -> int:
+        counted_messages.append(messages)
+        serialized = str(messages)
+        return serialized.count("unique-tool-arguments") * 100 + len(messages)
+
+    monkeypatch.setattr(
+        ai_builder_token_usage,
+        "count_message_tokens",
+        fake_count_message_tokens,
+    )
+    completion_message = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call-usage",
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "arguments": "unique-tool-arguments",
+                },
+            }
+        ],
+    }
+
+    usage = completion_token_usage_from_response(
+        SimpleNamespace(usage=None),
+        model_name="openai/gpt-5.4",
+        messages=[{"role": "user", "content": "request"}],
+        completion_messages=[completion_message],
+    )
+
+    assert usage.prompt_tokens == 1
+    assert usage.completion_tokens == 101
+    assert counted_messages == [
+        [{"role": "user", "content": "request"}],
+        [completion_message],
+    ]

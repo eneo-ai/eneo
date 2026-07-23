@@ -15,6 +15,7 @@ is expensive to build just for counting.
 
 import base64
 import io
+import json
 import logging
 from typing import Any, Optional, cast
 
@@ -141,6 +142,15 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
                     total += _FALLBACK_IMAGE_TOKENS
                 else:
                     total += len(str(block.get("text") or "")) // 4
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            total += (
+                len(json.dumps(tool_calls, ensure_ascii=False, separators=(",", ":")))
+                // 4
+            )
+        tool_call_id = message.get("tool_call_id")
+        if isinstance(tool_call_id, str):
+            total += len(tool_call_id) // 4
     return total
 
 
@@ -183,8 +193,6 @@ def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
         )
         return max(with_tools - without_tools, 0)
     except Exception as e:
-        import json
-
         serialized = json.dumps(tools)
         logger.error(
             f"Tool token counting failed for model '{model_name}' "

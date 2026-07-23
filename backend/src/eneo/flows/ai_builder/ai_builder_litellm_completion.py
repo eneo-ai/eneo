@@ -20,8 +20,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCallBudgetExhausted,
     ProposalCompletionFn,
     ProposalCompletionRequest,
+    flatten_proposal_message_groups,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
@@ -76,6 +78,18 @@ async def call_proposal_completion(
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
+    message_groups = request.message_groups
+    if request.request_budget is not None:
+        message_groups = request.request_budget.fit(
+            message_groups=message_groups,
+            tool_schemas=request.tool_schemas,
+            model_name=request.route.litellm_model,
+        )
+    messages = flatten_proposal_message_groups(message_groups)
+    if not request.call_budget.try_start_call():
+        raise ProposalCallBudgetExhausted
+    if usage_tracker is not None:
+        usage_tracker.start_attempt(counts_as_repair=request.counts_as_repair)
     provider_kwargs = request.route.filter_unsupported_model_kwargs(
         ModelKwargs(temperature=request.temperature)
     )
@@ -85,6 +99,7 @@ async def call_proposal_completion(
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence = _proposal_request_evidence(
         request=request,
+        messages=messages,
         provider_kwargs=provider_kwargs,
     )
     if before_provider_call is not None:
@@ -92,7 +107,7 @@ async def call_proposal_completion(
     try:
         raw_response = await litellm_client.acompletion(
             model=request.route.litellm_model,
-            messages=request.messages,
+            messages=messages,
             tools=request.tool_schemas,
             tool_choice=request.tool_choice,
             stream=False,
@@ -111,12 +126,12 @@ async def call_proposal_completion(
         raise failure.as_exception() from error
     response = normalize_litellm_completion_response(raw_response)
     if usage_tracker is not None:
-        completion_text, finish_reason = _first_text_and_finish_reason(response)
+        _, finish_reason = _first_text_and_finish_reason(response)
         metadata = _completion_metadata_from_response(
             response,
             litellm_model=request.route.litellm_model,
-            messages=request.messages,
-            completion_text=completion_text,
+            messages=messages,
+            completion_messages=_completion_messages_for_usage(response),
             finish_reason=finish_reason,
         )
         usage_tracker.record_response(
@@ -130,6 +145,7 @@ async def call_proposal_completion(
 def _proposal_request_evidence(
     *,
     request: ProposalCompletionRequest,
+    messages: Sequence[Mapping[str, Any]],
     provider_kwargs: Mapping[str, object],
 ) -> AIBuilderProviderRequestEvidence:
     outgoing_fields = [
@@ -140,7 +156,7 @@ def _proposal_request_evidence(
         ),
         CompletionEvidenceField(
             name="messages",
-            json_type=completion_evidence_json_type(request.messages),
+            json_type=completion_evidence_json_type(messages),
             domain="conversation",
         ),
         CompletionEvidenceField(
@@ -258,19 +274,44 @@ def _completion_metadata_from_response(
     *,
     litellm_model: str,
     messages: Sequence[Mapping[str, Any]],
-    completion_text: str,
+    completion_messages: Sequence[Mapping[str, Any]],
     finish_reason: str | None,
 ) -> CompletionMetadata:
     usage = completion_token_usage_from_response(
         response,
         model_name=litellm_model,
         messages=messages,
-        completion_text=completion_text,
+        completion_messages=completion_messages,
     )
     return CompletionMetadata(
         finish_reason=finish_reason,
         usage=usage,
     )
+
+
+def _completion_messages_for_usage(
+    response: LLMCompletionResponse,
+) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for choice in response.choices:
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": choice.message.content,
+        }
+        if choice.message.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": tool_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    },
+                }
+                for tool_call in choice.message.tool_calls
+            ]
+        messages.append(message)
+    return messages
 
 
 def _normalized_completion_usage(usage: Any) -> CompletionTokenUsage | None:

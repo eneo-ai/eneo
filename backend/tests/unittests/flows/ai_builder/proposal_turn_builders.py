@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderPlanEvent
 from eneo.flows.ai_builder.ai_builder_events import build_plan_event
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    ProposalMessageGroup,
     ProposalTurnContext,
     ToolRetryInvocation,
 )
@@ -62,6 +63,7 @@ def _make_turn(
 
 
 def _make_context(**overrides: object) -> ProposalTurnContext:
+    legacy_messages = overrides.pop("llm_messages", None)
     turn_override = overrides.pop("turn", None)
     session_id_override = overrides.pop("session_id", None)
     base_version_override = overrides.pop("base_planning_state_version", 0)
@@ -88,11 +90,11 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
             ),
         )
     )
-    defaults = {
+    defaults: dict[str, object] = {
         "turn": turn,
         "conversation": [],
         "new_messages_start": 0,
-        "llm_messages": [],
+        "message_groups": (),
         "tool_schemas": [],
         "route": ResolvedCompletionModelRoute(
             litellm_model=litellm_model,
@@ -110,8 +112,22 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "assistant_snapshots": None,
         "text_content": None,
     }
+    if legacy_messages is not None:
+        if not isinstance(legacy_messages, list):
+            raise TypeError("Proposal test messages must be a list.")
+        defaults["message_groups"] = (
+            (
+                ProposalMessageGroup(
+                    messages=tuple(legacy_messages),  # type: ignore[arg-type]
+                    kind="current_turn",
+                    protected=True,
+                ),
+            )
+            if legacy_messages
+            else ()
+        )
     defaults.update(overrides)
-    return ProposalTurnContext(**defaults)
+    return ProposalTurnContext(**defaults)  # type: ignore[arg-type]
 
 
 def _make_retry_invocation(**overrides: object) -> ToolRetryInvocation:

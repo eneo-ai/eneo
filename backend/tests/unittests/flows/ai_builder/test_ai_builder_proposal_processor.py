@@ -62,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalMessageGroup,
     ToolProcessingResult,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -99,6 +100,18 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_usage,
     _store_compiled_plan,
 )
+
+
+def _message_groups(
+    messages: list[dict[str, object]],
+) -> tuple[ProposalMessageGroup, ...]:
+    return (
+        ProposalMessageGroup(
+            messages=tuple(messages),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
+        ),
+    )
 
 
 def _route(model: str = "openai/gpt-5.4") -> ResolvedCompletionModelRoute:
@@ -253,7 +266,9 @@ async def test_propose_plan_passes_same_requested_output_sections_to_submission(
                 turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -336,7 +351,9 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
                 turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -398,7 +415,9 @@ async def test_propose_plan_create_compile_bug_preserves_provider_outcome_unknow
                         ConversationMessage(role="user", content="Build a flow")
                     ],
                     new_messages_start=1,
-                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    message_groups=_message_groups(
+                        [{"role": "system", "content": "Prompt"}]
+                    ),
                     completion_model_route=_route(),
                     available_model_refs=None,
                     available_kb_refs=None,
@@ -483,7 +502,9 @@ async def test_propose_plan_edit_compile_bug_preserves_provider_outcome_unknown(
                         )
                     ],
                     new_messages_start=1,
-                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    message_groups=_message_groups(
+                        [{"role": "system", "content": "Prompt"}]
+                    ),
                     completion_model_route=_route(),
                     available_model_refs=None,
                     available_kb_refs=None,
@@ -510,7 +531,7 @@ async def test_propose_plan_internal_completion_error_yields_planner_upstream_er
         _captured_proposal_telemetry() as telemetry_records,
         patch(
             "eneo.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
-            new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+            new=AsyncMock(side_effect=RuntimeError("completion processing failed")),
         ),
     ):
         events = [
@@ -519,7 +540,9 @@ async def test_propose_plan_internal_completion_error_yields_planner_upstream_er
                 turn=_make_turn(session_id=session_id),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -542,7 +565,7 @@ async def test_propose_plan_internal_completion_error_yields_planner_upstream_er
     assert failed_payload["target_kind"] == "create"
     assert failed_payload["branch"] == "internal_submission_error"
     assert failed_payload["repair_attempts"] == 0
-    assert failed_payload["llm_calls"] == 1
+    assert failed_payload["llm_calls"] == 0
     assert failed_payload["final_failure_kind"] == "internal_error"
     assert failed_payload["final_error_code"] == "planner_upstream_error"
 
@@ -569,7 +592,9 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
                 turn=_make_turn(session_id=session_id),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -640,7 +665,9 @@ async def test_propose_plan_explicit_truncation_yields_terminal_error_without_re
                     )
                 ],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "PROMPT SECRET"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "PROMPT SECRET"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -704,7 +731,9 @@ async def test_propose_plan_missing_tool_after_forced_retry_logs_failed_turn() -
                 turn=_make_turn(session_id=session_id),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -801,7 +830,9 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
                     )
                 ],
                 new_messages_start=0,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
@@ -876,7 +907,9 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
                     )
                 ],
                 new_messages_start=0,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
@@ -948,7 +981,9 @@ async def test_propose_plan_returns_edit_error_when_scoped_finalization_returns_
                     )
                 ],
                 new_messages_start=0,
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+                message_groups=_message_groups(
+                    [{"role": "system", "content": "Prompt"}]
+                ),
                 completion_model_route=_route(),
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
@@ -1029,7 +1064,9 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                message_groups=_message_groups(
+                    [{"role": "user", "content": "Bygg ett flöde"}]
+                ),
                 completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -1132,7 +1169,9 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                message_groups=_message_groups(
+                    [{"role": "user", "content": "Bygg ett flöde"}]
+                ),
                 completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,
@@ -1236,7 +1275,9 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
+                message_groups=_message_groups(
+                    [{"role": "user", "content": "Bygg ett flöde"}]
+                ),
                 completion_model_route=_route("openai/gpt-5.4-nano"),
                 available_model_refs=None,
                 available_kb_refs=None,

@@ -72,7 +72,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    LLMMessageParam,
+    ProposalCallBudgetExhausted,
+    ProposalMessageGroup,
+    ProposalRequestBudget,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
@@ -192,7 +194,7 @@ class ProposalSubmissionOwner:
         turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        llm_messages: list[LLMMessageParam],
+        message_groups: tuple[ProposalMessageGroup, ...],
         completion_model_route: ResolvedCompletionModelRoute,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
@@ -210,6 +212,7 @@ class ProposalSubmissionOwner:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
+        proposal_request_budget: ProposalRequestBudget | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
         tool_schemas = self._active_submission_tool_schemas(
@@ -225,7 +228,7 @@ class ProposalSubmissionOwner:
             turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            llm_messages=llm_messages,
+            message_groups=message_groups,
             tool_schemas=tool_schemas,
             route=completion_model_route,
             available_model_refs=available_model_refs,
@@ -242,10 +245,8 @@ class ProposalSubmissionOwner:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
             before_provider_call=before_provider_call,
+            proposal_request_budget=proposal_request_budget,
         )
-        if not ctx.proposal_call_budget.try_start_call():
-            raise RuntimeError("Fresh proposal turn exhausted its provider call budget")
-        usage_tracker.start_attempt(counts_as_repair=False)
         try:
             response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
@@ -256,6 +257,10 @@ class ProposalSubmissionOwner:
                 ),
                 before_provider_call=before_provider_call,
             )
+        except ProposalCallBudgetExhausted as error:
+            raise RuntimeError(
+                "Fresh proposal turn exhausted its provider call budget"
+            ) from error
         except AIBuilderBadRequestException:
             raise
         except Exception as error:
@@ -339,7 +344,7 @@ class ProposalSubmissionOwner:
 
         forced_events = await self._retry_forced_proposal_after_text(
             ctx=ctx,
-            correction_messages=llm_messages,
+            correction_message_groups=message_groups,
             assistant_text=message.content or "",
         )
         if forced_events is not None:
@@ -683,7 +688,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        correction_messages: list[LLMMessageParam],
+        correction_message_groups: tuple[ProposalMessageGroup, ...],
         assistant_text: str,
     ) -> tuple[AIBuilderStreamEvent, ...] | None:
         self._record_failed_proposal_attempt_repair(
@@ -704,7 +709,7 @@ class ProposalSubmissionOwner:
         outcome = await run_forced_tool_retry_after_text(
             ForcedToolAfterTextRequest(
                 ctx=ctx,
-                correction_messages=correction_messages,
+                correction_message_groups=correction_message_groups,
                 assistant_text=assistant_text,
                 retry_config=retry_config,
                 forced_proposal_temperature=self.forced_proposal_temperature,

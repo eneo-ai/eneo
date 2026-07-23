@@ -50,11 +50,14 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
+    ProposalCallBudgetExhausted,
     ProposalCompletionFn,
+    ProposalMessageGroup,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
+    append_protected_repair_group,
     forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
@@ -94,7 +97,7 @@ class ProposalSelfCorrectionRequest:
 @dataclass(frozen=True, slots=True)
 class ForcedToolAfterTextRequest:
     ctx: ProposalTurnContext
-    correction_messages: list[LLMMessageParam]
+    correction_message_groups: tuple[ProposalMessageGroup, ...]
     assistant_text: str
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
@@ -177,11 +180,6 @@ class _ProposalRepairRetryState:
             ),
             retry_count=self.retry_count + 1,
         )
-
-
-def _start_repair_attempt(ctx: ProposalTurnContext) -> None:
-    if ctx.usage_tracker is not None:
-        ctx.usage_tracker.start_attempt(counts_as_repair=True)
 
 
 def _record_attempt_failure(
@@ -453,8 +451,24 @@ def build_tool_retry_messages(
     tool_feedback: str,
     assistant_content: str | None = None,
 ) -> list[LLMMessageParam]:
+    return [
+        *llm_messages,
+        *_tool_retry_group_messages(
+            tool_call=tool_call,
+            tool_feedback=tool_feedback,
+            assistant_content=assistant_content,
+        ),
+    ]
+
+
+def _tool_retry_group_messages(
+    *,
+    tool_call: RuntimeToolCall,
+    tool_feedback: str,
+    assistant_content: str | None = None,
+) -> tuple[LLMMessageParam, ...]:
     tool_call_id = provider_safe_tool_call_id(tool_call.id)
-    return list(llm_messages) + [
+    return (
         {
             "role": "assistant",
             "content": assistant_content,
@@ -474,7 +488,7 @@ def build_tool_retry_messages(
             "tool_call_id": tool_call_id,
             "content": tool_feedback,
         },
-    ]
+    )
 
 
 def append_text_retry_feedback_turn(
@@ -483,10 +497,24 @@ def append_text_retry_feedback_turn(
     assistant_content: str,
     feedback: str,
 ) -> list[LLMMessageParam]:
-    return list(llm_messages) + [
+    return [
+        *llm_messages,
+        *_text_retry_group_messages(
+            assistant_content=assistant_content,
+            feedback=feedback,
+        ),
+    ]
+
+
+def _text_retry_group_messages(
+    *,
+    assistant_content: str,
+    feedback: str,
+) -> tuple[LLMMessageParam, ...]:
+    return (
         {"role": "assistant", "content": assistant_content},
         {"role": "user", "content": feedback},
-    ]
+    )
 
 
 def _build_retry_feedback(
@@ -602,14 +630,16 @@ async def _request_self_correction_events(
     ctx = request.ctx
     retry_config = request.retry_config
     yield build_status_event(AIBuilderStatus.REPAIRING)
-    correction_messages = build_tool_retry_messages(
-        llm_messages=ctx.llm_messages,
-        tool_call=request.tool_call,
-        tool_feedback=_build_retry_feedback(
-            target_kind=retry_config.target_kind,
-            feedback=request.error_message,
-            failure_codes=request.failure_codes,
-            retry_count=0,
+    correction_message_groups = append_protected_repair_group(
+        ctx.message_groups,
+        _tool_retry_group_messages(
+            tool_call=request.tool_call,
+            tool_feedback=_build_retry_feedback(
+                target_kind=retry_config.target_kind,
+                feedback=request.error_message,
+                failure_codes=request.failure_codes,
+                retry_count=0,
+            ),
         ),
     )
 
@@ -623,7 +653,19 @@ async def _request_self_correction_events(
         failure_codes=request.failure_codes,
     )
     while True:
-        if not ctx.proposal_call_budget.try_start_call():
+        try:
+            response = await request.repair_completion(
+                ctx.completion_request(
+                    message_groups=correction_message_groups,
+                    temperature=(
+                        request.self_correction_bumped_temperature
+                        if retry_state.use_bumped_temperature
+                        else request.self_correction_temperature
+                    ),
+                    counts_as_repair=True,
+                )
+            )
+        except ProposalCallBudgetExhausted:
             _log_self_correction_validation_failed_turn(
                 ctx=ctx,
                 branch="self_correction_invalid_tool_result",
@@ -636,19 +678,6 @@ async def _request_self_correction_events(
                 request_id=ctx.request_id,
             )
             return
-        _start_repair_attempt(ctx)
-        try:
-            response = await request.repair_completion(
-                ctx.completion_request(
-                    messages=correction_messages,
-                    temperature=(
-                        request.self_correction_bumped_temperature
-                        if retry_state.use_bumped_temperature
-                        else request.self_correction_temperature
-                    ),
-                    counts_as_repair=True,
-                )
-            )
         except AIBuilderBadRequestException:
             raise
         except Exception as error:
@@ -825,11 +854,13 @@ async def _request_self_correction_events(
                     failure_kind=failure_kind,
                     failure_codes=failure_codes,
                 )
-                correction_messages = build_tool_retry_messages(
-                    llm_messages=correction_messages,
-                    tool_call=correction_tool_call,
-                    assistant_content=assistant_text,
-                    tool_feedback=feedback,
+                correction_message_groups = append_protected_repair_group(
+                    correction_message_groups,
+                    _tool_retry_group_messages(
+                        tool_call=correction_tool_call,
+                        assistant_content=assistant_text,
+                        tool_feedback=feedback,
+                    ),
                 )
                 continue
 
@@ -841,7 +872,7 @@ async def _request_self_correction_events(
             forced_outcome = await run_forced_tool_retry_after_text(
                 ForcedToolAfterTextRequest(
                     ctx=ctx,
-                    correction_messages=correction_messages,
+                    correction_message_groups=correction_message_groups,
                     assistant_text=assistant_text,
                     retry_config=retry_config,
                     forced_proposal_temperature=request.forced_proposal_temperature,
@@ -873,10 +904,12 @@ async def _request_self_correction_events(
                     failure_codes=forced_outcome.failure_codes,
                     consume_text_feedback=True,
                 )
-                correction_messages = append_text_retry_feedback_turn(
-                    llm_messages=correction_messages,
-                    assistant_content=assistant_text,
-                    feedback=text_retry_feedback,
+                correction_message_groups = append_protected_repair_group(
+                    correction_message_groups,
+                    _text_retry_group_messages(
+                        assistant_content=assistant_text,
+                        feedback=text_retry_feedback,
+                    ),
                 )
                 continue
 
@@ -936,27 +969,25 @@ async def _execute_forced_tool_retry(
     ):
         return direct_outcome
 
-    forced_messages = list(request.correction_messages) + [
-        {"role": "assistant", "content": request.assistant_text},
-        {
-            "role": "user",
-            "content": request.retry_config.forced_tool_prompt,
-        },
-    ]
-
-    if not ctx.proposal_call_budget.try_start_call():
-        return ForcedToolRetryOutcome(failure_kind="validation")
-    _start_repair_attempt(ctx)
+    forced_message_groups = append_protected_repair_group(
+        request.correction_message_groups,
+        _text_retry_group_messages(
+            assistant_content=request.assistant_text,
+            feedback=request.retry_config.forced_tool_prompt,
+        ),
+    )
 
     try:
         response = await request.repair_completion(
             ctx.completion_request(
-                messages=forced_messages,
+                message_groups=forced_message_groups,
                 temperature=request.forced_proposal_temperature,
                 tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 counts_as_repair=True,
             )
         )
+    except ProposalCallBudgetExhausted:
+        return ForcedToolRetryOutcome(failure_kind="validation")
     except AIBuilderBadRequestException:
         raise
     except Exception as error:

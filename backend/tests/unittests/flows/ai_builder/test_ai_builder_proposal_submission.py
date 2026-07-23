@@ -25,7 +25,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorPhase
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorPhase,
+    AIBuilderProviderOutcomeUnknownException,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
     AIBuilderStreamEvent,
@@ -59,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    ProposalMessageGroup,
     ToolProcessingResult,
     ToolRetryConfig,
 )
@@ -96,6 +100,18 @@ def _route() -> ResolvedCompletionModelRoute:
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)
+        ),
+    )
+
+
+def _message_groups(
+    messages: list[dict[str, object]],
+) -> tuple[ProposalMessageGroup, ...]:
+    return (
+        ProposalMessageGroup(
+            messages=tuple(messages),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
         ),
     )
 
@@ -250,7 +266,9 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                         ConversationMessage(role="user", content=authoring_spec)
                     ],
                     new_messages_start=1,
-                    llm_messages=[{"role": "system", "content": "Prompt"}],
+                    message_groups=_message_groups(
+                        [{"role": "system", "content": "Prompt"}]
+                    ),
                     completion_model_route=_route(),
                     available_model_refs=None,
                     available_kb_refs=None,
@@ -953,7 +971,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
 
 
 @pytest.mark.asyncio
-async def test_create_propose_flow_self_correction_returns_typed_error_when_completion_raises() -> (
+async def test_create_propose_flow_self_correction_preserves_unknown_provider_outcome() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -975,15 +993,8 @@ async def test_create_propose_flow_self_correction_returns_typed_error_when_comp
     )
     dispatched = submission.dispatch_submission_tool_call(ctx=ctx, tool_call=tool_call)
     assert dispatched is not None
-    events = _wire_events([event async for event in dispatched])
-
-    assert [event["event"] for event in events] == ["status", "error"]
-    error_payload = json.loads(events[1]["data"])
-    assert error_payload["schema_version"] == 2
-    assert error_payload["code"] == "planner_upstream_error"
-    assert error_payload["category"] == "upstream"
-    assert error_payload["phase"] == "self_correction"
-    assert error_payload["request_id"] == "req-self-correction"
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException):
+        _ = [event async for event in dispatched]
 
 
 @pytest.mark.asyncio
@@ -1270,7 +1281,9 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
             ctx=ctx,
-            correction_messages=[{"role": "system", "content": "Prompt"}],
+            correction_message_groups=_message_groups(
+                [{"role": "system", "content": "Prompt"}]
+            ),
             assistant_text="Här är planen.",
         )
 
@@ -1314,7 +1327,9 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
             ctx=ctx,
-            correction_messages=[{"role": "system", "content": "Prompt"}],
+            correction_message_groups=_message_groups(
+                [{"role": "system", "content": "Prompt"}]
+            ),
             assistant_text="Här är planen.",
         )
 

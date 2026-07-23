@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -44,8 +45,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ProposalCompletionRequest,
+    ProposalCallBudget,
+    ProposalMessageGroup,
+    ProposalRequestBudget,
+    append_protected_repair_group,
+    flatten_proposal_message_groups,
     forced_tool_choice,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionRequest as ProposalCompletionRequestContract,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -65,6 +73,23 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
+
+
+def _completion_request(
+    *,
+    messages: list[dict[str, Any]],
+    **kwargs: Any,
+) -> ProposalCompletionRequestContract:
+    return ProposalCompletionRequestContract(
+        message_groups=(
+            ProposalMessageGroup(
+                messages=tuple(messages),  # type: ignore[arg-type]
+                kind="current_turn",
+                protected=True,
+            ),
+        ),
+        **kwargs,
     )
 
 
@@ -166,7 +191,7 @@ async def test_proposal_omits_temperature_without_persisted_route_capability() -
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=route,
@@ -199,7 +224,7 @@ async def test_proposal_passes_supported_temperature_unchanged() -> None:
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=route,
@@ -219,7 +244,7 @@ async def test_call_proposal_completion_strips_planner_response_format_kwargs() 
 
     result = await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(
@@ -250,7 +275,7 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(kwargs={"drop_params": False}),
@@ -270,7 +295,7 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -292,7 +317,7 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -402,13 +427,12 @@ async def test_proposal_provider_failure_uses_typed_disposition(
         model="private-model",
         target_kind=TargetKind.CREATE,
     )
-    tracker.start_attempt(counts_as_repair=False)
 
     with patch.object(error_contract_module.logger, "info") as event_log:
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
             await call_proposal_completion(
                 litellm_client=litellm_client,
-                request=ProposalCompletionRequest(
+                request=_completion_request(
                     messages=[{"role": "user", "content": "private-user-content"}],
                     tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
                     route=_route(),
@@ -502,7 +526,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         with pytest.raises(AIBuilderKnownProviderRejectionException):
             await call_proposal_completion(
                 litellm_client=litellm_client,
-                request=ProposalCompletionRequest(
+                request=_completion_request(
                     messages=[{"role": "user", "content": "private-user-content"}],
                     tool_schemas=[
                         {
@@ -603,7 +627,7 @@ async def test_call_proposal_completion_ignores_malformed_usage_shape() -> None:
 
     result = await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -640,7 +664,7 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
 
     result = await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -680,7 +704,7 @@ async def test_call_proposal_completion_normalizes_object_tool_calls() -> None:
 
     result = await call_proposal_completion(
         litellm_client=litellm_client,
-        request=ProposalCompletionRequest(
+        request=_completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -715,7 +739,7 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
     )
 
     result = await completion(
-        ProposalCompletionRequest(
+        _completion_request(
             messages=[{"role": "user", "content": "Build a flow"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -754,7 +778,7 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
     )
 
     result = await completion(
-        ProposalCompletionRequest(
+        _completion_request(
             messages=[{"role": "user", "content": "Repair the proposal"}],
             tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             route=_route(),
@@ -770,3 +794,315 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
     assert telemetry["llm_calls_made"] == 1
     assert telemetry["total_tokens"] == 10
     assert telemetry["repair_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_message = {"role": "system", "content": "protected system"}
+    current_turn = {"role": "user", "content": "protected current turn"}
+    call_budget = ProposalCallBudget()
+    request_budget = ProposalRequestBudget(
+        context_window_tokens=20,
+        output_reserve_tokens=10,
+        safety_buffer_tokens=0,
+        request_id="req-budget-overflow",
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
+        lambda messages, _model: 11,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+    before_provider_call = AsyncMock()
+    litellm_client = SimpleNamespace(acompletion=AsyncMock())
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=ProposalCompletionRequestContract(
+                message_groups=(
+                    ProposalMessageGroup(
+                        messages=(system_message,),  # type: ignore[arg-type]
+                        kind="system",
+                        protected=True,
+                    ),
+                    ProposalMessageGroup(
+                        messages=(current_turn,),  # type: ignore[arg-type]
+                        kind="current_turn",
+                        protected=True,
+                    ),
+                ),
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=10,
+                temperature=0.2,
+                request_budget=request_budget,
+                call_budget=call_budget,
+            ),
+            before_provider_call=before_provider_call,
+        )
+
+    assert (
+        exc_info.value.public_error.code
+        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    )
+    assert exc_info.value.public_error.details == {
+        "another_call_permitted": False,
+        "retry_scope": "new_turn",
+    }
+    assert call_budget.calls_started == 0
+    before_provider_call.assert_not_awaited()
+    litellm_client.acompletion.assert_not_awaited()
+
+
+def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_message = {"role": "system", "content": "system"}
+    oldest_turn = {"role": "user", "content": "oldest optional"}
+    newer_turn = {"role": "user", "content": "newer optional"}
+    current_turn = {"role": "user", "content": "current accepted turn"}
+    failed_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call-failed",
+                "type": "function",
+                "function": {"name": "propose_flow", "arguments": "bad"},
+            }
+        ],
+    }
+    tool_feedback = {
+        "role": "tool",
+        "tool_call_id": "call-failed",
+        "content": "latest failure",
+    }
+    groups = (
+        ProposalMessageGroup(
+            messages=(system_message,),  # type: ignore[arg-type]
+            kind="system",
+            protected=True,
+        ),
+        ProposalMessageGroup(
+            messages=(oldest_turn,),  # type: ignore[arg-type]
+            kind="history",
+            protected=False,
+        ),
+        ProposalMessageGroup(
+            messages=(newer_turn,),  # type: ignore[arg-type]
+            kind="history",
+            protected=False,
+        ),
+        ProposalMessageGroup(
+            messages=(current_turn,),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
+        ),
+        ProposalMessageGroup(
+            messages=(failed_call, tool_feedback),  # type: ignore[arg-type]
+            kind="repair",
+            protected=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
+        lambda candidate, _model: len(candidate) * 10,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+    budget = ProposalRequestBudget(
+        context_window_tokens=45,
+        output_reserve_tokens=0,
+        safety_buffer_tokens=0,
+        request_id="req-repair-budget",
+    )
+
+    fitted = budget.fit(message_groups=groups, tool_schemas=[], model_name="test")
+
+    assert flatten_proposal_message_groups(fitted) == [
+        system_message,
+        current_turn,
+        failed_call,
+        tool_feedback,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_message = {"role": "system", "content": "system"}
+    current_turn = {"role": "user", "content": "current accepted turn"}
+    repair_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call-repair",
+                "type": "function",
+                "function": {
+                    "name": "propose_flow",
+                    "arguments": "x" * 1000,
+                },
+            }
+        ],
+    }
+    repair_feedback = {
+        "role": "tool",
+        "tool_call_id": "call-repair",
+        "content": "repair feedback",
+    }
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
+        lambda messages, _model: len(messages) * 20,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+    call_budget = ProposalCallBudget(call_limit=4, calls_started=1)
+    before_provider_call = AsyncMock()
+    litellm_client = SimpleNamespace(acompletion=AsyncMock())
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=ProposalCompletionRequestContract(
+                message_groups=(
+                    ProposalMessageGroup(
+                        messages=(system_message,),  # type: ignore[arg-type]
+                        kind="system",
+                        protected=True,
+                    ),
+                    ProposalMessageGroup(
+                        messages=(current_turn,),  # type: ignore[arg-type]
+                        kind="current_turn",
+                        protected=True,
+                    ),
+                    ProposalMessageGroup(
+                        messages=(repair_call, repair_feedback),  # type: ignore[arg-type]
+                        kind="repair",
+                        protected=True,
+                    ),
+                ),
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=0,
+                temperature=0.2,
+                counts_as_repair=True,
+                request_budget=ProposalRequestBudget(
+                    context_window_tokens=70,
+                    output_reserve_tokens=0,
+                    safety_buffer_tokens=0,
+                    request_id="req-repair-overflow",
+                ),
+                call_budget=call_budget,
+            ),
+            before_provider_call=before_provider_call,
+        )
+
+    assert call_budget.calls_started == 1
+    before_provider_call.assert_not_awaited()
+    litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_group = ProposalMessageGroup(
+        messages=({"role": "system", "content": "system"},),
+        kind="system",
+        protected=True,
+    )
+    current_turn_group = ProposalMessageGroup(
+        messages=({"role": "user", "content": "current turn"},),
+        kind="current_turn",
+        protected=True,
+    )
+    initial_groups = (system_group, current_turn_group)
+    first_repair_groups = append_protected_repair_group(
+        initial_groups,
+        (
+            {"role": "assistant", "content": "first invalid repair"},
+            {"role": "user", "content": "first feedback"},
+        ),
+    )
+    second_repair_groups = append_protected_repair_group(
+        first_repair_groups,
+        (
+            {"role": "assistant", "content": "oversized second invalid repair"},
+            {"role": "user", "content": "oversized second feedback"},
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
+        lambda messages, _model: (
+            80 if "oversized" in json.dumps(messages) else len(messages) * 10
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+    call_budget = ProposalCallBudget()
+    request_budget = ProposalRequestBudget(
+        context_window_tokens=50,
+        output_reserve_tokens=0,
+        safety_buffer_tokens=0,
+        request_id="req-second-repair-overflow",
+    )
+    before_provider_call = AsyncMock()
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=_make_response_with_text("repair"))
+    )
+
+    for message_groups, counts_as_repair in (
+        (initial_groups, False),
+        (first_repair_groups, True),
+    ):
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=ProposalCompletionRequestContract(
+                message_groups=message_groups,
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=0,
+                temperature=0.2,
+                counts_as_repair=counts_as_repair,
+                request_budget=request_budget,
+                call_budget=call_budget,
+            ),
+            before_provider_call=before_provider_call,
+        )
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=ProposalCompletionRequestContract(
+                message_groups=second_repair_groups,
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=0,
+                temperature=0.2,
+                counts_as_repair=True,
+                request_budget=request_budget,
+                call_budget=call_budget,
+            ),
+            before_provider_call=before_provider_call,
+        )
+
+    assert (
+        exc_info.value.public_error.code
+        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    )
+    assert call_budget.calls_started == 2
+    assert before_provider_call.await_count == 2
+    assert litellm_client.acompletion.await_count == 2

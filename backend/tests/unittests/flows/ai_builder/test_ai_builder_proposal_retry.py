@@ -53,11 +53,14 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     MAX_PROPOSAL_PROVIDER_CALLS,
     ProposalCallBudget,
+    ProposalCallBudgetExhausted,
     ProposalCompletionFn,
     ProposalCompletionRequest,
+    ProposalMessageGroup,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
+    flatten_proposal_message_groups,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -226,39 +229,48 @@ def _make_self_correction_request(
     usage_tracker: ProposalTurnTelemetry | None = None,
     assistant_metadata: dict[str, Any] | None = None,
 ) -> ProposalSelfCorrectionRequest:
-    return ProposalSelfCorrectionRequest(
-        ctx=_make_context(
-            turn=_make_turn(),
-            conversation=[] if conversation is None else conversation,
-            new_messages_start=new_messages_start,
-            llm_messages=(
-                [{"role": "user", "content": "go"}]
-                if llm_messages is None
-                else llm_messages
-            ),
-            tool_schemas=(
-                [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
-                if tool_schemas is None
-                else tool_schemas
-            ),
-            litellm_model=litellm_model,
-            litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            max_output_tokens=max_output_tokens,
-            request_id=request_id,
-            usage_tracker=usage_tracker,
-            assistant_metadata=assistant_metadata,
-            proposal_call_budget=ProposalCallBudget(
-                call_limit=max_self_correction_retries + 1
-            ),
+    ctx = _make_context(
+        turn=_make_turn(),
+        conversation=[] if conversation is None else conversation,
+        new_messages_start=new_messages_start,
+        llm_messages=(
+            [{"role": "user", "content": "go"}]
+            if llm_messages is None
+            else llm_messages
         ),
+        tool_schemas=(
+            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+            if tool_schemas is None
+            else tool_schemas
+        ),
+        litellm_model=litellm_model,
+        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        max_output_tokens=max_output_tokens,
+        request_id=request_id,
+        usage_tracker=usage_tracker,
+        assistant_metadata=assistant_metadata,
+        proposal_call_budget=ProposalCallBudget(
+            call_limit=max_self_correction_retries + 1
+        ),
+    )
+
+    async def boundary_completion(request: ProposalCompletionRequest) -> Any:
+        if not request.call_budget.try_start_call():
+            raise ProposalCallBudgetExhausted
+        if ctx.usage_tracker is not None:
+            ctx.usage_tracker.start_attempt(counts_as_repair=request.counts_as_repair)
+        return await repair_completion(request)
+
+    return ProposalSelfCorrectionRequest(
+        ctx=ctx,
         error_message=error_message,
         failure_codes=failure_codes,
         tool_call=_original_tool_call() if tool_call is None else tool_call,
         self_correction_temperature=self_correction_temperature,
         self_correction_bumped_temperature=self_correction_bumped_temperature,
-        repair_completion=repair_completion,
+        repair_completion=boundary_completion,
         retry_config=ToolRetryConfig(
             target_kind=target_kind,
             forced_tool_prompt=forced_tool_prompt,
@@ -296,29 +308,45 @@ def _make_forced_tool_after_text_request(
     resolved_request_id = request_id or (
         usage_tracker.request_id if usage_tracker is not None else "req-forced-tool"
     )
-    return ForcedToolAfterTextRequest(
-        ctx=_make_context(
-            turn=_make_turn() if turn is None else turn,
-            conversation=[] if conversation is None else conversation,
-            new_messages_start=new_messages_start,
-            tool_schemas=(
-                [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
-                if tool_schemas is None
-                else tool_schemas
-            ),
-            litellm_model=litellm_model,
-            litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            max_output_tokens=max_output_tokens,
-            request_id=resolved_request_id,
-            usage_tracker=usage_tracker,
-            assistant_metadata=assistant_metadata,
+    ctx = _make_context(
+        turn=_make_turn() if turn is None else turn,
+        conversation=[] if conversation is None else conversation,
+        new_messages_start=new_messages_start,
+        tool_schemas=(
+            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+            if tool_schemas is None
+            else tool_schemas
         ),
-        correction_messages=(
-            [{"role": "system", "content": "Prompt"}]
-            if correction_messages is None
-            else correction_messages
+        litellm_model=litellm_model,
+        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        max_output_tokens=max_output_tokens,
+        request_id=resolved_request_id,
+        usage_tracker=usage_tracker,
+        assistant_metadata=assistant_metadata,
+    )
+
+    async def boundary_completion(request: ProposalCompletionRequest) -> Any:
+        if not request.call_budget.try_start_call():
+            raise ProposalCallBudgetExhausted
+        if ctx.usage_tracker is not None:
+            ctx.usage_tracker.start_attempt(counts_as_repair=request.counts_as_repair)
+        return await repair_completion(request)
+
+    messages = (
+        [{"role": "system", "content": "Prompt"}]
+        if correction_messages is None
+        else correction_messages
+    )
+    return ForcedToolAfterTextRequest(
+        ctx=ctx,
+        correction_message_groups=(
+            ProposalMessageGroup(
+                messages=tuple(messages),  # type: ignore[arg-type]
+                kind="current_turn",
+                protected=True,
+            ),
         ),
         assistant_text=assistant_text,
         retry_config=ToolRetryConfig(
@@ -327,7 +355,7 @@ def _make_forced_tool_after_text_request(
             process_tool_invocation=process_tool_invocation,
         ),
         forced_proposal_temperature=forced_proposal_temperature,
-        repair_completion=repair_completion,
+        repair_completion=boundary_completion,
     )
 
 
@@ -968,7 +996,7 @@ async def _run_repair_capturing(
         request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
         observed_temperatures.append(request.temperature)
-        for msg in reversed(request.messages):
+        for msg in reversed(flatten_proposal_message_groups(request.message_groups)):
             if msg.get("role") == "tool":
                 observed_retry_feedback.append(str(msg.get("content", "")))
                 break
@@ -1140,7 +1168,9 @@ async def test_run_tool_self_correction_uses_fallback_for_missing_retry_feedback
     async def call_proposal_completion(
         request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_messages.append(request.messages)
+        observed_messages.append(
+            flatten_proposal_message_groups(request.message_groups)
+        )
         return _bad_tool_response(len(observed_messages))
 
     async def process_invocation(_: ToolRetryInvocation) -> ToolProcessingResult:
@@ -1812,7 +1842,9 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
     async def call_proposal_completion(
         request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_messages.append(request.messages)
+        observed_messages.append(
+            flatten_proposal_message_groups(request.message_groups)
+        )
         return responses.pop(0)
 
     async def process_invocation(
@@ -1887,7 +1919,9 @@ async def test_run_tool_self_correction_limits_text_feedback_retry_budget() -> N
     async def call_proposal_completion(
         request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_messages.append(request.messages)
+        observed_messages.append(
+            flatten_proposal_message_groups(request.message_groups)
+        )
         return responses.pop(0)
 
     async def process_invocation(

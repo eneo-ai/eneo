@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from eneo.files.file_models import File
@@ -52,6 +52,11 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
     LLMMessageRole,
+    ProposalMessageGroup,
+    ProposalRequestBudget,
+    fit_proposal_message_groups,
+    flatten_proposal_message_groups,
+    group_proposal_messages,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
@@ -87,7 +92,6 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
-_MessageT = TypeVar("_MessageT", bound=Mapping[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,16 +114,21 @@ class PlannerRequestPreparationInput:
     prior_plan_for_revision: BuilderPlan | None
     allow_discovery_semantic_adjudication: bool
     persisted_planning_state: PlanningState | None
+    current_turn_start: int
     before_provider_call: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedPromptMessages:
-    llm_messages: list[LLMMessageParam]
+    message_groups: tuple[ProposalMessageGroup, ...]
     system_prompt_hash: str
     conversation_budget_tokens: int
     trimmed_message_count: int
     system_prompt_chars: int
+
+    @property
+    def llm_messages(self) -> list[LLMMessageParam]:
+        return flatten_proposal_message_groups(self.message_groups)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,13 +150,18 @@ class ServerOutputPrepared(_PreparedBase):
 
 @dataclass(frozen=True, slots=True)
 class ProposalPrepared(_PreparedBase):
-    llm_messages: list[LLMMessageParam]
+    message_groups: tuple[ProposalMessageGroup, ...]
     system_prompt_hash: str
     plan_edit_context: AIBuilderPlanEditContext | None
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
     requested_output_sections: RequestedOutputSections
+    request_budget: ProposalRequestBudget | None = None
+
+    @property
+    def llm_messages(self) -> list[LLMMessageParam]:
+        return flatten_proposal_message_groups(self.message_groups)
 
 
 PreparedTurnOutcome: TypeAlias = ServerOutputPrepared | ProposalPrepared
@@ -243,6 +257,7 @@ async def prepare_planner_request(
         max_output_tokens=request.max_output_tokens,
         budget_policy=request.budget_policy,
         attachment_file_count=len(request.attachment_files),
+        current_turn_start=request.current_turn_start,
     )
 
 
@@ -264,6 +279,7 @@ def build_proposal_prepared(
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
     attachment_file_count: int,
+    current_turn_start: int,
 ) -> ProposalPrepared:
     confirmed_requirements = latest_confirmed_requirements(conversation)
     section_signal_text = "\n".join(
@@ -300,6 +316,7 @@ def build_proposal_prepared(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,
+        current_turn_start=current_turn_start,
     )
     logger.info(
         "AI Builder plan proposal prompt metrics",
@@ -318,13 +335,18 @@ def build_proposal_prepared(
         requirements_state=requirements_state,
         ui_language=ui_language,
         slot_classification_metadata=slot_classification_metadata,
-        llm_messages=prepared_prompt.llm_messages,
+        message_groups=prepared_prompt.message_groups,
         system_prompt_hash=prepared_prompt.system_prompt_hash,
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         resource_catalog=resource_catalog,
         planning_state=planning_state,
         requested_output_sections=requested_output_sections,
+        request_budget=ProposalRequestBudget(
+            context_window_tokens=max_input_tokens,
+            output_reserve_tokens=max_output_tokens,
+            safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+        ),
     )
 
 
@@ -354,6 +376,7 @@ def _prepare_prompt_messages(
     max_input_tokens: int,
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
+    current_turn_start: int,
 ) -> PreparedPromptMessages:
     prompt_tokens = count_message_tokens(
         [{"role": "system", "content": system_prompt}],
@@ -373,16 +396,29 @@ def _prepare_prompt_messages(
     raw_messages = [
         conversation_message_to_llm_message(message) for message in conversation
     ]
-    trimmed = trim_conversation_for_context(
+    conversation_groups = group_proposal_messages(
         raw_messages,
-        max_tokens=conversation_budget,
-        litellm_model=litellm_model,
+        current_turn_index=current_turn_start,
+    )
+    trimmed_groups = fit_proposal_message_groups(
+        conversation_groups,
+        token_limit=conversation_budget,
+        model_name=litellm_model,
+    )
+    if trimmed_groups is None:
+        trimmed_groups = tuple(
+            group for group in conversation_groups if group.protected
+        )
+    system_group = ProposalMessageGroup(
+        messages=({"role": "system", "content": system_prompt},),
+        kind="system",
+        protected=True,
     )
     return PreparedPromptMessages(
-        llm_messages=[{"role": "system", "content": system_prompt}, *trimmed],
+        message_groups=(system_group, *trimmed_groups),
         system_prompt_hash=stable_hash(system_prompt),
         conversation_budget_tokens=conversation_budget,
-        trimmed_message_count=len(trimmed),
+        trimmed_message_count=sum(len(group.messages) for group in trimmed_groups),
         system_prompt_chars=len(system_prompt),
     )
 
@@ -417,53 +453,25 @@ def compute_conversation_token_budget(
 
 
 def trim_conversation_for_context(
-    messages: list[_MessageT],
+    messages: list[LLMMessageParam],
     *,
     max_tokens: int,
     litellm_model: str = "",
-) -> list[_MessageT]:
-    if max_tokens >= _count_group_tokens(messages, litellm_model):
-        return list(messages)
-
-    groups: list[list[_MessageT]] = []
-    index = 0
-    while index < len(messages):
-        message = messages[index]
-        group = [message]
-        if message.get("role") == "assistant" and message.get("tool_calls"):
-            tool_index = index + 1
-            while (
-                tool_index < len(messages)
-                and messages[tool_index].get("role") == "tool"
-            ):
-                group.append(messages[tool_index])
-                tool_index += 1
-            index = tool_index
-        else:
-            index += 1
-        groups.append(group)
-
-    kept_groups: list[list[_MessageT]] = []
-    consumed_tokens = 0
-    for group in reversed(groups):
-        group_tokens = _count_group_tokens(group, litellm_model)
-        if kept_groups and consumed_tokens + group_tokens > max_tokens:
-            break
-        kept_groups.append(group)
-        consumed_tokens += group_tokens
-
-    kept_groups.reverse()
-    trimmed: list[_MessageT] = []
-    for group in kept_groups:
-        trimmed.extend(group)
-    return trimmed
-
-
-def _count_group_tokens(
-    group: Sequence[Mapping[str, Any]],
-    litellm_model: str,
-) -> int:
-    return count_message_tokens([dict(message) for message in group], litellm_model)
+) -> list[LLMMessageParam]:
+    if not messages:
+        return []
+    groups = group_proposal_messages(
+        messages,
+        current_turn_index=len(messages) - 1,
+    )
+    fitted = fit_proposal_message_groups(
+        groups,
+        token_limit=max_tokens,
+        model_name=litellm_model,
+    )
+    if fitted is None:
+        fitted = tuple(group for group in groups if group.protected)
+    return flatten_proposal_message_groups(fitted)
 
 
 def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
-from eneo.tokens.token_utils import count_tokens
+from eneo.tokens.token_utils import count_message_tokens
 
 TokenUsageSource = Literal["provider", "litellm_estimate", "none"]
 
@@ -39,7 +38,8 @@ def completion_token_usage_from_response(
     *,
     model_name: str,
     messages: Sequence[Mapping[str, Any]],
-    completion_text: str,
+    completion_text: str | None = None,
+    completion_messages: Sequence[Mapping[str, Any]] | None = None,
 ) -> CompletionTokenUsage:
     """Extract provider usage or estimate it at the LLM boundary.
 
@@ -52,9 +52,19 @@ def completion_token_usage_from_response(
     if provider_usage.has_tokens:
         return provider_usage
 
-    prompt_text = _render_messages_for_counting(messages)
-    prompt_tokens = count_tokens(prompt_text, model_name)
-    completion_tokens = count_tokens(completion_text, model_name)
+    prompt_tokens = count_message_tokens(
+        [dict(message) for message in messages], model_name
+    )
+    normalized_completion_messages = completion_messages
+    if normalized_completion_messages is None:
+        normalized_completion_messages = (
+            [{"role": "assistant", "content": completion_text or ""}]
+            if completion_text
+            else []
+        )
+    completion_tokens = count_message_tokens(
+        [dict(message) for message in normalized_completion_messages], model_name
+    )
     return CompletionTokenUsage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -108,40 +118,6 @@ def _provider_usage(response: Any) -> CompletionTokenUsage:
         source=TOKEN_USAGE_SOURCE_PROVIDER,
         estimated=False,
     )
-
-
-def _render_messages_for_counting(messages: Sequence[Mapping[str, Any]]) -> str:
-    rendered: list[str] = []
-    for message in messages:
-        role = message.get("role")
-        content = message.get("content")
-        rendered.append(f"{role or 'message'}: {_render_content(content)}")
-    return "\n".join(rendered)
-
-
-def _render_content(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, Sequence) and not isinstance(content, (bytes, bytearray)):
-        parts: list[str] = []
-        for item in cast(Sequence[object], content):
-            if isinstance(item, Mapping):
-                text = cast(Mapping[str, object], item).get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-                    continue
-            parts.append(_jsonish(item))
-        return "\n".join(parts)
-    return _jsonish(content)
-
-
-def _jsonish(value: Any) -> str:
-    try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
-    except TypeError:
-        return str(value)
 
 
 def _safe_int(value: object) -> int | None:

@@ -20,6 +20,13 @@ def test_builder_transition_owners_are_exhaustive() -> None:
     assert set(AI_BUILDER_TURN_TRANSITIONS) == set(BuilderTurnState)
 
 
+def test_local_no_call_completion_can_commit_an_open_turn() -> None:
+    assert (
+        BuilderTurnState.COMMITTED
+        in AI_BUILDER_TURN_TRANSITIONS[BuilderTurnState.OPEN].legal_next_states
+    )
+
+
 @pytest.mark.parametrize(
     ("stored_state", "expired_state"),
     [

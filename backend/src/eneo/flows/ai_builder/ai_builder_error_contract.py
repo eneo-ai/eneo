@@ -144,6 +144,7 @@ class AIBuilderErrorCode(StrEnum):
     PLANNER_BUDGET_MISSING = "planner_budget_missing"
     PLANNER_MODEL_MISSING_CONTEXT_WINDOW = "planner_model_missing_context_window"
     PLANNER_MODEL_MISSING_OUTPUT_TOKENS = "planner_model_missing_output_tokens"
+    PLANNER_CONTEXT_LIMIT_EXCEEDED = "planner_context_limit_exceeded"
     PLANNER_INVALID_REPAIR_RESPONSE = "planner_invalid_repair_response"
     PLANNER_OUTPUT_TOO_LONG = "planner_output_too_long"
     PLANNER_PARSE_ERROR = "planner_parse_error"
@@ -531,6 +532,26 @@ def _provider_public_error(
     )
 
 
+def build_ai_builder_request_budget_exhausted_error(
+    *,
+    request_id: str | None,
+) -> AIBuilderPublicError:
+    return build_ai_builder_error(
+        message=(
+            "The AI planner request is too large to preserve the current turn and "
+            "repair context. Start a new turn with a shorter request or choose a "
+            "model with a larger context window."
+        ),
+        code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
+        phase=AIBuilderErrorPhase.PLANNER,
+        request_id=request_id,
+        details={
+            "another_call_permitted": False,
+            "retry_scope": "new_turn",
+        },
+    )
+
+
 class AIBuilderNotFoundException(NotFoundException):
     """AI Builder not-found exception with code narrowed to AIBuilderErrorCode."""
 
@@ -755,6 +776,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.SELF_CORRECTION,
+        ),
+        AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,

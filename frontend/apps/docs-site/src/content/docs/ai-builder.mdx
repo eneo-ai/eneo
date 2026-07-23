@@ -7,8 +7,8 @@ AI Builder helps a human operator draft or revise an Eneo Flow through a guided 
 Use AI Builder when you know the outcome you want but do not want to assemble every step, input binding, and output contract by hand.
 
 <Callout type="info">
-  AI Builder requires a user principal with Flow edit permission. Service keys
-  can run published Flows, but they cannot author drafts through AI Builder.
+  AI Builder requires a user principal with Flow edit permission. Service keys can run published
+  Flows, but they cannot author drafts through AI Builder.
 </Callout>
 
 ## When to use AI Builder
@@ -116,6 +116,13 @@ to recover the same error without another provider call. To try provider work
 again, create a new turn; do not set duplicate-spend acknowledgement and do not
 recall the provider with the rejected turn ID. Rate-limit errors identify
 `provider_exception_class=rate_limit` but do not promise a retry delay.
+
+If the protected current turn and latest repair context exceed the selected
+model's context window, the server commits
+`planner_context_limit_exceeded` before calling the provider. The error uses
+`retry_scope=new_turn` and `another_call_permitted=false`; shorten the request
+or select a model with a larger context window. A same-key replay returns the
+committed error without provider work or duplicate-spend acknowledgement.
 
 Timeouts, connection failures, provider `5xx` responses, and unknown failures are
 ambiguous. They leave the turn in `provider_outcome_unknown`; never retry them

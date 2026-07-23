@@ -159,7 +159,7 @@ class AIBuilderPlanner:
                     turn=turn,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
-                    llm_messages=proposal_request.llm_messages,
+                    message_groups=proposal_request.message_groups,
                     completion_model_route=completion_model_route,
                     available_model_refs=proposal_request.resource_catalog.model_refs,
                     available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
@@ -177,6 +177,14 @@ class AIBuilderPlanner:
                     plan_edit_context=proposal_request.plan_edit_context,
                     prior_plan_for_revision=proposal_request.prior_plan_for_revision,
                     before_provider_call=before_provider_call,
+                    proposal_request_budget=(
+                        replace(
+                            proposal_request.request_budget,
+                            request_id=request_id,
+                        )
+                        if proposal_request.request_budget is not None
+                        else None
+                    ),
                 )
             ]
         except AIBuilderKnownProviderRejectionException as error:
@@ -399,6 +407,7 @@ class AIBuilderPlanner:
                         persisted_planning_state=persisted_planning_state,
                         base_planning_state_version=turn.base_planning_state_version,
                         tenant_id=self.user.tenant_id,
+                        current_turn_start=new_messages_start,
                         before_provider_call=mark_provider_work_started,
                     )
                 )
@@ -508,6 +517,7 @@ class AIBuilderPlanner:
                             max_output_tokens=max_output_tokens,
                             budget_policy=budget_policy,
                             attachment_file_count=len(attachment_files or []),
+                            current_turn_start=new_messages_start,
                         )
                         pending_events.extend(
                             [

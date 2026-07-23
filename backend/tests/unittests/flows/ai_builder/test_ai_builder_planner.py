@@ -1519,6 +1519,12 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
     assert json.loads(events[0]["data"])["status"] == "architecture_revised"
     assert events[1]["data"] == '{"text":"proposal result"}'
     assert captured["new_messages_start"] == 1
+    message_groups = cast(tuple[object, ...], captured["message_groups"])
+    current_turn_groups = [
+        group for group in message_groups if getattr(group, "kind") == "current_turn"
+    ]
+    assert len(current_turn_groups) == 1
+    assert getattr(current_turn_groups[0], "protected") is True
     assert captured["planning_state"] is continuation_state
     turn = cast(object, captured["turn"])
     assert getattr(turn, "base_planning_state_version") == 9
