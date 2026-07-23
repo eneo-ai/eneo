@@ -827,10 +827,16 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
             tenant_id=admin_user.tenant_id,
             intent=_intent(run_id=run.id, step_id=step.id),
         )
+
+        async def _log_audit(**_kwargs: object) -> UUID:
+            await session.execute(sa.select(1))
+            return uuid4()
+
+        audit_log = AsyncMock(side_effect=_log_audit)
         audit_service = type(
             "AuditServiceStub",
             (),
-            {"log_async": AsyncMock(return_value=uuid4())},
+            {"log_async": audit_log},
         )
         service = _delivery_service(
             session=session,
@@ -841,6 +847,7 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
         request = httpx.Request("POST", "https://example.org/hook/case-123")
 
         async def _send_http_request(**kwargs):
+            assert not session.in_transaction()
             async with sessionmanager.session() as check_session:
                 enable_autobegin_for_flow_task_session(check_session)
                 committed_claim = (
@@ -893,8 +900,10 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
     assert delivery_state.delivered_at is not None
     assert run_state == FlowRunStatus.COMPLETED.value
     assert result_payload == {"text": "done"}
-    audit_service.log_async.assert_awaited_once()
-    assert audit_service.log_async.await_args.kwargs["outcome"] == Outcome.SUCCESS
+    audit_log.assert_awaited_once()
+    audit_args = audit_log.await_args
+    assert audit_args is not None
+    assert audit_args.kwargs["outcome"] == Outcome.SUCCESS
 
 
 @pytest.mark.asyncio
@@ -1079,10 +1088,16 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
             tenant_id=admin_user.tenant_id,
             intent=_intent(run_id=run.id, step_id=step.id),
         )
+
+        async def _log_audit(**_kwargs: object) -> UUID:
+            await session.execute(sa.select(1))
+            return uuid4()
+
+        audit_log = AsyncMock(side_effect=_log_audit)
         audit_service = type(
             "AuditServiceStub",
             (),
-            {"log_async": AsyncMock(return_value=uuid4())},
+            {"log_async": audit_log},
         )
         service = _delivery_service(
             session=session,
@@ -1093,6 +1108,7 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
         request = httpx.Request("POST", "https://example.org/hook/case-123")
 
         async def _send_http_request(**kwargs):
+            assert not session.in_transaction()
             return httpx.Response(503, request=request)
 
         service._send_http_request = _send_http_request
@@ -1114,8 +1130,10 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
     assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.delivery_attempts == 1
     assert "status 503" in delivery_state.delivery_last_error
-    audit_service.log_async.assert_awaited_once()
-    assert audit_service.log_async.await_args.kwargs["outcome"] == Outcome.FAILURE
+    audit_log.assert_awaited_once()
+    audit_args = audit_log.await_args
+    assert audit_args is not None
+    assert audit_args.kwargs["outcome"] == Outcome.FAILURE
 
 
 @pytest.mark.asyncio

@@ -198,7 +198,13 @@ class FlowRunWebhookDeliveryService:
                 async with self.webhook_delivery_repo.session.begin():
                     payload = await self._prepare_delivery_payload(row=row)
                 payload_prepared = True
-                await self._deliver_payload(row=row, payload=payload)
+                try:
+                    await self._deliver_payload(row=row, payload=payload)
+                finally:
+                    # Audit policy reads share this task-scoped session. Discard
+                    # their read transaction before persisting the delivery outcome.
+                    if self.webhook_delivery_repo.session.in_transaction():
+                        await self.webhook_delivery_repo.session.rollback()
             except (
                 BadRequestException,
                 FlowPublishedDefinitionWithoutExecutableStepsError,
