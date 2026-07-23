@@ -1,7 +1,7 @@
 """normalize File and Icon bytes into object content
 
 Revision ID: 202607231700
-Revises: 202607231200
+Revises: 202607231330
 Create Date: 2026-07-23 17:00:00.000000
 """
 
@@ -20,11 +20,11 @@ from sqlalchemy.engine import Connection, Row
 from alembic import op
 
 revision: str = "202607231700"
-down_revision: str | None = "202607231200"
+down_revision: str | None = "202607231330"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_DEFAULT_INLINE_MAXIMUM_BYTES = 10 * 1024 * 1024
+_DEFAULT_INLINE_MAXIMUM_BYTES = 200 * 1024 * 1024
 _DEFAULT_BATCH_SIZE = 100
 
 _CANDIDATES = sa.text("""
@@ -519,6 +519,26 @@ def _verify_copied_rows(connection: Connection) -> None:
         rows.close()
 
 
+def _assert_no_concurrent_legacy_write(
+    connection: Connection,
+    *,
+    inline_limit: int,
+) -> None:
+    candidate = connection.execute(
+        _CANDIDATES,
+        {
+            "batch_size": 1,
+            "batch_bytes": inline_limit,
+        },
+    ).first()
+    if candidate is not None:
+        raise RuntimeError(
+            "File/Icon normalization detected a concurrent File/Icon write "
+            f"for {candidate.owner_kind}:{candidate.owner_id}; legacy columns "
+            "remain authoritative, stop producers and retry"
+        )
+
+
 def upgrade() -> None:
     connection = op.get_bind()
     inline_limit = _positive_setting(
@@ -541,10 +561,20 @@ def upgrade() -> None:
             batch_bytes=inline_limit,
         )
 
-    _verify_copied_rows(connection)
-
     with op.get_context().autocommit_block():
         op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_files_checksum")
+
+    # Fence both legacy owners before the final scan and keep the lock through
+    # contraction. A transaction that began before the fence either commits
+    # first and is detected below, or rolls back. Later writers wait until the
+    # legacy columns are gone and then fail instead of creating a second truth.
+    op.execute("LOCK TABLE files, icons IN ACCESS EXCLUSIVE MODE")
+    _preflight_legacy_rows(connection, inline_limit)
+    _assert_no_concurrent_legacy_write(
+        connection,
+        inline_limit=inline_limit,
+    )
+    _verify_copied_rows(connection)
 
     op.drop_column("files", "text")
     op.drop_column("files", "blob")

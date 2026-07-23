@@ -16,8 +16,14 @@ from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.object_content_table import (
     ObjectContentReconciliationState,
 )
-from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ObjectContentUnavailableError
+from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
+    ObjectContentSettings,
+)
+from eneo.object_content.content import (
+    ObjectContentConfigurationError,
+    ObjectContentUnavailableError,
+)
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -151,6 +157,25 @@ def test_runtime_fails_closed_before_start() -> None:
 
     with pytest.raises(ObjectContentUnavailableError, match="not initialized"):
         runtime.service
+
+
+def test_runtime_rejects_inline_capacity_below_file_producer_limit() -> None:
+    runtime = ObjectContentRuntime()
+
+    with pytest.raises(
+        ObjectContentConfigurationError,
+        match="OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
+    ):
+        runtime.start(
+            core_settings=ObjectContentCoreSettings(
+                _env_file=None,
+                inline_maximum_bytes=10,
+                inline_io_chunk_bytes=10,
+            ),
+            required_inline_bytes=11,
+        )
+
+    assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
 
 
 @pytest.mark.asyncio

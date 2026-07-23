@@ -90,7 +90,9 @@ is the complete content backup.
 
 Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
 deployment ceiling. It is an operational safety bound, not a hidden product
-upload policy.
+upload policy. It must be at least the largest configured File, image, or audio
+upload limit. Eneo rejects a conflicting configuration at startup instead of
+accepting an upload that PostgreSQL-inline storage cannot persist.
 
   </Tabs.Tab>
   <Tabs.Tab>

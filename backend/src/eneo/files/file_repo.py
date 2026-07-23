@@ -52,9 +52,20 @@ _IMAGE_INPUT_VARIANTS = (
 
 
 def select_primary_file_reference(
+    file_type: FileType,
     references: list[FileContentReferenceRecord],
 ) -> FileContentReferenceRecord | None:
-    for variant in _PRIMARY_VARIANTS:
+    if file_type is FileType.TEXT:
+        variants = (
+            FileContentVariant.EXTRACTED_TEXT,
+            FileContentVariant.ORIGINAL,
+        )
+    elif file_type is FileType.IMAGE:
+        variants = _IMAGE_INPUT_VARIANTS
+    else:
+        variants = (FileContentVariant.ORIGINAL,)
+
+    for variant in (*variants, *_PRIMARY_VARIANTS):
         reference = next(
             (candidate for candidate in references if candidate.variant is variant),
             None,
@@ -87,7 +98,7 @@ def project_file_info(
     file: FileMetadata,
     references: list[FileContentReferenceRecord],
 ) -> FileInfo:
-    primary = select_primary_file_reference(references)
+    primary = select_primary_file_reference(file.file_type, references)
     if primary is None:
         raise NotFoundException(f"File {file.id} has no durable content")
     return FileInfo(

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from hashlib import sha256
 from io import BytesIO
 from uuid import UUID
 
@@ -15,7 +18,12 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.users_table import Users
-from eneo.files.file_protocol import FileProtocol
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import (
+    FileProtocol,
+    PendingFileContent,
+    PreparedFileUpload,
+)
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
@@ -30,15 +38,37 @@ from eneo.users.user import UserInDB
 
 def _content_service(
     database: DatabaseSessionManager,
+    *,
+    inline_maximum_bytes: int = 10 * 1024 * 1024,
 ) -> ObjectContentService:
     return ObjectContentService(
         ObjectContentCoreSettings(
             _env_file=None,
-            inline_maximum_bytes=10 * 1024 * 1024,
+            inline_maximum_bytes=inline_maximum_bytes,
             inline_io_chunk_bytes=64 * 1024,
         ),
         database,
     )
+
+
+async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
+    yield payload
+
+
+class _PreparedFileProtocol(FileProtocol):
+    def __init__(self, prepared: PreparedFileUpload) -> None:
+        self._prepared = prepared
+
+    @asynccontextmanager
+    async def prepare_upload(
+        self,
+        upload_file: UploadFile,
+        *,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
+    ) -> AsyncGenerator[PreparedFileUpload]:
+        del upload_file, max_size, limit_setting_name
+        yield self._prepared
 
 
 async def _user(session) -> UserInDB:
@@ -129,6 +159,192 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
     assert hydrated.blob is None
     assert downloaded == payload
     assert download.media_type == "text/plain"
+
+
+@pytest.mark.asyncio
+async def test_file_capture_persists_payload_above_the_old_inline_default(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    payload = b"a" * (10 * 1024 * 1024 + 1)
+    prepared = PreparedFileUpload(
+        name="long-recording.mp3",
+        file_type=FileType.AUDIO,
+        display_media_type="audio/mpeg",
+        contents=(
+            PendingFileContent(
+                variant=FileContentVariant.ORIGINAL,
+                chunks=_bytes_source(payload),
+                declared_media_type="audio/mpeg",
+                verified_media_type="audio/mpeg",
+            ),
+        ),
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=_PreparedFileProtocol(prepared),
+            object_content=_content_service(
+                object_content_database,
+                inline_maximum_bytes=len(payload),
+            ),
+        )
+        saved = await service.save_file(
+            UploadFile(
+                file=BytesIO(),
+                filename=prepared.name,
+                headers={"content-type": prepared.display_media_type},
+            )
+        )
+
+        control = await session.scalar(
+            select(ObjectContents)
+            .join(
+                FileContentReferences,
+                FileContentReferences.content_id == ObjectContents.id,
+            )
+            .where(FileContentReferences.file_id == saved.id)
+        )
+        assert control is not None
+        assert control.size_bytes == len(payload)
+        assert control.storage_kind == "postgres_inline"
+
+
+@pytest.mark.asyncio
+async def test_signed_download_preserves_the_established_text_and_image_variants(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    cases = (
+        (
+            PreparedFileUpload(
+                name="report.pdf",
+                file_type=FileType.TEXT,
+                display_media_type="application/pdf",
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.ORIGINAL,
+                        chunks=_bytes_source(b"%PDF exact original"),
+                        declared_media_type="application/pdf",
+                        verified_media_type="application/pdf",
+                    ),
+                    PendingFileContent(
+                        variant=FileContentVariant.EXTRACTED_TEXT,
+                        chunks=_bytes_source(b"extracted report"),
+                        declared_media_type="text/plain",
+                        verified_media_type="text/plain",
+                    ),
+                ),
+            ),
+            b"extracted report",
+            "text/plain",
+            "report.txt",
+        ),
+        (
+            PreparedFileUpload(
+                name="legacy-report.pdf",
+                file_type=FileType.TEXT,
+                display_media_type="application/pdf",
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.EXTRACTED_TEXT,
+                        chunks=_bytes_source(b"migrated report"),
+                        declared_media_type="text/plain",
+                        verified_media_type="text/plain",
+                    ),
+                ),
+            ),
+            b"migrated report",
+            "text/plain",
+            "legacy-report.txt",
+        ),
+        (
+            PreparedFileUpload(
+                name="photo.png",
+                file_type=FileType.IMAGE,
+                display_media_type="image/png",
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.ORIGINAL,
+                        chunks=_bytes_source(b"large original image"),
+                        declared_media_type="image/png",
+                        verified_media_type="image/png",
+                    ),
+                    PendingFileContent(
+                        variant=FileContentVariant.MODEL_INPUT,
+                        chunks=_bytes_source(b"bounded image"),
+                        declared_media_type="image/jpeg",
+                        verified_media_type="image/jpeg",
+                    ),
+                ),
+            ),
+            b"bounded image",
+            "image/jpeg",
+            "photo.png",
+        ),
+        (
+            PreparedFileUpload(
+                name="legacy-photo.png",
+                file_type=FileType.IMAGE,
+                display_media_type="image/png",
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.MODEL_INPUT,
+                        chunks=_bytes_source(b"migrated bounded image"),
+                        declared_media_type="image/jpeg",
+                        verified_media_type="image/jpeg",
+                    ),
+                ),
+            ),
+            b"migrated bounded image",
+            "image/jpeg",
+            "legacy-photo.png",
+        ),
+    )
+
+    saved_cases: list[tuple[UUID, bytes, str, str]] = []
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        for prepared, expected_bytes, expected_media_type, expected_name in cases:
+            service = FileService(
+                user=user,
+                repo=FileRepository(session),
+                protocol=_PreparedFileProtocol(prepared),
+                object_content=_content_service(object_content_database),
+            )
+            saved = await service.save_file(
+                UploadFile(
+                    file=BytesIO(),
+                    filename=prepared.name,
+                    headers={"content-type": prepared.display_media_type},
+                )
+            )
+            assert saved.checksum == sha256(expected_bytes).hexdigest()
+            assert saved.size == len(expected_bytes)
+            saved_cases.append(
+                (
+                    saved.id,
+                    expected_bytes,
+                    expected_media_type,
+                    expected_name,
+                )
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=_PreparedFileProtocol(cases[0][0]),
+            object_content=_content_service(object_content_database),
+        )
+        for file_id, expected_bytes, expected_media_type, expected_name in saved_cases:
+            download = await service.get_download_no_auth(file_id)
+            downloaded = b"".join([chunk async for chunk in download.chunks])
+            assert downloaded == expected_bytes
+            assert download.media_type == expected_media_type
+            assert download.filename == expected_name
 
 
 @pytest.mark.asyncio

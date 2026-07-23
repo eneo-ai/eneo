@@ -245,7 +245,10 @@ Inline capacity and common reconciliation tuning live in `env_backend.env`.
 bounds PostgreSQL row and process memory exposure; it is documented and
 configurable, not a hidden business limit. Lowering it affects new writes, not
 reads of existing rows. User-facing upload limits remain business settings
-owned by application/admin configuration.
+owned by application/admin configuration. Keep this ceiling at least as large
+as the largest File upload limit; backend and worker fail during startup when
+those settings conflict, before an upload can be accepted and then rejected by
+storage.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is

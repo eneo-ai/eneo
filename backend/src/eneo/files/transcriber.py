@@ -64,7 +64,7 @@ class Transcriber:
                 filepath=temp_file_path, transcription_model=transcription_model
             )
 
-            await self.file_service.save_transcription(file.id, result)
+            result = await self.file_service.save_transcription(file.id, result)
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):

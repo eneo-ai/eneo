@@ -24,7 +24,10 @@ class ObjectContentCoreSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    inline_maximum_bytes: int = Field(default=10 * _MEBIBYTE, ge=1)
+    # Preserve the established maximum audio upload when upgrading an existing
+    # deployment without this new setting. Operators can lower both limits
+    # together after measuring their PostgreSQL capacity.
+    inline_maximum_bytes: int = Field(default=200 * _MEBIBYTE, ge=1)
     inline_io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
     reconciliation_batch_size: int = Field(
         default=100,

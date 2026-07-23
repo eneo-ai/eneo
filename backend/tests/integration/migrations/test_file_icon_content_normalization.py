@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +24,7 @@ _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
 )
-_PREVIOUS_REVISION = "202607231200"
+_PREVIOUS_REVISION = "202607231330"
 _NORMALIZATION_REVISION = "202607231700"
 
 
@@ -255,6 +257,103 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
             """
         )
 
+    # Remove the legacy checksum index before holding a writer open. Otherwise
+    # DROP INDEX CONCURRENTLY, rather than the final authority fence, can be the
+    # lock waiter observed below.
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute("DROP INDEX IF EXISTS ix_files_checksum")
+
+    racing_file_id = str(uuid4())
+    racing_payload = b"racing legacy audio"
+    writer = _connect(database_url)
+    try:
+        with writer.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO files (
+                    id, name, text, blob, checksum, size, mimetype, file_type,
+                    transcription, user_id, tenant_id, parent_file_id
+                )
+                VALUES (
+                    %s, 'racing.mp3', NULL, %s, 'racing-checksum', %s,
+                    'audio/mpeg', 'audio', NULL, %s, %s, NULL
+                )
+                """,
+                (
+                    racing_file_id,
+                    racing_payload,
+                    len(racing_payload),
+                    seeded["user"],
+                    seeded["tenant"],
+                ),
+            )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            migration = executor.submit(
+                command.upgrade,
+                _alembic_config(database_url),
+                _NORMALIZATION_REVISION,
+            )
+            deadline = time.monotonic() + 10
+            fence_waiting = False
+            while time.monotonic() < deadline:
+                with _connect(database_url) as observer, observer.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_locks AS lock
+                            JOIN pg_class AS relation
+                              ON relation.oid = lock.relation
+                            WHERE relation.relname = 'files'
+                              AND lock.mode = 'AccessExclusiveLock'
+                              AND NOT lock.granted
+                        )
+                        """
+                    )
+                    fence_waiting = cursor.fetchone() == (True,)
+                if fence_waiting:
+                    break
+                time.sleep(0.05)
+
+            assert fence_waiting, "migration never established its final write fence"
+            writer.commit()
+            with pytest.raises(
+                RuntimeError,
+                match="concurrent File/Icon write",
+            ):
+                migration.result(timeout=10)
+    finally:
+        writer.rollback()
+        writer.close()
+
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT blob
+            FROM files
+            WHERE id = %s
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM file_content_references
+                  WHERE file_id = files.id
+              )
+            """,
+            (racing_file_id,),
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        assert bytes(row[0]) == racing_payload
+        cursor.execute(
+            """
+            SELECT count(*)
+            FROM information_schema.columns
+            WHERE (table_name = 'files' AND column_name = 'blob')
+               OR (table_name = 'icons' AND column_name = 'blob')
+            """
+        )
+        assert cursor.fetchone() == (2,)
+
     command.upgrade(config, _NORMALIZATION_REVISION)
 
     expected = {
@@ -262,6 +361,7 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
         ("file", seeded["image"], "model_input"): seeded["image_payload"],
         ("file", seeded["derived"], "derived_page"): seeded["derived_payload"],
         ("file", seeded["audio"], "original"): seeded["audio_payload"],
+        ("file", racing_file_id, "original"): racing_payload,
         (
             "file",
             seeded["audio"],

@@ -459,7 +459,7 @@ class FileService:
         file: FileMetadata,
         references: list[FileContentReferenceRecord],
     ) -> FileContentReferenceRecord:
-        reference = select_primary_file_reference(references)
+        reference = select_primary_file_reference(file.file_type, references)
         if reference is not None:
             return reference
         raise NotFoundException(f"File {file.id} has no durable content")
