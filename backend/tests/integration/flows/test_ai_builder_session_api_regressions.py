@@ -61,6 +61,13 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder import ai_builder_error_contract as error_contract_module
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+from eneo.flows.ai_builder.ai_builder_architecture_commit import (
+    finalize_architecture_commit,
+)
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_commit_invariance import CommitDriftError
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     MAX_SESSION_CONVERSATION_BYTES,
     conversation_serialized_size_bytes,
@@ -112,6 +119,9 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 from eneo.flows.application.flow_authoring_command import FlowAuthoringCommandService
 from eneo.flows.domain.flow import FlowStep
@@ -259,13 +269,14 @@ async def _claim_session_send_turn(
     lock_expires_at: datetime | None = None,
     client_turn_id: UUID | None = None,
     lease: SessionSendLease | None = None,
+    message_content: str = "Accepted turn",
 ) -> SessionSendTurn:
     resolved_lease = lease or SessionSendLease(
         request_id=uuid4(),
         lock_token=uuid4(),
     )
     resolved_turn_id = client_turn_id or uuid4()
-    message = ConversationMessage(role="user", content="Accepted turn")
+    message = ConversationMessage(role="user", content=message_content)
     preflight = await repo.preflight_session_turn(
         session_id=session_id,
         tenant_id=tenant_id,
@@ -5040,6 +5051,112 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
 
     assert [message.content for message in fetched.conversation] == ["Accepted turn"]
     assert loaded is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_commit_turn_rolls_back_pinned_architecture_drift(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Commit Turn Pinned Drift Rollback",
+    )
+    text_request = (
+        "Skapa ett enkelt flöde som tar emot en kort text från användaren "
+        "och sammanfattar den i tre tydliga punkter."
+    )
+    prior_state = build_planning_state_from_conversation(
+        [ConversationMessage(role="user", content=text_request)]
+    )
+    prior_draft = derive_architecture_commit_draft(prior_state)
+    assert prior_draft is not None
+    prior_state.architecture_commit = finalize_architecture_commit(prior_draft)
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        first_turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            message_content=text_request,
+        )
+        await repo.commit_turn(
+            turn=first_turn,
+            new_messages=[
+                ConversationMessage(role="assistant", content="Architecture pinned")
+            ],
+            architecture_commit=prior_state.architecture_commit,
+        )
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=first_turn.lease,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            message_content="Ändra slutresultatet till PDF istället.",
+        )
+
+        with pytest.raises(CommitDriftError, match="draft mutated"):
+            await repo.commit_turn(
+                turn=turn,
+                new_messages=[
+                    ConversationMessage(
+                        role="assistant",
+                        content="Should roll back",
+                    )
+                ],
+            )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        loaded = await repo.load_planning_state(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        turn_state, active_request_id = (
+            await repo.session.execute(
+                select(
+                    BuilderSessions.latest_turn_state,
+                    BuilderSessions.active_request_id,
+                ).where(BuilderSessions.id == session.id)
+            )
+        ).one()
+
+    assert [message.content for message in fetched.conversation] == [
+        text_request,
+        "Architecture pinned",
+        "Ändra slutresultatet till PDF istället.",
+    ]
+    assert loaded == prior_state
+    assert turn_state == BuilderTurnState.OPEN.value
+    assert active_request_id == turn.lease.request_id
 
 
 @pytest.mark.integration

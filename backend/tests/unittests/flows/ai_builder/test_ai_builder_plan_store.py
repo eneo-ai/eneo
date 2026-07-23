@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_plan_store import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -256,12 +257,33 @@ def _make_repo_mock() -> AsyncMock:
     repo.create_plan = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     repo.load_planning_state = AsyncMock(return_value=None)
     repo.list_session_file_ids = AsyncMock(return_value=[])
+    repo.save_planning_state = AsyncMock(return_value=1)
+
+    async def commit_turn(**kwargs) -> int:
+        return await AIBuilderRepository.commit_turn(repo, **kwargs)
+
+    repo.commit_turn.side_effect = commit_turn
     return repo
 
 
 def _text_architecture_commit() -> ArchitectureCommit:
     state = build_planning_state_from_conversation(
         [ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST)]
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    return finalize_architecture_commit(draft)
+
+
+def _pdf_architecture_commit() -> ArchitectureCommit:
+    state = build_planning_state_from_conversation(
+        [
+            ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
+            ConversationMessage(
+                role="user",
+                content="Ändra slutresultatet till PDF istället.",
+            ),
+        ]
     )
     draft = derive_architecture_commit_draft(state)
     assert draft is not None
@@ -333,7 +355,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     repo = _make_repo_mock()
     spec = _make_turn_spec()
 
-    await store_plan_and_update_conversation(
+    result = await store_plan_and_update_conversation(
         repo=repo,
         turn=_make_turn(base_version=7),
         conversation=[],
@@ -351,6 +373,11 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     assert isinstance(saved_state, PlanningState)
     assert "phase" not in saved_state.model_dump(mode="json")
     assert repo.save_planning_state.await_args.kwargs["base_version"] == 7
+    assert [
+        message.role for message in repo.commit_turn.await_args.kwargs["new_messages"]
+    ] == ["assistant", "tool"]
+    assert result.new_planning_state_version == 1
+    repo.complete_session_turn.assert_awaited_once()
     repo.update_session_latest_plan.assert_awaited_once()
     assert repo.update_session_latest_plan.await_args.kwargs["plan_id"] == (
         repo.create_plan.return_value.id
@@ -391,6 +418,81 @@ async def test_store_plan_rejects_proposal_when_current_slots_drift_from_commit(
         )
 
     repo.save_planning_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commit_turn_rejects_non_plan_conversation_drift_before_state_save() -> (
+    None
+):
+    repo = _make_repo_mock()
+    prior_state = PlanningState.empty()
+    prior_state.architecture_commit = _text_architecture_commit()
+    repo.load_planning_state.return_value = prior_state
+    repo.append_session_messages.return_value = [
+        ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
+        ConversationMessage(
+            role="user",
+            content="Ändra slutresultatet till PDF istället.",
+        ),
+    ]
+
+    with pytest.raises(CommitDriftError, match="draft mutated"):
+        await AIBuilderRepository.commit_turn(
+            repo,
+            turn=_make_turn(base_version=7),
+            new_messages=[ConversationMessage(role="assistant", content="Nästa fråga")],
+        )
+
+    repo.save_planning_state.assert_not_awaited()
+    repo.complete_session_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commit_turn_rebuilds_state_from_messages_that_append_persisted() -> None:
+    repo = _make_repo_mock()
+    repo.append_session_messages.return_value = [
+        ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST)
+    ]
+
+    await AIBuilderRepository.commit_turn(
+        repo,
+        turn=_make_turn(base_version=7),
+        new_messages=[
+            ConversationMessage(role="assistant", content="Caller-only transient text")
+        ],
+    )
+
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert saved_state.resolved_slots["primary_runtime_input"].value == "text"
+    assert saved_state.resolved_slots["terminal_output"].value == "structured_text"
+
+
+@pytest.mark.asyncio
+async def test_commit_turn_accepts_explicit_architecture_revision() -> None:
+    repo = _make_repo_mock()
+    prior_state = PlanningState.empty()
+    prior_state.architecture_commit = _text_architecture_commit()
+    repo.load_planning_state.return_value = prior_state
+    repo.append_session_messages.return_value = [
+        ConversationMessage(role="user", content=_TEXT_SUMMARY_REQUEST),
+        ConversationMessage(
+            role="user",
+            content="Ändra slutresultatet till PDF istället.",
+        ),
+    ]
+    revised_commit = _pdf_architecture_commit()
+
+    await AIBuilderRepository.commit_turn(
+        repo,
+        turn=_make_turn(base_version=7),
+        new_messages=[ConversationMessage(role="assistant", content="Reviderad")],
+        architecture_commit=revised_commit,
+        complete_turn=False,
+    )
+
+    saved_state = repo.save_planning_state.await_args.kwargs["state"]
+    assert saved_state.architecture_commit == revised_commit
+    repo.complete_session_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio

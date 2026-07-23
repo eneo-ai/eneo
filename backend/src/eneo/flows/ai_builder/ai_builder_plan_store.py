@@ -3,12 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
-    derive_architecture_commit_draft,
-)
-from eneo.flows.ai_builder.ai_builder_commit_invariance import (
-    assert_architecture_commit_draft_matches_pinned,
-)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
 )
@@ -27,10 +21,6 @@ from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
-from eneo.flows.ai_builder.planning_state_builder import (
-    build_planning_state_from_conversation,
-    carry_forward_persisted_planner_state,
-)
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
@@ -114,49 +104,17 @@ async def store_plan_and_update_conversation(
         assumptions=compiled.content.assumptions,
     )
     async with repo.savepoint():
-        prior_state = await repo.load_planning_state(
-            session_id=turn.session_id, tenant_id=turn.tenant_id
-        )
         plan = await _persist_active_send_plan_proposal(
             repo=repo,
             turn=turn,
             proposal=proposal,
         )
-        persisted = await append_session_messages(
-            repo=repo,
+        new_version = await repo.commit_turn(
             turn=turn,
-            conversation=conversation,
-            start_index=new_messages_start,
+            new_messages=conversation[new_messages_start:],
+            flow=flow,
+            planning_state_overlay=planning_state_overlay,
         )
-        attached_file_ids = await repo.list_session_file_ids(
-            session_id=turn.session_id,
-            tenant_id=turn.tenant_id,
-        )
-        planning_state = build_planning_state_from_conversation(persisted, flow=flow)
-        # Current-turn overlay must run before prior state: carry-forward only
-        # fills missing planner-owned fields, so the current upload role wins.
-        carry_forward_persisted_planner_state(
-            planning_state,
-            planning_state_overlay,
-            attached_file_ids=attached_file_ids,
-        )
-        carry_forward_persisted_planner_state(
-            planning_state,
-            prior_state,
-            attached_file_ids=attached_file_ids,
-        )
-        prior_commit = prior_state.architecture_commit if prior_state else None
-        assert_architecture_commit_draft_matches_pinned(
-            before=prior_commit,
-            after=derive_architecture_commit_draft(planning_state),
-        )
-        new_version = await repo.save_planning_state(
-            session_id=turn.session_id,
-            tenant_id=turn.tenant_id,
-            state=planning_state,
-            base_version=turn.base_planning_state_version,
-        )
-        await repo.complete_session_turn(turn=turn)
     return StoredPlanResult(
         plan=plan,
         proposal=proposal,
@@ -186,21 +144,6 @@ async def _persist_active_send_plan_proposal(
         lease=turn.lease,
     )
     return plan
-
-
-async def append_session_messages(
-    *,
-    repo: AIBuilderRepository,
-    turn: SessionSendTurn,
-    conversation: list[ConversationMessage],
-    start_index: int,
-) -> list[ConversationMessage]:
-    return await repo.append_session_messages(
-        session_id=turn.session_id,
-        tenant_id=turn.tenant_id,
-        conversation=conversation[start_index:],
-        lease=turn.lease,
-    )
 
 
 def append_plan_messages(

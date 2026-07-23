@@ -19,6 +19,12 @@ from eneo.database.tables.flow_tables import (
     BuilderSessions,
 )
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from eneo.flows.ai_builder.ai_builder_commit_invariance import (
+    assert_architecture_commit_draft_matches_pinned,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
@@ -1639,6 +1645,13 @@ class AIBuilderRepository:
                 state,
                 prior_state,
                 attached_file_ids=attached_file_ids,
+            )
+            pinned_commit = architecture_commit or (
+                prior_state.architecture_commit if prior_state else None
+            )
+            assert_architecture_commit_draft_matches_pinned(
+                before=pinned_commit,
+                after=derive_architecture_commit_draft(state),
             )
             new_version = await self.save_planning_state(
                 session_id=turn.session_id,
