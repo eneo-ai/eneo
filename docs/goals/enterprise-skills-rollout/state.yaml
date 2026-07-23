@@ -603,7 +603,11 @@ tasks:
       result: done
       summary: "Reconciled the remaining non-Marketplace roadmap into an implementation-ready #553-first sequence, corrected the copied discovery budget and loopback-MCP dependency, and synced the accepted contract to live Issue #553 without production edits."
       planning_pr: 581
-      planning_pr_status: "opened for CI and fresh review"
+      planning_pr_status: "squash-merged into develop"
+      planning_pr_source_head: "73beee9e9731a8444bea22d3718a61f0e279541a"
+      planning_pr_merge_commit: "677c54ca4aa0a244f51bbe77de8890ca23807536"
+      planning_pr_merged_at: "2026-07-23T22:43:40Z"
+      planning_pr_final_review: "Review 2 on 73beee9 confirmed F1 resolved with no current findings: https://github.com/eneo-ai/eneo/pull/581#issuecomment-5064240636"
       issue: "https://github.com/eneo-ai/eneo/issues/553"
       issue_updated_at: "2026-07-23T22:06:02Z"
       changed_files:
