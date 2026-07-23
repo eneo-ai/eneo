@@ -154,7 +154,7 @@ async def get_organization_skill(
         "List structural Assistant and App adoption of an organisation Skill, "
         "with full-result revision totals."
     ),
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_organization_skill_adoption(
     skill_id: UUID,

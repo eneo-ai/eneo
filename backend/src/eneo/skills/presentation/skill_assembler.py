@@ -126,7 +126,11 @@ class SkillAssembler:
         projection: SkillAdoptionProjectionPage,
     ) -> SkillAdoptionProjectionPagePublic:
         return SkillAdoptionProjectionPagePublic(
-            summary=cls.adoption_summary_to_public(projection.summary),
+            summary=(
+                cls.adoption_summary_to_public(projection.summary)
+                if projection.summary is not None
+                else None
+            ),
             items=[
                 cls.adoption_resource_to_public(resource)
                 for resource in projection.items

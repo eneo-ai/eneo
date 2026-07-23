@@ -15988,7 +15988,7 @@ export interface components {
     };
     /** SkillAdoptionProjectionPagePublic */
     SkillAdoptionProjectionPagePublic: {
-      summary: components["schemas"]["SkillAdoptionSummaryPublic"];
+      summary: components["schemas"]["SkillAdoptionSummaryPublic"] | null;
       /** Items */
       items: components["schemas"]["SkillAdoptionResourcePublic"][];
       /** Limit */
@@ -39493,6 +39493,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SkillAdoptionProjectionPagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

@@ -35,20 +35,20 @@
 
   let sourcePage = $state.raw(untrack(() => initialPage));
   let page = $state.raw<SkillAdoptionProjectionPagePublic | null>(untrack(() => initialPage));
+  let summary = $state.raw(untrack(() => initialPage?.summary ?? null));
   let items = $state<AdoptionResource[]>(untrack(() => [...(initialPage?.items ?? [])]));
   let nextCursor = $state<string | null>(untrack(() => initialPage?.next_cursor ?? null));
   let loadingInitial = $state(untrack(() => initialLoading));
   let initialLoadError = $state(untrack(() => initialError));
   let loadingMore = $state(false);
   let loadMoreError = $state<string | null>(null);
-  let resourceTotal = $derived(
-    page === null ? 0 : page.summary.assistant_count + page.summary.app_count
-  );
+  let resourceTotal = $derived(summary === null ? 0 : summary.assistant_count + summary.app_count);
 
   $effect(() => {
     if (initialPage === null || initialPage === sourcePage) return;
     sourcePage = initialPage;
     page = initialPage;
+    summary = initialPage.summary;
     items = [...initialPage.items];
     nextCursor = initialPage.next_cursor ?? null;
     loadingInitial = false;
@@ -95,6 +95,7 @@
       });
       sourcePage = loadedPage;
       page = loadedPage;
+      summary = loadedPage.summary;
       items = [...loadedPage.items];
       nextCursor = loadedPage.next_cursor ?? null;
     } catch {
@@ -166,28 +167,28 @@
         <Button variant="outline" size="sm" onclick={retryInitialLoad}>{m.retry()}</Button>
       </Alert.Action>
     </Alert.Root>
-  {:else}
+  {:else if summary !== null}
     <dl class="grid grid-cols-2 gap-x-4 gap-y-5 border-y py-4 sm:grid-cols-4">
       <div>
         <dt class="text-muted-foreground text-xs font-medium">
           {m.organization_skills_adoption_assistants_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">
-          {page.summary.assistant_count}
+          {summary.assistant_count}
         </dd>
       </div>
       <div>
         <dt class="text-muted-foreground text-xs font-medium">
           {m.organization_skills_adoption_apps_label()}
         </dt>
-        <dd class="mt-1 text-xl font-semibold tabular-nums">{page.summary.app_count}</dd>
+        <dd class="mt-1 text-xl font-semibold tabular-nums">{summary.app_count}</dd>
       </div>
       <div>
         <dt class="text-muted-foreground text-xs font-medium">
           {m.organization_skills_adoption_spaces_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">
-          {page.summary.distinct_space_count}
+          {summary.distinct_space_count}
         </dd>
       </div>
       <div>
@@ -195,12 +196,12 @@
           {m.organization_skills_adoption_behind_label()}
         </dt>
         <dd class="mt-1 text-xl font-semibold tabular-nums">
-          {page.summary.behind_published_count}
+          {summary.behind_published_count}
         </dd>
       </div>
     </dl>
 
-    {#if page.summary.assistant_count === 0 && page.summary.app_count === 0 && page.summary.personal_chat === null}
+    {#if summary.assistant_count === 0 && summary.app_count === 0 && summary.personal_chat === null}
       <div class="border-border flex flex-col items-center border-y px-6 py-8 text-center">
         <h3 class="text-foreground text-base font-medium">
           {m.organization_skills_adoption_empty_title()}
@@ -219,14 +220,14 @@
             {m.organization_skills_adoption_personal_chat_heading()}
           </h3>
           <div class="mt-3 flex min-h-10 flex-wrap items-center gap-2 border-y py-3">
-            {#if page.summary.personal_chat}
+            {#if summary.personal_chat}
               <span class="text-sm">
                 {m.organization_skills_adoption_personal_chat_pinned({
-                  version: String(page.summary.personal_chat.revision_number)
+                  version: String(summary.personal_chat.revision_number)
                 })}
               </span>
-              <Badge variant={driftVariant(page.summary.personal_chat.drift)}>
-                {driftLabel(page.summary.personal_chat.drift)}
+              <Badge variant={driftVariant(summary.personal_chat.drift)}>
+                {driftLabel(summary.personal_chat.drift)}
               </Badge>
             {:else}
               <span class="text-muted-foreground text-sm">
@@ -277,7 +278,7 @@
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {#each page.summary.revision_counts as revision (revision.revision_id)}
+                  {#each summary.revision_counts as revision (revision.revision_id)}
                     <Table.Row>
                       <Table.Cell class="font-medium">
                         {m.organization_skills_version({

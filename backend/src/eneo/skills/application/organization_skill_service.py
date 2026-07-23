@@ -139,34 +139,17 @@ class OrganizationSkillService:
         limit: int,
         cursor: str | None,
     ) -> SkillAdoptionProjectionPage:
-        skill = await self.get_organization_skill(skill_id=skill_id)
+        self._require_admin()
         after = SkillAdoptionCursor.parse(cursor)
-        summary = await self.repo.get_organization_adoption_summary(
+        projection = await self.repo.get_organization_adoption_projection_page(
             tenant_id=self.user.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=skill.published_revision_number,
-        )
-        resources = await self.repo.list_organization_adoption_resources(
-            tenant_id=self.user.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=skill.published_revision_number,
-            limit=limit + 1,
+            skill_id=skill_id,
+            limit=limit,
             after=after,
         )
-        visible = resources[:limit]
-        next_cursor = None
-        if len(resources) > limit and visible:
-            last = visible[-1]
-            next_cursor = SkillAdoptionCursor(
-                kind=last.kind,
-                resource_id=last.resource_id,
-            ).serialize()
-        return SkillAdoptionProjectionPage(
-            summary=summary,
-            items=tuple(visible),
-            limit=limit,
-            next_cursor=next_cursor,
-        )
+        if projection is None:
+            raise NotFoundException()
+        return projection
 
     async def create_organization_skill(
         self,

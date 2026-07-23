@@ -361,7 +361,7 @@ class SkillAdoptionResource:
 
 @dataclass(frozen=True)
 class SkillAdoptionProjectionPage:
-    summary: SkillAdoptionSummary
+    summary: SkillAdoptionSummary | None
     items: tuple[SkillAdoptionResource, ...]
     limit: int
     next_cursor: str | None

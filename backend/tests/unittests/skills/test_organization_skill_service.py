@@ -21,6 +21,7 @@ from eneo.skills.domain.skill import (
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
+    SkillAdoptionProjectionPage,
     SkillAdoptionResource,
     SkillAdoptionResourceKind,
     SkillAdoptionRevisionCount,
@@ -527,15 +528,14 @@ async def test_skills_permission_does_not_grant_adoption_projection_access():
         )
 
     repo.get_organization_for_tenant.assert_not_awaited()
-    repo.get_organization_adoption_summary.assert_not_awaited()
-    repo.list_organization_adoption_resources.assert_not_awaited()
+    repo.get_organization_adoption_projection_page.assert_not_awaited()
 
 
 async def test_missing_tenant_skill_has_no_adoption_projection():
     organization = _organization()
     skill_id = uuid4()
     repo = AsyncMock()
-    repo.get_organization_for_tenant.return_value = None
+    repo.get_organization_adoption_projection_page.return_value = None
     service = _service(
         organization=organization,
         permissions={Permission.ADMIN},
@@ -549,12 +549,12 @@ async def test_missing_tenant_skill_has_no_adoption_projection():
             cursor=None,
         )
 
-    repo.get_organization_for_tenant.assert_awaited_once_with(
+    repo.get_organization_adoption_projection_page.assert_awaited_once_with(
         tenant_id=organization.tenant_id,
         skill_id=skill_id,
+        limit=25,
+        after=None,
     )
-    repo.get_organization_adoption_summary.assert_not_awaited()
-    repo.list_organization_adoption_resources.assert_not_awaited()
 
 
 async def test_adoption_projection_uses_an_opaque_stable_cursor_without_duplicates():
@@ -622,11 +622,24 @@ async def test_adoption_projection_uses_an_opaque_stable_cursor_without_duplicat
         ),
     )
     repo = AsyncMock()
-    repo.get_organization_for_tenant.return_value = skill
-    repo.get_organization_adoption_summary.return_value = summary
-    repo.list_organization_adoption_resources.side_effect = [
-        list(resources),
-        [resources[2]],
+    first_projection = SkillAdoptionProjectionPage(
+        summary=summary,
+        items=resources[:2],
+        limit=2,
+        next_cursor=SkillAdoptionCursor(
+            kind=resources[1].kind,
+            resource_id=resources[1].resource_id,
+        ).serialize(),
+    )
+    second_projection = SkillAdoptionProjectionPage(
+        summary=None,
+        items=resources[2:],
+        limit=2,
+        next_cursor=None,
+    )
+    repo.get_organization_adoption_projection_page.side_effect = [
+        first_projection,
+        second_projection,
     ]
     service = _service(
         organization=organization,
@@ -654,38 +667,24 @@ async def test_adoption_projection_uses_an_opaque_stable_cursor_without_duplicat
         limit=2,
         cursor=first_page.next_cursor,
     )
-    assert second_page.summary is summary
+    assert second_page.summary is None
     assert second_page.items == resources[2:]
     assert second_page.next_cursor is None
     assert {
         resource.resource_id for resource in first_page.items + second_page.items
     } == {resource.resource_id for resource in resources}
 
-    assert repo.get_organization_adoption_summary.await_args_list == [
+    assert repo.get_organization_adoption_projection_page.await_args_list == [
         call(
             tenant_id=organization.tenant_id,
             skill_id=skill.id,
-            published_revision_number=2,
-        ),
-        call(
-            tenant_id=organization.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=2,
-        ),
-    ]
-    assert repo.list_organization_adoption_resources.await_args_list == [
-        call(
-            tenant_id=organization.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=2,
-            limit=3,
+            limit=2,
             after=None,
         ),
         call(
             tenant_id=organization.tenant_id,
             skill_id=skill.id,
-            published_revision_number=2,
-            limit=3,
+            limit=2,
             after=decoded_cursor,
         ),
     ]
@@ -710,5 +709,4 @@ async def test_adoption_projection_rejects_malformed_cursors(cursor: str):
             cursor=cursor,
         )
 
-    repo.get_organization_adoption_summary.assert_not_awaited()
-    repo.list_organization_adoption_resources.assert_not_awaited()
+    repo.get_organization_adoption_projection_page.assert_not_awaited()

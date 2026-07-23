@@ -1,8 +1,10 @@
+import asyncio
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 
 from eneo.database.tables.governance_policy_table import GovernancePolicies
+from eneo.database.tables.skill_table import AssistantSkillBindings
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.skills.domain.skill import (
@@ -161,18 +163,16 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
             ],
         )
 
-        summary = await repo.get_organization_adoption_summary(
+        projection = await repo.get_organization_adoption_projection_page(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
-            published_revision_number=revision_two.revision_number,
-        )
-        resources = await repo.list_organization_adoption_resources(
-            tenant_id=admin_user.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=revision_two.revision_number,
             limit=10,
             after=None,
         )
+        assert projection is not None
+        assert projection.summary is not None
+        summary = projection.summary
+        resources = projection.items
 
         assert summary.assistant_count == 2
         assert summary.app_count == 1
@@ -247,45 +247,62 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
                 capture_statement,
             )
 
-        assert len(captured_statements) == 4
+        assert len(captured_statements) == 1
         adoption_statements = [
             (statement, parameters)
             for statement, parameters in captured_statements
             if "organization_skill_adoption_" in statement
         ]
-        assert len(adoption_statements) == 3
-        resource_statements = [
-            statement
-            for statement, _parameters in adoption_statements
-            if "organization_skill_adoption_resources" in statement
-        ]
-        assert len(resource_statements) == 1
-        assert "UNION ALL" in resource_statements[0]
-        assert "ORDER BY" in resource_statements[0]
-        assert "LIMIT" in resource_statements[0]
+        assert len(adoption_statements) == 1
+        projection_statement, projection_parameters = adoption_statements[0]
+        assert "organization_skill_adoption_resources" in projection_statement
+        assert "organization_skill_adoption_facts" in projection_statement
+        assert "organization_skill_adoption_totals" in projection_statement
+        assert "UNION ALL" in projection_statement
+        assert "ORDER BY" in projection_statement
+        assert "LIMIT" in projection_statement
 
         connection = await session.connection()
         await connection.exec_driver_sql("SET LOCAL enable_seqscan = off")
-        plans: list[str] = []
-        for statement, parameters in adoption_statements:
-            explained = await connection.exec_driver_sql(
-                f"EXPLAIN (COSTS OFF) {statement}",
-                parameters,
-            )
-            plans.append("\n".join(str(row[0]) for row in explained))
-        combined_plan = "\n".join(plans)
-        assert plans[-1].startswith("Limit")
-        assert "Append" in plans[-1]
-        assert "Seq Scan" not in combined_plan
+        explained = await connection.exec_driver_sql(
+            f"EXPLAIN (COSTS OFF) {projection_statement}",
+            projection_parameters,
+        )
+        plan = "\n".join(str(row[0]) for row in explained)
+        assert "Append" in plan
+        assert "Seq Scan" not in plan
 
+        assert first_page.summary is not None
         assert [
             (resource.kind, resource.resource_id) for resource in first_page.items
         ] == [(SkillAdoptionResourceKind.ASSISTANT, assistant_behind.id)]
         assert first_page.next_cursor is not None
-        second_page = await adoption_service.get_adoption_projection(
-            skill_id=skill.id,
-            limit=1,
-            cursor=first_page.next_cursor,
+        captured_statements.clear()
+        sa.event.listen(
+            sync_engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
+        try:
+            second_page = await adoption_service.get_adoption_projection(
+                skill_id=skill.id,
+                limit=1,
+                cursor=first_page.next_cursor,
+            )
+        finally:
+            sa.event.remove(
+                sync_engine,
+                "before_cursor_execute",
+                capture_statement,
+            )
+        assert second_page.summary is None
+        assert len(captured_statements) == 1
+        continuation_statement = captured_statements[0][0]
+        assert "organization_skill_adoption_resources" in continuation_statement
+        assert "organization_skill_adoption_facts" not in continuation_statement
+        assert "organization_skill_adoption_totals" not in continuation_statement
+        assert (
+            "organization_skill_adoption_revision_counts" not in continuation_statement
         )
         assert [
             (resource.kind, resource.resource_id) for resource in second_page.items
@@ -296,6 +313,7 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
             limit=1,
             cursor=second_page.next_cursor,
         )
+        assert third_page.summary is None
         assert [
             (resource.kind, resource.resource_id) for resource in third_page.items
         ] == [(SkillAdoptionResourceKind.APP, app_behind.id)]
@@ -333,18 +351,15 @@ async def test_unpublished_skill_without_bindings_has_an_empty_projection(
             created_by_user_id=admin_user.id,
         )
 
-        summary = await repo.get_organization_adoption_summary(
+        projection = await repo.get_organization_adoption_projection_page(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
-            published_revision_number=None,
-        )
-        resources = await repo.list_organization_adoption_resources(
-            tenant_id=admin_user.tenant_id,
-            skill_id=skill.id,
-            published_revision_number=None,
             limit=10,
             after=None,
         )
+        assert projection is not None
+        assert projection.summary is not None
+        summary = projection.summary
 
         assert summary.assistant_count == 0
         assert summary.app_count == 0
@@ -352,7 +367,130 @@ async def test_unpublished_skill_without_bindings_has_an_empty_projection(
         assert summary.behind_published_count == 0
         assert summary.personal_chat is None
         assert summary.revision_counts == ()
-        assert resources == []
+        assert projection.items == ()
+
+
+async def test_adoption_projection_uses_one_consistent_statement_snapshot(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    async with db_container() as setup_container:
+        setup_session = setup_container.session()
+        organization = await _organization_space(
+            setup_session,
+            tenant_id=admin_user.tenant_id,
+        )
+        model = await completion_model_factory(
+            setup_session,
+            "skill-adoption-snapshot-model",
+        )
+        shared_space = await space_factory(
+            setup_session,
+            "Adoption snapshot Space",
+            [model.id],
+        )
+        setup_session.add(
+            SpacesUsers(
+                space_id=shared_space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            setup_session,
+            "Snapshot-bound Assistant",
+            model.id,
+            space_id=shared_space.id,
+        )
+        setup_repo = setup_container.skill_repo()
+        skill = await setup_repo.create(
+            space_id=organization.id,
+            slug=f"snapshot-adoption-{uuid4().hex[:8]}",
+            display_name="Snapshot adoption projection",
+            description="Keeps summary and resources on one database snapshot.",
+            instructions="Use one consistent projection.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        revision = skill.current_revision
+        await setup_repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=revision.id,
+        )
+        await setup_container.skill_service().replace_assistant_bindings(
+            space_id=shared_space.id,
+            assistant_id=assistant.id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id,
+                    skill_revision_id=revision.id,
+                )
+            ],
+        )
+        assistant_id = assistant.id
+        skill_id = skill.id
+        await setup_session.commit()
+
+    statement_finished = asyncio.Event()
+    mutation_finished = asyncio.Event()
+    async with (
+        db_container(user=admin_user) as reader_container,
+        db_container(user=admin_user) as writer_container,
+    ):
+        reader_session = reader_container.session()
+        original_execute = reader_session.execute
+
+        async def execute_then_pause(*args, **kwargs):
+            result = await original_execute(*args, **kwargs)
+            statement_finished.set()
+            await mutation_finished.wait()
+            return result
+
+        monkeypatch.setattr(reader_session, "execute", execute_then_pause)
+        projection_task = asyncio.create_task(
+            reader_container.skill_repo().get_organization_adoption_projection_page(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill_id,
+                limit=10,
+                after=None,
+            )
+        )
+        await statement_finished.wait()
+
+        writer_session = writer_container.session()
+        await writer_session.execute(
+            sa.delete(AssistantSkillBindings).where(
+                AssistantSkillBindings.assistant_id == assistant_id,
+                AssistantSkillBindings.skill_id == skill_id,
+            )
+        )
+        await writer_session.commit()
+        mutation_finished.set()
+        projection = await projection_task
+
+    assert projection is not None
+    assert projection.summary is not None
+    assert projection.summary.assistant_count == 1
+    assert [(resource.kind, resource.resource_id) for resource in projection.items] == [
+        (SkillAdoptionResourceKind.ASSISTANT, assistant_id)
+    ]
+
+    async with db_container(user=admin_user) as verify_container:
+        updated_projection = await verify_container.skill_repo().get_organization_adoption_projection_page(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill_id,
+            limit=10,
+            after=None,
+        )
+        assert updated_projection is not None
+        assert updated_projection.summary is not None
+        assert updated_projection.summary.assistant_count == 0
+        assert updated_projection.items == ()
 
 
 async def test_adoption_projection_repo_does_not_cross_tenant_boundary(
@@ -377,23 +515,11 @@ async def test_adoption_projection_repo_does_not_cross_tenant_boundary(
         )
 
         foreign_tenant_id = uuid4()
-        summary = await repo.get_organization_adoption_summary(
+        projection = await repo.get_organization_adoption_projection_page(
             tenant_id=foreign_tenant_id,
             skill_id=skill.id,
-            published_revision_number=skill.published_revision_number,
-        )
-        resources = await repo.list_organization_adoption_resources(
-            tenant_id=foreign_tenant_id,
-            skill_id=skill.id,
-            published_revision_number=skill.published_revision_number,
             limit=10,
             after=None,
         )
 
-        assert summary.assistant_count == 0
-        assert summary.app_count == 0
-        assert summary.distinct_space_count == 0
-        assert summary.behind_published_count == 0
-        assert summary.personal_chat is None
-        assert summary.revision_counts == ()
-        assert resources == []
+        assert projection is None

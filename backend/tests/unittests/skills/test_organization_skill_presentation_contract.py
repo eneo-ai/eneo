@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from fastapi import Response
+from fastapi import FastAPI, Response
 from fastapi.routing import APIRoute
 
 from eneo.audit.domain.action_types import ActionType
@@ -155,6 +155,7 @@ async def test_adoption_route_projects_structural_metadata_without_skill_content
         limit=25,
         cursor=None,
     )
+    assert response.summary is not None
     assert response.summary.assistant_count == 1
     assert response.summary.personal_chat is not None
     assert response.summary.personal_chat.revision_id == revision_id
@@ -163,6 +164,17 @@ async def test_adoption_route_projects_structural_metadata_without_skill_content
     serialized = response.model_dump()
     assert "instructions" not in str(serialized)
     assert "content_digest" not in str(serialized)
+
+
+def test_adoption_route_documents_malformed_cursor_response():
+    app = FastAPI()
+    app.include_router(router)
+
+    operation = app.openapi()["paths"]["/skills/organization/{skill_id}/adoption/"][
+        "get"
+    ]
+
+    assert "400" in operation["responses"]
 
 
 def test_organization_revision_creation_documents_created_and_noop_responses():

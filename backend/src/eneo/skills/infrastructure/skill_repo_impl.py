@@ -31,6 +31,7 @@ from eneo.skills.domain.skill import (
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
+    SkillAdoptionProjectionPage,
     SkillAdoptionResource,
     SkillAdoptionResourceKind,
     SkillAdoptionRevisionCount,
@@ -454,127 +455,26 @@ class SkillRepoImpl:
         row = result.one_or_none()
         return self._to_skill(row[0], row[1]) if row is not None else None
 
-    async def get_organization_adoption_summary(
+    async def get_organization_adoption_projection_page(
         self,
         *,
         tenant_id: UUID,
         skill_id: UUID,
-        published_revision_number: int | None,
-    ) -> SkillAdoptionSummary:
-        facts = self._organization_adoption_facts(
-            tenant_id=tenant_id,
-            skill_id=skill_id,
-        )
-        revision_rows = await self.session.execute(
-            sa.select(
-                facts.c.revision_id,
-                SkillRevisions.revision_number,
-                sa.func.count()
-                .filter(facts.c.kind == SkillAdoptionResourceKind.ASSISTANT.value)
-                .label("assistant_count"),
-                sa.func.count()
-                .filter(facts.c.kind == SkillAdoptionResourceKind.APP.value)
-                .label("app_count"),
-                sa.func.bool_or(facts.c.kind == "personal_chat").label(
-                    "personal_chat_pinned"
-                ),
-            )
-            .join(
-                SkillRevisions,
-                sa.and_(
-                    SkillRevisions.id == facts.c.revision_id,
-                    SkillRevisions.skill_id == skill_id,
-                ),
-            )
-            .group_by(facts.c.revision_id, SkillRevisions.revision_number)
-            .order_by(SkillRevisions.revision_number)
-        )
-        revision_counts: list[SkillAdoptionRevisionCount] = []
-        personal_chat: SkillAdoptionPersonalChat | None = None
-        for (
-            revision_id,
-            revision_number,
-            assistant_count,
-            app_count,
-            personal_chat_pinned,
-        ) in revision_rows.tuples():
-            revision_counts.append(
-                SkillAdoptionRevisionCount(
-                    revision_id=revision_id,
-                    revision_number=revision_number,
-                    assistant_count=int(assistant_count),
-                    app_count=int(app_count),
-                    personal_chat_pinned=bool(personal_chat_pinned),
-                )
-            )
-            if personal_chat_pinned:
-                personal_chat = SkillAdoptionPersonalChat(
-                    revision_id=revision_id,
-                    revision_number=revision_number,
-                    drift=self._adoption_drift(
-                        revision_number=revision_number,
-                        published_revision_number=published_revision_number,
-                    ),
-                )
-
-        behind_predicate: ColumnElement[bool]
-        if published_revision_number is None:
-            behind_predicate = sa.false()
-        else:
-            behind_predicate = (
-                SkillRevisions.revision_number != published_revision_number
-            )
-        totals = (
-            await self.session.execute(
-                sa.select(
-                    sa.func.count()
-                    .filter(facts.c.kind == SkillAdoptionResourceKind.ASSISTANT.value)
-                    .label("assistant_count"),
-                    sa.func.count()
-                    .filter(facts.c.kind == SkillAdoptionResourceKind.APP.value)
-                    .label("app_count"),
-                    sa.func.count(sa.distinct(facts.c.space_id))
-                    .filter(
-                        facts.c.kind.in_(
-                            (
-                                SkillAdoptionResourceKind.ASSISTANT.value,
-                                SkillAdoptionResourceKind.APP.value,
-                            )
-                        )
-                    )
-                    .label("distinct_space_count"),
-                    sa.func.count()
-                    .filter(behind_predicate)
-                    .label("behind_published_count"),
-                )
-                .select_from(facts)
-                .join(
-                    SkillRevisions,
-                    sa.and_(
-                        SkillRevisions.id == facts.c.revision_id,
-                        SkillRevisions.skill_id == skill_id,
-                    ),
-                )
-            )
-        ).one()
-        return SkillAdoptionSummary(
-            assistant_count=int(totals.assistant_count),
-            app_count=int(totals.app_count),
-            distinct_space_count=int(totals.distinct_space_count),
-            behind_published_count=int(totals.behind_published_count),
-            personal_chat=personal_chat,
-            revision_counts=tuple(revision_counts),
-        )
-
-    async def list_organization_adoption_resources(
-        self,
-        *,
-        tenant_id: UUID,
-        skill_id: UUID,
-        published_revision_number: int | None,
         limit: int,
         after: SkillAdoptionCursor | None,
-    ) -> list[SkillAdoptionResource]:
+    ) -> SkillAdoptionProjectionPage | None:
+        scope = (
+            sa.select(
+                Skills.published_revision_number.label("published_revision_number")
+            )
+            .select_from(Skills)
+            .join(Spaces, Spaces.id == Skills.space_id)
+            .where(
+                Skills.id == skill_id,
+                *self._organization_scope(tenant_id),
+            )
+            .cte("organization_skill_adoption_scope")
+        )
         resources = sa.union_all(
             sa.select(
                 sa.literal(0).label("kind_rank"),
@@ -587,6 +487,7 @@ class SkillRepoImpl:
                 SkillRevisions.revision_number.label("revision_number"),
             )
             .select_from(AssistantSkillBindings)
+            .join(scope, sa.true())
             .join(
                 Assistants,
                 Assistants.id == AssistantSkillBindings.assistant_id,
@@ -615,6 +516,7 @@ class SkillRepoImpl:
                 SkillRevisions.revision_number.label("revision_number"),
             )
             .select_from(AppSkillBindings)
+            .join(scope, sa.true())
             .join(Apps, Apps.id == AppSkillBindings.app_id)
             .join(Spaces, Spaces.id == AppSkillBindings.space_id)
             .join(
@@ -630,15 +532,15 @@ class SkillRepoImpl:
                 Apps.tenant_id == tenant_id,
                 Spaces.tenant_id == tenant_id,
             ),
-        ).subquery("organization_skill_adoption_resources")
-        statement = (
+        ).cte("organization_skill_adoption_resources")
+        resource_page_statement = (
             sa.select(resources)
             .order_by(resources.c.kind_rank, resources.c.resource_id)
-            .limit(limit)
+            .limit(limit + 1)
         )
         if after is not None:
             after_rank = 0 if after.kind is SkillAdoptionResourceKind.ASSISTANT else 1
-            statement = statement.where(
+            resource_page_statement = resource_page_statement.where(
                 sa.or_(
                     resources.c.kind_rank > after_rank,
                     sa.and_(
@@ -647,32 +549,282 @@ class SkillRepoImpl:
                     ),
                 )
             )
-        rows = await self.session.execute(statement)
-        return [
-            SkillAdoptionResource(
-                kind=SkillAdoptionResourceKind(kind),
-                resource_id=resource_id,
-                name=name,
-                space_id=space_id,
-                space_name=space_name,
-                revision_id=revision_id,
-                revision_number=revision_number,
-                drift=self._adoption_drift(
-                    revision_number=revision_number,
-                    published_revision_number=published_revision_number,
-                ),
+        resource_page = resource_page_statement.cte(
+            "organization_skill_adoption_resource_page"
+        )
+
+        null_count = sa.cast(sa.null(), sa.BigInteger())
+        null_uuid = sa.cast(sa.null(), SkillRevisions.id.type)
+        null_integer = sa.cast(sa.null(), sa.Integer())
+        null_boolean = sa.cast(sa.null(), sa.Boolean())
+        null_string = sa.cast(sa.null(), sa.String())
+
+        scope_row = sa.select(
+            sa.literal(0).label("row_kind"),
+            scope.c.published_revision_number,
+            null_count.label("assistant_count"),
+            null_count.label("app_count"),
+            null_count.label("distinct_space_count"),
+            null_count.label("behind_published_count"),
+            null_uuid.label("revision_id"),
+            null_integer.label("revision_number"),
+            null_boolean.label("personal_chat_pinned"),
+            null_string.label("resource_kind"),
+            null_uuid.label("resource_id"),
+            null_string.label("resource_name"),
+            null_uuid.label("space_id"),
+            null_string.label("space_name"),
+            null_integer.label("kind_rank"),
+        ).select_from(scope)
+
+        branches = [scope_row]
+        if after is None:
+            facts = self._organization_adoption_facts(
+                tenant_id=tenant_id,
+                skill_id=skill_id,
             )
-            for (
-                _kind_rank,
-                kind,
-                resource_id,
-                name,
-                space_id,
-                space_name,
-                revision_id,
-                revision_number,
-            ) in rows.tuples()
-        ]
+            facts_with_revision = (
+                sa.select(
+                    facts.c.kind,
+                    facts.c.revision_id,
+                    facts.c.space_id,
+                    SkillRevisions.revision_number,
+                )
+                .select_from(facts)
+                .join(scope, sa.true())
+                .join(
+                    SkillRevisions,
+                    sa.and_(
+                        SkillRevisions.id == facts.c.revision_id,
+                        SkillRevisions.skill_id == skill_id,
+                    ),
+                )
+                .cte("organization_skill_adoption_revision_facts")
+            )
+            totals = (
+                sa.select(
+                    scope.c.published_revision_number,
+                    sa.func.count()
+                    .filter(
+                        facts_with_revision.c.kind
+                        == SkillAdoptionResourceKind.ASSISTANT.value
+                    )
+                    .label("assistant_count"),
+                    sa.func.count()
+                    .filter(
+                        facts_with_revision.c.kind
+                        == SkillAdoptionResourceKind.APP.value
+                    )
+                    .label("app_count"),
+                    sa.func.count(sa.distinct(facts_with_revision.c.space_id))
+                    .filter(
+                        facts_with_revision.c.kind.in_(
+                            (
+                                SkillAdoptionResourceKind.ASSISTANT.value,
+                                SkillAdoptionResourceKind.APP.value,
+                            )
+                        )
+                    )
+                    .label("distinct_space_count"),
+                    sa.func.count()
+                    .filter(
+                        sa.and_(
+                            facts_with_revision.c.revision_id.is_not(None),
+                            scope.c.published_revision_number.is_not(None),
+                            facts_with_revision.c.revision_number
+                            != scope.c.published_revision_number,
+                        )
+                    )
+                    .label("behind_published_count"),
+                )
+                .select_from(scope)
+                .outerjoin(facts_with_revision, sa.true())
+                .group_by(scope.c.published_revision_number)
+                .cte("organization_skill_adoption_totals")
+            )
+            revision_counts = (
+                sa.select(
+                    facts_with_revision.c.revision_id,
+                    facts_with_revision.c.revision_number,
+                    sa.func.count()
+                    .filter(
+                        facts_with_revision.c.kind
+                        == SkillAdoptionResourceKind.ASSISTANT.value
+                    )
+                    .label("assistant_count"),
+                    sa.func.count()
+                    .filter(
+                        facts_with_revision.c.kind
+                        == SkillAdoptionResourceKind.APP.value
+                    )
+                    .label("app_count"),
+                    sa.func.bool_or(
+                        facts_with_revision.c.kind == "personal_chat"
+                    ).label("personal_chat_pinned"),
+                )
+                .select_from(facts_with_revision)
+                .group_by(
+                    facts_with_revision.c.revision_id,
+                    facts_with_revision.c.revision_number,
+                )
+                .cte("organization_skill_adoption_revision_counts")
+            )
+            branches[0] = sa.select(
+                sa.literal(0).label("row_kind"),
+                totals.c.published_revision_number,
+                totals.c.assistant_count,
+                totals.c.app_count,
+                totals.c.distinct_space_count,
+                totals.c.behind_published_count,
+                null_uuid.label("revision_id"),
+                null_integer.label("revision_number"),
+                null_boolean.label("personal_chat_pinned"),
+                null_string.label("resource_kind"),
+                null_uuid.label("resource_id"),
+                null_string.label("resource_name"),
+                null_uuid.label("space_id"),
+                null_string.label("space_name"),
+                null_integer.label("kind_rank"),
+            ).select_from(totals)
+            branches.append(
+                sa.select(
+                    sa.literal(1).label("row_kind"),
+                    scope.c.published_revision_number,
+                    revision_counts.c.assistant_count,
+                    revision_counts.c.app_count,
+                    null_count.label("distinct_space_count"),
+                    null_count.label("behind_published_count"),
+                    revision_counts.c.revision_id,
+                    revision_counts.c.revision_number,
+                    revision_counts.c.personal_chat_pinned,
+                    null_string.label("resource_kind"),
+                    null_uuid.label("resource_id"),
+                    null_string.label("resource_name"),
+                    null_uuid.label("space_id"),
+                    null_string.label("space_name"),
+                    null_integer.label("kind_rank"),
+                )
+                .select_from(revision_counts)
+                .join(scope, sa.true())
+            )
+
+        branches.append(
+            sa.select(
+                sa.literal(2).label("row_kind"),
+                scope.c.published_revision_number,
+                null_count.label("assistant_count"),
+                null_count.label("app_count"),
+                null_count.label("distinct_space_count"),
+                null_count.label("behind_published_count"),
+                resource_page.c.revision_id,
+                resource_page.c.revision_number,
+                null_boolean.label("personal_chat_pinned"),
+                resource_page.c.kind.label("resource_kind"),
+                resource_page.c.resource_id,
+                resource_page.c.name.label("resource_name"),
+                resource_page.c.space_id,
+                resource_page.c.space_name,
+                resource_page.c.kind_rank,
+            )
+            .select_from(resource_page)
+            .join(scope, sa.true())
+        )
+        projection_rows = sa.union_all(*branches).subquery(
+            "organization_skill_adoption_projection"
+        )
+        result = await self.session.execute(
+            sa.select(projection_rows).order_by(
+                projection_rows.c.row_kind,
+                sa.case(
+                    (
+                        projection_rows.c.row_kind == 1,
+                        projection_rows.c.revision_number,
+                    ),
+                    else_=None,
+                ),
+                projection_rows.c.kind_rank,
+                projection_rows.c.resource_id,
+            )
+        )
+        rows = result.tuples().all()
+        if not rows:
+            return None
+
+        published_revision_number = rows[0][1]
+        revision_counts_result: list[SkillAdoptionRevisionCount] = []
+        personal_chat: SkillAdoptionPersonalChat | None = None
+        adoption_resources: list[SkillAdoptionResource] = []
+        summary: SkillAdoptionSummary | None = None
+        for row in rows:
+            row_kind = row[0]
+            if row_kind == 0 and after is None:
+                summary = SkillAdoptionSummary(
+                    assistant_count=int(row[2]),
+                    app_count=int(row[3]),
+                    distinct_space_count=int(row[4]),
+                    behind_published_count=int(row[5]),
+                    personal_chat=None,
+                    revision_counts=(),
+                )
+            elif row_kind == 1:
+                revision_count = SkillAdoptionRevisionCount(
+                    revision_id=row[6],
+                    revision_number=row[7],
+                    assistant_count=int(row[2]),
+                    app_count=int(row[3]),
+                    personal_chat_pinned=bool(row[8]),
+                )
+                revision_counts_result.append(revision_count)
+                if revision_count.personal_chat_pinned:
+                    personal_chat = SkillAdoptionPersonalChat(
+                        revision_id=revision_count.revision_id,
+                        revision_number=revision_count.revision_number,
+                        drift=self._adoption_drift(
+                            revision_number=revision_count.revision_number,
+                            published_revision_number=published_revision_number,
+                        ),
+                    )
+            elif row_kind == 2:
+                adoption_resources.append(
+                    SkillAdoptionResource(
+                        kind=SkillAdoptionResourceKind(row[9]),
+                        resource_id=row[10],
+                        name=row[11],
+                        space_id=row[12],
+                        space_name=row[13],
+                        revision_id=row[6],
+                        revision_number=row[7],
+                        drift=self._adoption_drift(
+                            revision_number=row[7],
+                            published_revision_number=published_revision_number,
+                        ),
+                    )
+                )
+
+        if summary is not None:
+            summary = SkillAdoptionSummary(
+                assistant_count=summary.assistant_count,
+                app_count=summary.app_count,
+                distinct_space_count=summary.distinct_space_count,
+                behind_published_count=summary.behind_published_count,
+                personal_chat=personal_chat,
+                revision_counts=tuple(revision_counts_result),
+            )
+
+        visible = adoption_resources[:limit]
+        next_cursor = None
+        if len(adoption_resources) > limit and visible:
+            last = visible[-1]
+            next_cursor = SkillAdoptionCursor(
+                kind=last.kind,
+                resource_id=last.resource_id,
+            ).serialize()
+        return SkillAdoptionProjectionPage(
+            summary=summary,
+            items=tuple(visible),
+            limit=limit,
+            next_cursor=next_cursor,
+        )
 
     async def list_published_for_tenant(
         self,

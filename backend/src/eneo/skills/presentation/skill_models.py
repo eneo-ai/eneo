@@ -132,7 +132,7 @@ class SkillAdoptionSummaryPublic(BaseModel):
 
 
 class SkillAdoptionProjectionPagePublic(BaseModel):
-    summary: SkillAdoptionSummaryPublic
+    summary: SkillAdoptionSummaryPublic | None
     items: list[SkillAdoptionResourcePublic]
     limit: int
     next_cursor: str | None = None

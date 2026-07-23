@@ -18,35 +18,39 @@ function adoptionPage({
       drift: "behind" as const
     }
   ],
-  nextCursor = null
+  nextCursor = null,
+  includeSummary = true
 }: {
   items?: SkillAdoptionProjectionPagePublic["items"];
   nextCursor?: string | null;
+  includeSummary?: boolean;
 } = {}): SkillAdoptionProjectionPagePublic {
   const assistantCount = items.filter((item) => item.kind === "assistant").length;
   const appCount = items.filter((item) => item.kind === "app").length + (nextCursor ? 1 : 0);
 
   return {
-    summary: {
-      assistant_count: assistantCount,
-      app_count: appCount,
-      distinct_space_count: new Set(items.map((item) => item.space_id)).size,
-      behind_published_count: items.filter((item) => item.drift === "behind").length + 1,
-      personal_chat: {
-        revision_id: "revision-1",
-        revision_number: 1,
-        drift: "behind"
-      },
-      revision_counts: [
-        {
-          revision_id: "revision-1",
-          revision_number: 1,
-          assistant_count: items.filter((item) => item.kind === "assistant").length,
-          app_count: items.filter((item) => item.kind === "app").length,
-          personal_chat_pinned: true
+    summary: includeSummary
+      ? {
+          assistant_count: assistantCount,
+          app_count: appCount,
+          distinct_space_count: new Set(items.map((item) => item.space_id)).size,
+          behind_published_count: items.filter((item) => item.drift === "behind").length + 1,
+          personal_chat: {
+            revision_id: "revision-1",
+            revision_number: 1,
+            drift: "behind"
+          },
+          revision_counts: [
+            {
+              revision_id: "revision-1",
+              revision_number: 1,
+              assistant_count: items.filter((item) => item.kind === "assistant").length,
+              app_count: items.filter((item) => item.kind === "app").length,
+              personal_chat_pinned: true
+            }
+          ]
         }
-      ]
-    },
+      : null,
     items,
     limit: 25,
     next_cursor: nextCursor
@@ -209,7 +213,8 @@ describe("Skill adoption projection", () => {
           revision_number: 2,
           drift: "current"
         }
-      ]
+      ],
+      includeSummary: false
     });
     const getOrganizationSkillAdoption = vi
       .fn()
