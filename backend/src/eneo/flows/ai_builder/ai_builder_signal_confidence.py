@@ -18,12 +18,18 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
+    normalize_signal_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 
 Confidence = Literal["high", "medium", "low"]
+
+# ``text`` is the intentionally broad fallback signal emitted for generic text
+# input markers. Other canonical values carry enough semantic specificity to be
+# treated as medium-confidence freeform evidence.
+_GENERIC_SIGNAL_VALUES = frozenset({"text"})
 
 
 @dataclass(frozen=True)
@@ -76,11 +82,7 @@ def score_conversation_signals(
             if question_id in structured_ids:
                 continue  # Already have a structured answer — skip
             for value in values:
-                confidence = _score_text_signal_confidence(
-                    question_id,
-                    value,
-                    freeform_text,
-                )
+                confidence = _score_text_signal_confidence(value)
                 scored.append(
                     ScoredSignal(
                         question_id=question_id,
@@ -123,27 +125,12 @@ def high_confidence_signals(
     return result
 
 
-def _score_text_signal_confidence(
-    question_id: str,
-    value: str,
-    text: str,
-) -> Confidence:
+def _score_text_signal_confidence(value: str) -> Confidence:
     """Score confidence for a text-inferred signal.
 
-    Specific multi-word matches are medium confidence.
-    Generic single-word matches are low confidence.
+    Canonical-value scoring keeps equivalent Swedish and English matches equal.
     """
-    # Count how many words from the value appear in the text
-    value_words = set(value.replace("_", " ").split())
-    text_words = set(text.casefold().split())
-    overlap = value_words & text_words
-
-    if len(overlap) >= 2:
-        return "medium"
-
-    # Single-word match with very common words → low confidence
-    common_words = {"text", "data", "file", "output", "input", "single", "multiple"}
-    if overlap and overlap.issubset(common_words):
+    if normalize_signal_text(value) in _GENERIC_SIGNAL_VALUES:
         return "low"
 
     return "medium"

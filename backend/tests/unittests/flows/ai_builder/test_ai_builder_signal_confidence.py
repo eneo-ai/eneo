@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -48,6 +50,68 @@ class TestSignalConfidence:
         assert len(text_signals) >= 1
         assert all(s.confidence in ("medium", "low") for s in text_signals)
 
+    @pytest.mark.parametrize(
+        ("swedish_text", "english_text", "question_id", "value", "confidence"),
+        [
+            pytest.param(
+                "flera filer",
+                "multiple files",
+                "document_material_scope",
+                "multiple_documents_case",
+                "medium",
+                id="multiple-files",
+            ),
+            pytest.param(
+                "flera underlagsfiler",
+                "multiple source files",
+                "document_material_scope",
+                "multiple_documents_case",
+                "medium",
+                id="multiple-source-files",
+            ),
+            pytest.param(
+                "flera pdf",
+                "multiple pdf",
+                "document_material_scope",
+                "multiple_documents_case",
+                "medium",
+                id="multiple-pdf",
+            ),
+            pytest.param(
+                "klistra in",
+                "paste as text",
+                "primary_runtime_input",
+                "text",
+                "low",
+                id="generic-text-input",
+            ),
+        ],
+    )
+    def test_matched_swedish_and_english_prompts_score_equivalently(
+        self,
+        swedish_text: str,
+        english_text: str,
+        question_id: str,
+        value: str,
+        confidence: str,
+    ) -> None:
+        pair_confidences: list[str] = []
+        for text in (swedish_text, english_text):
+            signals = score_conversation_signals([], freeform_text=text)
+            matching_signals = [
+                signal
+                for signal in signals
+                if signal.question_id == question_id and signal.value == value
+            ]
+            assert len(matching_signals) == 1
+            pair_confidences.append(matching_signals[0].confidence)
+
+        assert pair_confidences == [confidence, confidence]
+        if confidence == "low":
+            assert has_low_confidence_signals(
+                score_conversation_signals([], freeform_text=swedish_text)
+            )
+
     def test_structured_answer_overrides_text_inference(self):
         conversation = [
             ConversationMessage(
@@ -71,20 +135,15 @@ class TestSignalConfidence:
         assert all(s.source == "structured_answer" for s in doc_kind)
 
     def test_has_low_confidence_detects_weak_signals(self):
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="single file please",
-            ),
-        ]
-        signals = score_conversation_signals(
-            conversation,
-            freeform_text="single file please",
+        signals = score_conversation_signals([], freeform_text="klistra in")
+
+        assert any(
+            signal.question_id == "primary_runtime_input"
+            and signal.value == "text"
+            and signal.confidence == "low"
+            for signal in signals
         )
-        # "single" and "file" are common words → low confidence
-        if signals:
-            low = [s for s in signals if s.confidence == "low"]
-            assert has_low_confidence_signals(signals) == (len(low) > 0)
+        assert has_low_confidence_signals(signals)
 
     def test_high_confidence_signals_filter(self):
         conversation = [
