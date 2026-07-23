@@ -273,7 +273,8 @@ class FileContentReferences(BaseCrossReference):
         ),
         CheckConstraint(
             "variant IN ('original', 'extracted_text', 'transcription', "
-            "'derived_page', 'model_input', 'generated_artifact', 'preview')",
+            "'derived_page', 'model_input', 'generated_artifact', "
+            "'legacy_image', 'preview')",
             name="ck_file_content_references_variant",
         ),
         CheckConstraint("ordinal >= 0", name="ck_file_content_references_ordinal"),

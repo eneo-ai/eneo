@@ -48,6 +48,7 @@ _IMAGE_INPUT_VARIANTS = (
     FileContentVariant.DERIVED_PAGE,
     FileContentVariant.GENERATED_ARTIFACT,
     FileContentVariant.ORIGINAL,
+    FileContentVariant.LEGACY_IMAGE,
 )
 
 
@@ -108,11 +109,21 @@ def project_file_info(
         name=file.name,
         checksum=primary.sha256.hex(),
         size=primary.size_bytes,
-        mimetype=file.mimetype or primary.media_type,
+        mimetype=project_file_media_type(file, primary),
         file_type=file.file_type,
         user_id=file.user_id,
         tenant_id=file.tenant_id,
     )
+
+
+def project_file_media_type(
+    file: FileMetadata,
+    reference: FileContentReferenceRecord,
+) -> str:
+    """Project the media type users supplied, except for transformed images."""
+    if file.file_type is FileType.IMAGE:
+        return reference.media_type
+    return file.mimetype or reference.media_type
 
 
 class FileRepository:

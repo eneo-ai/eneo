@@ -13,7 +13,7 @@ from pydantic import (
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.web_search import WebSearchResult
-from eneo.files.file_models import File, FilePublic
+from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
     LoggingDetails,
@@ -43,7 +43,7 @@ class UseTools(BaseModel):
 
 class QuestionsFiles(BaseModel):
     type: str
-    file: File
+    file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,19 +140,18 @@ class Question(QuestionAdd, InDB):
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
-    @model_validator(mode="after")
-    def process_files_from_db(self) -> "Question":
-        """
-        Process files from the database record.
-        User files have type="user", assistant files have type="assistant"
-        """
-        if self.questions_files:
-            self.files = [qf.file for qf in self.questions_files if qf.type == "user"]
-            self.generated_files = [
-                qf.file for qf in self.questions_files if qf.type == "assistant"
-            ]
-
-        return self
+    def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
+        """Attach byte-complete Files after the persistent row is authorized."""
+        self.files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "user"
+        ]
+        self.generated_files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "assistant"
+        ]
 
 
 class Message(QuestionBase, InDB):

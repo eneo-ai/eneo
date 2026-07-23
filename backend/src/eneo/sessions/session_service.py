@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -9,8 +9,10 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.database.database import sessionmanager
+from eneo.database.database import AsyncSession, sessionmanager
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
+from eneo.files.file_service import FileService
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.logging.logging import LoggingDetails
@@ -127,17 +129,40 @@ class SessionService:
         session_repo: SessionRepository,
         question_repo: QuestionRepository,
         user: UserInDB,
+        file_service: FileService | None = None,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
         mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
+        file_content_loader_factory: (
+            Callable[[AsyncSession], FileContentLoader] | None
+        ) = None,
     ):
         super().__init__()
         self.session_repo = session_repo
         self.question_repo = question_repo
         self.user = user
+        self.file_service = file_service
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
         self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
+        self._file_content_loader_factory = file_content_loader_factory
+
+    def _file_content_loader(self, session: AsyncSession) -> FileContentLoader | None:
+        if self._file_content_loader_factory is None:
+            return None
+        return self._file_content_loader_factory(session)
+
+    def _question_repository(self, session: AsyncSession) -> QuestionRepository:
+        loader = self._file_content_loader(session)
+        if loader is None:
+            return QuestionRepository(session)
+        return QuestionRepository(session, loader)
+
+    def _session_repository(self, session: AsyncSession) -> SessionRepository:
+        loader = self._file_content_loader(session)
+        if loader is None:
+            return SessionRepository(session)
+        return SessionRepository(session, loader)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -293,7 +318,7 @@ class SessionService:
             group_chat_id=group_chat_id,
         )
         async with sessionmanager.session() as session, session.begin():
-            return await SessionRepository(session).add(session_add)
+            return await self._session_repository(session).add(session_add)
 
     def _build_session_add(
         self,
@@ -373,7 +398,7 @@ class SessionService:
             group_chat_id=group_chat_id,
         )
         async with sessionmanager.session() as db_session, db_session.begin():
-            session_record = await SessionRepository(db_session).add(session_add)
+            session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(
                 question=question,
                 session_id=session_record.id,
@@ -382,7 +407,7 @@ class SessionService:
                 skill_provenance=skill_provenance,
             )
             question_id = await self._insert_question_placeholder(
-                QuestionRepository(db_session), question_add, files
+                self._question_repository(db_session), question_add, files
             )
         return session_record, question_id
 
@@ -421,7 +446,7 @@ class SessionService:
 
         async with sessionmanager.session() as db_session, db_session.begin():
             return await self._insert_question_placeholder(
-                QuestionRepository(db_session), question_add, files
+                self._question_repository(db_session), question_add, files
             )
 
     async def complete_question_with_answer(

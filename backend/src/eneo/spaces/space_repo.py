@@ -67,6 +67,8 @@ from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
+from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -119,6 +121,7 @@ class SpaceRepository:
         session: AsyncSession,
         user: "UserInDB",
         factory: SpaceFactory,
+        file_content_loader: FileContentLoader,
         app_repo: Optional["AppRepository"],
         assistant_repo: "AssistantRepository",
         completion_model_repo: "CompletionModelRepository",
@@ -130,12 +133,42 @@ class SpaceRepository:
         self.session = session
         self.user = user
         self.factory = factory
+        self.file_content_loader = file_content_loader
         self.app_repo = app_repo
         self.completion_model_repo = completion_model_repo
         self.transcription_model_repo = transcription_model_repo
         self.embedding_model_repo = embedding_model_repo
         self.assistant_repo = assistant_repo
         self.http_auth_encryption = http_auth_encryption
+
+    async def _load_application_attachments(
+        self,
+        *,
+        tenant_id: UUID,
+        assistants: Sequence[Assistants],
+        apps: Sequence[Apps],
+    ) -> tuple[dict[UUID, list[File]], dict[UUID, list[File]]]:
+        groups = [
+            FileAttachmentGroup(
+                owner_kind=owner_kind,
+                owner_id=record.id,
+                tenant_id=tenant_id,
+                files=tuple(
+                    FileMetadata.model_validate(attachment.file)
+                    for attachment in record.attachments
+                ),
+            )
+            for owner_kind, records in (
+                ("assistant", assistants),
+                ("app", apps),
+            )
+            for record in records
+        ]
+        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        return (
+            {record.id: loaded[("assistant", record.id)] for record in assistants},
+            {record.id: loaded[("app", record.id)] for record in apps},
+        )
 
     def _options(self) -> list[Any]:
         return [
@@ -1317,6 +1350,14 @@ class SpaceRepository:
 
         assistants = await self._get_assistants(space_id=entry_in_db.id)
         apps = await self._get_apps(space_id=entry_in_db.id)
+        (
+            assistant_attachments,
+            app_attachments,
+        ) = await self._load_application_attachments(
+            tenant_id=entry_in_db.tenant_id,
+            assistants=assistants,
+            apps=apps,
+        )
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
 
@@ -1330,8 +1371,10 @@ class SpaceRepository:
             transcription_models=transcription_models,
             mcp_servers=mcp_servers,
             assistants_in_db=assistants,
+            assistant_attachments=assistant_attachments,
             group_chats_in_db=group_chats,
             apps_in_db=apps,
+            app_attachments=app_attachments,
             services_in_db=services,
             integration_knowledge_in_db=integration_knowledge_union,
             security_classification=entry_in_db.security_classification,
@@ -1496,10 +1539,20 @@ class SpaceRepository:
             if include_applications:
                 assistants = await self._get_assistants(space_id=record.id)
                 apps = await self._get_apps(space_id=record.id)
+                (
+                    assistant_attachments,
+                    app_attachments,
+                ) = await self._load_application_attachments(
+                    tenant_id=record.tenant_id,
+                    assistants=assistants,
+                    apps=apps,
+                )
                 group_chats = await self._get_group_chats(space_id=record.id)
             else:
                 assistants: Sequence[Assistants] = []
                 apps: Sequence[Apps] = []
+                assistant_attachments: dict[UUID, list[File]] = {}
+                app_attachments: dict[UUID, list[File]] = {}
                 group_chats: Sequence[GroupChatsTable] = []
 
             spaces.append(
@@ -1507,7 +1560,9 @@ class SpaceRepository:
                     record,
                     user=self.user,
                     assistants_in_db=assistants,
+                    assistant_attachments=assistant_attachments,
                     apps_in_db=apps,
+                    app_attachments=app_attachments,
                     group_chats_in_db=group_chats,
                 )
             )

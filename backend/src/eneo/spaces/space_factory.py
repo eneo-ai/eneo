@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Optional, TypeVar, cast
 from uuid import UUID
 
@@ -13,6 +13,7 @@ from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
+from eneo.files.file_models import File
 from eneo.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -146,8 +147,10 @@ class SpaceFactory:
         transcription_models: Sequence["TranscriptionModel"] | None = None,
         mcp_servers: Sequence["MCPServer"] | None = None,
         assistants_in_db: Sequence["Assistants"] | None = None,
+        assistant_attachments: Mapping[UUID, Sequence[File]] | None = None,
         group_chats_in_db: Sequence["GroupChatsTable"] | None = None,
         apps_in_db: Sequence["Apps"] | None = None,
+        app_attachments: Mapping[UUID, Sequence[File]] | None = None,
         services_in_db: Sequence[Services] | None = None,
         security_classification: Optional["SecurityClassificationDBModel"] = None,
         integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
@@ -160,9 +163,18 @@ class SpaceFactory:
         transcription_models = list(transcription_models or [])
         mcp_servers = list(mcp_servers or [])
         assistants_in_db = list(assistants_in_db or [])
+        assistant_attachments = assistant_attachments or {}
         group_chats_in_db = list(group_chats_in_db or [])
         apps_in_db = list(apps_in_db or [])
+        app_attachments = app_attachments or {}
         services_in_db = list(services_in_db or [])
+        if any(
+            assistant.attachments and assistant.id not in assistant_attachments
+            for assistant in assistants_in_db
+        ):
+            raise RuntimeError("Space assistant attachments were not hydrated")
+        if any(app.attachments and app.id not in app_attachments for app in apps_in_db):
+            raise RuntimeError("Space app attachments were not hydrated")
         non_deprecated_completion_models = [
             completion_model
             for completion_model in completion_models
@@ -352,6 +364,7 @@ class SpaceFactory:
             item_kind="assistant",
             build_fn=lambda assistant: self.assistant_factory.create_space_assistant_from_db(
                 assistant_in_db=assistant,
+                attachments=assistant_attachments.get(assistant.id, ()),
                 completion_models=completion_models,
                 collections=space_collections,
                 websites=space_websites,
@@ -382,6 +395,7 @@ class SpaceFactory:
             item_kind="app",
             build_fn=lambda app: self.app_factory.create_space_app_from_db(
                 app_in_db=app,
+                attachments=app_attachments.get(app.id, ()),
                 completion_models=completion_models,
                 transcription_models=transcription_models,
             ),

@@ -6,12 +6,14 @@ from uuid import UUID
 
 from fastapi import UploadFile
 
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
     FileContentVariant,
     FileInfo,
     FileMetadata,
     FileMetadataCreate,
+    FilePublic,
     FileType,
 )
 from eneo.files.file_protocol import (
@@ -23,7 +25,6 @@ from eneo.files.file_repo import (
     FileContentReferenceRecord,
     FileRepository,
     project_file_info,
-    select_binary_file_reference,
     select_primary_file_reference,
 )
 from eneo.main.exceptions import (
@@ -68,7 +69,8 @@ class FileService:
         self.user = user
         self.repo = repo
         self.protocol = protocol
-        self.object_content = object_content
+        self._object_content = object_content
+        self._content_loader = FileContentLoader(repo, object_content)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -139,12 +141,12 @@ class FileService:
             )
         )
         for pending in prepared.contents:
-            async with self.object_content.capture_inline(
+            async with self._object_content.capture_inline(
                 pending.chunks,
                 declared_media_type=pending.declared_media_type,
                 verified_media_type=pending.verified_media_type,
             ) as captured:
-                stored = await self.object_content.prepare_in_transaction(
+                stored = await self._object_content.prepare_in_transaction(
                     self.repo.session,
                     intent=ContentIntent(
                         tenant_id=user.tenant_id,
@@ -181,6 +183,11 @@ class FileService:
         self._require_owner(metadata, action="read")
         return await self._file_info(metadata)
 
+    async def get_public_file_by_id(self, file_id: UUID) -> FilePublic:
+        metadata = await self.repo.get_by_id(file_id=file_id)
+        self._require_owner(metadata, action="read")
+        return (await self._project_public_files([metadata]))[0]
+
     async def get_files_by_ids(
         self,
         file_ids: list[UUID],
@@ -195,15 +202,11 @@ class FileService:
             include_transcription=include_transcription,
         )
 
-    async def get_files(self) -> list[FileInfo]:
+    async def get_public_files(self) -> list[FilePublic]:
         metadata = await self.repo.get_list_by_user(
             user_id=self._authenticated_user().id
         )
-        references = await self.repo.get_content_references(
-            [file.id for file in metadata]
-        )
-        by_file = self._references_by_file(references)
-        return [project_file_info(file, by_file[file.id]) for file in metadata]
+        return await self._project_public_files(metadata)
 
     async def get_derived_images(self, parent_ids: list[UUID]) -> list[File]:
         metadata = await self.repo.get_by_parent_ids(
@@ -272,12 +275,12 @@ class FileService:
             if existing is not None:
                 return (await self._read_bytes(metadata, existing)).decode("utf-8")
 
-            async with self.object_content.capture_inline(
+            async with self._object_content.capture_inline(
                 _bytes_source(payload),
                 declared_media_type="text/plain",
                 verified_media_type="text/plain",
             ) as captured:
-                prepared = await self.object_content.prepare_in_transaction(
+                prepared = await self._object_content.prepare_in_transaction(
                     self.repo.session,
                     intent=ContentIntent(
                         tenant_id=metadata.tenant_id,
@@ -321,7 +324,7 @@ class FileService:
         )
 
         async def stream() -> AsyncGenerator[bytes]:
-            async with self.object_content.open_content(
+            async with self._object_content.open_content(
                 grant,
                 range_header=range_header,
             ) as opened:
@@ -353,74 +356,48 @@ class FileService:
         references = await self.repo.get_content_references([metadata.id])
         return project_file_info(metadata, references)
 
+    async def _project_public_files(
+        self,
+        metadata: list[FileMetadata],
+    ) -> list[FilePublic]:
+        references = await self.repo.get_content_references(
+            [file.id for file in metadata]
+        )
+        by_file = self._references_by_file(references)
+        projected: list[FilePublic] = []
+        for file in metadata:
+            file_references = by_file[file.id]
+            info = project_file_info(file, file_references)
+            transcription_reference = self._first_reference(
+                file_references,
+                FileContentVariant.TRANSCRIPTION,
+            )
+            transcription = (
+                None
+                if transcription_reference is None
+                else (await self._read_bytes(file, transcription_reference)).decode(
+                    "utf-8"
+                )
+            )
+            projected.append(
+                FilePublic(
+                    **info.model_dump(),
+                    transcription=transcription,
+                )
+            )
+        return projected
+
     async def _hydrate_files(
         self,
         metadata: list[FileMetadata],
         *,
         include_transcription: bool = True,
     ) -> list[File]:
-        references = await self.repo.get_content_references(
-            [file.id for file in metadata]
+        loaded = await self._content_loader.load(
+            metadata,
+            include_transcription=include_transcription,
         )
-        by_file = self._references_by_file(references)
-        hydrated: list[File] = []
-        for file in metadata:
-            file_references = by_file[file.id]
-            primary = self._primary_reference(file, file_references)
-            text: str | None = None
-            blob: bytes | None = None
-            transcription: str | None = None
-            hydrated_reference = primary
-
-            if file.file_type is FileType.TEXT:
-                text_reference = self._first_reference(
-                    file_references,
-                    FileContentVariant.EXTRACTED_TEXT,
-                )
-                if text_reference is None and primary.media_type.startswith("text/"):
-                    text_reference = primary
-                if text_reference is not None:
-                    text = (await self._read_bytes(file, text_reference)).decode(
-                        "utf-8"
-                    )
-                    hydrated_reference = text_reference
-            else:
-                content_reference = self._preferred_binary_reference(
-                    file,
-                    file_references,
-                )
-                blob = await self._read_bytes(file, content_reference)
-                hydrated_reference = content_reference
-
-            if include_transcription:
-                transcription_reference = self._first_reference(
-                    file_references,
-                    FileContentVariant.TRANSCRIPTION,
-                )
-                if transcription_reference is not None:
-                    transcription = (
-                        await self._read_bytes(file, transcription_reference)
-                    ).decode("utf-8")
-
-            hydrated.append(
-                File(
-                    id=file.id,
-                    created_at=file.created_at,
-                    updated_at=file.updated_at,
-                    name=file.name,
-                    checksum=hydrated_reference.sha256.hex(),
-                    size=hydrated_reference.size_bytes,
-                    mimetype=hydrated_reference.media_type,
-                    file_type=file.file_type,
-                    text=text,
-                    blob=blob,
-                    transcription=transcription,
-                    user_id=file.user_id,
-                    tenant_id=file.tenant_id,
-                    parent_file_id=file.parent_file_id,
-                )
-            )
-        return hydrated
+        return [loaded[file.id] for file in metadata]
 
     async def _read_bytes(
         self,
@@ -432,7 +409,7 @@ class FileService:
             tenant_id=file.tenant_id,
             access_class=reference.access_class,
         )
-        async with self.object_content.open_content(grant) as opened:
+        async with self._object_content.open_content(grant) as opened:
             return b"".join([chunk async for chunk in opened.chunks])
 
     @staticmethod
@@ -463,16 +440,6 @@ class FileService:
         if reference is not None:
             return reference
         raise NotFoundException(f"File {file.id} has no durable content")
-
-    def _preferred_binary_reference(
-        self,
-        file: FileMetadata,
-        references: list[FileContentReferenceRecord],
-    ) -> FileContentReferenceRecord:
-        reference = select_binary_file_reference(file.file_type, references)
-        if reference is not None:
-            return reference
-        raise NotFoundException(f"File {file.id} has no readable binary content")
 
     def _require_owner(self, file: FileMetadata, *, action: str) -> None:
         if file.user_id == self._authenticated_user().id:

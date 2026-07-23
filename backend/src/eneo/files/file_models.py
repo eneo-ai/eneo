@@ -25,6 +25,7 @@ class FileContentVariant(StrEnum):
     DERIVED_PAGE = "derived_page"
     MODEL_INPUT = "model_input"
     GENERATED_ARTIFACT = "generated_artifact"
+    LEGACY_IMAGE = "legacy_image"
     PREVIEW = "preview"
 
 

@@ -86,6 +86,7 @@ from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.feature_flag.feature_flag_factory import FeatureFlagFactory
 from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
 from eneo.feature_flag.feature_flag_service import FeatureFlagService
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
@@ -444,6 +445,13 @@ def _object_content_service() -> ObjectContentService:
     return object_content_runtime.service
 
 
+def _file_content_loader_for_session(session: AsyncSession) -> FileContentLoader:
+    return FileContentLoader(
+        FileRepository(session),
+        _object_content_service(),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION PROXY PATTERN FOR SESSIONLESS CONTAINERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -738,10 +746,18 @@ class Container(containers.DeclarativeContainer):
     transcription_model_enable_service = providers.Factory(
         TranscriptionModelEnableService, session=session
     )
+    object_content_service = providers.Callable(_object_content_service)
+    file_repo = providers.Factory(FileRepository, session=session)
+    file_content_loader = providers.Factory(
+        FileContentLoader,
+        repo=file_repo,
+        object_content=object_content_service,
+    )
     assistant_repo = providers.Factory(
         AssistantRepository,
         session=session,
         factory=assistant_factory,
+        file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
         user=user,
     )
@@ -750,10 +766,21 @@ class Container(containers.DeclarativeContainer):
 
     step_repo = providers.Factory(StepRepository, session=session)
     user_groups_repo = providers.Factory(UserGroupsRepository, session=session)
-    analysis_repo = providers.Factory(AnalysisRepository, session=session)
-    session_repo = providers.Factory(SessionRepository, session=session)
-    question_repo = providers.Factory(QuestionRepository, session=session)
-    file_repo = providers.Factory(FileRepository, session=session)
+    analysis_repo = providers.Factory(
+        AnalysisRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
+    session_repo = providers.Factory(
+        SessionRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
+    question_repo = providers.Factory(
+        QuestionRepository,
+        session=session,
+        file_content_loader=file_content_loader,
+    )
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
 
     storage_repo = providers.Factory(
@@ -763,6 +790,7 @@ class Container(containers.DeclarativeContainer):
         AppRepository,
         session=session,
         factory=app_factory,
+        file_content_loader=file_content_loader,
         prompt_repo=prompt_repo,
         transcription_model_repo=transcription_model_repo,
     )
@@ -781,6 +809,7 @@ class Container(containers.DeclarativeContainer):
         SpaceRepository,
         user=user,
         factory=space_factory,
+        file_content_loader=file_content_loader,
         session=session,
         app_repo=app_repo,
         assistant_repo=assistant_repo,
@@ -1035,7 +1064,6 @@ class Container(containers.DeclarativeContainer):
     file_size_service = providers.Factory(
         FileSizeService,
     )
-    object_content_service = providers.Callable(_object_content_service)
     icon_service = providers.Factory(
         IconService,
         icon_repo=icon_repo,
@@ -1180,6 +1208,8 @@ class Container(containers.DeclarativeContainer):
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        file_service=file_service,
+        file_content_loader_factory=providers.Object(_file_content_loader_for_session),
         mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(

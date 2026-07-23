@@ -3,19 +3,23 @@
 Revision ID: 202607231700
 Revises: 202607231330
 Create Date: 2026-07-23 17:00:00.000000
+
+The copy phase is resumable and bounded by both
+``FILE_ICON_NORMALIZATION_BATCH_ROWS`` and
+``FILE_ICON_NORMALIZATION_BATCH_BYTES``. The final authority fence compares
+the copied payloads with the legacy columns once while writers wait; operators
+should measure that pass on a restored production-size database and reserve a
+maintenance window proportional to total File/Icon bytes.
 """
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 from collections.abc import Sequence
 from hashlib import sha256
-from uuid import uuid4
 
 import sqlalchemy as sa
-from sqlalchemy.engine import Connection, Row
+from sqlalchemy.engine import Connection
 
 from alembic import op
 
@@ -26,156 +30,231 @@ depends_on: str | Sequence[str] | None = None
 
 _DEFAULT_INLINE_MAXIMUM_BYTES = 200 * 1024 * 1024
 _DEFAULT_BATCH_SIZE = 100
+_DEFAULT_BATCH_BYTES = 32 * 1024 * 1024
 
-_CANDIDATES = sa.text("""
-    WITH candidate_facts AS (
-        SELECT
-            'file'::text AS owner_kind,
-            file.id AS owner_id,
-            file.tenant_id,
-            file.user_id AS created_by_user_id,
-            CASE
+_PENDING_KEYS_TABLE = "file_icon_normalization_pending"
+
+_CANDIDATE_KEY_FACTS = """
+    SELECT
+        'file'::text AS owner_kind,
+        file.id AS owner_id,
+        CASE
+            WHEN file.file_type = 'text' THEN 'extracted_text'
+            WHEN file.file_type = 'audio' THEN 'original'
+            WHEN file.parent_file_id IS NOT NULL THEN 'derived_page'
+            ELSE 'legacy_image'
+        END AS variant,
+        0::integer AS ordinal,
+        CASE
+            WHEN file.file_type = 'text'
+                THEN octet_length(convert_to(file.text, 'UTF8'))
+            ELSE octet_length(file.blob)
+        END::bigint AS payload_size,
+        1::integer AS owner_order
+    FROM files AS file
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM file_content_references AS reference
+        WHERE reference.file_id = file.id
+          AND reference.variant = CASE
                 WHEN file.file_type = 'text' THEN 'extracted_text'
                 WHEN file.file_type = 'audio' THEN 'original'
                 WHEN file.parent_file_id IS NOT NULL THEN 'derived_page'
-                ELSE 'model_input'
-            END AS variant,
-            0::integer AS ordinal,
-            CASE
-                WHEN file.file_type = 'text' THEN 'text/plain'
-                ELSE COALESCE(NULLIF(file.mimetype, ''), 'application/octet-stream')
-            END AS media_type,
-            CASE
-                WHEN file.file_type = 'text'
-                    THEN octet_length(convert_to(file.text, 'UTF8'))
-                ELSE octet_length(file.blob)
-            END::bigint AS payload_size,
-            1::integer AS owner_order
-        FROM files AS file
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM file_content_references AS reference
-            WHERE reference.file_id = file.id
-              AND reference.variant = CASE
-                    WHEN file.file_type = 'text' THEN 'extracted_text'
-                    WHEN file.file_type = 'audio' THEN 'original'
-                    WHEN file.parent_file_id IS NOT NULL THEN 'derived_page'
-                    ELSE 'model_input'
-                  END
-              AND reference.ordinal = 0
-        )
+                ELSE 'legacy_image'
+              END
+          AND reference.ordinal = 0
+    )
 
-        UNION ALL
+    UNION ALL
 
-        SELECT
-            'file',
-            file.id,
-            file.tenant_id,
-            file.user_id,
-            'transcription',
-            0,
-            'text/plain',
-            octet_length(convert_to(file.transcription, 'UTF8'))::bigint,
-            2
-        FROM files AS file
-        WHERE file.transcription IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM file_content_references AS reference
-              WHERE reference.file_id = file.id
-                AND reference.variant = 'transcription'
-                AND reference.ordinal = 0
-          )
+    SELECT
+        'file',
+        file.id,
+        'original',
+        0,
+        octet_length(file.blob)::bigint,
+        2
+    FROM files AS file
+    WHERE file.file_type = 'text'
+      AND file.blob IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM file_content_references AS reference
+          WHERE reference.file_id = file.id
+            AND reference.variant = 'original'
+            AND reference.ordinal = 0
+      )
 
-        UNION ALL
+    UNION ALL
 
-        SELECT
-            'icon',
-            icon.id,
-            icon.tenant_id,
-            NULL::uuid,
-            'primary',
-            0,
-            icon.mimetype,
-            octet_length(icon.blob)::bigint,
-            3
-        FROM icons AS icon
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM icon_content_references AS reference
-            WHERE reference.icon_id = icon.id
-              AND reference.variant = 'primary'
-        )
+    SELECT
+        'file',
+        file.id,
+        'transcription',
+        0,
+        octet_length(convert_to(file.transcription, 'UTF8'))::bigint,
+        3
+    FROM files AS file
+    WHERE file.transcription IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM file_content_references AS reference
+          WHERE reference.file_id = file.id
+            AND reference.variant = 'transcription'
+            AND reference.ordinal = 0
+      )
+
+    UNION ALL
+
+    SELECT
+        'icon',
+        icon.id,
+        'primary',
+        0,
+        octet_length(icon.blob)::bigint,
+        4
+    FROM icons AS icon
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM icon_content_references AS reference
+        WHERE reference.icon_id = icon.id
+          AND reference.variant = 'primary'
+    )
+"""
+
+_DROP_PENDING_KEYS = sa.text(f"DROP TABLE IF EXISTS pg_temp.{_PENDING_KEYS_TABLE}")
+
+_CREATE_PENDING_KEYS = sa.text(f"""
+    CREATE TEMPORARY TABLE {_PENDING_KEYS_TABLE} (
+        sequence bigint PRIMARY KEY,
+        owner_kind text NOT NULL,
+        owner_id uuid NOT NULL,
+        variant text NOT NULL,
+        ordinal integer NOT NULL,
+        payload_size bigint NOT NULL
+    ) ON COMMIT PRESERVE ROWS
+""")
+
+_POPULATE_PENDING_KEYS = sa.text(f"""
+    INSERT INTO {_PENDING_KEYS_TABLE} (
+        sequence,
+        owner_kind,
+        owner_id,
+        variant,
+        ordinal,
+        payload_size
+    )
+    SELECT
+        row_number() OVER (
+            ORDER BY owner_order, owner_id, variant, ordinal
+        ) AS sequence,
+        owner_kind,
+        owner_id,
+        variant,
+        ordinal,
+        payload_size
+    FROM ({_CANDIDATE_KEY_FACTS}) AS candidate
+    ORDER BY owner_order, owner_id, variant, ordinal
+""")
+
+_CANDIDATE_PAGE = sa.text(f"""
+    WITH page AS (
+        SELECT pending.*
+        FROM {_PENDING_KEYS_TABLE} AS pending
+        WHERE pending.sequence > :after_sequence
+        ORDER BY pending.sequence
+        LIMIT :batch_size
     ),
     bounded AS (
         SELECT
-            facts.*,
-            row_number() OVER (
-                ORDER BY owner_order, owner_id, variant, ordinal
-            ) AS row_number,
-            sum(payload_size) OVER (
-                ORDER BY owner_order, owner_id, variant, ordinal
+            page.*,
+            sum(page.payload_size) OVER (
+                ORDER BY page.sequence
                 ROWS UNBOUNDED PRECEDING
             ) AS running_size
-        FROM candidate_facts AS facts
+        FROM page
+    ),
+    selected AS (
+        SELECT bounded.*
+        FROM bounded
+        WHERE bounded.sequence = (SELECT min(sequence) FROM bounded)
+           OR bounded.running_size <= :batch_bytes
     )
     SELECT
-        bounded.owner_kind,
-        bounded.owner_id,
-        bounded.tenant_id,
-        bounded.created_by_user_id,
-        bounded.variant,
-        bounded.ordinal,
-        bounded.media_type,
-        bounded.payload_size,
+        selected.sequence,
+        selected.owner_kind,
+        selected.owner_id,
         CASE
-            WHEN bounded.owner_kind = 'icon' THEN icon.blob
-            WHEN bounded.variant = 'transcription'
+            WHEN selected.owner_kind = 'icon' THEN icon.tenant_id
+            ELSE file.tenant_id
+        END AS tenant_id,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN NULL::uuid
+            ELSE file.user_id
+        END AS created_by_user_id,
+        selected.variant,
+        selected.ordinal,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN icon.mimetype
+            WHEN selected.variant = 'transcription' THEN 'text/plain'
+            WHEN selected.variant = 'original' THEN COALESCE(
+                NULLIF(file.mimetype, ''),
+                'application/octet-stream'
+            )
+            WHEN file.file_type = 'text' THEN 'text/plain'
+            ELSE COALESCE(
+                NULLIF(file.mimetype, ''),
+                'application/octet-stream'
+            )
+        END AS media_type,
+        selected.payload_size,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN icon.blob
+            WHEN selected.variant = 'transcription'
                 THEN convert_to(file.transcription, 'UTF8')
+            WHEN selected.variant = 'original' THEN file.blob
             WHEN file.file_type = 'text' THEN convert_to(file.text, 'UTF8')
             ELSE file.blob
         END AS payload
-    FROM bounded
+    FROM selected
     LEFT JOIN files AS file
-      ON bounded.owner_kind = 'file' AND file.id = bounded.owner_id
+      ON selected.owner_kind = 'file' AND file.id = selected.owner_id
     LEFT JOIN icons AS icon
-      ON bounded.owner_kind = 'icon' AND icon.id = bounded.owner_id
-    WHERE bounded.row_number = 1 OR bounded.running_size <= :batch_bytes
-    ORDER BY bounded.owner_order, bounded.owner_id, bounded.variant, bounded.ordinal
-    LIMIT :batch_size
+      ON selected.owner_kind = 'icon' AND icon.id = selected.owner_id
+    ORDER BY selected.sequence
 """)
 
-_INSERT_BATCH = sa.text("""
-    WITH batch AS (
+_FIRST_CANDIDATE = sa.text(f"""
+    SELECT owner_kind, owner_id
+    FROM ({_CANDIDATE_KEY_FACTS}) AS candidate
+    ORDER BY owner_order, owner_id, variant, ordinal
+    LIMIT 1
+""")
+
+_INSERT_BATCH = sa.text(f"""
+    WITH selected AS (
+        {_CANDIDATE_PAGE.text}
+    ),
+    normalized AS (
         SELECT
-            record.content_id::uuid AS content_id,
-            record.owner_kind,
-            record.owner_id::uuid AS owner_id,
-            record.tenant_id::uuid AS tenant_id,
-            NULLIF(record.created_by_user_id, '')::uuid AS created_by_user_id,
-            record.variant,
-            record.ordinal,
-            record.media_type,
-            decode(record.payload_base64, 'base64') AS payload,
-            decode(record.sha256_hex, 'hex') AS sha256,
-            record.size_bytes,
-            record.idempotency_key,
-            decode(record.request_fingerprint_hex, 'hex') AS request_fingerprint
-        FROM jsonb_to_recordset(CAST(:batch AS jsonb)) AS record(
-            content_id text,
-            owner_kind text,
-            owner_id text,
-            tenant_id text,
-            created_by_user_id text,
-            variant text,
-            ordinal integer,
-            media_type text,
-            payload_base64 text,
-            sha256_hex text,
-            size_bytes bigint,
-            idempotency_key text,
-            request_fingerprint_hex text
-        )
+            selected.*,
+            gen_random_uuid() AS content_id,
+            sha256(selected.payload) AS sha256,
+            'normalize:' || selected.owner_kind || ':'
+                || selected.owner_id::text || ':' || selected.variant || ':'
+                || selected.ordinal::text AS idempotency_key
+        FROM selected
+    ),
+    batch AS (
+        SELECT
+            normalized.*,
+            sha256(
+                convert_to('eneo-file-icon-normalization-v1', 'UTF8')
+                || decode('00', 'hex')
+                || convert_to(normalized.idempotency_key, 'UTF8')
+                || normalized.sha256
+            ) AS request_fingerprint
+        FROM normalized
     ),
     controls AS (
         INSERT INTO object_contents (
@@ -205,7 +284,7 @@ _INSERT_BATCH = sa.text("""
                 ELSE 'private_resource'
             END,
             batch.sha256,
-            batch.size_bytes,
+            batch.payload_size,
             batch.media_type,
             batch.media_type,
             batch.idempotency_key,
@@ -256,7 +335,9 @@ _INSERT_BATCH = sa.text("""
     )
     SELECT
         (SELECT count(*) FROM file_references)
-        + (SELECT count(*) FROM icon_references) AS inserted_count
+        + (SELECT count(*) FROM icon_references) AS inserted_count,
+        (SELECT count(*) FROM batch) AS expected_count,
+        (SELECT max(sequence) FROM batch) AS last_sequence
 """)
 
 
@@ -281,7 +362,7 @@ def _preflight_legacy_rows(connection: Connection, inline_limit: int) -> None:
             WHERE file_type NOT IN ('text', 'image', 'audio')
                OR (
                     file_type = 'text'
-                    AND (text IS NULL OR blob IS NOT NULL)
+                    AND text IS NULL
                )
                OR (
                     file_type IN ('image', 'audio')
@@ -358,6 +439,11 @@ def _preflight_legacy_rows(connection: Connection, inline_limit: int) -> None:
                     END::bigint AS size_bytes
                 FROM files
                 UNION ALL
+                SELECT 'file-original', id, octet_length(blob)::bigint
+                FROM files
+                WHERE file_type = 'text'
+                  AND blob IS NOT NULL
+                UNION ALL
                 SELECT 'file-transcription', id,
                        octet_length(convert_to(transcription, 'UTF8'))::bigint
                 FROM files
@@ -384,33 +470,11 @@ def _preflight_legacy_rows(connection: Connection, inline_limit: int) -> None:
         )
 
 
-def _normalization_record(row: Row[object]) -> dict[str, object]:
-    payload = bytes(row.payload)
-    digest = sha256(payload).digest()
-    content_id = uuid4()
-    idempotency_key = (
-        f"normalize:{row.owner_kind}:{row.owner_id}:{row.variant}:{row.ordinal}"
-    )
-    request_fingerprint = sha256(
-        b"eneo-file-icon-normalization-v1\0" + idempotency_key.encode() + digest
-    ).digest()
-    return {
-        "content_id": str(content_id),
-        "owner_kind": row.owner_kind,
-        "owner_id": str(row.owner_id),
-        "tenant_id": str(row.tenant_id),
-        "created_by_user_id": (
-            "" if row.created_by_user_id is None else str(row.created_by_user_id)
-        ),
-        "variant": row.variant,
-        "ordinal": row.ordinal,
-        "media_type": row.media_type,
-        "payload_base64": base64.b64encode(payload).decode("ascii"),
-        "sha256_hex": digest.hex(),
-        "size_bytes": len(payload),
-        "idempotency_key": idempotency_key,
-        "request_fingerprint_hex": request_fingerprint.hex(),
-    }
+def _stage_pending_keys(connection: Connection) -> None:
+    """Snapshot missing owner/variant keys without materializing payload bytes."""
+    connection.execute(_DROP_PENDING_KEYS)
+    connection.execute(_CREATE_PENDING_KEYS)
+    connection.execute(_POPULATE_PENDING_KEYS)
 
 
 def _copy_in_bounded_batches(
@@ -419,29 +483,29 @@ def _copy_in_bounded_batches(
     batch_size: int,
     batch_bytes: int,
 ) -> None:
+    _stage_pending_keys(connection)
+    after_sequence = 0
     while True:
-        candidates = connection.execute(
-            _CANDIDATES,
+        result = connection.execute(
+            _INSERT_BATCH,
             {
+                "after_sequence": after_sequence,
                 "batch_size": batch_size,
                 "batch_bytes": batch_bytes,
             },
-        ).all()
-        if not candidates:
+        ).one()
+        expected_count = int(result.expected_count)
+        if expected_count == 0:
             return
 
-        records = [_normalization_record(row) for row in candidates]
-        inserted_count = connection.execute(
-            _INSERT_BATCH,
-            {"batch": json.dumps(records, separators=(",", ":"))},
-        ).scalar_one()
-        if inserted_count != len(records):
+        if int(result.inserted_count) != expected_count:
             raise RuntimeError(
                 "File/Icon normalization did not attach every copied payload"
             )
+        after_sequence = int(result.last_sequence)
 
 
-def _verify_copied_rows(connection: Connection) -> None:
+def _assert_copy_matches_legacy(connection: Connection) -> None:
     mismatch = connection.execute(
         sa.text("""
             WITH expected AS (
@@ -450,6 +514,8 @@ def _verify_copied_rows(connection: Connection) -> None:
                     CASE
                         WHEN reference.variant = 'transcription'
                             THEN convert_to(file.transcription, 'UTF8')
+                        WHEN reference.variant = 'original'
+                            THEN file.blob
                         WHEN file.file_type = 'text'
                             THEN convert_to(file.text, 'UTF8')
                         ELSE file.blob
@@ -463,7 +529,8 @@ def _verify_copied_rows(connection: Connection) -> None:
                     'transcription',
                     'original',
                     'derived_page',
-                    'model_input'
+                    'model_input',
+                    'legacy_image'
                 )
                   AND content.idempotency_key LIKE 'normalize:%'
                 UNION ALL
@@ -494,6 +561,8 @@ def _verify_copied_rows(connection: Connection) -> None:
             f"File/Icon normalization verification failed for content {mismatch}"
         )
 
+
+def _verify_canonical_digests(connection: Connection) -> None:
     rows = connection.execute(
         sa.text("""
             SELECT content.id, content.sha256, content.size_bytes, inline.payload
@@ -521,15 +590,9 @@ def _verify_copied_rows(connection: Connection) -> None:
 
 def _assert_no_concurrent_legacy_write(
     connection: Connection,
-    *,
-    inline_limit: int,
 ) -> None:
     candidate = connection.execute(
-        _CANDIDATES,
-        {
-            "batch_size": 1,
-            "batch_bytes": inline_limit,
-        },
+        _FIRST_CANDIDATE,
     ).first()
     if candidate is not None:
         raise RuntimeError(
@@ -546,10 +609,27 @@ def upgrade() -> None:
         _DEFAULT_INLINE_MAXIMUM_BYTES,
     )
     batch_size = _positive_setting(
-        "OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE",
+        "FILE_ICON_NORMALIZATION_BATCH_ROWS",
         _DEFAULT_BATCH_SIZE,
     )
+    batch_bytes = _positive_setting(
+        "FILE_ICON_NORMALIZATION_BATCH_BYTES",
+        _DEFAULT_BATCH_BYTES,
+    )
     _preflight_legacy_rows(connection, inline_limit)
+
+    op.drop_constraint(
+        "ck_file_content_references_variant",
+        "file_content_references",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_file_content_references_variant",
+        "file_content_references",
+        "variant IN ('original', 'extracted_text', 'transcription', "
+        "'derived_page', 'model_input', 'generated_artifact', "
+        "'legacy_image', 'preview')",
+    )
 
     # Each bounded batch is one atomic statement in autocommit mode. A stopped
     # migration leaves legacy columns authoritative and reruns skip committed
@@ -558,8 +638,13 @@ def upgrade() -> None:
         _copy_in_bounded_batches(
             connection,
             batch_size=batch_size,
-            batch_bytes=inline_limit,
+            batch_bytes=batch_bytes,
         )
+
+    # The copied rows are immutable normalization artifacts. Recompute every
+    # canonical digest before taking the final legacy write fence so total
+    # byte hashing never extends the exclusive-lock window.
+    _verify_canonical_digests(connection)
 
     with op.get_context().autocommit_block():
         op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_files_checksum")
@@ -570,11 +655,8 @@ def upgrade() -> None:
     # legacy columns are gone and then fail instead of creating a second truth.
     op.execute("LOCK TABLE files, icons IN ACCESS EXCLUSIVE MODE")
     _preflight_legacy_rows(connection, inline_limit)
-    _assert_no_concurrent_legacy_write(
-        connection,
-        inline_limit=inline_limit,
-    )
-    _verify_copied_rows(connection)
+    _assert_no_concurrent_legacy_write(connection)
+    _assert_copy_matches_legacy(connection)
 
     op.drop_column("files", "text")
     op.drop_column("files", "blob")

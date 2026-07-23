@@ -87,11 +87,9 @@ async def get_files(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
-    files = await service.get_files()
+    files = await service.get_public_files()
 
-    return protocol.to_paginated_response(
-        [FilePublic(**item.model_dump()) for item in files]
-    )
+    return protocol.to_paginated_response(files)
 
 
 @router.get(
@@ -106,7 +104,7 @@ async def get_file(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
-    return await service.get_file_by_id(file_id=id)
+    return await service.get_public_file_by_id(file_id=id)
 
 
 @router.delete(

@@ -31,6 +31,7 @@ from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
+from eneo.main.exceptions import NotFoundException
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content_service import ObjectContentService
 from eneo.users.user import UserInDB
@@ -290,7 +291,7 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
                 display_media_type="image/png",
                 contents=(
                     PendingFileContent(
-                        variant=FileContentVariant.MODEL_INPUT,
+                        variant=FileContentVariant.LEGACY_IMAGE,
                         chunks=_bytes_source(b"migrated bounded image"),
                         declared_media_type="image/jpeg",
                         verified_media_type="image/jpeg",
@@ -303,7 +304,7 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
         ),
     )
 
-    saved_cases: list[tuple[UUID, bytes, str, str]] = []
+    saved_cases: list[tuple[UUID, bytes, str, str, str]] = []
     async with object_content_database.session() as session, session.begin():
         user = await _user(session)
         for prepared, expected_bytes, expected_media_type, expected_name in cases:
@@ -322,12 +323,19 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
             )
             assert saved.checksum == sha256(expected_bytes).hexdigest()
             assert saved.size == len(expected_bytes)
+            expected_file_media_type = (
+                expected_media_type
+                if prepared.file_type is FileType.IMAGE
+                else prepared.display_media_type
+            )
+            assert saved.mimetype == expected_file_media_type
             saved_cases.append(
                 (
                     saved.id,
                     expected_bytes,
                     expected_media_type,
                     expected_name,
+                    expected_file_media_type,
                 )
             )
 
@@ -339,12 +347,65 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
             protocol=_PreparedFileProtocol(cases[0][0]),
             object_content=_content_service(object_content_database),
         )
-        for file_id, expected_bytes, expected_media_type, expected_name in saved_cases:
+        for (
+            file_id,
+            expected_bytes,
+            expected_media_type,
+            expected_name,
+            expected_file_media_type,
+        ) in saved_cases:
+            hydrated = await service.get_file_content(file_id)
             download = await service.get_download_no_auth(file_id)
             downloaded = b"".join([chunk async for chunk in download.chunks])
+            assert hydrated.mimetype == expected_file_media_type
             assert downloaded == expected_bytes
             assert download.media_type == expected_media_type
             assert download.filename == expected_name
+
+
+@pytest.mark.asyncio
+async def test_text_hydration_without_readable_text_returns_typed_not_found(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    prepared = PreparedFileUpload(
+        name="unextracted.pdf",
+        file_type=FileType.TEXT,
+        display_media_type="application/pdf",
+        contents=(
+            PendingFileContent(
+                variant=FileContentVariant.ORIGINAL,
+                chunks=_bytes_source(b"%PDF exact original"),
+                declared_media_type="application/pdf",
+                verified_media_type="application/pdf",
+            ),
+        ),
+    )
+
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=_PreparedFileProtocol(prepared),
+            object_content=_content_service(object_content_database),
+        )
+        saved = await service.save_file(
+            UploadFile(
+                file=BytesIO(),
+                filename=prepared.name,
+                headers={"content-type": prepared.display_media_type},
+            )
+        )
+
+    async with object_content_database.session() as session, session.begin():
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=_PreparedFileProtocol(prepared),
+            object_content=_content_service(object_content_database),
+        )
+        with pytest.raises(NotFoundException, match="no readable text content"):
+            await service.get_file_content(saved.id)
 
 
 @pytest.mark.asyncio

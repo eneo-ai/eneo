@@ -4,11 +4,14 @@ import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import ModuleType
 from uuid import uuid4
 
 import psycopg2
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
@@ -82,13 +85,16 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
         "user": str(uuid4()),
         "text": str(uuid4()),
         "image": str(uuid4()),
+        "generated_image": str(uuid4()),
         "derived": str(uuid4()),
         "audio": str(uuid4()),
         "icon": str(uuid4()),
     }
     payloads: dict[str, bytes] = {
         "text": "Extracted café".encode(),
+        "text_original": b"%PDF exact legacy original",
         "image": b"legacy-model-input-image",
+        "generated_image": b"legacy-generated-image",
         "derived": b"legacy-derived-page",
         "audio": b"legacy-audio",
         "transcription": "spoken words".encode(),
@@ -123,9 +129,11 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
                 transcription, user_id, tenant_id, parent_file_id
             )
             VALUES
-                (%s, 'legacy.pdf', %s, NULL, 'legacy-text', %s,
+                (%s, 'legacy.pdf', %s, %s, 'legacy-text', %s,
                  'application/pdf', 'text', NULL, %s, %s, NULL),
                 (%s, 'legacy.png', NULL, %s, 'legacy-image', %s,
+                 'image/png', 'image', NULL, %s, %s, NULL),
+                (%s, 'generated.png', NULL, %s, 'legacy-generated', %s,
                  'image/png', 'image', NULL, %s, %s, NULL),
                 (%s, 'legacy-page.png', NULL, %s, 'legacy-derived', %s,
                  'image/png', 'image', NULL, %s, %s, %s),
@@ -135,12 +143,18 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
             (
                 ids["text"],
                 payloads["text"].decode(),
+                payloads["text_original"],
                 len(payloads["text"]),
                 ids["user"],
                 ids["tenant"],
                 ids["image"],
                 payloads["image"],
                 len(payloads["image"]),
+                ids["user"],
+                ids["tenant"],
+                ids["generated_image"],
+                payloads["generated_image"],
+                len(payloads["generated_image"]),
                 ids["user"],
                 ids["tenant"],
                 ids["derived"],
@@ -172,6 +186,67 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
     return {**ids, **{f"{name}_payload": value for name, value in payloads.items()}}
 
 
+def _normalization_module() -> ModuleType:
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "alembic"
+        / "versions"
+        / "202607231700_normalize_file_icon_content.py"
+    )
+    spec = spec_from_file_location("file_icon_normalization_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _plan_nodes(plan: dict[str, object]) -> Generator[dict[str, object], None, None]:
+    yield plan
+    children = plan.get("Plans")
+    if children is None:
+        return
+    assert isinstance(children, list)
+    for child in children:
+        assert isinstance(child, dict)
+        yield from _plan_nodes(child)
+
+
+def _assert_byte_bounded_page_plan(
+    database_url: str,
+    *,
+    batch_size: int,
+    batch_bytes: int,
+) -> None:
+    migration = _normalization_module()
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as connection:
+            migration._stage_pending_keys(connection)
+            explained = connection.execute(
+                sa.text(
+                    "EXPLAIN (ANALYZE, FORMAT JSON) " + migration._CANDIDATE_PAGE.text
+                ),
+                {
+                    "after_sequence": 0,
+                    "batch_size": batch_size,
+                    "batch_bytes": batch_bytes,
+                },
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    root = explained[0]["Plan"]
+    window_rows = [
+        int(node["Actual Rows"])
+        for node in _plan_nodes(root)
+        if node.get("Node Type") == "WindowAgg"
+    ]
+    assert window_rows
+    assert max(window_rows) <= batch_size
+
+
 def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
     migration_database: tuple[str, Config],
     monkeypatch: pytest.MonkeyPatch,
@@ -180,6 +255,11 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
     script = ScriptDirectory.from_config(config)
     assert script.get_heads() == [_NORMALIZATION_REVISION]
     seeded = _seed_legacy_owners(database_url)
+    _assert_byte_bounded_page_plan(
+        database_url,
+        batch_size=2,
+        batch_bytes=1,
+    )
 
     payloads = [
         value
@@ -191,7 +271,8 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
         "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
         str(largest_payload - 1),
     )
-    monkeypatch.setenv("OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE", "1")
+    monkeypatch.setenv("FILE_ICON_NORMALIZATION_BATCH_ROWS", "1")
+    monkeypatch.setenv("FILE_ICON_NORMALIZATION_BATCH_BYTES", "1")
 
     with pytest.raises(
         RuntimeError,
@@ -358,7 +439,13 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
 
     expected = {
         ("file", seeded["text"], "extracted_text"): seeded["text_payload"],
-        ("file", seeded["image"], "model_input"): seeded["image_payload"],
+        ("file", seeded["text"], "original"): seeded["text_original_payload"],
+        ("file", seeded["image"], "legacy_image"): seeded["image_payload"],
+        (
+            "file",
+            seeded["generated_image"],
+            "legacy_image",
+        ): seeded["generated_image_payload"],
         ("file", seeded["derived"], "derived_page"): seeded["derived_payload"],
         ("file", seeded["audio"], "original"): seeded["audio_payload"],
         ("file", racing_file_id, "original"): racing_payload,
