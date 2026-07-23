@@ -90,7 +90,10 @@ external endpoint.
 
 Do not route either endpoint through the public reverse proxy. Give Eneo access
 to one dedicated bucket; do not use bucket-per-tenant or cross-deployment
-deduplication.
+deduplication. Keep versioning and Object Lock disabled for the active content
+bucket: the current deletion contract removes one opaque key and does not claim
+to purge retained historical versions. Use paired storage snapshots/backups for
+recovery instead.
 
 ### External MinIO example
 
@@ -183,10 +186,10 @@ Before production traffic, validate a staging Eneo deployment against the exact
 MinIO version and configuration you will operate. Exercise single and multipart
 upload (including ordered part listing), full and range read, delete visibility,
 bucket isolation, TLS trust, and paired restore; Eneo's object-content
-integration suite defines those expected behaviors. Align MinIO object
-versioning, lifecycle rules, snapshots, and immutable retention with Eneo's
-deletion and legal-retention policy; an object-store rule must not silently keep
-purged content longer than approved.
+integration suite defines those expected behaviors. Keep versioning, Object
+Lock, and object-store lifecycle retention disabled for the active-content
+bucket. Use paired storage snapshots/backups for recovery; an object-store rule
+must not silently keep purged content longer than approved.
 
 ## Configuration states
 
@@ -438,6 +441,12 @@ For the File/Icon normalization upgrade, stop backend and worker producers
 before Alembic starts and do not restart them until the migration succeeds. If
 it stops, retry the migration before accepting new uploads; intervening writes
 make the retry fail closed rather than guess which authority is valid.
+
+The migration copies in row- and byte-bounded batches and hashes copied content
+before its final write fence. While that fence is held, PostgreSQL compares the
+copied payloads with the legacy File/Icon columns once and contracts the old
+schema. Measure this pass on a restored production-size database and reserve a
+maintenance window proportional to total File/Icon bytes.
 
 Rollback means restoring the previous application/image version and the matching
 database/object backup pair. Do not roll back only Alembic or only the object

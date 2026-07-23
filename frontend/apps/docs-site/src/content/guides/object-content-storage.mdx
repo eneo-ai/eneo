@@ -203,7 +203,10 @@ curl -fsS https://eneo.example.eu/api/readyz \
 
 Before production, test the exact service version and configuration: single and
 multipart write, `HEAD`, full and single-range read, deletion, pagination, TLS,
-and paired restore.
+and paired restore. Use one dedicated private active-content bucket with
+versioning and Object Lock disabled. Eneo currently deletes one opaque key and
+does not claim to purge retained historical object versions; snapshots and
+paired backups own recovery.
 
   </Tabs.Tab>
 </Tabs>
@@ -223,6 +226,12 @@ traffic. Never combine a newer database with an older bucket or the reverse.
 During the File/Icon normalization upgrade, keep backend and worker producers
 stopped until Alembic succeeds. Retry a stopped migration before accepting new
 uploads; intervening writes deliberately block an unsafe retry.
+
+The copy phase is row- and byte-bounded and hashes copied content before the
+final write fence. The fenced pass compares copied payloads with the legacy
+File/Icon columns once before dropping them. Measure this on a restored
+production-size database and plan a maintenance window proportional to total
+File/Icon bytes.
 
 ### Failure rule
 
