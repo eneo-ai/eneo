@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+from fastapi import Response
 from fastapi.routing import APIRoute
 
 from eneo.audit.domain.action_types import ActionType
@@ -31,6 +32,7 @@ from eneo.skills.presentation.skill_assembler import SkillAssembler
 from eneo.skills.presentation.skill_models import (
     SkillPublishRequest,
     SkillRevisionCreateRequest,
+    SkillRevisionPublic,
     SkillRevisionRestoreRequest,
 )
 
@@ -82,6 +84,20 @@ def test_catalogue_and_management_have_separate_read_contracts():
         "/skills/organization/": {"GET", "POST"},
         "/skills/organization/{skill_id}/": {"GET", "DELETE"},
     }
+
+
+def test_organization_revision_creation_documents_created_and_noop_responses():
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/skills/organization/{skill_id}/revisions/"
+        and route.methods == {"POST"}
+    )
+
+    assert route.status_code == 201
+    assert 200 in route.responses
+    assert route.responses[200]["model"] is SkillRevisionPublic
 
 
 def test_management_summary_exposes_status_without_instruction_bodies():
@@ -299,6 +315,7 @@ async def test_revision_created_audit_uses_persisted_post_mutation_state():
             service=service,
             audit_service=audit_service,
         ),
+        response=Response(status_code=201),
     )
 
     extra = audit_service.log_async.await_args.kwargs["metadata"]["extra"]

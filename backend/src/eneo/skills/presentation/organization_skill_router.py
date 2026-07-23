@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -193,13 +193,23 @@ async def get_organization_skill_revision(
     "/organization/{skill_id}/revisions/",
     response_model=SkillRevisionPublic,
     status_code=201,
-    description="Create the next immutable organisation Skill revision.",
-    responses=responses.get_responses([400, 403, 404]),
+    description=(
+        "Create the next immutable organisation Skill revision; identical current "
+        "content is a no-op."
+    ),
+    responses={
+        200: {
+            "model": SkillRevisionPublic,
+            "description": "The submitted content already matches the current revision.",
+        },
+        **responses.get_responses([400, 403, 404]),
+    },
 )
 async def create_organization_skill_revision(
     skill_id: UUID,
     payload: SkillRevisionCreateRequest,
     container: _ContainerWithUser,
+    response: Response,
 ) -> SkillRevisionPublic:
     change = await container.organization_skill_service().create_revision(
         skill_id=skill_id,
@@ -208,7 +218,9 @@ async def create_organization_skill_revision(
         instructions=payload.instructions,
     )
     revision = change.revision
-    if change.created:
+    if not change.created:
+        response.status_code = 200
+    else:
         skill = change.skill
         user = container.user()
         await container.audit_service().log_async(

@@ -5954,7 +5954,7 @@ export interface paths {
     put?: never;
     /**
      * Create Organization Skill Revision
-     * @description Create the next immutable organisation Skill revision.
+     * @description Create the next immutable organisation Skill revision; identical current content is a no-op.
      */
     post: operations["create_organization_skill_revision_api_v1_skills_organization__skill_id__revisions__post"];
     delete?: never;
@@ -39432,6 +39432,15 @@ export interface operations {
       };
     };
     responses: {
+      /** @description The submitted content already matches the current revision. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRevisionPublic"];
+        };
+      };
       /** @description Successful Response */
       201: {
         headers: {
