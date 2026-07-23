@@ -2,6 +2,7 @@
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
 
+import asyncio
 import json
 import os
 import socket
@@ -632,7 +633,7 @@ def db_session(setup_database):
 
 
 @pytest.fixture
-def db_container(setup_database):
+def db_container(setup_database, test_settings: Settings):
     """
     Provide a context manager for a database container with session.
 
@@ -656,30 +657,69 @@ def db_container(setup_database):
             service = container.some_service()
     """
 
+    active_contexts = 0
+    runtime_started_here = False
+    runtime_lock = asyncio.Lock()
+
+    async def acquire_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            if active_contexts == 0 and not object_content_runtime.enabled:
+                object_content_runtime.start(
+                    required_inline_bytes=max(
+                        test_settings.upload_file_to_session_max_size,
+                        test_settings.upload_image_to_session_max_size,
+                        test_settings.transcription_max_file_size,
+                    )
+                )
+                try:
+                    await object_content_runtime.validate_configuration()
+                except BaseException:
+                    await object_content_runtime.stop()
+                    raise
+                runtime_started_here = True
+            active_contexts += 1
+
+    async def release_object_content_runtime() -> None:
+        nonlocal active_contexts, runtime_started_here
+        from eneo.object_content.runtime import object_content_runtime
+
+        async with runtime_lock:
+            active_contexts -= 1
+            if active_contexts == 0 and runtime_started_here:
+                runtime_started_here = False
+                await object_content_runtime.stop()
+
     @contextlib.asynccontextmanager
     async def _container(user=None, tenant=None):
-        async with sessionmanager.session() as session, session.begin():
-            # Create container with session first to fetch user and tenant if not provided
-            temp_container = Container(session=providers.Object(session))
+        await acquire_object_content_runtime()
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                # Create container with session first to fetch user and tenant if not provided
+                temp_container = Container(session=providers.Object(session))
 
-            # Fetch default user if not provided
-            if user is None:
-                user_repo = temp_container.user_repo()
-                user = await user_repo.get_user_by_email("test@example.com")
+                # Fetch default user if not provided
+                if user is None:
+                    user_repo = temp_container.user_repo()
+                    user = await user_repo.get_user_by_email("test@example.com")
 
-            # Fetch default tenant if not provided
-            if tenant is None:
-                tenant_repo = temp_container.tenant_repo()
-                tenants = await tenant_repo.get_all_tenants()
-                tenant = tenants[0] if tenants else None
+                # Fetch default tenant if not provided
+                if tenant is None:
+                    tenant_repo = temp_container.tenant_repo()
+                    tenants = await tenant_repo.get_all_tenants()
+                    tenant = tenants[0] if tenants else None
 
-            # Create container with all dependencies
-            container = Container(
-                session=providers.Object(session),
-                user=providers.Object(user),
-                tenant=providers.Object(tenant),
-            )
-            yield container
+                # Create container with all dependencies
+                container = Container(
+                    session=providers.Object(session),
+                    user=providers.Object(user),
+                    tenant=providers.Object(tenant),
+                )
+                yield container
+        finally:
+            await release_object_content_runtime()
 
     return _container
 
