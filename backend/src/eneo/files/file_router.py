@@ -1,5 +1,3 @@
-import io
-import re
 import time
 from typing import Annotated
 from uuid import UUID
@@ -16,18 +14,16 @@ from eneo.authentication.signed_urls import generate_signed_token, verify_signed
 from eneo.files.file_models import (
     ContentDisposition,
     FilePublic,
-    FileType,
     SignedURLRequest,
     SignedURLResponse,
 )
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     AuthenticationException,
-    BadRequestException,
-    NotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import PaginatedResponse
+from eneo.object_content.content import InvalidContentRangeError
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -246,83 +242,28 @@ async def download_file_signed(
     # Get the content disposition from the token
     content_disposition = ContentDisposition(payload["content_disposition"])
 
-    # Get the file without auth
-    file_repo = container.file_repo()
-    file = await file_repo.get_by_id(file_id=payload["file_id"])
+    service = container.file_service(user=None)
+    try:
+        download = await service.get_download_no_auth(id, range_header=range)
+    except InvalidContentRangeError:
+        whole = await service.get_download_no_auth(id)
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{whole.content_length}"},
+        )
 
-    if file.text is None and file.blob is None:
-        raise NotFoundException("File content not found")
-
-    content_bytes = None
-    response_mimetype = file.mimetype
-    response_filename = file.name
-
-    if file.file_type == FileType.TEXT and file.text:
-        content_bytes = file.text.encode("utf-8")
-        # For text files (PDFs, DOCX, etc.), return as .txt with plain text mimetype
-        response_mimetype = "text/plain"
-        # Change file extension to .txt
-        if "." in file.name:
-            filename_without_ext = file.name.rsplit(".", 1)[0]
-            response_filename = f"{filename_without_ext}.txt"
-        else:
-            response_filename = f"{file.name}.txt"
-    elif file.blob:
-        content_bytes = file.blob
-    else:
-        return Response(status_code=404, content="File content not found")
-
-    total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
+        "Content-Disposition": (
+            f'{content_disposition.value}; filename="{download.filename}"'
+        ),
         "Accept-Ranges": "bytes",
+        "Content-Length": str(download.content_length),
     }
-
-    # Handle range request
-    if range:
-        # Only allow range requests for audio files
-        if file.file_type != FileType.AUDIO:
-            raise BadRequestException("Range is only allowed for audio files")
-
-        try:
-            range_match = re.match(r"bytes=(\d+)-(\d*)", range)
-            if range_match:
-                start = int(range_match.group(1))
-                end = (
-                    int(range_match.group(2))
-                    if range_match.group(2)
-                    else total_size - 1
-                )
-
-                # Validate range
-                if start >= total_size or end >= total_size or start > end:
-                    return Response(
-                        status_code=416,  # Range Not Satisfiable
-                        headers={"Content-Range": f"bytes */{total_size}"},
-                    )
-
-                # Create partial response
-                content = io.BytesIO(content_bytes[start : end + 1])
-
-                headers.update(
-                    {
-                        "Content-Range": f"bytes {start}-{end}/{total_size}",
-                        "Content-Length": str(end - start + 1),
-                    }
-                )
-
-                return StreamingResponse(
-                    content,
-                    status_code=206,  # Partial Content
-                    media_type=response_mimetype,
-                    headers=headers,
-                )
-        except Exception:
-            # If range parsing fails, fall back to full content
-            pass
-
-    # Return full content if range is not specified or invalid
-    headers["Content-Length"] = str(total_size)
-    content = io.BytesIO(content_bytes)
-
-    return StreamingResponse(content, media_type=response_mimetype, headers=headers)
+    if download.content_range is not None:
+        headers["Content-Range"] = download.content_range
+    return StreamingResponse(
+        download.chunks,
+        status_code=206 if download.content_range is not None else 200,
+        media_type=download.media_type,
+        headers=headers,
+    )

@@ -288,6 +288,8 @@ from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from eneo.modules.module_repo import ModuleRepository
+from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.runtime import object_content_runtime
 from eneo.prompt_library.application.prompt_library_service import (
     PromptLibraryService,
 )
@@ -436,6 +438,10 @@ def _build_encryption_service() -> EncryptionService:
         },
     )
     return EncryptionService(key)
+
+
+def _object_content_service() -> ObjectContentService:
+    return object_content_runtime.service
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -761,7 +767,10 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     app_run_repo = providers.Factory(
-        AppRunRepository, session=session, factory=app_run_factory
+        AppRunRepository,
+        session=session,
+        factory=app_run_factory,
+        file_repo=file_repo,
     )
     service_repo = providers.Factory(
         ServiceRepository,
@@ -1026,10 +1035,12 @@ class Container(containers.DeclarativeContainer):
     file_size_service = providers.Factory(
         FileSizeService,
     )
+    object_content_service = providers.Callable(_object_content_service)
     icon_service = providers.Factory(
         IconService,
         icon_repo=icon_repo,
         file_size_service=file_size_service,
+        object_content=object_content_service,
     )
     quota_service = providers.Factory(
         QuotaService, user=user, info_blob_repo=info_blob_repo
@@ -1139,6 +1150,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=file_repo,
         protocol=file_protocol,
+        object_content=object_content_service,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
@@ -1557,7 +1569,7 @@ class Container(containers.DeclarativeContainer):
     )
     transcriber = providers.Factory(
         Transcriber,
-        file_repo=file_repo,
+        file_service=file_service,
         tenant=tenant,
         config=config,
         encryption_service=encryption_service,

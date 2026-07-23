@@ -52,11 +52,12 @@ class AppRunFactory:
             completion_model_id=app.completion_model.id,
         )
 
-    def create_app_run_from_db(self, app_run_in_db: AppRuns):
-        input_files = [
-            FileInfo.model_validate(input_file.file)
-            for input_file in app_run_in_db.input_files
-        ]
+    def create_app_run_from_db(
+        self,
+        app_run_in_db: AppRuns,
+        *,
+        input_files: list[FileInfo] | None = None,
+    ) -> AppRun:
         user = UserSparse.model_validate(app_run_in_db.user)
         job_in_db = cast(JobInDb | None, app_run_in_db.job)
         job = JobInDb.model_validate(job_in_db) if job_in_db is not None else None
@@ -69,7 +70,7 @@ class AppRunFactory:
             app_id=app_run_in_db.app_id,
             user_id=app_run_in_db.user_id,
             tenant_id=app_run_in_db.tenant_id,
-            input_files=input_files,
+            input_files=input_files or [],
             input_text=app_run_in_db.input_text,
             output=app_run_in_db.output_text,
             user=user,

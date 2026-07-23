@@ -48,7 +48,11 @@ async def get_icon(id: UUID, container: _Container) -> Response:
 async def create_icon(file: UploadFile, container: _ContainerWithUser) -> IconPublic:
     icon_service = container.icon_service()
     user = container.user()
-    icon = await icon_service.create_icon(file, user.tenant_id)
+    icon = await icon_service.create_icon(
+        file,
+        tenant_id=user.tenant_id,
+        created_by_user_id=user.id,
+    )
     return IconPublic.model_validate(icon)
 
 

@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from secrets import token_hex
@@ -25,6 +25,7 @@ from eneo.object_content.content import (
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
     StorageKind,
+    capture_content,
     content_request_fingerprint,
 )
 from eneo.object_content.content_repository import (
@@ -201,6 +202,35 @@ class ObjectContentService:
             raise ObjectContentUnavailableError(
                 "Unable to confirm the object-content database binding"
             ) from error
+
+    @asynccontextmanager
+    async def capture_inline(
+        self,
+        source: AsyncIterable[bytes],
+        *,
+        declared_media_type: str,
+        verified_media_type: str,
+        business_maximum_bytes: int | None = None,
+    ) -> AsyncGenerator[CapturedContent]:
+        """Capture one producer stream within both business and inline limits."""
+        maximum_size_bytes = self._core_settings.inline_maximum_bytes
+        if business_maximum_bytes is not None:
+            if business_maximum_bytes < 1:
+                raise ValueError("business_maximum_bytes must be positive")
+            maximum_size_bytes = min(
+                maximum_size_bytes,
+                business_maximum_bytes,
+            )
+
+        async with capture_content(
+            source,
+            declared_media_type=declared_media_type,
+            verified_media_type=verified_media_type,
+            maximum_size_bytes=maximum_size_bytes,
+            spool_memory_bytes=self._core_settings.inline_io_chunk_bytes,
+            multipart_part_bytes=self._core_settings.inline_io_chunk_bytes,
+        ) as captured:
+            yield captured
 
     async def prepare_in_transaction(
         self,

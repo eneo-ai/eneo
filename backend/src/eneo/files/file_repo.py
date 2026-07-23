@@ -1,121 +1,300 @@
-from typing import cast
+from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import defer
 
 from eneo.database.database import AsyncSession
-from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.files_table import Files
-from eneo.files.file_models import File, FileCreate, FileInfo
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    ObjectContents,
+)
+from eneo.files.file_models import (
+    FileContentVariant,
+    FileInfo,
+    FileMetadata,
+    FileMetadataCreate,
+    FileType,
+)
 from eneo.main.exceptions import NotFoundException
+from eneo.object_content.content import ContentAccessClass
+
+
+@dataclass(frozen=True, slots=True)
+class FileContentReferenceRecord:
+    file_id: UUID
+    content_id: UUID
+    variant: FileContentVariant
+    ordinal: int
+    page_number: int | None
+    width: int | None
+    height: int | None
+    duration_ms: int | None
+    sha256: bytes
+    size_bytes: int
+    media_type: str
+    access_class: ContentAccessClass
+
+
+_PRIMARY_VARIANTS = (
+    FileContentVariant.ORIGINAL,
+    FileContentVariant.GENERATED_ARTIFACT,
+    FileContentVariant.DERIVED_PAGE,
+    FileContentVariant.MODEL_INPUT,
+    FileContentVariant.EXTRACTED_TEXT,
+)
+_IMAGE_INPUT_VARIANTS = (
+    FileContentVariant.MODEL_INPUT,
+    FileContentVariant.DERIVED_PAGE,
+    FileContentVariant.GENERATED_ARTIFACT,
+    FileContentVariant.ORIGINAL,
+)
+
+
+def select_primary_file_reference(
+    references: list[FileContentReferenceRecord],
+) -> FileContentReferenceRecord | None:
+    for variant in _PRIMARY_VARIANTS:
+        reference = next(
+            (candidate for candidate in references if candidate.variant is variant),
+            None,
+        )
+        if reference is not None:
+            return reference
+    return None
+
+
+def select_binary_file_reference(
+    file_type: FileType,
+    references: list[FileContentReferenceRecord],
+) -> FileContentReferenceRecord | None:
+    variants = (
+        _IMAGE_INPUT_VARIANTS
+        if file_type is FileType.IMAGE
+        else (FileContentVariant.ORIGINAL,)
+    )
+    for variant in variants:
+        reference = next(
+            (candidate for candidate in references if candidate.variant is variant),
+            None,
+        )
+        if reference is not None:
+            return reference
+    return None
+
+
+def project_file_info(
+    file: FileMetadata,
+    references: list[FileContentReferenceRecord],
+) -> FileInfo:
+    primary = select_primary_file_reference(references)
+    if primary is None:
+        raise NotFoundException(f"File {file.id} has no durable content")
+    return FileInfo(
+        id=file.id,
+        created_at=file.created_at,
+        updated_at=file.updated_at,
+        name=file.name,
+        checksum=primary.sha256.hex(),
+        size=primary.size_bytes,
+        mimetype=file.mimetype or primary.media_type,
+        file_type=file.file_type,
+        user_id=file.user_id,
+        tenant_id=file.tenant_id,
+    )
 
 
 class FileRepository:
+    """Persist File identity and its typed durable-content references."""
+
     def __init__(self, session: AsyncSession):
-        super().__init__()
-        self._delegate: BaseRepositoryDelegate[File] = BaseRepositoryDelegate(
-            session=session, table=Files, in_db_model=File
-        )
         self.session = session
 
-    async def add(self, file: FileCreate) -> File:
-        return await self._delegate.add(file)
+    async def add_metadata(self, file: FileMetadataCreate) -> FileMetadata:
+        row = Files(**file.model_dump())
+        self.session.add(row)
+        await self.session.flush()
+        return FileMetadata.model_validate(row)
+
+    async def add_content_reference(
+        self,
+        *,
+        file_id: UUID,
+        content_id: UUID,
+        variant: FileContentVariant,
+        ordinal: int = 0,
+        page_number: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
+        reference = FileContentReferences()
+        reference.file_id = file_id
+        reference.content_id = content_id
+        reference.variant = variant.value
+        reference.ordinal = ordinal
+        reference.page_number = page_number
+        reference.width = width
+        reference.height = height
+        reference.duration_ms = duration_ms
+        self.session.add(reference)
+        await self.session.flush()
 
     async def get_list_by_id_and_user(
-        self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
-    ) -> list[File]:
-        stmt = (
+        self,
+        ids: list[UUID],
+        user_id: UUID,
+    ) -> list[FileMetadata]:
+        if not ids:
+            return []
+        rows = await self.session.scalars(
             sa.select(Files)
-            .where(Files.id.in_(ids))
-            .where(Files.user_id == user_id)
+            .where(Files.id.in_(ids), Files.user_id == user_id)
             .order_by(Files.created_at)
         )
+        return [FileMetadata.model_validate(row) for row in rows]
 
-        if not include_transcription:
-            stmt = stmt.options(defer(Files.transcription, raiseload=True))
-
-        files_in_db = await self.session.scalars(stmt)
-
-        files = [File.model_validate(file) for file in files_in_db]
-
-        return files
+    async def get_by_ids(self, ids: list[UUID]) -> list[FileMetadata]:
+        if not ids:
+            return []
+        rows = await self.session.scalars(
+            sa.select(Files).where(Files.id.in_(ids)).order_by(Files.created_at)
+        )
+        return [FileMetadata.model_validate(row) for row in rows]
 
     async def get_by_parent_ids(
-        self, parent_ids: list[UUID], user_id: UUID
-    ) -> list[File]:
+        self,
+        parent_ids: list[UUID],
+        user_id: UUID,
+    ) -> list[FileMetadata]:
         if not parent_ids:
             return []
-
-        stmt = (
+        rows = await self.session.scalars(
             sa.select(Files)
-            .where(Files.parent_file_id.in_(parent_ids))
-            .where(Files.user_id == user_id)
-            .order_by(Files.created_at)
-        )
-        files_in_db = await self.session.scalars(stmt)
-        return [File.model_validate(file) for file in files_in_db]
-
-    async def get_by_id(self, file_id: UUID) -> File:
-        file = await self._delegate.get(id=file_id)
-        if file is None:
-            raise NotFoundException()
-        return File.model_validate(file)
-
-    async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        # Derived files (parent_file_id set) are internal vision inputs and
-        # not part of the user's own upload library.
-        stmt = (
-            sa.select(Files)
-            .where(Files.user_id == user_id)
-            .where(Files.parent_file_id.is_(None))
-            .order_by(Files.created_at)
-        )
-        files_in_db = await self.session.scalars(stmt)
-        return [File.model_validate(file) for file in files_in_db]
-
-    async def get_by_checksum(self, checksum: str) -> File:
-        return cast(
-            File,
-            await self._delegate.get_by(conditions={Files.checksum: checksum}),
-        )
-
-    async def delete(self, id: UUID) -> File:
-        return cast(File, await self._delegate.delete(id))
-
-    async def delete_by_owner(
-        self, id: UUID, user_id: UUID, tenant_id: UUID
-    ) -> File | None:
-        """Atomic tenant- and owner-bound delete. Returns None if no row matches."""
-        stmt = (
-            sa.delete(Files)
             .where(
-                Files.id == id,
+                Files.parent_file_id.in_(parent_ids),
+                Files.user_id == user_id,
+            )
+            .order_by(Files.created_at)
+        )
+        return [FileMetadata.model_validate(row) for row in rows]
+
+    async def get_by_id(self, file_id: UUID) -> FileMetadata:
+        row = await self.session.get(Files, file_id)
+        if row is None:
+            raise NotFoundException()
+        return FileMetadata.model_validate(row)
+
+    async def get_by_id_for_update(self, file_id: UUID) -> FileMetadata:
+        row = await self.session.scalar(
+            sa.select(Files).where(Files.id == file_id).with_for_update()
+        )
+        if row is None:
+            raise NotFoundException()
+        return FileMetadata.model_validate(row)
+
+    async def get_by_id_and_owner(
+        self,
+        *,
+        file_id: UUID,
+        user_id: UUID,
+        tenant_id: UUID,
+    ) -> FileMetadata | None:
+        row = await self.session.scalar(
+            sa.select(Files).where(
+                Files.id == file_id,
                 Files.user_id == user_id,
                 Files.tenant_id == tenant_id,
             )
-            .returning(Files)
         )
-        result = await self.session.execute(stmt)
-        row = result.scalar_one_or_none()
-        if row is None:
-            return None
-        return File.model_validate(row)
+        return None if row is None else FileMetadata.model_validate(row)
 
-    async def update(self, file: File) -> File:
-        return cast(File, await self._delegate.update(file))
-
-    async def get_file_infos(self, ids: list[UUID]) -> list[FileInfo]:
-        stmt = (
+    async def get_list_by_user(self, user_id: UUID) -> list[FileMetadata]:
+        rows = await self.session.scalars(
             sa.select(Files)
-            .where(Files.id.in_(ids))
-            .options(
-                defer(Files.text, raiseload=True),
-                defer(Files.blob, raiseload=True),
-                defer(Files.transcription, raiseload=True),
+            .where(
+                Files.user_id == user_id,
+                Files.parent_file_id.is_(None),
+            )
+            .order_by(Files.created_at)
+        )
+        return [FileMetadata.model_validate(row) for row in rows]
+
+    async def get_content_references(
+        self,
+        file_ids: list[UUID],
+    ) -> list[FileContentReferenceRecord]:
+        if not file_ids:
+            return []
+        rows = await self.session.execute(
+            sa.select(
+                FileContentReferences.file_id,
+                FileContentReferences.content_id,
+                FileContentReferences.variant,
+                FileContentReferences.ordinal,
+                FileContentReferences.page_number,
+                FileContentReferences.width,
+                FileContentReferences.height,
+                FileContentReferences.duration_ms,
+                ObjectContents.sha256,
+                ObjectContents.size_bytes,
+                ObjectContents.verified_media_type,
+                ObjectContents.access_class,
+            )
+            .join(
+                ObjectContents,
+                ObjectContents.id == FileContentReferences.content_id,
+            )
+            .where(FileContentReferences.file_id.in_(file_ids))
+            .order_by(
+                FileContentReferences.file_id,
+                FileContentReferences.variant,
+                FileContentReferences.ordinal,
             )
         )
+        return [
+            FileContentReferenceRecord(
+                file_id=row.file_id,
+                content_id=row.content_id,
+                variant=FileContentVariant(row.variant),
+                ordinal=row.ordinal,
+                page_number=row.page_number,
+                width=row.width,
+                height=row.height,
+                duration_ms=row.duration_ms,
+                sha256=row.sha256,
+                size_bytes=row.size_bytes,
+                media_type=row.verified_media_type,
+                access_class=ContentAccessClass(row.access_class),
+            )
+            for row in rows
+        ]
 
-        files_in_db = await self.session.scalars(stmt)
+    async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]:
+        metadata = await self.get_by_ids(file_ids)
+        references = await self.get_content_references([file.id for file in metadata])
+        by_file: dict[UUID, list[FileContentReferenceRecord]] = {
+            file.id: [] for file in metadata
+        }
+        for reference in references:
+            by_file[reference.file_id].append(reference)
+        return [project_file_info(file, by_file[file.id]) for file in metadata]
 
-        return [FileInfo.model_validate(file) for file in files_in_db]
+    async def delete_by_owner(
+        self,
+        id: UUID,
+        user_id: UUID,
+        tenant_id: UUID,
+    ) -> FileMetadata | None:
+        row = (
+            await self.session.execute(
+                sa.delete(Files)
+                .where(
+                    Files.id == id,
+                    Files.user_id == user_id,
+                    Files.tenant_id == tenant_id,
+                )
+                .returning(Files)
+            )
+        ).scalar_one_or_none()
+        return None if row is None else FileMetadata.model_validate(row)
