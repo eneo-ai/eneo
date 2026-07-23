@@ -8,10 +8,12 @@ const args = parseArgs(process.argv.slice(2));
 const selfTest = args["self-test"] === "true";
 const owner = args.owner || process.env.PROJECT_OWNER || "eneo-ai";
 const project = args.project || process.env.PROJECT_NUMBER || "5";
+const repository = args.repository || process.env.ROADMAP_REPOSITORY || "";
 const limit = args.limit || "1000";
 const format = args.format || "markdown";
 const audience = args.audience || "default";
 const versions = parseVersionList(args.versions || "");
+const generatedAt = new Date().toISOString();
 
 if (selfTest) {
   runSelfTest();
@@ -27,7 +29,15 @@ const epics = (data.items || [])
   .map(toEpic)
   .sort(compareEpics);
 
-const output = renderOutput(epics, { owner, project, format, audience, versions });
+const output = renderOutput(epics, {
+  owner,
+  project,
+  repository,
+  format,
+  audience,
+  versions,
+  generatedAt,
+});
 
 if (args.output) {
   fs.writeFileSync(args.output, output);
@@ -36,6 +46,10 @@ if (args.output) {
 }
 
 function renderOutput(epics, context) {
+  if (context.format === "json") {
+    return renderPublicJson(epics, context);
+  }
+
   if (context.format === "mermaid") {
     return renderMermaid(epics, context);
   }
@@ -160,8 +174,92 @@ function toEpic(item, index) {
       getSectionValue(body, ["Sub-issue progress", "Progress"]),
       "",
     ]),
+    summary: getSectionBody(body, ["Summary"]),
+    contentType: item.content?.type || "",
+    repository: item.content?.repository || "",
     version,
   };
+}
+
+function renderPublicJson(epics, context) {
+  if (context.audience !== "default") {
+    throw new Error("JSON roadmap exports require the default audience");
+  }
+
+  if (!context.repository) {
+    throw new Error("JSON roadmap exports require --repository");
+  }
+
+  const publicEpics = epics.filter((epic) => (
+    epic.contentType === "Issue"
+    && epic.repository === context.repository
+    && Number.isInteger(epic.number)
+    && Boolean(epic.url)
+  ));
+  const nextVersionRank = publicNextVersionRank(publicEpics);
+  const groupOrder = ["in_progress", "next", "later", "delivered"];
+  const items = publicEpics
+    .map((epic) => ({
+      number: epic.number,
+      url: epic.url,
+      title: epic.title,
+      summary: epic.summary,
+      status: epic.status,
+      roadmapVersion: versionGroup(epic.version),
+      area: epic.area,
+      priority: epic.priority,
+      startDate: epic.startDate,
+      targetDate: epic.targetDate,
+      group: publicRoadmapGroup(epic, nextVersionRank),
+    }))
+    .sort((left, right) => (
+      groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group)
+      || compareVersions(left.roadmapVersion, right.roadmapVersion)
+      || comparePriority(left.priority, right.priority)
+      || left.title.localeCompare(right.title)
+    ));
+
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    generatedAt: context.generatedAt,
+    source: {
+      owner: context.owner,
+      project: context.project,
+      repository: context.repository,
+    },
+    groups: groupOrder,
+    unpublishedItemCount: epics.length - publicEpics.length,
+    items,
+  }, null, 2)}\n`;
+}
+
+function publicNextVersionRank(epics) {
+  const ranks = epics
+    .filter((epic) => equals(epic.status, "Todo"))
+    .map((epic) => versionRank(versionGroup(epic.version)))
+    .filter((rank) => rank < 8_000);
+
+  return ranks.length > 0 ? Math.min(...ranks) : null;
+}
+
+function publicRoadmapGroup(epic, nextVersionRank) {
+  if (isDone(epic)) {
+    return "delivered";
+  }
+
+  if (isActive(epic) || isBlocked(epic)) {
+    return "in_progress";
+  }
+
+  if (
+    equals(epic.status, "Todo")
+    && nextVersionRank !== null
+    && versionRank(versionGroup(epic.version)) === nextVersionRank
+  ) {
+    return "next";
+  }
+
+  return "later";
 }
 
 function renderMarkdown(epics, context) {
@@ -679,6 +777,31 @@ function getSectionValue(body, headings) {
   return "";
 }
 
+function getSectionBody(body, headings) {
+  for (const heading of headings) {
+    const escaped = escapeRegExp(heading);
+    const pattern = new RegExp(
+      `^#{2,6}\\s+${escaped}\\s*$([\\s\\S]*?)(?=^#{2,6}\\s+|$(?![\\s\\S]))`,
+      "im",
+    );
+    const match = body.match(pattern);
+
+    if (!match) {
+      continue;
+    }
+
+    const value = match[1]
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .trim();
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 function getLabels(item) {
   return (item.labels || []).map((label) => {
     if (typeof label === "string") {
@@ -894,7 +1017,14 @@ function runSelfTest() {
         number: 101,
         title: "Personlig chatt 2.0",
         url: "https://github.com/eneo-ai/eneo/issues/101",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
         body: [
+          "## Summary",
+          "People can use a safer personal chat.",
+          "",
+          "The rollout remains controlled by administrators.",
+          "",
           "## Roadmap version",
           "2.7",
           "",
@@ -918,6 +1048,9 @@ function runSelfTest() {
       content: {
         number: 102,
         title: "Extern kostnadsuppfoljning",
+        url: "https://github.com/eneo-ai/eneo/issues/102",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
         body: "## Roadmap version\n2.7 RC\n",
       },
       Status: "Todo",
@@ -928,6 +1061,9 @@ function runSelfTest() {
       content: {
         number: 103,
         title: "Crawl 2.0",
+        url: "https://github.com/eneo-ai/eneo/issues/103",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
         body: "## Roadmap version\nFuture\n## Owner / lead\nSearch\n",
       },
       Status: "Todo",
@@ -946,6 +1082,156 @@ function runSelfTest() {
   const epics = items.filter(isEpic).map(toEpic).sort(compareEpics);
 
   assert.equal(epics.length, 3, "generic Version fields must not turn tasks into roadmap epics");
+
+  const publicExportItems = [
+    ...items,
+    {
+      id: "draft-1",
+      kind: "Epic",
+      title: "Private Project draft",
+      status: "Todo",
+      "roadmap version": "2.7",
+      content: {
+        type: "DraftIssue",
+        body: "## Summary\nThis draft must never be published.\n",
+      },
+    },
+    {
+      id: "foreign-1",
+      kind: "Epic",
+      title: "Foreign repository epic",
+      status: "Todo",
+      "roadmap version": "2.7",
+      content: {
+        number: 104,
+        title: "Foreign repository epic",
+        url: "https://github.com/eneo-ai/private-planning/issues/104",
+        type: "Issue",
+        repository: "eneo-ai/private-planning",
+        body: "## Summary\nThis issue belongs to another repository.\n",
+      },
+    },
+    {
+      id: "item-4",
+      kind: "Epic",
+      status: "Done",
+      "roadmap version": "2.6",
+      content: {
+        number: 105,
+        title: "Delivered epic",
+        url: "https://github.com/eneo-ai/eneo/issues/105",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
+        body: "## Summary\nThis outcome has shipped.\n",
+      },
+    },
+    {
+      id: "item-5",
+      kind: "Epic",
+      status: "In review",
+      "roadmap version": "2.7",
+      content: {
+        number: 106,
+        title: "Unknown status epic",
+        url: "https://github.com/eneo-ai/eneo/issues/106",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
+        body: "## Summary\nThis status is not part of the public grouping contract.\n",
+      },
+    },
+    {
+      id: "item-6",
+      kind: "Epic",
+      status: "Blocked",
+      "roadmap version": "Future",
+      content: {
+        number: 107,
+        title: "Blocked future epic",
+        url: "https://github.com/eneo-ai/eneo/issues/107",
+        type: "Issue",
+        repository: "eneo-ai/eneo",
+        body: "## Summary\nThis work has started but is currently blocked.\n",
+      },
+    },
+  ];
+  const publicExportEpics = publicExportItems
+    .filter(isEpic)
+    .map(toEpic)
+    .sort(compareEpics);
+  const publicJson = JSON.parse(renderOutput(publicExportEpics, {
+    owner: "eneo-ai",
+    project: "5",
+    repository: "eneo-ai/eneo",
+    format: "json",
+    audience: "default",
+    versions: [],
+    generatedAt: "2026-07-23T12:00:00.000Z",
+  }));
+  const publicItemKeys = [
+    "area",
+    "group",
+    "number",
+    "priority",
+    "roadmapVersion",
+    "startDate",
+    "status",
+    "summary",
+    "targetDate",
+    "title",
+    "url",
+  ];
+
+  assert.deepEqual(Object.keys(publicJson).sort(), [
+    "generatedAt",
+    "groups",
+    "items",
+    "schemaVersion",
+    "source",
+    "unpublishedItemCount",
+  ]);
+  assert.deepEqual(Object.keys(publicJson.source).sort(), ["owner", "project", "repository"]);
+  assert.equal(publicJson.schemaVersion, 1);
+  assert.deepEqual(publicJson.groups, ["in_progress", "next", "later", "delivered"]);
+  assert.equal(publicJson.unpublishedItemCount, 2);
+  assert.deepEqual(publicJson.items.map((epic) => epic.number), [101, 107, 102, 106, 103, 105]);
+  assert.ok(publicJson.items.every((epic) => (
+    JSON.stringify(Object.keys(epic).sort()) === JSON.stringify(publicItemKeys)
+  )), "public roadmap items must expose only the schema allowlist");
+  assert.equal(publicJson.items.find((epic) => epic.number === 101).group, "in_progress");
+  assert.equal(publicJson.items.find((epic) => epic.number === 107).group, "in_progress");
+  assert.equal(publicJson.items.find((epic) => epic.number === 102).group, "next");
+  assert.equal(publicJson.items.find((epic) => epic.number === 103).group, "later");
+  assert.equal(publicJson.items.find((epic) => epic.number === 105).group, "delivered");
+  assert.equal(publicJson.items.find((epic) => epic.number === 106).group, "later");
+  assert.equal(
+    publicJson.items.find((epic) => epic.number === 101).summary,
+    "People can use a safer personal chat.\n\nThe rollout remains controlled by administrators.",
+  );
+  assert.doesNotMatch(JSON.stringify(publicJson), /Private Project draft|Foreign repository epic/);
+  assert.throws(
+    () => renderOutput(publicExportEpics, {
+      owner: "eneo-ai",
+      project: "5",
+      repository: "eneo-ai/eneo",
+      format: "json",
+      audience: "committee",
+      versions: [],
+      generatedAt: "2026-07-23T12:00:00.000Z",
+    }),
+    /JSON roadmap exports require the default audience/,
+  );
+  assert.throws(
+    () => renderOutput(publicExportEpics, {
+      owner: "eneo-ai",
+      project: "5",
+      repository: "",
+      format: "json",
+      audience: "default",
+      versions: [],
+      generatedAt: "2026-07-23T12:00:00.000Z",
+    }),
+    /JSON roadmap exports require --repository/,
+  );
 
   const markdown = renderOutput(epics, {
     owner: "eneo-ai",
