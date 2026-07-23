@@ -626,11 +626,11 @@ erDiagram
   flow_run_review_checkpoints }o--|| flow_runs : "flow_run_id, tenant_id ondelete=CASCADE"
   flow_run_review_checkpoints |o--|| flow_step_attempts : "flow_run_id, step_id, attempt_no ondelete=RESTRICT"
   flow_run_review_checkpoints }o--|| flows : "flow_id ondelete=CASCADE"
-  flow_run_review_checkpoints }o--o| service_principals : "decided_by_service_id ondelete=SET NULL"
-  flow_run_review_checkpoints }o--o| service_principals : "requester_service_id ondelete=SET NULL"
+  flow_run_review_checkpoints }o--o| service_principals : "decided_by_service_id ondelete=RESTRICT"
+  flow_run_review_checkpoints }o--o| service_principals : "requester_service_id ondelete=RESTRICT"
   flow_run_review_checkpoints }o--|| tenants : "tenant_id ondelete=CASCADE"
-  flow_run_review_checkpoints }o--o| users : "decided_by_user_id ondelete=SET NULL"
-  flow_run_review_checkpoints }o--o| users : "requester_user_id ondelete=SET NULL"
+  flow_run_review_checkpoints }o--o| users : "decided_by_user_id ondelete=RESTRICT"
+  flow_run_review_checkpoints }o--o| users : "requester_user_id ondelete=RESTRICT"
 ```
 
 </div>

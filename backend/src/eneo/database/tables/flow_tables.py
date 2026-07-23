@@ -1354,7 +1354,7 @@ class FlowRunReviewCheckpoints(BasePublic):
     requester_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             Users.id,
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name="fk_review_checkpoints_requester_user",
         ),
         nullable=True,
@@ -1362,7 +1362,7 @@ class FlowRunReviewCheckpoints(BasePublic):
     requester_service_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             "service_principals.id",
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name="fk_review_checkpoints_requester_service",
         ),
         nullable=True,
@@ -1374,7 +1374,7 @@ class FlowRunReviewCheckpoints(BasePublic):
     decided_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             Users.id,
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name="fk_review_checkpoints_decided_by_user",
         ),
         nullable=True,
@@ -1382,7 +1382,7 @@ class FlowRunReviewCheckpoints(BasePublic):
     decided_by_service_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             "service_principals.id",
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name="fk_review_checkpoints_decided_by_service",
         ),
         nullable=True,

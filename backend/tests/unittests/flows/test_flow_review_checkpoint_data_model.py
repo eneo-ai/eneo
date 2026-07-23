@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import CheckConstraint, Index
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
@@ -59,6 +59,16 @@ def _index_by_name(table: object, index_name: str) -> Index:
         if index.name == index_name:
             return index
     raise AssertionError(f"Index {index_name} was not found.")
+
+
+def _foreign_key_by_name(table: object, constraint_name: str) -> ForeignKeyConstraint:
+    for constraint in table.__table__.constraints:
+        if (
+            isinstance(constraint, ForeignKeyConstraint)
+            and constraint.name == constraint_name
+        ):
+            return constraint
+    raise AssertionError(f"Foreign key {constraint_name} was not found.")
 
 
 def _service_principal_actor() -> FlowServicePrincipalActorPublic:
@@ -230,6 +240,18 @@ def test_review_checkpoint_table_owns_state_payloads_and_resume_key() -> None:
         FlowRunReviewCheckpoints,
         "ck_flow_run_review_checkpoints_requester_principal",
     )
+
+    actor_foreign_keys = (
+        "fk_review_checkpoints_requester_user",
+        "fk_review_checkpoints_requester_service",
+        "fk_review_checkpoints_decided_by_user",
+        "fk_review_checkpoints_decided_by_service",
+    )
+    for constraint_name in actor_foreign_keys:
+        assert (
+            _foreign_key_by_name(FlowRunReviewCheckpoints, constraint_name).ondelete
+            == "RESTRICT"
+        )
 
     active_index = _index_by_name(
         FlowRunReviewCheckpoints,

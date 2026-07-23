@@ -20,10 +20,16 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from eneo.database.tables.users_table import Users
-from eneo.main.exceptions import SystemUserProtected
+from eneo.main.exceptions import SystemUserProtected, UserDeletionBlocked
 from eneo.users.user_repo import UsersRepository
+
+
+class _PostgresIntegrityViolation(RuntimeError):
+    def __init__(self, sqlstate: str, *, attribute: str = "sqlstate"):
+        setattr(self, attribute, sqlstate)
 
 
 def _make_repo() -> UsersRepository:
@@ -114,12 +120,49 @@ class TestDeleteGuards:
 
     async def test_hard_delete_proceeds_for_regular_user(self):
         repo = _make_repo()
-        repo.session.scalar.return_value = False  # not a system user
+        repo.session.scalar.return_value = False
         repo.delegate.delete.return_value = None
 
         await repo.hard_delete(uuid4())
 
         repo.delegate.delete.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "sqlstate_attribute",
+        ("sqlstate", "pgcode"),
+    )
+    async def test_hard_delete_translates_retained_flow_record_fk_violation(
+        self, sqlstate_attribute: str
+    ):
+        repo = _make_repo()
+        repo.session.scalar.return_value = False
+        repo.delegate.delete.side_effect = IntegrityError(
+            "DELETE FROM users",
+            {},
+            _PostgresIntegrityViolation("23503", attribute=sqlstate_attribute),
+        )
+
+        with pytest.raises(UserDeletionBlocked) as exc_info:
+            await repo.hard_delete(uuid4())
+
+        message = str(exc_info.value)
+        assert "retained Flow runtime records" in message
+        assert "runs, rerun operations, or review checkpoints" in message
+
+    async def test_hard_delete_preserves_non_fk_integrity_error(self):
+        repo = _make_repo()
+        repo.session.scalar.return_value = False
+        integrity_error = IntegrityError(
+            "DELETE FROM users",
+            {},
+            _PostgresIntegrityViolation("23505"),
+        )
+        repo.delegate.delete.side_effect = integrity_error
+
+        with pytest.raises(IntegrityError) as exc_info:
+            await repo.hard_delete(uuid4())
+
+        assert exc_info.value is integrity_error
 
 
 class TestListExclusion:

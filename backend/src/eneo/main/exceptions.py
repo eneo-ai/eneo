@@ -182,6 +182,10 @@ class ConflictException(Exception):
         self.context = context
 
 
+class UserDeletionBlocked(ConflictException):
+    """Raised when retained Flow runtime history references a user."""
+
+
 class TypedIOValidationException(BadRequestException):
     def __init__(
         self,
