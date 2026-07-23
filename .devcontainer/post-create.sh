@@ -17,19 +17,6 @@ if [ -e /var/run/docker.sock ]; then
     echo "✓ Docker group created with GID $DOCKER_GID for testcontainers support"
 fi
 
-# Install system dependencies.
-# - ffmpeg/libmagic1 support existing audio and file type detection paths.
-# - fontconfig/fonts/harfbuzz/pango support WeasyPrint PDF rendering.
-sudo apt-get update
-sudo apt-get install -y \
-    ffmpeg \
-    fontconfig \
-    fonts-dejavu-core \
-    libharfbuzz-subset0 \
-    libmagic1 \
-    libpango-1.0-0 \
-    libpangoft2-1.0-0
-
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"

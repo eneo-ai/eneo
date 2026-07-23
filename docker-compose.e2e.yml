@@ -7,7 +7,8 @@
 # Prod-safety by construction:
 #   - its own throwaway postgres/redis, isolated network
 #   - every outbound LLM key is a dummy, so it can't reach a real provider
-#   - reuses the devcontainer image + venv (read-only), ships nothing to prod
+#   - reuses the rebuilt devcontainer image + venv (read-only); native packages
+#     are baked into the image
 #
 # Bring up:   docker compose -f docker-compose.e2e.yml up -d --wait
 # Tear down:  docker compose -f docker-compose.e2e.yml down        (data is gone)
@@ -80,9 +81,6 @@ services:
 
   e2e-backend:
     image: eneo_devcontainer-eneo
-    # Root so we can install the few system libs the devcontainer adds
-    # post-create (not baked into the image). The venv is mounted read-only.
-    user: root
     working_dir: /workspace/backend
     depends_on:
       e2e-db:
@@ -100,7 +98,6 @@ services:
       - |
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
-        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
         python /workspace/e2e/seed.py  # seed mock completion model
         exec gunicorn src.eneo.server.main:app \
@@ -119,7 +116,6 @@ services:
 
   celery-worker-flows:
     image: eneo_devcontainer-eneo
-    user: root
     working_dir: /workspace/backend
     depends_on:
       e2e-backend:
@@ -135,7 +131,6 @@ services:
       - |
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
-        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg fontconfig fonts-dejavu-core libharfbuzz-subset0 libmagic1 libpango-1.0-0 libpangoft2-1.0-0 >/dev/null
         exec ./run.sh
     volumes: *e2e-backend-volumes
     networks: [e2e]

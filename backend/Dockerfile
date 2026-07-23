@@ -37,7 +37,7 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 FROM python:3.11-slim-bookworm
 
 # Runtime dependencies:
-# - ffmpeg/libmagic1 support existing audio and file type detection paths.
+# - ffmpeg/libsndfile1 support audio; libmagic1 supports file type detection.
 # - fontconfig/fonts/harfbuzz/pango support WeasyPrint PDF rendering.
 RUN apt-get update && apt-get install -y \
     ffmpeg \
@@ -47,6 +47,7 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy venv and tiktoken from builder
