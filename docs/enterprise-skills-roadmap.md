@@ -87,18 +87,28 @@ The foundation merged into `develop` before this roadmap was written:
   provenance. It squash-merged as `a29e9464` on 2026-07-22.
 - PR #559 added paginated immutable revision history and conflict-safe
   restore-as-a-new-revision. It squash-merged as `8ef96390` on 2026-07-22.
+- PR #560 added the admin-owned organisation catalogue, exact publication
+  lifecycle, and direct approved-revision reuse. It squash-merged as
+  `71de15e5` on 2026-07-23.
+- PR #574 added tenant-scoped adoption and drift evidence to the existing Skill
+  detail. It squash-merged as `dfe9dbe7` on 2026-07-23.
+- PR #577 added the organisation-wide emergency execution block. It
+  squash-merged as `b186f175` on 2026-07-23.
 
-The delivery graph was last verified on 2026-07-22:
+The delivery graph was last verified on 2026-07-23:
 
-| Work item                                                | Purpose                                         | Base                                                  | State and next action                                                                                                                                                    |
-| -------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                     | `develop`                                             | Merged as `a29e9464`. Full local verification and all required GitHub checks passed; Review 7 found no current findings and Opus high gave green light at score 8.       |
-| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                          | `develop`                                             | Merged as `8ef96390`. Full CI passed; Review 5 inspected all 29 paths with no findings, and Opus high gave green light at score 8.                                       |
-| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                       | `develop` at `8ef96390`                               | Active replay. Complete the admin-only authority correction and picker projection, then render and review the full UX before Fable high, `/review`, CI, Opus, and merge. |
-| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Current `develop` after the object-content foundation | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                                                                            |
-| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | `develop`                                             | Open and conflict-marked. It belongs to the object-content/file track.                                                                                                   |
-| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Internal MCP and on-demand knowledge            | `feat/mcp-file-ref-and-identity`                      | Open and coupled to #464. Split its internal-effect/knowledge core from file references before selective Skills if the maintainers accept the split.                     |
-| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                         | `feat/agentic-rag-knowledge-mcp`                      | Draft. It should not gate Skills.                                                                                                                                        |
+| Work item                                                | Purpose                                         | State and next action                                                                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                     | Merged as `a29e9464`; required CI and final review passed.                                                                               |
+| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                          | Merged as `8ef96390`; required CI and final review passed.                                                                               |
+| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                       | Merged as `71de15e5`; required CI, final review, and product review passed.                                                              |
+| [#574](https://github.com/eneo-ai/eneo/pull/574)         | O1 adoption and drift evidence                  | Merged as `dfe9dbe7`; required CI and final review passed.                                                                               |
+| [#577](https://github.com/eneo-ai/eneo/pull/577)         | O1 emergency execution block                    | Merged as `b186f175`; required CI passed and the final review found no current findings.                                                 |
+| Goal task T007                                           | O1 deletion and retained-provenance closure     | Active. Lock the existing terminal-run recovery contract with PostgreSQL behavior proof and concise operator documentation before O1 GA. |
+| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                                            |
+| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                                                   |
+| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Internal MCP and on-demand knowledge            | Open and coupled to #464. Split its internal effect/knowledge core before selective Skills if maintainers accept that split.             |
+| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                         | Draft. It does not gate Skills.                                                                                                          |
 
 Passing checks on an old PR head do not remove the need to rebase and rerun the
 full checks against the current `develop` branch.
@@ -549,18 +559,11 @@ on-demand loading ineffective without adding a second event source.
    `8ef96390` on 2026-07-22. Restore remains a copy-to-new-revision operation;
    the reviewed current revision is checked under the append lock and a stale
    review returns 409 without discarding dirty editor content.
-3. **Active:** rebase #560 on merged #559. Keep organisation navigation canonical and retain
-   O1 publication, direct reuse, the adoption-projection contract, and this roadmap. Put the
-   admin-only Organisation correction in #560; do not create another stacked PR
-   for a small subtractive alignment.
-   Before merge, run the complete catalogue and binding flow, capture desktop
-   and responsive evidence, address verified accessibility or UX problems, and
-   obtain both a Fable high whole-PR assessment and explicit product approval.
-   #560 lands the catalogue foundation; queued task T005 owns the adoption
-   projection and remains required before O1 is generally available.
-4. Before O1 is generally available, land the emergency execution block in #560
-   or a narrow follow-up. Do not delay the #560 rebase to absorb unrelated #553
-   work.
+3. **Completed:** #560, #574, and #577 delivered the organisation catalogue,
+   adoption evidence, and emergency execution block on `develop`.
+4. **Active:** T007 closes deletion and retained provenance with the existing
+   Skill and App-run owners. Do not add lifecycle state or product behavior
+   unless a behavior test disproves the accepted contract.
 5. Build O2 after O1 if local editable copies remain the next product priority.
    O2 has no internal MCP dependency.
 
@@ -645,6 +648,9 @@ flowchart LR
 - Parent saves update fields and bindings atomically.
 - Provider-facing instructions preserve exact revision and order.
 - Queued App runs retain bounded provenance and stay stable after later edits.
+- Bound Skills and retained queued or running App runs block deletion. Complete
+  and failed runs keep readable body-free provenance but no longer retain an
+  otherwise eligible Skill.
 - Personal Chat uses Governance Policy pins and rejects direct default-Assistant
   bindings.
 - Zero-Skill behaviour remains byte-equivalent.
@@ -714,6 +720,7 @@ flowchart LR
 | Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                          |
 | Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                     |
 | Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.            |
+| Skill deletion could invalidate a queued run    | Bindings and retained queued/running App-run evidence block deletion; terminal runs retain body-free IDs and digests.       |
 | Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                          |
 | End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                        |
 | Two Skills contradict each other                | Saved order is visible. The author resolves the conflict; Eneo does not invent semantic precedence.                         |
@@ -737,6 +744,9 @@ flowchart LR
 - Use the organisation execution block for an incident. In-flight provider
   requests finish, while later turns and App runs that have not begun provider
   execution fail closed with a recorded reason.
+- Detach a local or never-published organisation draft before deletion. Wait
+  for retained App runs to complete or fail; their body-free provenance remains
+  readable after an eligible hard deletion.
 - Roll back a selective-activation release by keeping existing bindings as
   `always`; do not drop mode or evidence columns until the team has migrated the
   data.
