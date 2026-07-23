@@ -22,6 +22,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
 )
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    top_level_schema_property_names,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_SV,
@@ -188,8 +191,12 @@ def _confirm_requirements_payload(
         key_decisions.append(architecture_decision)
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
+    summary = _summary_text(resolved, locale)
+    output_schema_summary = _output_schema_summary_line(session_state, locale)
+    if output_schema_summary is not None:
+        summary = f"{summary} {output_schema_summary}"
     return RequirementsSummaryPayload(
-        summary=_summary_text(resolved, locale),
+        summary=summary,
         key_decisions=key_decisions,
         input_description=input_description,
         output_description=output_description,
@@ -203,6 +210,30 @@ def _confirm_requirements_payload(
             *_assumptions(locale),
         ],
         manual_setup_notes=[],
+    )
+
+
+def _output_schema_summary_line(
+    session_state: PlanningState,
+    locale: Locale,
+) -> str | None:
+    evidence = session_state.output_schema_evidence
+    if (
+        evidence is None
+        or evidence.source != "template_placeholders"
+        or not evidence.truncated
+        or evidence.total_count is None
+    ):
+        return None
+    visible_count = len(top_level_schema_property_names(evidence.json_schema))
+    if locale == "sv":
+        return (
+            f"Mallen innehåller {evidence.total_count} unika platshållare; "
+            f"{visible_count} visas i planeringsunderlaget."
+        )
+    return (
+        f"The template contains {evidence.total_count} unique placeholders; "
+        f"{visible_count} are shown in the planning evidence."
     )
 
 

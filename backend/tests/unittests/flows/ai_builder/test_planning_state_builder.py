@@ -391,6 +391,131 @@ class TestOutputSchemaEvidencePreservation:
             "additionalProperties": False,
         }
 
+    def test_duplicate_placeholder_survives_when_one_source_file_is_detached(
+        self,
+    ) -> None:
+        active_file_id = UUID("00000000-0000-0000-0000-000000000701")
+        detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {"shared": {"type": "string"}},
+            },
+            source="template_placeholders",
+            confidence="high",
+            evidence=[
+                f"file:{detached_file_id}:content:template_placeholder:shared",
+                f"file:{active_file_id}:content:template_placeholder:shared",
+            ],
+            total_count=1,
+            truncated=False,
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={active_file_id},
+        )
+
+        evidence = rebuilt.output_schema_evidence
+        assert evidence is not None
+        assert evidence.json_schema["properties"] == {"shared": {"type": "string"}}
+        assert evidence.total_count == 1
+
+    def test_non_truncated_placeholder_total_recounts_after_detach(self) -> None:
+        active_file_id = UUID("00000000-0000-0000-0000-000000000701")
+        detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {
+                    "kept": {"type": "string"},
+                    "removed": {"type": "string"},
+                },
+            },
+            source="template_placeholders",
+            confidence="high",
+            evidence=[
+                f"file:{active_file_id}:content:template_placeholder:kept",
+                f"file:{detached_file_id}:content:template_placeholder:removed",
+            ],
+            total_count=2,
+            truncated=False,
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={active_file_id},
+        )
+
+        evidence = rebuilt.output_schema_evidence
+        assert evidence is not None
+        assert evidence.json_schema["properties"] == {"kept": {"type": "string"}}
+        assert evidence.total_count == 1
+
+    def test_drops_truncated_template_evidence_when_a_source_file_is_detached(
+        self,
+    ) -> None:
+        active_file_id = UUID("00000000-0000-0000-0000-000000000701")
+        detached_file_id = UUID("00000000-0000-0000-0000-000000000702")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {
+                    f"field_{index}": {"type": "string"} for index in range(8)
+                },
+            },
+            source="template_placeholders",
+            confidence="medium",
+            evidence=[
+                f"file:{active_file_id}:template_placeholder_source",
+                f"file:{detached_file_id}:template_placeholder_source",
+                *[
+                    f"file:{active_file_id}:content:template_placeholder:field_{index}"
+                    for index in range(8)
+                ],
+            ],
+            total_count=12,
+            truncated=True,
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids={active_file_id},
+        )
+
+        assert rebuilt.output_schema_evidence is None
+
+    def test_drops_attached_json_schema_evidence_after_detach(self) -> None:
+        file_id = UUID("00000000-0000-0000-0000-000000000701")
+        persisted = _state()
+        persisted.output_schema_evidence = OutputSchemaEvidence(
+            json_schema={
+                "type": "object",
+                "properties": {"decision": {"type": "string"}},
+            },
+            source="attachment_json_schema",
+            confidence="high",
+            evidence=[f"file:{file_id}:json_schema_attachment"],
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted,
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.output_schema_evidence is None
+
     def test_drops_template_output_schema_evidence_for_detached_file(self) -> None:
         file_id = UUID("00000000-0000-0000-0000-000000000701")
         persisted = _state()

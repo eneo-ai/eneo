@@ -241,10 +241,17 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
     fields = top_level_schema_property_names(evidence.json_schema)
     field_text = ", ".join(fields) if fields else "top-level object"
     if evidence.source == "template_placeholders":
+        coverage_line = (
+            f"- placeholder coverage: {len(fields)} of {evidence.total_count} unique "
+            "fields retained (truncated)"
+            if evidence.truncated and evidence.total_count is not None
+            else None
+        )
         return "\n".join(
             [
                 f"- source: {evidence.source}, {evidence.confidence} confidence",
                 f"- template placeholder fields: {field_text}",
+                *([coverage_line] if coverage_line is not None else []),
                 "- Prefer source-derived output_fields for placeholders that can be "
                 "extracted from uploaded documents; use input_fields only for values "
                 "the user must provide at runtime.",

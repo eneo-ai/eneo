@@ -643,7 +643,7 @@ def _terminal_output_schema_from_planning_state(
     evidence = state.output_schema_evidence
     if evidence is None:
         return None
-    if evidence.source != "freeform_text":
+    if evidence.source == "template_placeholders":
         return None
     if final_output_type != OutputType.JSON:
         slot = state.resolved_slots.get("terminal_output")

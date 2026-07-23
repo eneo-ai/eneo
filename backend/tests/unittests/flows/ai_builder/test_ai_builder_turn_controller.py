@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
 )
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -140,6 +141,56 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
     }
+
+
+def test_server_confirmation_discloses_truncated_template_placeholders_in_swedish() -> (
+    None
+):
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
+        },
+        source="template_placeholders",
+        confidence="medium",
+        total_count=12,
+        truncated=True,
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="sv")
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert (
+        "Mallen innehåller 12 unika platshållare; 8 visas i planeringsunderlaget."
+        in decision.payload.summary
+    )
+
+
+def test_server_confirmation_discloses_truncated_template_placeholders_in_english() -> (
+    None
+):
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {f"field_{index}": {"type": "string"} for index in range(8)},
+        },
+        source="template_placeholders",
+        confidence="medium",
+        total_count=12,
+        truncated=True,
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="en")
+
+    assert isinstance(decision, ConfirmRequirements)
+    assert (
+        "The template contains 12 unique placeholders; 8 are shown in the planning evidence."
+        in decision.payload.summary
+    )
 
 
 def test_server_confirmation_summarizes_processing_goal() -> None:

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 from uuid import UUID
 
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.planning_state import (
+    ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
+    TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
+    TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     FileRole,
     FileRoleEvidence,
     OutputSchemaEvidence,
@@ -62,6 +65,7 @@ class AIBuilderAttachmentContext:
     included_file_ids: list[UUID]
     total_chars: int
     truncated: bool
+    output_schema_evidence: OutputSchemaEvidence | None = None
 
 
 def readable_attachment_text(file: File) -> str | None:
@@ -92,11 +96,13 @@ def apply_attachment_file_roles_to_planning_state(
             candidate_roles=list(item.candidate_roles),
         )
     state.file_roles = list(roles_by_id.values())
-    _apply_template_placeholder_output_schema(state, attachment_context)
+    if (
+        state.output_schema_evidence is None
+        and attachment_context.output_schema_evidence is not None
+    ):
+        state.output_schema_evidence = attachment_context.output_schema_evidence
     _apply_structural_template_docx_mode(state, attachment_context)
 
-
-_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
 
 _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
     "runtime_input_sample",
@@ -109,51 +115,82 @@ _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
 _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
 
 
-def _apply_template_placeholder_output_schema(
-    state: PlanningState,
-    attachment_context: AIBuilderAttachmentContext,
-) -> None:
-    if state.output_schema_evidence is not None:
-        return
-    placeholders = _template_placeholder_items(attachment_context)
-    if not placeholders:
-        return
-    state.output_schema_evidence = OutputSchemaEvidence(
-        json_schema=_template_placeholder_schema(
-            tuple(placeholder for placeholder, _ in placeholders)
-        ),
-        source="template_placeholders",
-        confidence="high",
-        evidence=[evidence for _, evidence in placeholders],
+def _attachment_output_schema_evidence(
+    files: list[File],
+    readable_text_by_file: Mapping[UUID, str | None],
+) -> OutputSchemaEvidence | None:
+    # A top-level import would cycle through conversation metadata back into this
+    # module. The parser remains owned by planning_state_builder until that owner
+    # can move independently without widening this persisted-contract slice.
+    from eneo.flows.ai_builder.planning_state_builder import (
+        parse_output_schema_candidate,
+    )
+
+    for file in sorted(files, key=lambda item: str(item.id)):
+        text = readable_text_by_file[file.id]
+        if text is None or not _is_json_attachment(file):
+            continue
+        schema = parse_output_schema_candidate(text)
+        if schema is not None:
+            return OutputSchemaEvidence(
+                json_schema=schema,
+                source="attachment_json_schema",
+                confidence="high",
+                evidence=[f"file:{file.id}{ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX}"],
+            )
+    return _template_placeholder_output_schema_evidence(files, readable_text_by_file)
+
+
+def _is_json_attachment(file: File) -> bool:
+    mimetype = (file.mimetype or "").casefold().split(";", 1)[0].strip()
+    return mimetype in {"application/json", "application/schema+json"} or (
+        file.name.casefold().endswith(".json")
     )
 
 
-def _template_placeholder_items(
-    attachment_context: AIBuilderAttachmentContext,
-) -> tuple[tuple[str, str], ...]:
-    placeholders: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for item in attachment_context.evidence:
-        if item.inferred_role != "template":
+def _template_placeholder_output_schema_evidence(
+    files: list[File],
+    readable_text_by_file: Mapping[UUID, str | None],
+) -> OutputSchemaEvidence | None:
+    selected: list[str] = []
+    all_placeholders: set[str] = set()
+    source_markers: list[str] = []
+    placeholder_markers: list[str] = []
+
+    for file in sorted(files, key=lambda item: str(item.id)):
+        text = readable_text_by_file[file.id]
+        if text is None or _infer_file_role(file, text)[0] != "template":
             continue
-        for marker in item.role_evidence:
-            placeholder = _template_placeholder_from_evidence(marker)
-            if placeholder is None or placeholder in seen:
-                continue
-            placeholders.append((placeholder, f"file:{item.file_id}:{marker}"))
-            seen.add(placeholder)
-            if len(placeholders) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
-                return tuple(placeholders)
-    return tuple(placeholders)
+        file_placeholders: set[str] = set()
+        has_placeholder = False
+        for placeholder in _iter_normalized_template_placeholders(text):
+            has_placeholder = True
+            if placeholder not in all_placeholders:
+                all_placeholders.add(placeholder)
+                if len(selected) < _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
+                    selected.append(placeholder)
+            if placeholder in selected and placeholder not in file_placeholders:
+                placeholder_markers.append(
+                    f"file:{file.id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder}"
+                )
+                file_placeholders.add(placeholder)
+        if has_placeholder:
+            source_markers.append(
+                f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
+            )
 
-
-def _template_placeholder_from_evidence(marker: str) -> str | None:
-    if not marker.startswith(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX):
+    if not selected:
         return None
-    placeholder = marker.removeprefix(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
-    if not placeholder:
-        return None
-    return placeholder
+    total_count = len(all_placeholders)
+    truncated = total_count > len(selected)
+    return OutputSchemaEvidence(
+        json_schema=_template_placeholder_schema(tuple(selected)),
+        source="template_placeholders",
+        confidence="medium" if truncated else "high",
+        evidence=[*source_markers, *placeholder_markers],
+        total_count=total_count,
+        truncated=truncated,
+    )
 
 
 def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
@@ -188,7 +225,7 @@ def _apply_structural_template_docx_mode(
         for item in attachment_context.evidence
         if item.inferred_role == "template"
         for marker in item.role_evidence
-        if marker.startswith(_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
+        if marker.startswith(TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX)
     ]
     if not evidence:
         return
@@ -333,16 +370,21 @@ def _add_role_candidate(
 
 def _template_placeholder_evidence(text: str) -> tuple[str, ...]:
     evidence: list[str] = []
-    seen: set[str] = set()
-    for expression in iter_template_expressions(text):
-        normalized = " ".join(expression.split())
-        if not normalized or normalized in seen:
+    for placeholder in _iter_normalized_template_placeholders(text):
+        marker = f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder}"
+        if marker in evidence:
             continue
-        evidence.append(f"{_TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{normalized[:80]}")
-        seen.add(normalized)
+        evidence.append(marker)
         if len(evidence) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
             break
     return tuple(evidence)
+
+
+def _iter_normalized_template_placeholders(text: str) -> Iterator[str]:
+    for expression in iter_template_expressions(text):
+        normalized = " ".join(expression.split())[:80]
+        if normalized:
+            yield normalized
 
 
 def build_ai_builder_attachment_context(
@@ -356,6 +398,10 @@ def build_ai_builder_attachment_context(
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
     remaining = resolved_policy.max_total_chars
     readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
+    output_schema_evidence = _attachment_output_schema_evidence(
+        files,
+        readable_text_by_file,
+    )
     discovery_excerpts = _fair_discovery_excerpts(
         readable_text_by_file,
         policy=resolved_policy,
@@ -426,6 +472,7 @@ def build_ai_builder_attachment_context(
         included_file_ids=included_file_ids,
         total_chars=total_chars,
         truncated=truncated,
+        output_schema_evidence=output_schema_evidence,
     )
 
 

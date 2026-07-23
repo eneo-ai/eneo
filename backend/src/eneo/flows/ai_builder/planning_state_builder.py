@@ -77,9 +77,12 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
+    TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     FileRole,
     OutputSchemaEvidence,
     PlanningSignal,
@@ -219,6 +222,7 @@ def build_planning_state_from_conversation(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
+    attachment_output_schema_evidence: OutputSchemaEvidence | None = None,
 ) -> PlanningState:
     """Derive a `PlanningState` from a conversation and optional `Flow`.
 
@@ -226,7 +230,15 @@ def build_planning_state_from_conversation(
     this function seeds the deterministic slot surface from the compacted
     conversation that was actually persisted.
     """
-    output_schema_evidence = _derive_output_schema_evidence(conversation)
+    attachment_json_schema_evidence = (
+        attachment_output_schema_evidence
+        if attachment_output_schema_evidence is not None
+        and attachment_output_schema_evidence.source == "attachment_json_schema"
+        else None
+    )
+    output_schema_evidence = (
+        _derive_output_schema_evidence(conversation) or attachment_json_schema_evidence
+    )
     resolved_slots = _resolve_slots(
         conversation,
         flow=flow,
@@ -359,10 +371,35 @@ def _carryable_output_schema_evidence(
     *,
     attached_file_ids: Collection[UUID],
 ) -> OutputSchemaEvidence | None:
-    if evidence.source != "template_placeholders":
+    if evidence.source == "freeform_text":
         return evidence
 
     attached = set(attached_file_ids)
+    if evidence.source == "attachment_json_schema":
+        source_file_ids = {
+            file_id
+            for marker in evidence.evidence
+            if (
+                file_id := _attachment_evidence_file_id(
+                    marker, ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX
+                )
+            )
+            is not None
+        }
+        return evidence if source_file_ids and source_file_ids <= attached else None
+
+    source_file_ids = {
+        file_id
+        for marker in evidence.evidence
+        if (
+            file_id := _attachment_evidence_file_id(
+                marker, TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX
+            )
+        )
+        is not None
+    }
+    if evidence.truncated and source_file_ids and not source_file_ids <= attached:
+        return None
     retained = [
         (marker, parsed)
         for marker in evidence.evidence
@@ -373,6 +410,16 @@ def _carryable_output_schema_evidence(
         return None
 
     retained_placeholders = {placeholder for _, (_, placeholder) in retained}
+    retained_source_markers = [
+        marker
+        for marker in evidence.evidence
+        if (
+            file_id := _attachment_evidence_file_id(
+                marker, TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX
+            )
+        )
+        in attached
+    ]
     return OutputSchemaEvidence(
         json_schema=_filter_template_placeholder_schema(
             evidence.json_schema,
@@ -380,13 +427,31 @@ def _carryable_output_schema_evidence(
         ),
         source=evidence.source,
         confidence=evidence.confidence,
-        evidence=[marker for marker, _ in retained],
+        evidence=[*retained_source_markers, *[marker for marker, _ in retained]],
+        total_count=(
+            evidence.total_count
+            if evidence.truncated
+            else len(retained_placeholders)
+            if evidence.total_count is not None
+            else None
+        ),
+        truncated=evidence.truncated,
     )
+
+
+def _attachment_evidence_file_id(marker: str, suffix: str) -> UUID | None:
+    if not marker.startswith("file:") or not marker.endswith(suffix):
+        return None
+    raw_file_id = marker.removeprefix("file:").removesuffix(suffix)
+    try:
+        return UUID(raw_file_id)
+    except ValueError:
+        return None
 
 
 def _template_placeholder_marker(marker: str) -> tuple[UUID, str] | None:
     prefix = "file:"
-    placeholder_separator = ":content:template_placeholder:"
+    placeholder_separator = f":{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}"
     if not marker.startswith(prefix) or placeholder_separator not in marker:
         return None
     raw_file_id, placeholder = marker.removeprefix(prefix).split(
@@ -437,7 +502,7 @@ def _derive_output_schema_evidence(
         for match in _FENCED_JSON_BLOCK_RE.finditer(message.content):
             if not _mentions_output_schema_near_fence(message.content, match):
                 continue
-            schema = _parse_output_schema_candidate(match.group(1))
+            schema = parse_output_schema_candidate(match.group(1))
             if schema is None:
                 continue
             evidence = OutputSchemaEvidence(
@@ -517,7 +582,7 @@ def _latest_output_schema_evidence_message_index(
         for match in _FENCED_JSON_BLOCK_RE.finditer(message.content):
             if not _mentions_output_schema_near_fence(message.content, match):
                 continue
-            if _parse_output_schema_candidate(match.group(1)) is not None:
+            if parse_output_schema_candidate(match.group(1)) is not None:
                 index = message_index
     return index
 
@@ -558,7 +623,7 @@ def _mentions_output_schema_near_fence(
     return any(label in window for label in _OUTPUT_SCHEMA_LABELS)
 
 
-def _parse_output_schema_candidate(raw_json: str) -> JsonObject | None:
+def parse_output_schema_candidate(raw_json: str) -> JsonObject | None:
     try:
         parsed: object = json.loads(raw_json)
     except json.JSONDecodeError:

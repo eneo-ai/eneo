@@ -41,7 +41,7 @@ from eneo.json_types import JsonObject
 
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 5
+BUILDER_SCHEMA_VERSION: int = 6
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
@@ -78,7 +78,15 @@ FileRole = Literal[
 ]
 
 FileRoleSource = Literal["structured_answer", "heuristic", "model"]
-OutputSchemaEvidenceSource = Literal["freeform_text", "template_placeholders"]
+OutputSchemaEvidenceSource = Literal[
+    "freeform_text",
+    "template_placeholders",
+    "attachment_json_schema",
+]
+
+ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX = ":json_schema_attachment"
+TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
+TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX = ":template_placeholder_source"
 
 StepOutputType = Literal["text", "json", "pdf", "docx"]
 StepOutputMode = Literal[
@@ -231,6 +239,30 @@ class OutputSchemaEvidence(_PlanningModel):
     source: OutputSchemaEvidenceSource
     confidence: SignalConfidence
     evidence: list[str] = Field(default_factory=list[str])
+    total_count: int | None = Field(default=None, ge=0)
+    truncated: bool = False
+
+    @model_validator(mode="after")
+    def _validate_truncation_metadata(self) -> OutputSchemaEvidence:
+        if self.source != "template_placeholders":
+            if self.total_count is not None or self.truncated:
+                raise ValueError(
+                    "placeholder count metadata requires template_placeholders source"
+                )
+            return self
+        if self.truncated and self.total_count is None:
+            raise ValueError("truncated placeholder evidence requires total_count")
+        properties = self.json_schema.get("properties")
+        visible_count = len(properties) if isinstance(properties, dict) else 0
+        if self.total_count is not None and self.total_count < visible_count:
+            raise ValueError("total_count cannot be smaller than visible schema fields")
+        if self.truncated and self.total_count == visible_count:
+            raise ValueError("truncated evidence must omit at least one placeholder")
+        if self.truncated and self.confidence == "high":
+            raise ValueError(
+                "truncated placeholder evidence cannot have high confidence"
+            )
+        return self
 
 
 class PlanningState(_PlanningModel):

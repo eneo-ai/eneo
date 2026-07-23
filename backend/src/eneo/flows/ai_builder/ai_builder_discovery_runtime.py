@@ -301,7 +301,15 @@ async def build_runtime_discovery_context(
     attachment_context: AIBuilderAttachmentContext | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> RuntimeDiscoveryContext:
-    state = build_planning_state_from_conversation(conversation, flow=flow)
+    state = build_planning_state_from_conversation(
+        conversation,
+        flow=flow,
+        attachment_output_schema_evidence=(
+            attachment_context.output_schema_evidence
+            if attachment_context is not None
+            else None
+        ),
+    )
     apply_attachment_file_roles_to_planning_state(state, attachment_context)
     if (
         not allow_classification

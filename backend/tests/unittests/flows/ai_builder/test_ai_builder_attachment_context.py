@@ -7,13 +7,14 @@ from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
     AIBuilderAttachmentContextPolicy,
+    apply_attachment_file_roles_to_planning_state,
     build_ai_builder_attachment_context,
     render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     build_slot_classification_input,
 )
-from eneo.flows.ai_builder.planning_state import FileRole
+from eneo.flows.ai_builder.planning_state import FileRole, PlanningState
 
 
 def _make_file(
@@ -135,6 +136,140 @@ def test_build_ai_builder_attachment_context_detects_structural_template_placeho
     assert result.context is not None
     assert "File role: template" in result.context
     assert "File role: context_only" in result.context
+
+
+def test_template_placeholder_evidence_reports_below_at_and_above_cap() -> None:
+    for total_count, expected_truncated, expected_confidence in (
+        (7, False, "high"),
+        (8, False, "high"),
+        (12, True, "medium"),
+    ):
+        placeholders = " ".join(
+            f"{{{{ field_{index} }}}}" for index in range(total_count)
+        )
+        result = build_ai_builder_attachment_context(
+            [
+                _make_file(
+                    name=f"template-{total_count}.docx",
+                    text=placeholders,
+                    mimetype=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    ),
+                    file_type=FileType.DOCUMENT,
+                )
+            ]
+        )
+        assert result is not None
+        state = PlanningState.empty()
+
+        apply_attachment_file_roles_to_planning_state(state, result)
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        assert evidence.total_count == total_count
+        assert evidence.truncated is expected_truncated
+        assert evidence.confidence == expected_confidence
+        properties = evidence.json_schema["properties"]
+        assert isinstance(properties, dict)
+        assert len(properties) == min(total_count, 8)
+
+
+def test_template_placeholder_total_deduplicates_across_multiple_templates() -> None:
+    shared = "{{ shared_field }} {{ shared_field }}"
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="first.docx",
+                text=f"{shared} " + " ".join(f"{{{{ first_{i} }}}}" for i in range(5)),
+                file_type=FileType.DOCUMENT,
+            ),
+            _make_file(
+                name="second.docx",
+                text=f"{shared} " + " ".join(f"{{{{ second_{i} }}}}" for i in range(5)),
+                file_type=FileType.DOCUMENT,
+            ),
+        ]
+    )
+    assert result is not None
+    state = PlanningState.empty()
+
+    apply_attachment_file_roles_to_planning_state(state, result)
+
+    evidence = state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.total_count == 11
+    assert evidence.truncated is True
+    assert (
+        sum("template_placeholder:shared_field" in item for item in evidence.evidence)
+        == 2
+    )
+
+
+def test_non_template_transcription_does_not_become_placeholder_schema() -> None:
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="meeting.wav",
+                text="The speaker literally said {{ example }}.",
+                file_type=FileType.AUDIO,
+                mimetype="audio/wav",
+            )
+        ]
+    )
+    assert result is not None
+    state = PlanningState.empty()
+
+    apply_attachment_file_roles_to_planning_state(state, result)
+
+    assert state.file_roles[0].role == "runtime_input_sample"
+    assert state.output_schema_evidence is None
+
+
+def test_json_schema_attachment_uses_structured_output_schema_evidence() -> None:
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="result.schema.json",
+                text=(
+                    '{"type":"object","properties":{"decision":{"type":"string"}},'
+                    '"required":["decision"],"additionalProperties":false}'
+                ),
+                mimetype="application/json",
+            )
+        ]
+    )
+    assert result is not None
+    state = PlanningState.empty()
+
+    apply_attachment_file_roles_to_planning_state(state, result)
+
+    evidence = state.output_schema_evidence
+    assert evidence is not None
+    assert evidence.source == "attachment_json_schema"
+    assert evidence.confidence == "high"
+    assert evidence.json_schema["required"] == ["decision"]
+    assert evidence.evidence == [
+        f"file:{result.evidence[0].file_id}:json_schema_attachment"
+    ]
+
+
+def test_json_schema_filename_uses_structured_evidence_with_plain_text_mimetype() -> (
+    None
+):
+    result = build_ai_builder_attachment_context(
+        [
+            _make_file(
+                name="result.schema.json",
+                text=('{"type":"object","properties":{"decision":{"type":"string"}}}'),
+                mimetype="text/plain",
+            )
+        ]
+    )
+
+    assert result is not None
+    assert result.output_schema_evidence is not None
+    assert result.output_schema_evidence.source == "attachment_json_schema"
 
 
 def test_build_ai_builder_attachment_context_does_not_infer_semantic_roles() -> None:

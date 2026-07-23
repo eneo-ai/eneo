@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
+    OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
 )
@@ -549,6 +550,20 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
                 included_file_ids=[],
                 total_chars=0,
                 truncated=False,
+                output_schema_evidence=OutputSchemaEvidence(
+                    json_schema={
+                        "type": "object",
+                        "properties": {"kundnamn": {"type": "string"}},
+                    },
+                    source="template_placeholders",
+                    confidence="high",
+                    evidence=[
+                        f"file:{file_id}:template_placeholder_source",
+                        f"file:{file_id}:content:template_placeholder:kundnamn",
+                    ],
+                    total_count=1,
+                    truncated=False,
+                ),
             ),
         )
     ).planning_state
@@ -563,7 +578,8 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
     assert evidence.source == "template_placeholders"
     assert evidence.confidence == "high"
     assert evidence.evidence == [
-        f"file:{file_id}:content:template_placeholder:kundnamn"
+        f"file:{file_id}:template_placeholder_source",
+        f"file:{file_id}:content:template_placeholder:kundnamn",
     ]
     properties = evidence.json_schema["properties"]
     assert isinstance(properties, dict)
@@ -571,6 +587,85 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
 
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "docx_output_mode" not in analysis.selected_question_ids
+
+
+@pytest.mark.asyncio
+async def test_runtime_applies_attachment_json_schema_evidence_without_model_call() -> (
+    None
+):
+    file_id = uuid4()
+    attachment_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+        },
+        source="attachment_json_schema",
+        confidence="high",
+        evidence=[f"file:{file_id}:json_schema_attachment"],
+    )
+
+    state = (
+        await build_runtime_discovery_context(
+            [],
+            tenant_id=uuid4(),
+            allow_classification=False,
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                evidence=(),
+                included_file_ids=[],
+                total_chars=0,
+                truncated=False,
+                output_schema_evidence=attachment_evidence,
+            ),
+        )
+    ).planning_state
+
+    assert state.output_schema_evidence is attachment_evidence
+    terminal_output = state.resolved_slots["terminal_output"]
+    assert terminal_output.value == "structured_json"
+    assert terminal_output.source == "heuristic"
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -> None:
+    file_id = uuid4()
+    template_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"kundnamn": {"type": "string"}},
+        },
+        source="template_placeholders",
+        confidence="high",
+        evidence=[
+            f"file:{file_id}:template_placeholder_source",
+            f"file:{file_id}:content:template_placeholder:kundnamn",
+        ],
+        total_count=1,
+        truncated=False,
+    )
+
+    state = (
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user", content="Bygg ett flöde för våra handlingar."
+                )
+            ],
+            tenant_id=uuid4(),
+            allow_classification=False,
+            attachment_context=AIBuilderAttachmentContext(
+                context=None,
+                evidence=(),
+                included_file_ids=[],
+                total_chars=0,
+                truncated=False,
+                output_schema_evidence=template_evidence,
+            ),
+        )
+    ).planning_state
+
+    assert state.output_schema_evidence is template_evidence
+    assert "terminal_output" not in state.resolved_slots
 
 
 @pytest.mark.asyncio

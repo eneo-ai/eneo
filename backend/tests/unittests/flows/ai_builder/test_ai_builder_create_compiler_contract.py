@@ -48,6 +48,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
 )
 from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.json_types import JsonObject
 
 
 def _question(input_bindings: dict[str, object] | None) -> str:
@@ -104,6 +105,53 @@ def test_compile_context_keeps_template_placeholder_evidence_out_of_terminal_sch
     assert [
         hint.variable_name for hint in context.template_placeholder_field_hints
     ] == ["kundnamn"]
+
+
+def test_compile_context_binds_attachment_json_schema_to_json_terminal() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    schema: JsonObject = {
+        "type": "object",
+        "properties": {"decision": {"type": "string"}},
+        "required": ["decision"],
+    }
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema=schema,
+        source="attachment_json_schema",
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.final_output_type == OutputType.JSON
+    assert context.terminal_output_schema == schema
+
+
+def test_compile_context_rejects_attachment_json_schema_for_docx_terminal() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.output_schema_evidence = OutputSchemaEvidence(
+        json_schema={
+            "type": "object",
+            "properties": {"decision": {"type": "string"}},
+        },
+        source="attachment_json_schema",
+        confidence="high",
+        evidence=["file:00000000-0000-0000-0000-000000000701:json_schema_attachment"],
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc:
+        create_compile_context_from_planning_state(state)
+
+    assert exc.value.public_code == "architecture_critic_invariant_failed"
 
 
 def test_compile_context_requires_only_summary_source_reader_obligation() -> None:

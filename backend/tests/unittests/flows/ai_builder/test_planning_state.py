@@ -36,8 +36,8 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_five(self) -> None:
-        assert BUILDER_SCHEMA_VERSION == 5
+    def test_builder_schema_version_is_six(self) -> None:
+        assert BUILDER_SCHEMA_VERSION == 6
 
     def test_payload_cap_is_128_kilobytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 128 * 1024
@@ -83,6 +83,30 @@ class TestOutputSchemaEvidence:
         )
 
         assert evidence.source == "template_placeholders"
+
+    def test_old_payload_defaults_truncation_metadata(self) -> None:
+        state = PlanningState.model_validate(
+            {
+                "fcm_version": FCM_VERSION,
+                "planner_contract_version": PLANNER_CONTRACT_VERSION,
+                "builder_schema_version": 5,
+                "output_schema_evidence": {
+                    "json_schema": {
+                        "type": "object",
+                        "properties": {"kundnamn": {"type": "string"}},
+                    },
+                    "source": "template_placeholders",
+                    "confidence": "high",
+                    "evidence": ["file:file_id:content:template_placeholder:kundnamn"],
+                },
+            }
+        )
+
+        evidence = state.output_schema_evidence
+        assert evidence is not None
+        assert evidence.total_count is None
+        assert evidence.truncated is False
+        assert state.builder_schema_version == 5
 
 
 class TestRoundTrip:
