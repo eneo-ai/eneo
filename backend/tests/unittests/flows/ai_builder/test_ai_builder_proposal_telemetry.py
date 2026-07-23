@@ -49,15 +49,18 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ChangesetCountSummary,
     MaterializerProgressSnapshot,
     ProposalAttemptTelemetryPayload,
+    ProposalCallKind,
     ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
+    assistant_metadata_with_usage,
     log_apply_failed,
     log_proposal_first_attempt,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
+from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 from eneo.observability.failure_events import (
@@ -133,6 +136,89 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
     assert payload["proposal_first_attempt_failure_kind"] == "validation"
     assert payload["proposal_repair_invocation_count"] == 1
     assert payload["proposal_repair_invocation_reasons"] == ["validation"]
+
+
+def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-call-family",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    usages = (
+        CompletionTokenUsage(2, 1, 3, source="provider"),
+        CompletionTokenUsage(5, 2, 7, source="litellm_estimate", estimated=True),
+        CompletionTokenUsage(),
+    )
+    kinds: tuple[ProposalCallKind, ...] = (
+        "semantic_adjudication",
+        "proposal_initial",
+        "proposal_repair",
+    )
+    for kind, usage in zip(kinds, usages, strict=True):
+        call = telemetry.begin_call(call_kind=kind)
+        telemetry.complete_call(call=call, usage=usage)
+
+    payload = telemetry.build_planner_telemetry()
+
+    assert [record["call_kind"] for record in payload["call_records"]] == list(kinds)
+    assert [record["attempt"] for record in payload["call_records"]] == [1, 2, 3]
+    assert {record["request_id"] for record in payload["call_records"]} == {
+        "req-call-family"
+    }
+    assert payload["prompt_tokens"] == 7
+    assert payload["completion_tokens"] == 3
+    assert payload["total_tokens"] == 10
+    assert payload["llm_calls_made"] == 3
+    assert payload["auxiliary_llm_call_count"] == 1
+    assert payload["used_auxiliary_llm"] is True
+    assert payload["token_usage_source"] == "litellm_estimate"
+    assert payload["token_usage_estimated"] is True
+    assert payload["call_records"][-1]["token_usage_source"] == "none"
+    assert "prompt_tokens" not in payload["call_records"][-1]
+    assert "completion_tokens" not in payload["call_records"][-1]
+    assert "total_tokens" not in payload["call_records"][-1]
+    metadata = assistant_metadata_with_usage(
+        conversation=[],
+        base_metadata=None,
+        usage_tracker=telemetry,
+    )
+    assert metadata is not None
+    summary = metadata["session_telemetry"]
+    assert summary["prompt_tokens_total"] == 7
+    assert summary["completion_tokens_total"] == 3
+    assert summary["total_tokens_total"] == 10
+    assert summary["llm_calls_made_total"] == 3
+    assert summary["auxiliary_llm_call_count"] == 1
+    assert summary["last_request_id"] == "req-call-family"
+    assert summary["last_token_usage_source"] == "litellm_estimate"
+
+
+@pytest.mark.parametrize(
+    "call_kind",
+    [
+        "semantic_adjudication",
+        "slot_classification",
+        "proposal_initial",
+        "forced_tool_continuation",
+        "proposal_repair",
+    ],
+)
+def test_every_closed_call_kind_is_aggregated(call_kind: ProposalCallKind) -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-kind-closure",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
+    call = telemetry.begin_call(call_kind=call_kind)
+    telemetry.complete_call(
+        call=call,
+        usage=CompletionTokenUsage(1, 2, 3, source="provider"),
+    )
+
+    payload = telemetry.build_planner_telemetry()
+    assert payload["llm_calls_made"] == 1
+    assert payload["total_tokens"] == 3
 
 
 def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:

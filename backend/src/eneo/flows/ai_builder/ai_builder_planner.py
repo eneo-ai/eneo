@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -48,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
 from eneo.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -148,6 +150,7 @@ class AIBuilderPlanner:
         completion_model_route: ResolvedCompletionModelRoute,
         max_output_tokens: int,
         request_id: str,
+        usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None",
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         before_provider_call: Callable[[], Awaitable[None]],
@@ -167,6 +170,7 @@ class AIBuilderPlanner:
                     max_output_tokens=max_output_tokens,
                     proposal_temperature=self.planner_temperature,
                     request_id=request_id,
+                    usage_tracker=usage_tracker,
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
                     assistant_metadata=build_assistant_message_metadata(conversation),
@@ -323,6 +327,11 @@ class AIBuilderPlanner:
             turn = claimed_turn.turn
             lease = turn.lease
             request_id = str(lease.request_id)
+            usage_tracker = ProposalTurnTelemetry(
+                request_id=request_id,
+                model=completion_model_route.litellm_model,
+                target_kind=TargetKind.EDIT if flow is not None else TargetKind.CREATE,
+            )
             lease_lost_event = claimed_turn.lease_lost_event
             accepted_message = claimed_turn.user_message
             accepted_session = await self.repo.get_session(
@@ -361,6 +370,7 @@ class AIBuilderPlanner:
                     ui_language=ui_language,
                     completion_model_route=completion_model_route,
                     prepared=prepared_metadata,
+                    usage_tracker=usage_tracker,
                     before_provider_call=mark_provider_work_started,
                 )
             except AIBuilderKnownProviderRejectionException as error:
@@ -408,6 +418,7 @@ class AIBuilderPlanner:
                         base_planning_state_version=turn.base_planning_state_version,
                         tenant_id=self.user.tenant_id,
                         current_turn_start=new_messages_start,
+                        usage_tracker=usage_tracker,
                         before_provider_call=mark_provider_work_started,
                     )
                 )
@@ -443,6 +454,7 @@ class AIBuilderPlanner:
                         completion_model_route=completion_model_route,
                         max_output_tokens=max_output_tokens,
                         request_id=request_id,
+                        usage_tracker=usage_tracker,
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
                         before_provider_call=mark_provider_work_started,
@@ -465,9 +477,7 @@ class AIBuilderPlanner:
                                 telemetry=ServerDecisionTelemetry(
                                     request_id=request_id,
                                     litellm_model=litellm_model,
-                                    used_auxiliary_llm=(
-                                        metadata_resolution.used_auxiliary_llm
-                                    ),
+                                    usage_tracker=usage_tracker,
                                 ),
                                 planning_state=planner_turn_request.planning_state,
                                 discovery_assumptions=(
@@ -530,6 +540,7 @@ class AIBuilderPlanner:
                                     completion_model_route=completion_model_route,
                                     max_output_tokens=max_output_tokens,
                                     request_id=request_id,
+                                    usage_tracker=usage_tracker,
                                     flow=flow,
                                     assistant_snapshots=assistant_snapshots,
                                     before_provider_call=mark_provider_work_started,

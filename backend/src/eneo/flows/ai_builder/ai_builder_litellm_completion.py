@@ -17,6 +17,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalCallKind,
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -76,6 +77,7 @@ async def call_proposal_completion(
     litellm_client: Any,
     request: ProposalCompletionRequest,
     usage_tracker: ProposalTurnTelemetry | None = None,
+    call_kind: ProposalCallKind | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
     message_groups = request.message_groups
@@ -88,8 +90,6 @@ async def call_proposal_completion(
     messages = flatten_proposal_message_groups(message_groups)
     if not request.call_budget.try_start_call():
         raise ProposalCallBudgetExhausted
-    if usage_tracker is not None:
-        usage_tracker.start_attempt(counts_as_repair=request.counts_as_repair)
     provider_kwargs = request.route.filter_unsupported_model_kwargs(
         ModelKwargs(temperature=request.temperature)
     )
@@ -104,6 +104,11 @@ async def call_proposal_completion(
     )
     if before_provider_call is not None:
         await before_provider_call()
+    if usage_tracker is not None:
+        usage_tracker.start_attempt(
+            counts_as_repair=request.counts_as_repair,
+            call_kind=call_kind,
+        )
     try:
         raw_response = await litellm_client.acompletion(
             model=request.route.litellm_model,
@@ -209,6 +214,7 @@ def make_usage_tracked_proposal_completion(
     *,
     litellm_client: Any,
     usage_tracker: ProposalTurnTelemetry | None,
+    call_kind: ProposalCallKind | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> ProposalCompletionFn:
     async def _tracked_completion(
@@ -218,6 +224,7 @@ def make_usage_tracked_proposal_completion(
             litellm_client=litellm_client,
             request=request,
             usage_tracker=usage_tracker,
+            call_kind=call_kind,
             before_provider_call=before_provider_call,
         )
 

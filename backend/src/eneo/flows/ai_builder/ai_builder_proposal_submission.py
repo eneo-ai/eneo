@@ -202,6 +202,7 @@ class ProposalSubmissionOwner:
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
+        usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
@@ -214,15 +215,9 @@ class ProposalSubmissionOwner:
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
         proposal_request_budget: ProposalRequestBudget | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
             resource_catalog=resource_catalog,
-        )
-        usage_tracker = ProposalTurnTelemetry(
-            request_id=request_id,
-            model=completion_model_route.litellm_model,
-            target_kind=target_kind,
         )
         ctx = ProposalTurnContext(
             turn=turn,
@@ -251,6 +246,7 @@ class ProposalSubmissionOwner:
             response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
                 usage_tracker=usage_tracker,
+                call_kind="proposal_initial",
                 request=ctx.completion_request(
                     temperature=proposal_temperature,
                     tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
@@ -519,6 +515,7 @@ class ProposalSubmissionOwner:
             repair_completion=make_usage_tracked_proposal_completion(
                 litellm_client=self.litellm_client,
                 usage_tracker=ctx.usage_tracker,
+                call_kind="proposal_repair",
                 before_provider_call=ctx.before_provider_call,
             ),
         )
@@ -716,6 +713,7 @@ class ProposalSubmissionOwner:
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
+                    call_kind="forced_tool_continuation",
                     before_provider_call=ctx.before_provider_call,
                 ),
                 truncation_error_phase=AIBuilderErrorPhase.PROPOSAL,

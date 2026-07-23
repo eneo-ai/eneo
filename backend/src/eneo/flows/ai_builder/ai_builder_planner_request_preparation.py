@@ -49,6 +49,7 @@ from eneo.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     form_intake_signal_values_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
     LLMMessageRole,
@@ -115,6 +116,7 @@ class PlannerRequestPreparationInput:
     allow_discovery_semantic_adjudication: bool
     persisted_planning_state: PlanningState | None
     current_turn_start: int
+    usage_tracker: ProposalTurnTelemetry
     before_provider_call: Callable[[], Awaitable[None]] | None = None
 
 
@@ -184,6 +186,7 @@ async def prepare_planner_request(
         allow_semantic_adjudication=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
         attachment_context=attachment_context_result,
+        usage_tracker=request.usage_tracker,
         before_provider_call=request.before_provider_call,
     )
     discovery_analysis = discovery_runtime.discovery_analysis

@@ -35,6 +35,7 @@ def build_planner_telemetry(
     total_tokens: object,
     tool_call_count: int,
     used_auxiliary_llm: bool,
+    auxiliary_llm_call_count: int | None = None,
     token_usage_source: object | None = None,
     token_usage_estimated: bool = False,
     outcome_kind: object | None = None,
@@ -65,6 +66,11 @@ def build_planner_telemetry(
         "total_tokens": total,
         "tool_call_count": tool_call_count,
         "used_auxiliary_llm": used_auxiliary_llm,
+        "auxiliary_llm_call_count": (
+            _non_negative_int(auxiliary_llm_call_count)
+            if auxiliary_llm_call_count is not None
+            else int(used_auxiliary_llm)
+        ),
         "token_usage_source": _safe_str(token_usage_source)
         or ("provider" if total is not None else None),
         "token_usage_estimated": token_usage_estimated,
@@ -266,8 +272,9 @@ def _apply_planner_telemetry(
     summary["tool_call_count_total"] += _non_negative_int(
         planner_telemetry.get("tool_call_count")
     )
-    if planner_telemetry.get("used_auxiliary_llm") is True:
-        summary["auxiliary_llm_call_count"] += 1
+    summary["auxiliary_llm_call_count"] += _non_negative_int(
+        planner_telemetry.get("auxiliary_llm_call_count")
+    )
     if planner_telemetry.get("architecture_commit_populated") is True:
         summary["architecture_commit_count"] += 1
     summary["repair_attempts_total"] += _non_negative_int(

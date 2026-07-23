@@ -61,6 +61,10 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     prepare_planner_request,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalMessageGroup,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -307,6 +311,12 @@ async def _prepare_planner_request_for_test(
             prior_plan_for_revision=prior_plan_for_revision,
             allow_discovery_semantic_adjudication=allow_discovery_semantic_adjudication,
             persisted_planning_state=persisted_planning_state,
+            current_turn_start=0,
+            usage_tracker=ProposalTurnTelemetry(
+                request_id="req-prepare-test",
+                model=completion_model_route.litellm_model,
+                target_kind=TargetKind.CREATE,
+            ),
         )
     )
 
@@ -1606,7 +1616,13 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
         ProposalPrepared(
             requirements_state=_requirements_state_confirmed(),
             ui_language="sv",
-            llm_messages=[{"role": "system", "content": "proposal"}],
+            message_groups=(
+                ProposalMessageGroup(
+                    messages=({"role": "system", "content": "proposal"},),
+                    kind="system",
+                    protected=True,
+                ),
+            ),
             system_prompt_hash="proposal-hash",
             prior_plan_for_revision=None,
             slot_classification_metadata=None,
@@ -1784,7 +1800,13 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
         ProposalPrepared(
             requirements_state=_requirements_state_confirmed(),
             ui_language="sv",
-            llm_messages=[{"role": "system", "content": "proposal"}],
+            message_groups=(
+                ProposalMessageGroup(
+                    messages=({"role": "system", "content": "proposal"},),
+                    kind="system",
+                    protected=True,
+                ),
+            ),
             system_prompt_hash="proposal-hash",
             prior_plan_for_revision=None,
             slot_classification_metadata=None,
@@ -1863,7 +1885,13 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         return ProposalPrepared(
             requirements_state=_requirements_state_confirmed(),
             ui_language="sv",
-            llm_messages=[{"role": "system", "content": "proposal"}],
+            message_groups=(
+                ProposalMessageGroup(
+                    messages=({"role": "system", "content": "proposal"},),
+                    kind="system",
+                    protected=True,
+                ),
+            ),
             system_prompt_hash="proposal-hash",
             prior_plan_for_revision=cast(BuilderPlan, prior_plan),
             slot_classification_metadata=None,

@@ -13,12 +13,16 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderQuestionEvent,
     AIBuilderStatus,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionTelemetry,
@@ -77,7 +81,11 @@ def _request(
         telemetry=ServerDecisionTelemetry(
             request_id="req-test",
             litellm_model="server",
-            used_auxiliary_llm=False,
+            usage_tracker=ProposalTurnTelemetry(
+                request_id="req-test",
+                model="server",
+                target_kind=TargetKind.CREATE,
+            ),
         ),
         planning_state=planning_state or PlanningState.empty(),
         discovery_assumptions=discovery_assumptions,

@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
     last_answered_question,
@@ -299,6 +300,7 @@ async def build_runtime_discovery_context(
     tenant_id: UUID,
     allow_classification: bool = True,
     attachment_context: AIBuilderAttachmentContext | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(
@@ -353,6 +355,7 @@ async def build_runtime_discovery_context(
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
+        usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
     )
     if result is None:
@@ -402,6 +405,7 @@ async def build_discovery_runtime_result(
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
     attachment_context: AIBuilderAttachmentContext | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
@@ -413,6 +417,7 @@ async def build_discovery_runtime_result(
         tenant_id=tenant_id,
         allow_classification=allow_semantic_adjudication,
         attachment_context=attachment_context,
+        usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
     )
     analysis = analyze_discovery(

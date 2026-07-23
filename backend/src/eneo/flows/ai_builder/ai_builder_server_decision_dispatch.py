@@ -33,13 +33,13 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     normalize_requirements_summary_for_flow,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
-    build_planner_telemetry,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -74,7 +74,7 @@ ServerDecisionKind = Literal[
 class ServerDecisionTelemetry:
     request_id: str
     litellm_model: str
-    used_auxiliary_llm: bool
+    usage_tracker: ProposalTurnTelemetry
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,22 +334,14 @@ def _server_turn_telemetry(
     architecture_commit_populated: bool,
     tool_call_count: int,
 ) -> dict[str, object]:
-    return build_planner_telemetry(
-        request_id=request.telemetry.request_id,
-        model=request.telemetry.litellm_model,
-        finish_reason=None,
-        prompt_tokens=None,
-        completion_tokens=None,
-        total_tokens=None,
-        tool_call_count=tool_call_count,
-        used_auxiliary_llm=request.telemetry.used_auxiliary_llm,
+    telemetry = request.telemetry.usage_tracker.build_planner_telemetry(
+        tool_call_count=tool_call_count
+    )
+    telemetry.update(
         outcome_kind=f"server_{action_kind}",
-        wall_clock_ms=0,
-        llm_calls_made=0,
-        repair_attempts=0,
-        parse_repair_attempts=0,
         architecture_commit_populated=architecture_commit_populated,
     )
+    return telemetry
 
 
 __all__ = [

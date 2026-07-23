@@ -15,10 +15,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
 )
+from eneo.flows.ai_builder.ai_builder_token_usage import (
+    completion_token_usage_from_response,
+)
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
+    )
+    from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+        ProposalTurnTelemetry,
     )
 
 
@@ -42,6 +48,7 @@ async def adjudicate_pending_question_answer(
     completion_model_route: ResolvedCompletionModelRoute,
     conversation: list[ConversationMessage],
     user_message: str,
+    usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> PendingQuestionResolution | None:
     pending = latest_pending_structured_question(conversation)
@@ -73,32 +80,38 @@ async def adjudicate_pending_question_answer(
     if not valid_option_ids:
         return None
 
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Classify a user's freeform answer to a structured question. "
+                "Return JSON only in the format "
+                '{"selected_option_id": string|null, "reason": string}.'
+            ),
+        },
+        {
+            "role": "user",
+            "content": _build_answer_prompt(
+                question=question,
+                options=cast(list[dict[str, Any]], options),
+                user_message=user_message,
+            ),
+        },
+    ]
     completion_kwargs = completion_model_route.filter_unsupported_model_kwargs(
         ModelKwargs(temperature=0.0)
     )
     if before_provider_call is not None:
         await before_provider_call()
+    call = (
+        usage_tracker.begin_call(call_kind="semantic_adjudication")
+        if usage_tracker is not None
+        else None
+    )
     try:
         response = await litellm_client.acompletion(
             model=completion_model_route.litellm_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Classify a user's freeform answer to a structured question. "
-                        "Return JSON only in the format "
-                        '{"selected_option_id": string|null, "reason": string}.'
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": _build_answer_prompt(
-                        question=question,
-                        options=cast(list[dict[str, Any]], options),
-                        user_message=user_message,
-                    ),
-                },
-            ],
+            messages=messages,
             stream=False,
             drop_params=True,
             max_tokens=120,
@@ -110,6 +123,19 @@ async def adjudicate_pending_question_answer(
             stage="semantic_adjudication",
         )
         raise failure.as_exception() from error
+
+    if call is not None and usage_tracker is not None:
+        usage_tracker.complete_call(
+            call=call,
+            usage=completion_token_usage_from_response(
+                response,
+                model_name=completion_model_route.litellm_model,
+                messages=messages,
+                completion_text=(
+                    response.choices[0].message.content if response.choices else None
+                ),
+            ),
+        )
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():

@@ -9,7 +9,6 @@ from typing import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
-    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -105,6 +104,7 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
+        usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
@@ -136,11 +136,7 @@ class AIBuilderProposalProcessor:
                     plan_edit_context=plan_edit_context,
                     prior_plan_for_revision=prior_plan_for_revision,
                     request_id=request_id,
-                    usage_tracker=ProposalTurnTelemetry(
-                        request_id=request_id,
-                        model=completion_model_route.litellm_model,
-                        target_kind=TargetKind.CREATE,
-                    ),
+                    usage_tracker=usage_tracker,
                     requested_output_sections=requested_output_sections,
                     assistant_metadata=assistant_metadata,
                     flow=flow,
@@ -164,6 +160,7 @@ class AIBuilderProposalProcessor:
             max_output_tokens=max_output_tokens,
             proposal_temperature=proposal_temperature,
             request_id=request_id,
+            usage_tracker=usage_tracker,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             assistant_metadata=assistant_metadata,

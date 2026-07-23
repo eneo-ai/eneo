@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     latest_pending_structured_question,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
@@ -112,6 +113,7 @@ async def resolve_user_question_metadata(
     ui_language: str | None = None,
     completion_model_route: ResolvedCompletionModelRoute,
     prepared: PreparedUserQuestionMetadata | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> UserQuestionMetadataResolution:
     prepared = prepared or prepare_user_question_metadata(
@@ -128,6 +130,7 @@ async def resolve_user_question_metadata(
             completion_model_route=completion_model_route,
             conversation=conversation,
             user_message=message,
+            usage_tracker=usage_tracker,
             before_provider_call=before_provider_call,
         )
         if adjudicated_answer is not None:

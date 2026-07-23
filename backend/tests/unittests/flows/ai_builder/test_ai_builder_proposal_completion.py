@@ -30,7 +30,10 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -42,7 +45,9 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     make_usage_tracked_proposal_completion,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalCallKind,
     ProposalTurnTelemetry,
+    assistant_metadata_with_usage,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCallBudget,
@@ -54,6 +59,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest as ProposalCompletionRequestContract,
+)
+from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
+    adjudicate_pending_question_answer,
 )
 from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -1106,3 +1114,123 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
     assert call_budget.calls_started == 2
     assert before_provider_call.await_count == 2
     assert litellm_client.acompletion.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-turn-usage",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+    auxiliary_response = _make_response_with_text(
+        json.dumps(
+            {
+                "selected_option_id": "pdf_document",
+                "reason": "mentions PDF",
+            }
+        ),
+        prompt_tokens=2,
+        completion_tokens=1,
+        total_tokens=3,
+    )
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[
+                auxiliary_response,
+                _make_response_with_text(
+                    "initial",
+                    prompt_tokens=5,
+                    completion_tokens=3,
+                    total_tokens=8,
+                ),
+                _make_response_with_text(
+                    "repair",
+                    prompt_tokens=7,
+                    completion_tokens=4,
+                    total_tokens=11,
+                ),
+            ]
+        )
+    )
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                {
+                    "id": "tool-1",
+                    "name": "ask_structured_question",
+                    "arguments": {
+                        "question_id": "terminal_output",
+                        "question": "Output?",
+                        "options": [
+                            {
+                                "id": "pdf_document",
+                                "label": "PDF",
+                                "value": "pdf_document",
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+    ]
+
+    await adjudicate_pending_question_answer(
+        litellm_client=client,
+        completion_model_route=_route(),
+        conversation=conversation,
+        user_message="PDF",
+        usage_tracker=tracker,
+    )
+    call_budget = ProposalCallBudget(call_limit=2)
+    calls: tuple[tuple[ProposalCallKind, bool], ...] = (
+        ("proposal_initial", False),
+        ("proposal_repair", True),
+    )
+    for call_kind, counts_as_repair in calls:
+        await call_proposal_completion(
+            litellm_client=client,
+            usage_tracker=tracker,
+            call_kind=call_kind,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=100,
+                temperature=0.0,
+                counts_as_repair=counts_as_repair,
+                call_budget=call_budget,
+            ),
+        )
+
+    metadata = assistant_metadata_with_usage(
+        conversation=[],
+        base_metadata=None,
+        usage_tracker=tracker,
+    )
+
+    assert client.acompletion.await_count == 3
+    assert metadata is not None
+    planner = metadata["planner_telemetry"]
+    assert [record["call_kind"] for record in planner["call_records"]] == [
+        "semantic_adjudication",
+        "proposal_initial",
+        "proposal_repair",
+    ]
+    assert [record["attempt"] for record in planner["call_records"]] == [1, 2, 3]
+    assert {record["request_id"] for record in planner["call_records"]} == {
+        "req-turn-usage"
+    }
+    assert planner["prompt_tokens"] == 2 + 5 + 7
+    assert planner["completion_tokens"] == 1 + 3 + 4
+    assert planner["total_tokens"] == 3 + 8 + 11
+    assert planner["llm_calls_made"] == 3
+    assert planner["auxiliary_llm_call_count"] == 1
+    summary = metadata["session_telemetry"]
+    assert summary["prompt_tokens_total"] == 2 + 5 + 7
+    assert summary["completion_tokens_total"] == 1 + 3 + 4
+    assert summary["total_tokens_total"] == 3 + 8 + 11
+    assert summary["llm_calls_made_total"] == 3
+    assert summary["auxiliary_llm_call_count"] == 1

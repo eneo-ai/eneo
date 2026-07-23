@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
 )
+from eneo.flows.ai_builder.ai_builder_token_usage import (
+    completion_token_usage_from_response,
+)
 from eneo.flows.ai_builder.planning_state import FileRole
 from eneo.main.logging import get_logger
 
@@ -31,6 +34,9 @@ logger = get_logger(__name__)
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
+    )
+    from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+        ProposalTurnTelemetry,
     )
 
 SlotClassificationConfidence = Literal["high", "medium", "low"]
@@ -153,6 +159,7 @@ async def classify_slots(
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> SlotClassificationResult | None:
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
@@ -203,6 +210,11 @@ async def classify_slots(
     completion_kwargs["response_format"] = response_format
     if before_provider_call is not None:
         await before_provider_call()
+    call = (
+        usage_tracker.begin_call(call_kind="slot_classification")
+        if usage_tracker is not None
+        else None
+    )
     try:
         response = await litellm_client.acompletion(
             model=litellm_model,
@@ -219,6 +231,19 @@ async def classify_slots(
             tenant_id=tenant_id,
         )
         raise failure.as_exception() from error
+
+    if call is not None and usage_tracker is not None:
+        usage_tracker.complete_call(
+            call=call,
+            usage=completion_token_usage_from_response(
+                response,
+                model_name=litellm_model,
+                messages=messages,
+                completion_text=(
+                    response.choices[0].message.content if response.choices else None
+                ),
+            ),
+        )
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():

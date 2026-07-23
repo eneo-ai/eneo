@@ -83,6 +83,13 @@ ProposalTerminalFailureKind = Literal[
     "repair_quality_failure",
 ]
 ProposalAttemptKind = Literal["initial", "repair"]
+ProposalCallKind = Literal[
+    "semantic_adjudication",
+    "slot_classification",
+    "proposal_initial",
+    "forced_tool_continuation",
+    "proposal_repair",
+]
 ProposalAttemptFailureKind = Literal[
     "parse",
     "validation",
@@ -130,7 +137,7 @@ def proposal_repair_reason_from_tool_failure(
     return "validation"
 
 
-def _empty_token_usages() -> list[CompletionTokenUsage]:
+def _empty_call_records() -> list[ProposalCallRecord]:
     return []
 
 
@@ -160,14 +167,22 @@ class ProposalAttemptTelemetryPayload(BaseModel):
     failure_code_count: int = Field(default=0, ge=0)
 
 
+@dataclass(frozen=True, slots=True)
+class ProposalCallRecord:
+    """Content-free accounting fact for one provider call in a send turn."""
+
+    call_kind: ProposalCallKind
+    usage: CompletionTokenUsage
+    request_id: str
+    attempt: int
+
+
 @dataclass
 class ProposalTurnTelemetry:
     request_id: str
     model: str
     target_kind: TargetKind
-    token_usages: list[CompletionTokenUsage] = field(
-        default_factory=_empty_token_usages
-    )
+    call_records: list[ProposalCallRecord] = field(default_factory=_empty_call_records)
     finish_reason: str | None = None
     repair_attempts: int = 0
     proposal_first_attempt_tool: str | None = None
@@ -182,16 +197,58 @@ class ProposalTurnTelemetry:
     _turn_started_ns: int = field(default_factory=monotonic_ns, repr=False)
     _attempt_started_ns: int | None = field(default=None, init=False, repr=False)
     _attempt_counts_as_repair: bool = field(default=False, init=False, repr=False)
+    _pending_call: ProposalCallRecord | None = field(
+        default=None, init=False, repr=False
+    )
+
+    @property
+    def token_usages(self) -> list[CompletionTokenUsage]:
+        return [record.usage for record in self.call_records]
 
     @property
     def llm_calls_made(self) -> int:
-        return len(self.proposal_attempts) + int(self._attempt_started_ns is not None)
+        return len(self.call_records)
 
-    def start_attempt(self, *, counts_as_repair: bool) -> None:
+    def begin_call(self, *, call_kind: ProposalCallKind) -> ProposalCallRecord:
+        record = ProposalCallRecord(
+            call_kind=call_kind,
+            usage=CompletionTokenUsage(),
+            request_id=self.request_id,
+            attempt=len(self.call_records) + 1,
+        )
+        self.call_records.append(record)
+        return record
+
+    def complete_call(
+        self,
+        *,
+        call: ProposalCallRecord,
+        usage: CompletionTokenUsage,
+    ) -> None:
+        index = call.attempt - 1
+        if index >= len(self.call_records) or self.call_records[index] != call:
+            raise ValueError("Call record does not belong to this turn")
+        self.call_records[index] = ProposalCallRecord(
+            call_kind=call.call_kind,
+            usage=usage,
+            request_id=call.request_id,
+            attempt=call.attempt,
+        )
+
+    def start_attempt(
+        self,
+        *,
+        counts_as_repair: bool,
+        call_kind: ProposalCallKind | None = None,
+    ) -> None:
         if self._attempt_started_ns is not None:
             self._complete_attempt(usage=None)
         self._attempt_started_ns = monotonic_ns()
         self._attempt_counts_as_repair = counts_as_repair
+        self._pending_call = self.begin_call(
+            call_kind=call_kind
+            or ("proposal_repair" if counts_as_repair else "proposal_initial")
+        )
         if counts_as_repair:
             self.repair_attempts += 1
 
@@ -206,7 +263,6 @@ class ProposalTurnTelemetry:
             self.start_attempt(counts_as_repair=counts_as_repair)
         self._complete_attempt(usage=usage)
         self.finish_reason = finish_reason
-        self.token_usages.append(usage)
 
     def record_attempt_failure(
         self,
@@ -250,6 +306,9 @@ class ProposalTurnTelemetry:
                 token_usage_estimated=attempt_usage.estimated,
             )
         )
+        if self._pending_call is not None:
+            self.complete_call(call=self._pending_call, usage=attempt_usage)
+            self._pending_call = None
         self._attempt_started_ns = None
         self._attempt_counts_as_repair = False
 
@@ -294,8 +353,15 @@ class ProposalTurnTelemetry:
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
             tool_call_count=tool_call_count,
-            used_auxiliary_llm=False,
-            token_usage_source=usage.source if usage.has_tokens else None,
+            used_auxiliary_llm=any(
+                record.call_kind in {"semantic_adjudication", "slot_classification"}
+                for record in self.call_records
+            ),
+            auxiliary_llm_call_count=sum(
+                record.call_kind in {"semantic_adjudication", "slot_classification"}
+                for record in self.call_records
+            ),
+            token_usage_source=usage.source,
             token_usage_estimated=usage.estimated,
             outcome_kind="dispatched",
             wall_clock_ms=max(0, (monotonic_ns() - self._turn_started_ns) // 1_000_000),
@@ -315,6 +381,31 @@ class ProposalTurnTelemetry:
         telemetry["proposal_attempts"] = [
             attempt.model_dump(mode="json", exclude_none=True)
             for attempt in self.proposal_attempts
+        ]
+        telemetry["call_records"] = [
+            {
+                "call_kind": record.call_kind,
+                "request_id": record.request_id,
+                "attempt": record.attempt,
+                "token_usage_source": record.usage.source,
+                "token_usage_estimated": record.usage.estimated,
+                **(
+                    {"prompt_tokens": record.usage.prompt_tokens}
+                    if record.usage.prompt_tokens is not None
+                    else {}
+                ),
+                **(
+                    {"completion_tokens": record.usage.completion_tokens}
+                    if record.usage.completion_tokens is not None
+                    else {}
+                ),
+                **(
+                    {"total_tokens": record.usage.total_tokens}
+                    if record.usage.total_tokens is not None
+                    else {}
+                ),
+            }
+            for record in self.call_records
         ]
         return telemetry
 
@@ -457,7 +548,7 @@ def build_proposal_failed_turn_payload(
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         total_tokens=usage.total_tokens,
-        token_usage_source=usage.source if usage.has_tokens else None,
+        token_usage_source=usage.source,
         token_usage_estimated=usage.estimated,
         final_failure_kind=final_failure_kind,
         final_error_code=final_error_code,
