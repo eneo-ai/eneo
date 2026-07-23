@@ -142,6 +142,10 @@ class ObjectContentReconciler:
             )
         )
 
+        object_cycle_completed = False
+        missing_objects = 0
+        multipart_aborted = 0
+        orphan_objects_deleted = 0
         try:
             object_cycle_completed = await self._reconcile_object_page()
             async with self._database.session() as session, session.begin():
@@ -153,10 +157,10 @@ class ObjectContentReconciler:
             multipart_aborted = await self._reconcile_multipart_page()
             orphan_objects_deleted = await self._delete_orphans(lease_owner)
         except ObjectStoreUnavailableError:
-            object_cycle_completed = False
-            missing_objects = 0
-            multipart_aborted = 0
-            orphan_objects_deleted = 0
+            # Each preceding phase commits independently. Preserve its result
+            # when a later object-store call becomes unavailable so the worker
+            # summary agrees with the durable transitions already recorded.
+            pass
         async with self._database.session() as session, session.begin():
             (
                 references_audited,

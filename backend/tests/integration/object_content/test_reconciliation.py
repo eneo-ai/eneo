@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from threading import Event
 from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -42,6 +43,7 @@ from eneo.object_content.reconciliation_repository import (
 from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
+    ObjectStoreUnavailableError,
     S3ObjectStore,
     new_object_key,
 )
@@ -448,6 +450,65 @@ async def test_completed_inventory_reports_missing_retained_bytes_once(
         content = await session.get(ObjectContents, pending.content_id)
         assert content is not None
         assert content.state == ContentState.RETAINED.value
+        assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
+
+
+@pytest.mark.asyncio
+async def test_multipart_outage_preserves_committed_object_inventory_result(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    reconciler = _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    await reconciler.run_once()
+
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        actor_user_id = (await session.scalars(select(Users.id))).one()
+        assert content is not None
+        await ObjectContentRepository(session).apply_hold(
+            tenant_id=content.tenant_id,
+            content_id=content.id,
+            kind="legal",
+            reason="retain missing bytes for late-outage reporting",
+            actor_user_id=actor_user_id,
+            expires_at=None,
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+
+    await real_object_store.store.delete_and_confirm(pending.object_key)
+    observation_boundary = await reconciler.run_once()
+    assert observation_boundary.missing_objects == 0
+
+    monkeypatch.setattr(
+        real_object_store.store,
+        "list_multipart_page",
+        AsyncMock(
+            side_effect=ObjectStoreUnavailableError("multipart inventory unavailable")
+        ),
+    )
+    result = await reconciler.run_once()
+
+    assert result.object_cycle_completed is True
+    assert result.missing_objects == 1
+    assert result.multipart_aborted == 0
+    assert result.orphan_objects_deleted == 0
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        assert content is not None
         assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
 
 
