@@ -3,10 +3,10 @@
 Each `BuildableGoldenCase` is a real, domain-neutral `FlowDraftSpecCore` the AI
 Builder can author. The suite proves every one passes the critic draft preflight
 with no architecture blocker, resolves its declared form fields, matches its
-declared composition columns, and reaches deterministic create-mode
-materialization through the canonical authoring command owner. LLM-output
-quality on real planner output belongs in a committed release or QA runbook,
-not this deterministic fence.
+declared composition columns. Critic preflight is an early architecture check;
+real FlowService materialization through canonical create/edit authoring commands
+is the final acceptance fence. LLM-output quality on real planner output belongs
+in a committed release or QA runbook, not this deterministic fence.
 
 The set covers every AI-Builder-expressible capability row across the composition
 columns, meeting each row's complexity policy and the global coverage thresholds
@@ -391,6 +391,7 @@ def _pdf_report_advanced_edit() -> BuildableGoldenCase:
                 "{{review_focus}}.",
                 input_source=InputSource.ALL_PREVIOUS_STEPS,
                 output_type=OutputType.PDF,
+                output_mode=OutputMode.RENDER_VERBATIM,
             ),
         ],
         form_fields=[FormFieldSpec(name="review_focus", type="text", label="Fokus")],
@@ -556,16 +557,18 @@ def _comparison_advanced() -> BuildableGoldenCase:
         steps=[
             _step(
                 "step_a",
-                "Läs första offerten",
-                "Extrahera nyckeltal ur den första offerten enligt {{criteria}}.",
+                "Läs offerterna",
+                "Extrahera jämförbara nyckeltal ur de uppladdade offerterna "
+                "enligt {{criteria}}.",
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
             ),
             _step(
                 "step_b",
-                "Läs andra offerten",
-                "Extrahera nyckeltal ur den andra offerten enligt {{criteria}}.",
-                input_type=InputType.DOCUMENT,
+                "Normalisera nyckeltal",
+                "Normalisera nyckeltalen från "
+                "{{step_a.output.structured.metrics}} enligt {{criteria}}.",
+                input_source=InputSource.PREVIOUS_STEP,
                 output_type=OutputType.JSON,
             ),
             _step(

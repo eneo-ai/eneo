@@ -11,9 +11,9 @@ Capabilities the builder cannot author yet (HTTP) are recorded as explicit
 ratchet keeps that honest: every row is classified `buildable`, `gap`, or
 `planned`, and a gap that silently becomes authorable fails the suite.
 
-Canonical command preparation and deterministic create-mode materialization are
-asserted here; LLM-output quality on real planner output belongs in a committed
-release or QA runbook when that gate is owned.
+Canonical command preparation and deterministic create/edit materialization run
+through a real FlowService here; LLM-output quality on real planner output belongs
+in a committed release or QA runbook when that gate is owned.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from eneo.flows.flow_authoring_spec import (
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_materializes_through_authoring_command_async,
     assert_create_spec_prepares_through_authoring_command,
+    assert_edit_spec_materializes_through_authoring_command_async,
 )
 
 from .coverage import (
@@ -163,6 +164,18 @@ async def test_buildable_golden_materializes_through_canonical_authoring_command
     case: BuildableGoldenCase,
 ) -> None:
     await assert_create_spec_materializes_through_authoring_command_async(case.spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [case for case in GOLDEN_CASES if case.via_edit],
+    ids=lambda case: case.case_id,
+)
+async def test_edit_golden_materializes_through_canonical_authoring_command(
+    case: BuildableGoldenCase,
+) -> None:
+    await assert_edit_spec_materializes_through_authoring_command_async(case.spec)
 
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)

@@ -6506,7 +6506,7 @@ async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
+async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish_a_flow(
     client,
     bearer_token,
     completion_model_factory,
@@ -6517,38 +6517,31 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
         bearer_token=bearer_token,
         db_container=db_container,
         completion_model_factory=completion_model_factory,
-        space_name="AI Builder API create/apply",
-    )
-    async with db_container() as container:
-        tenant_id = container.user().tenant_id
-    await _create_default_transcription_model(
-        db_container=db_container,
-        space_id=space_id,
-        tenant_id=tenant_id,
+        space_name="AI Builder API create/apply/publish",
     )
 
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
         name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
-            "flow_name": "Ljudtranskribering till PDF",
-            "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
-            "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
+            "flow_name": "Dokumentsammanfattning till PDF",
+            "flow_description": "Sammanfattar uppladdade dokument i en PDF-rapport.",
+            "plan_rationale": "Extrahera en grundad sammanfattning och skapa en PDF-rapport.",
             "steps": [
                 {
-                    "name": "Skapa PDF-sammanfattning",
+                    "name": "Extrahera sammanfattning",
                     "instructions": (
-                        "Sammanfatta transkriberingen på tydlig svenska med de "
+                        "Sammanfatta dokumentunderlaget på tydlig svenska med de "
                         "viktigaste punkterna för en mänsklig läsare."
                     ),
-                    "output_type": "text",
-                },
-                {
-                    "name": "Generera PDF-dokument",
-                    "instructions": (
-                        "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
-                    ),
-                    "output_type": "pdf",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Kort sammanfattning grundad i källmaterialet.",
+                        }
+                    ],
                 },
             ],
         },
@@ -6576,12 +6569,13 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 bearer_token=bearer_token,
                 session_id=session_id,
                 initial_message=(
-                    "Skapa ett flöde som tar en ljudfil, transkriberar den och "
-                    "sammanfattar innehållet för en mänsklig läsare."
+                    "Skapa ett flöde som sammanfattar uppladdade dokument i en "
+                    "PDF-rapport för en mänsklig läsare."
                 ),
                 structured_answers={
-                    "input_material_mode": "audio",
-                    "flow_input_architecture": "audio_primary_input",
+                    "input_material_mode": "documents",
+                    "flow_input_architecture": "document_primary_input",
+                    "document_kind": "case_documents",
                     "terminal_output": "pdf_document",
                     "post_processing_goal": "summarize_or_overview",
                 },
@@ -6626,13 +6620,32 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     )
     assert flow_response.status_code == 200, flow_response.text
     flow_payload = flow_response.json()
-    assert flow_payload["name"] == "Ljudtranskribering till PDF"
+    assert flow_payload["name"] == "Dokumentsammanfattning till PDF"
     assert apply_payload["steps_created"] == 3
     assert len(flow_payload["steps"]) == 3
-    assert flow_payload["steps"][0]["input_type"] == "audio"
-    assert flow_payload["steps"][0]["output_mode"] == "transcribe_only"
+    assert flow_payload["steps"][0]["input_type"] == "document"
+    assert flow_payload["steps"][0]["output_type"] == "json"
     assert flow_payload["steps"][1]["output_type"] == "text"
     assert flow_payload["steps"][-1]["output_type"] == "pdf"
+
+    publish_response = await client.post(
+        f"/api/v1/flows/{flow_id}/publish/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert publish_response.status_code == 200, publish_response.text
+    assert publish_response.json()["published_version"] == 1
+
+    published_flow_response = await client.get(
+        f"/api/v1/flows/{flow_id}/",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert published_flow_response.status_code == 200, published_flow_response.text
+    assert published_flow_response.json()["published_version"] == 1
+
+    async with db_container() as container:
+        published_flow = await container.flow_service().get_flow(UUID(flow_id))
+    assert published_flow.published is True
+    assert published_flow.published_version == 1
 
 
 @pytest.mark.asyncio
