@@ -87,6 +87,7 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     settings = await service.get_settings()
@@ -104,6 +105,7 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED
@@ -128,6 +130,7 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
     )
 
     new_settings = SettingsBase(chatbot_widget={"preferred_text_format": "richtext"})
@@ -151,6 +154,7 @@ async def test_settings_project_object_content_as_a_read_only_capability():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        skill_repo=MagicMock(),
         object_content=runtime,
     )
 

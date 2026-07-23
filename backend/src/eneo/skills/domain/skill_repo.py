@@ -10,6 +10,8 @@ from eneo.skills.domain.skill import (
     SkillAdoptionProjectionPage,
     SkillBindingReference,
     SkillCatalogEntry,
+    SkillExecutionBlock,
+    SkillExecutionBlockChange,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
@@ -145,6 +147,39 @@ class SkillRepo(Protocol):
         tenant_id: UUID,
         skill_id: UUID,
     ) -> Skill | None: ...
+
+    async def get_active_execution_block(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> SkillExecutionBlock | None: ...
+
+    async def list_active_execution_blocks(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: list[UUID],
+    ) -> dict[UUID, SkillExecutionBlock]: ...
+
+    async def block_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        blocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None: ...
+
+    async def unblock_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_block_id: UUID,
+        unblocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None: ...
 
     async def resolve_references_for_execution_snapshot(
         self,

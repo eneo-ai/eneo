@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -7,8 +8,12 @@ import pytest
 from eneo.apps.apps.app_service import AppService
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
     SkillBindingReference,
+    SkillBindingSource,
     SkillComposition,
+    SkillExecutionBlock,
+    SkillExecutionBlockedException,
     SkillExecutionReference,
 )
 
@@ -341,6 +346,56 @@ async def test_run_app_uses_queued_skill_snapshot_instead_of_current_bindings(
         == "Stored base\n\nQueued Skill instructions"
     )
     assert result.skill_provenance == (reference,)
+
+
+async def test_queued_app_block_stops_before_files_context_and_provider(
+    service: AppService,
+):
+    app = _runnable_app()
+    reference = _execution_reference()
+    binding = ResolvedSkillBinding(
+        skill_id=reference.skill_id,
+        skill_revision_id=reference.skill_revision_id,
+        current_revision_id=reference.skill_revision_id,
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=reference.revision_number,
+        current_revision_number=reference.revision_number,
+        display_name="Payroll",
+        instructions="Use approved payroll guidance.",
+        content_digest=reference.content_digest,
+        position=reference.position,
+        source=SkillBindingSource.ORGANIZATION,
+    )
+    service._get_runnable_app = AsyncMock(return_value=app)  # type: ignore[method-assign]
+    service.skill_service.compose_for_execution_snapshot.side_effect = (
+        SkillExecutionBlockedException(
+            block=SkillExecutionBlock(
+                id=uuid4(),
+                tenant_id=uuid4(),
+                skill_space_id=binding.skill_space_id,
+                skill_id=reference.skill_id,
+                blocked_by_user_id=uuid4(),
+                reason="Confirmed unsafe instructions",
+                blocked_at=datetime.now(timezone.utc),
+            ),
+            binding=binding,
+        )
+    )
+
+    with pytest.raises(
+        SkillExecutionBlockedException,
+        match="Confirmed unsafe instructions",
+    ):
+        await service.run_app(
+            app.id,
+            file_ids=[uuid4()],
+            text="input",
+            skill_provenance=(reference,),
+        )
+
+    service.file_service.get_files_by_ids.assert_not_awaited()
+    app.run.assert_not_awaited()
 
 
 async def test_run_app_with_no_skills_keeps_provider_prompt_override_none(

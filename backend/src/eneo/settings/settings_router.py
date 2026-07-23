@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
@@ -18,6 +19,9 @@ from eneo.settings.settings import (
     GetModelsResponse,
     SettingsBase,
     SettingsPublic,
+    SkillExecutionBlockState,
+    SkillExecutionBlockUpdate,
+    SkillExecutionUnblockUpdate,
     ToggleSettingUpdate,
 )
 
@@ -25,6 +29,64 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+
+
+@settings_admin_router.get(
+    "/skills/{skill_id}/execution-block",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([403, 404]),
+    summary="Get an organisation Skill execution block",
+    description="Return the active tenant-scoped execution block for one organisation Skill.",
+)
+async def get_skill_execution_block(
+    skill_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await container.settings_service().get_skill_execution_block(
+        skill_id=skill_id
+    )
+
+
+@settings_admin_router.post(
+    "/skills/{skill_id}/execution-block",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([400, 403, 404]),
+    summary="Block an organisation Skill from execution",
+    description=(
+        "Block every retained version of an organisation Skill from subsequent "
+        "runtime composition without changing its bindings or history."
+    ),
+)
+async def block_skill_execution(
+    skill_id: UUID,
+    data: SkillExecutionBlockUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await container.settings_service().block_skill_execution(
+        skill_id=skill_id,
+        reason=data.reason,
+    )
+
+
+@settings_admin_router.post(
+    "/skills/{skill_id}/execution-block/unblock",
+    response_model=SkillExecutionBlockState,
+    responses=responses.get_responses([400, 403, 404, 409]),
+    summary="Unblock an organisation Skill",
+    description=(
+        "Release the exact active execution block reviewed by the tenant administrator."
+    ),
+)
+async def unblock_skill_execution(
+    skill_id: UUID,
+    data: SkillExecutionUnblockUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await container.settings_service().unblock_skill_execution(
+        skill_id=skill_id,
+        expected_block_id=data.expected_block_id,
+        reason=data.reason,
+    )
 
 
 @router.get(

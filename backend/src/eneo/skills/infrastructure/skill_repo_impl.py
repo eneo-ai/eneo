@@ -15,6 +15,7 @@ from eneo.database.tables.skill_table import (
     AppSkillBindings,
     AssistantSkillBindings,
     GovernancePolicySkillBindings,
+    SkillExecutionBlocks,
     SkillRevisions,
     Skills,
 )
@@ -39,6 +40,9 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
+    SkillExecutionBlock,
+    SkillExecutionBlockChange,
+    SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillPublicationChange,
@@ -92,6 +96,21 @@ class SkillRepoImpl:
             content_digest=row.content_digest,
             created_by_user_id=row.created_by_user_id,
             created_at=row.created_at,
+        )
+
+    @staticmethod
+    def _to_execution_block(row: SkillExecutionBlocks) -> SkillExecutionBlock:
+        return SkillExecutionBlock(
+            id=row.id,
+            tenant_id=row.tenant_id,
+            skill_space_id=row.skill_space_id,
+            skill_id=row.skill_id,
+            blocked_by_user_id=row.blocked_by_user_id,
+            reason=row.reason,
+            blocked_at=row.created_at,
+            unblocked_by_user_id=row.unblocked_by_user_id,
+            unblock_reason=row.unblock_reason,
+            unblocked_at=row.unblocked_at,
         )
 
     @classmethod
@@ -1231,6 +1250,134 @@ class SkillRepoImpl:
             raise RuntimeError("Skill current revision is missing")
         return await self._delete_locked_skill(
             skill=self._to_skill(skill_row, revision_row)
+        )
+
+    async def get_active_execution_block(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> SkillExecutionBlock | None:
+        row = await self.session.scalar(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        return self._to_execution_block(row) if row is not None else None
+
+    async def list_active_execution_blocks(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: list[UUID],
+    ) -> dict[UUID, SkillExecutionBlock]:
+        if not skill_ids:
+            return {}
+        rows = await self.session.scalars(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id.in_(skill_ids),
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        return {
+            block.skill_id: block
+            for block in (self._to_execution_block(row) for row in rows.all())
+        }
+
+    async def block_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        blocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None:
+        skill = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill is None or skill.first_published_at is None:
+            return None
+        existing = await self.session.scalar(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        if existing is not None:
+            return SkillExecutionBlockChange(
+                block=self._to_execution_block(existing),
+                changed=False,
+            )
+        block_id = uuid4()
+        await self.session.execute(
+            sa.insert(SkillExecutionBlocks).values(
+                id=block_id,
+                tenant_id=tenant_id,
+                skill_space_id=skill.space_id,
+                skill_id=skill_id,
+                blocked_by_user_id=blocked_by_user_id,
+                reason=reason,
+            )
+        )
+        persisted = await self.session.get(SkillExecutionBlocks, block_id)
+        if persisted is None:
+            raise RuntimeError("Skill execution block was not persisted")
+        return SkillExecutionBlockChange(
+            block=self._to_execution_block(persisted),
+            changed=True,
+        )
+
+    async def unblock_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_block_id: UUID,
+        unblocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None:
+        skill = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill is None or skill.first_published_at is None:
+            return None
+        active = await self.session.scalar(
+            sa.select(SkillExecutionBlocks)
+            .where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if active is None or active.id != expected_block_id:
+            raise SkillExecutionBlockConflictError
+        await self.session.execute(
+            sa.update(SkillExecutionBlocks)
+            .where(SkillExecutionBlocks.id == active.id)
+            .values(
+                unblocked_by_user_id=unblocked_by_user_id,
+                unblock_reason=reason,
+                unblocked_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        persisted = await self.session.get(
+            SkillExecutionBlocks,
+            active.id,
+            populate_existing=True,
+        )
+        if persisted is None:
+            raise RuntimeError("Skill execution block disappeared during unblock")
+        return SkillExecutionBlockChange(
+            block=self._to_execution_block(persisted),
+            changed=True,
         )
 
     async def _delete_locked_skill(self, *, skill: Skill) -> Skill:

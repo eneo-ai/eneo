@@ -1,8 +1,10 @@
 <script lang="ts">
-  import type {
-    OrganizationSkillPublic,
-    SkillAdoptionProjectionPagePublic,
-    SkillRevisionRestorePublic
+  import {
+    EneoError,
+    type OrganizationSkillPublic,
+    type SkillAdoptionProjectionPagePublic,
+    type SkillExecutionBlockState,
+    type SkillRevisionRestorePublic
   } from "@eneo/eneo-js";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
@@ -10,6 +12,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import SkillPreview from "$lib/features/skills/SkillPreview.svelte";
@@ -17,11 +21,13 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
   import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
-  import { Info, RefreshCw, ShieldCheck } from "lucide-svelte";
+  import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
   import { tick } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";
+  type ExecutionAction = "block" | "unblock";
 
   let { data } = $props();
 
@@ -29,6 +35,12 @@
   let publicationAction = $state<PublicationAction | null>(null);
   let publicationSaving = $state(false);
   let publicationError = $state<string | null>(null);
+  let executionBlockOverride = $state<SkillExecutionBlockState | null>(null);
+  let executionBlockOverrideBase = $state<SkillExecutionBlockState | null>(null);
+  let executionAction = $state<ExecutionAction | null>(null);
+  let executionReason = $state("");
+  let executionSaving = $state(false);
+  let executionError = $state<string | null>(null);
   let refreshWarning = $state(false);
   let restoreAnnouncement = $state("");
 
@@ -36,6 +48,19 @@
   const approvedPreview = $derived(
     data.published === null ? null : publishedSkillPreview(data.published)
   );
+  const executionBlock = $derived(executionBlockOverride ?? data.executionBlock);
+  const normalizedExecutionReason = $derived(executionReason.trim());
+
+  $effect(() => {
+    if (
+      executionBlockOverride !== null &&
+      executionBlockOverrideBase !== null &&
+      data.executionBlock !== executionBlockOverrideBase
+    ) {
+      executionBlockOverride = null;
+      executionBlockOverrideBase = null;
+    }
+  });
 
   function publicationLabel(skill: OrganizationSkillPublic): string {
     switch (skill.publication_state) {
@@ -131,6 +156,81 @@
     if (open || publicationSaving) return;
     publicationAction = null;
     publicationError = null;
+  }
+
+  function setExecutionDialogOpen(open: boolean) {
+    if (open || executionSaving) return;
+    executionAction = null;
+    executionError = null;
+    executionReason = "";
+  }
+
+  function formatExecutionDate(value: string): string {
+    return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+  }
+
+  function setExecutionBlockOverride(block: SkillExecutionBlockState) {
+    executionBlockOverrideBase = data.executionBlock;
+    executionBlockOverride = block;
+  }
+
+  async function reloadExecutionBlock() {
+    const block = await data.eneo.settings.getSkillExecutionBlock({
+      skillId: data.skill.id
+    });
+    setExecutionBlockOverride(block);
+  }
+
+  async function changeExecution(event: MouseEvent) {
+    event.preventDefault();
+    if (executionAction === null || executionSaving || normalizedExecutionReason.length === 0) {
+      return;
+    }
+    executionSaving = true;
+    executionError = null;
+    try {
+      if (executionAction === "block") {
+        const block = await data.eneo.settings.blockSkillExecution({
+          skillId: data.skill.id,
+          reason: normalizedExecutionReason
+        });
+        setExecutionBlockOverride(block);
+      } else {
+        const reviewedBlock = executionBlock.block;
+        if (reviewedBlock === null) {
+          await reloadExecutionBlock();
+          executionError = m.organization_skills_execution_stale_error();
+          executionSaving = false;
+          return;
+        }
+        const block = await data.eneo.settings.unblockSkillExecution({
+          skillId: data.skill.id,
+          expectedBlockId: reviewedBlock.id,
+          reason: normalizedExecutionReason
+        });
+        setExecutionBlockOverride(block);
+      }
+    } catch (error) {
+      if (error instanceof EneoError && error.status === 409) {
+        try {
+          await reloadExecutionBlock();
+        } catch {
+          // Keep the last known state when the follow-up read is unavailable.
+        }
+        executionError = m.organization_skills_execution_stale_error();
+      } else {
+        executionError = getErrorMessage(error);
+      }
+      executionSaving = false;
+      return;
+    }
+    executionAction = null;
+    executionReason = "";
+    executionSaving = false;
+    await refreshOrganizationSkills();
   }
 
   async function changePublication(event: MouseEvent) {
@@ -347,6 +447,68 @@
                 </p>
               {/if}
             </div>
+
+            {#if data.skill.first_published_at !== null}
+              <section
+                class="border-border flex flex-col gap-4 border-t pt-5"
+                aria-labelledby="organization-skill-execution-heading"
+              >
+                <div class="flex flex-col items-start gap-2">
+                  <div>
+                    <h2
+                      id="organization-skill-execution-heading"
+                      class="text-foreground font-semibold"
+                    >
+                      {m.organization_skills_execution_heading()}
+                    </h2>
+                    <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
+                      {m.organization_skills_execution_description()}
+                    </p>
+                  </div>
+                  <Badge variant={executionBlock.block === null ? "outline" : "destructive"}>
+                    {executionBlock.block === null
+                      ? m.organization_skills_execution_available_status()
+                      : m.organization_skills_execution_blocked_status()}
+                  </Badge>
+                </div>
+
+                {#if executionBlock.block}
+                  <Alert.Root variant="destructive">
+                    <ShieldAlert aria-hidden="true" />
+                    <Alert.Title>{m.organization_skills_execution_blocked_status()}</Alert.Title>
+                    <Alert.Description>
+                      <span class="block">
+                        {m.organization_skills_execution_blocked_description()}
+                      </span>
+                      <span class="mt-2 block font-medium text-current">
+                        {executionBlock.block.reason}
+                      </span>
+                      <span class="mt-1 block text-xs text-current/80">
+                        {m.organization_skills_execution_blocked_at({
+                          time: formatExecutionDate(executionBlock.block.blocked_at)
+                        })}
+                      </span>
+                    </Alert.Description>
+                  </Alert.Root>
+                {/if}
+
+                <div>
+                  <Button
+                    variant={executionBlock.block === null ? "destructive" : "outline"}
+                    onclick={() =>
+                      (executionAction = executionBlock.block === null ? "block" : "unblock")}
+                  >
+                    {#if executionBlock.block === null}
+                      <ShieldAlert aria-hidden="true" />
+                      {m.organization_skills_execution_block_action()}
+                    {:else}
+                      <ShieldCheck aria-hidden="true" />
+                      {m.organization_skills_execution_unblock_action()}
+                    {/if}
+                  </Button>
+                </div>
+              </section>
+            {/if}
           </div>
         </aside>
       </div>
@@ -437,6 +599,78 @@
           : publicationAction === "unpublish"
             ? m.organization_skills_unpublish_action()
             : m.organization_skills_publish_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root open={executionAction !== null} onOpenChange={setExecutionDialogOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>
+        {executionAction === "unblock"
+          ? m.organization_skills_execution_unblock_title()
+          : m.organization_skills_execution_block_title()}
+      </AlertDialog.Title>
+      <AlertDialog.Description>
+        {executionAction === "unblock"
+          ? m.organization_skills_execution_unblock_description()
+          : m.organization_skills_execution_block_description()}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+
+    {#if executionAction === "unblock" && executionBlock.block}
+      <div class="border-border bg-muted/40 rounded-lg border p-3">
+        <p class="text-sm font-medium">{m.organization_skills_execution_blocked_status()}</p>
+        <p class="text-muted-foreground mt-1 text-sm leading-5">
+          {executionBlock.block.reason}
+        </p>
+      </div>
+    {/if}
+
+    <Field.Group>
+      <Field.Field>
+        <Field.Label for="execution-change-reason">
+          {m.organization_skills_execution_reason_label()}
+        </Field.Label>
+        <Textarea
+          id="execution-change-reason"
+          bind:value={executionReason}
+          required
+          maxlength={1000}
+          rows={4}
+          placeholder={m.organization_skills_execution_reason_placeholder()}
+          disabled={executionSaving}
+        />
+        <Field.Description>
+          {executionAction === "unblock"
+            ? m.organization_skills_execution_unblock_reason_description()
+            : m.organization_skills_execution_block_reason_description()}
+        </Field.Description>
+      </Field.Field>
+    </Field.Group>
+
+    {#if executionError}
+      <Alert.Root variant="destructive">
+        <Alert.Title>{m.organization_skills_execution_change_error_title()}</Alert.Title>
+        <Alert.Description>{executionError}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={executionSaving}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        variant={executionAction === "block" ? "destructive" : "default"}
+        disabled={executionSaving ||
+          normalizedExecutionReason.length === 0 ||
+          (executionAction === "unblock" && executionBlock.block === null)}
+        onclick={changeExecution}
+      >
+        {executionSaving
+          ? m.saving()
+          : executionAction === "unblock"
+            ? m.organization_skills_execution_unblock_confirm()
+            : m.organization_skills_execution_block_confirm()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

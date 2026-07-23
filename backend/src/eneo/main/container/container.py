@@ -1080,6 +1080,7 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        skill_repo=skill_repo,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1205,7 +1206,7 @@ class Container(containers.DeclarativeContainer):
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
-        skill_repo=skill_repo,
+        skill_service=skill_service,
     )
     assistant_service = providers.Factory(
         AssistantService,

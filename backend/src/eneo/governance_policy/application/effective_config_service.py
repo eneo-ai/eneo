@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
+    from eneo.skills.application.skill_service import SkillService
     from eneo.skills.domain.skill import ResolvedSkillBinding
-    from eneo.skills.domain.skill_repo import SkillRepo
     from eneo.users.user import UserInDB
 
 
@@ -45,14 +45,14 @@ class EffectiveConfigService:
         prompt_library_repo: "PromptLibraryRepo",
         completion_model_crud_service: "CompletionModelCRUDService",
         mcp_server_settings_service: "MCPServerSettingsService",
-        skill_repo: "SkillRepo",
+        skill_service: "SkillService",
     ) -> None:
         self.user = user
         self.policy_repo = policy_repo
         self.prompt_library_repo = prompt_library_repo
         self.completion_model_crud_service = completion_model_crud_service
         self.mcp_server_settings_service = mcp_server_settings_service
-        self.skill_repo = skill_repo
+        self.skill_service = skill_service
 
     async def resolve_for(
         self, assistant: "Assistant", *, space_is_personal: bool
@@ -120,7 +120,9 @@ class EffectiveConfigService:
         async def _load_governance_skills() -> "list[ResolvedSkillBinding]":
             if policy.id is None:
                 return []
-            return await self.skill_repo.list_policy_bindings(policy_id=policy.id)
+            return await self.skill_service.list_governance_bindings_for_runtime(
+                policy_id=policy.id
+            )
 
         tenant_models = await _load_models()
         tenant_mcp_servers = await _load_mcp_servers()

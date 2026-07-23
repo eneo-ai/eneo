@@ -27,15 +27,15 @@ continuity:
   rotate_after_completed_write_tasks: 2
   rotate_after_hours: 6
   rotate_when_slow: true
-  current_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
-  previous_thread_id: "019f654f-1989-7692-b9fd-0a4a94dd83f1"
-  rotation_count: 0
-  completed_write_tasks_in_thread: 3
+  current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
+  previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
+  rotation_count: 1
+  completed_write_tasks_in_thread: 1
   handoff_note: notes/handoff.md
-  last_handoff_at: null
-  last_verified_revision: "71de15e5013a566a4a54875b0bd189f0d258e205"
+  last_handoff_at: "2026-07-23T16:52:16Z"
+  last_verified_revision: "dfe9dbe7b6ed8c899c08acf15df84cd8e609934b"
 
-active_task: T005
+active_task: T006
 
 tasks:
   - id: T001
@@ -273,7 +273,7 @@ tasks:
   - id: T005
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add the tenant-scoped adoption projection required to complete O1, finish the accepted responsive catalogue polish, and document the governed user flow without deriving counts in the UI."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/572"
@@ -341,12 +341,46 @@ tasks:
       - "Correct tenant isolation or bounded aggregation requires schema changes beyond the reviewed cursor indexes."
       - "Counts must be calculated in Svelte/TypeScript or through one request per Skill, revision, or resource."
       - "The projection cannot distinguish unpublished state from behind-published-revision drift without inventing semantics."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added tenant-safe organisation Skill adoption and drift visibility to the canonical detail owner, completed responsive catalogue polish, documented the governed flow, and squash-merged PR #574."
+      merged_pr: 574
+      source_head: "db31f21707109ac9980e6fc547cbd9ac53acdf53"
+      merge_commit: "dfe9dbe7b6ed8c899c08acf15df84cd8e609934b"
+      merged_at: "2026-07-23T16:51:19Z"
+      changed_files:
+        - "backend/alembic/versions/202607231330_add_skill_adoption_cursor_indexes.py"
+        - "backend/src/eneo/skills/"
+        - "backend/tests/integration/skills/test_skill_adoption_projection.py"
+        - "backend/tests/unittests/skills/"
+        - "frontend/apps/docs-site/src/content/guides/"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+        - "frontend/packages/eneo-js/"
+      commands:
+        - cmd: "focused backend Skill adoption and presentation tests"
+          status: pass
+        - cmd: "focused adoption, revision-history, and organisation catalogue component tests"
+          status: pass
+        - cmd: "frontend check, lint, docs build, hooks, and pre-push checks"
+          status: pass
+        - cmd: "clean PostgreSQL 13 migration through the full Alembic history"
+          status: pass
+      github_checks: "All 19 reported checks passed; the docs deploy step was correctly skipped for pull requests."
+      review: "Review 4 inspected all 34 changed paths, confirmed F6 resolved, and found no current in-scope findings."
+      review_url: "https://github.com/eneo-ai/eneo/pull/574#issuecomment-5060965574"
+      claude_gate: "green; GREEN_LIGHT yes; MIN_SCORE 8"
+      claude_artifact: ".codex/artifacts/claude-peer-loop-pr-574-adoption-ui-and-docs-verification-20260723T160401Z.md"
+      verification:
+        - "Backend integration tests, quality, route metadata, schema drift, and Docker build passed in GitHub CI."
+        - "Frontend unit, production build, E2E, Docker build, and coverage diff passed in GitHub CI."
+        - "Alembic had one head and migrated a clean PostgreSQL 13 database to 202607231330."
+        - "The Skills guide now provides a concise TL;DR, navigation paths, permissions, organisation/Space/Personal Chat behavior, adoption evidence boundaries, governance, and FAQ."
 
   - id: T006
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Add the organisation-wide emergency Skill execution block before O1 becomes generally available."
     inputs:
@@ -356,12 +390,49 @@ tasks:
       - "Retain exact pins and history; block execution rather than rewriting resources."
       - "Use the existing organisation-settings and audit owners."
       - "Do not pull selective activation, token policy, or activation tools out of Task #553."
+      - "Treat runtime-plan resolution immediately before provider work as the concurrency boundary: a block committed first prevents the provider call; a plan resolved first may finish and the next run is blocked."
+      - "Keep durable block/unblock actor, reason, and time in typed append-history Skill lifecycle rows while continuing to emit the existing configurable organisation-settings audit event."
+      - "Do not introduce a generic tenant-policy framework, a second adoption dashboard, or a provider lease/retry subsystem."
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/apps/apps/app_service.py"
+      - "backend/src/eneo/database/tables/skill_table.py"
+      - "backend/src/eneo/governance_policy/application/effective_config_service.py"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/src/eneo/settings/setting_service.py"
+      - "backend/src/eneo/settings/settings.py"
+      - "backend/src/eneo/settings/settings_factory.py"
+      - "backend/src/eneo/settings/settings_router.py"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/integration/migrations/test_skills_schema_round_trip.py"
+      - "backend/tests/integration/skills/"
+      - "backend/tests/unit/test_setting_service_audit.py"
+      - "backend/tests/unittests/apps/"
+      - "backend/tests/unittests/governance_policy/"
+      - "backend/tests/unittests/settings/"
+      - "backend/tests/unittests/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/"
+      - "frontend/packages/eneo-js/package.json"
+      - "frontend/packages/eneo-js/src/endpoints/settings.js"
+      - "frontend/packages/eneo-js/src/endpoints/settings.test.js"
+      - "frontend/packages/eneo-js/src/eneo.js"
+      - "frontend/packages/eneo-js/src/types/resources.d.ts"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
     verify:
-      - "Personal Chat and Assistant composition exclude blocked identities"
-      - "Queued App runs fail closed before provider execution"
-      - "Actor, reason, time, affected-resource, unblock, and concurrency behavior"
+      - "Focused repository and PostgreSQL tests prove tenant isolation, one active block, stale-unblock protection, append-only history, and block-versus-runtime-plan concurrency."
+      - "Personal Chat and Assistant composition exclude blocked identities without mutating exact bindings."
+      - "A queued App snapshot predating the block fails with an explicit reason and does not call the provider seam."
+      - "Settings service and HTTP tests prove admin-only block/unblock, required reasons, typed current state, affected-resource projection reuse, and old/new audit metadata."
+      - "Frontend component and SDK tests prove block, retry/refresh, stale conflict, unblock warning, and concise accessible copy."
+      - "Alembic heads, empty PostgreSQL migration, focused backend tests, Ruff, Pyright, frontend unit tests, check, lint, and docs build."
+      - "Required GitHub CI, fresh /review with no findings, and a same-session peer verification when model authentication is available."
     stop_if:
       - "The implementation mutates or silently advances retained bindings."
+      - "Closing the provider-start boundary requires a new distributed lease or retry owner rather than deepening the existing immutable execution-plan boundary."
     receipt: null
 
   - id: T007

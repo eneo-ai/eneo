@@ -51,7 +51,9 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
                 ]
             )
         ),
-        skill_repo=AsyncMock(list_policy_bindings=AsyncMock(return_value=[])),
+        skill_service=AsyncMock(
+            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -85,7 +87,9 @@ async def test_resolve_for_all_restrictions_disabled_skips_catalog_fetches():
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
-        skill_repo=AsyncMock(list_policy_bindings=AsyncMock(return_value=[])),
+        skill_service=AsyncMock(
+            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -107,7 +111,9 @@ async def test_resolve_for_non_personal_space_short_circuits_before_repos():
         prompt_library_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
-        skill_repo=AsyncMock(list_policy_bindings=AsyncMock(return_value=[])),
+        skill_service=AsyncMock(
+            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -139,14 +145,16 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
         position=0,
         source=SkillBindingSource.ORGANIZATION,
     )
-    skill_repo = AsyncMock(list_policy_bindings=AsyncMock(return_value=[binding]))
+    skill_service = AsyncMock(
+        list_governance_bindings_for_runtime=AsyncMock(return_value=[binding])
+    )
     service = EffectiveConfigService(
         user=SimpleNamespace(tenant_id=tenant_id),
         policy_repo=AsyncMock(get_by_tenant=AsyncMock(return_value=policy)),
         prompt_library_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
-        skill_repo=skill_repo,
+        skill_service=skill_service,
     )
 
     cfg = await service.resolve_for(
@@ -154,7 +162,9 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
     )
 
     assert cfg.governance_skill_bindings == (binding,)
-    skill_repo.list_policy_bindings.assert_awaited_once_with(policy_id=policy.id)
+    skill_service.list_governance_bindings_for_runtime.assert_awaited_once_with(
+        policy_id=policy.id
+    )
 
 
 async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
@@ -202,8 +212,10 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
         prompt_library_repo=AsyncMock(get=AsyncMock(side_effect=get_prompt)),
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
-        skill_repo=AsyncMock(
-            list_policy_bindings=AsyncMock(side_effect=list_policy_bindings)
+        skill_service=AsyncMock(
+            list_governance_bindings_for_runtime=AsyncMock(
+                side_effect=list_policy_bindings
+            )
         ),
     )
 

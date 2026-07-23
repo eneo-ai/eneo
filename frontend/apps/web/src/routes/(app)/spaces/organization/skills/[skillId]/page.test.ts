@@ -28,16 +28,24 @@ function event({ publishedRevisionNumber }: { publishedRevisionNumber: number | 
     limit: 25,
     next_cursor: null
   };
+  const executionBlock = {
+    skill_id: "skill-1",
+    block: null
+  };
   const organizationGet = vi.fn().mockResolvedValue(skill);
   const catalogueGet = vi.fn().mockResolvedValue(published);
   const listRevisionSummaries = vi.fn().mockResolvedValue(revisionPage);
   const getAdoption = vi.fn().mockResolvedValue(adoptionPage);
+  const getSkillExecutionBlock = vi.fn().mockResolvedValue(executionBlock);
   return {
     input: {
       params: { skillId: "skill-1" },
       depends: vi.fn(),
       parent: vi.fn().mockResolvedValue({
         eneo: {
+          settings: {
+            getSkillExecutionBlock
+          },
           skills: {
             catalogue: { get: catalogueGet },
             organization: {
@@ -53,10 +61,12 @@ function event({ publishedRevisionNumber }: { publishedRevisionNumber: number | 
     published,
     revisionPage,
     adoptionPage,
+    executionBlock,
     organizationGet,
     catalogueGet,
     listRevisionSummaries,
-    getAdoption
+    getAdoption,
+    getSkillExecutionBlock
   };
 }
 
@@ -69,12 +79,16 @@ describe("organisation Skill detail loader", () => {
     expect(result).toMatchObject({
       skill: fixture.skill,
       revisionPage: fixture.revisionPage,
-      published: fixture.published
+      published: fixture.published,
+      executionBlock: fixture.executionBlock
     });
     await expect(result.adoptionPage).resolves.toEqual(fixture.adoptionPage);
     expect(fixture.organizationGet).toHaveBeenCalledWith({ skillId: "skill-1" });
     expect(fixture.catalogueGet).toHaveBeenCalledWith({ skillId: "skill-1" });
     expect(fixture.getAdoption).toHaveBeenCalledWith({ skillId: "skill-1" });
+    expect(fixture.getSkillExecutionBlock).toHaveBeenCalledWith({
+      skillId: "skill-1"
+    });
   });
 
   test("draft details do not call the published catalogue", async () => {

@@ -20,6 +20,8 @@ from eneo.skills.domain.skill import (
     Skill,
     SkillBindingReference,
     SkillBindingSource,
+    SkillExecutionBlock,
+    SkillExecutionBlockedException,
     SkillExecutionReference,
     SkillPublicationState,
     SkillRevision,
@@ -44,8 +46,10 @@ def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
 
 
 def _service(repo: AsyncMock) -> SkillService:
+    if not isinstance(repo.list_active_execution_blocks.return_value, dict):
+        repo.list_active_execution_blocks.return_value = {}
     return SkillService(
-        user=MagicMock(),
+        user=MagicMock(tenant_id=uuid4()),
         repo=repo,
         space_service=AsyncMock(),
         actor_manager=MagicMock(),
@@ -61,6 +65,19 @@ def _reference(
         revision_number=binding.revision_number,
         content_digest=binding.content_digest,
         position=binding.position if position is None else position,
+    )
+
+
+def _execution_block(*, tenant_id, binding: ResolvedSkillBinding):
+    now = datetime.now(timezone.utc)
+    return SkillExecutionBlock(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        skill_space_id=binding.skill_space_id,
+        skill_id=binding.skill_id,
+        blocked_by_user_id=uuid4(),
+        reason="Confirmed unsafe instructions",
+        blocked_at=now,
     )
 
 
@@ -319,6 +336,103 @@ async def test_execution_snapshot_uses_persisted_order_and_allows_inactive_skill
         "### Skill: Absence"
     )
     assert [reference.position for reference in composition.provenance] == [10, 20]
+
+
+async def test_assistant_composition_excludes_blocked_skill_without_changing_bindings():
+    blocked = _binding(position=0, name="Payroll")
+    allowed = _binding(position=1, name="Absence")
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [blocked, allowed]
+    repo.list_active_execution_blocks.return_value = {
+        blocked.skill_id: _execution_block(tenant_id=tenant_id, binding=blocked)
+    }
+    service = _service(repo)
+    service.user.tenant_id = tenant_id
+
+    composition = await service.compose_for_assistant(
+        assistant_id=uuid4(),
+        base_instructions="Base",
+    )
+
+    assert "Payroll" not in composition.prompt
+    assert "Absence" in composition.prompt
+    assert [reference.skill_id for reference in composition.provenance] == [
+        allowed.skill_id
+    ]
+    repo.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_runtime_composition_keeps_all_bindings_without_execution_blocks():
+    binding = _binding(position=0, name="Payroll")
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [binding]
+    repo.list_app_bindings_for_execution_plan.return_value = [binding]
+    repo.list_policy_bindings.return_value = [binding]
+    repo.list_active_execution_blocks.return_value = {}
+    service = _service(repo)
+
+    assistant = await service.compose_for_assistant(
+        assistant_id=uuid4(),
+        base_instructions="Assistant base",
+    )
+    app = await service.compose_for_app(
+        app_id=uuid4(),
+        base_instructions="App base",
+    )
+    policy = await service.compose_for_policy(
+        policy_id=uuid4(),
+        base_instructions="Policy base",
+    )
+
+    assert [reference.skill_id for reference in assistant.provenance] == [
+        binding.skill_id
+    ]
+    assert [reference.skill_id for reference in app.provenance] == [binding.skill_id]
+    assert [reference.skill_id for reference in policy.provenance] == [binding.skill_id]
+
+
+async def test_policy_runtime_bindings_exclude_blocked_skill():
+    blocked = _binding(position=0, name="Payroll")
+    allowed = _binding(position=1, name="Absence")
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [blocked, allowed]
+    repo.list_active_execution_blocks.return_value = {
+        blocked.skill_id: _execution_block(tenant_id=tenant_id, binding=blocked)
+    }
+    service = _service(repo)
+    service.user.tenant_id = tenant_id
+
+    bindings = await service.list_governance_bindings_for_runtime(policy_id=uuid4())
+
+    assert bindings == [allowed]
+    repo.replace_policy_bindings.assert_not_awaited()
+
+
+async def test_execution_snapshot_fails_with_incident_reason_when_skill_is_blocked():
+    binding = _binding(position=0)
+    reference = _reference(binding)
+    tenant_id = uuid4()
+    block = _execution_block(tenant_id=tenant_id, binding=binding)
+    repo = AsyncMock()
+    repo.resolve_references_for_execution_snapshot.return_value = [binding]
+    repo.list_active_execution_blocks.return_value = {binding.skill_id: block}
+
+    with pytest.raises(
+        SkillExecutionBlockedException,
+        match="Confirmed unsafe instructions",
+    ) as exc_info:
+        await _service(repo).compose_for_execution_snapshot(
+            tenant_id=tenant_id,
+            space_id=uuid4(),
+            provenance=(reference,),
+            base_instructions="Base",
+        )
+
+    assert exc_info.value.block_id == block.id
+    assert exc_info.value.skill_id == binding.skill_id
+    assert exc_info.value.reason == block.reason
 
 
 @pytest.mark.parametrize("field", ["revision_number", "content_digest"])

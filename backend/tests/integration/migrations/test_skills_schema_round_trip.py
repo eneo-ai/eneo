@@ -35,6 +35,8 @@ SKILLS_PROVENANCE_INDEX_REVISION = "202607221400"
 PRE_RESOURCE_BINDING_SCOPE_REVISION = "202607221500"
 PRE_PERMISSION_CONVERGENCE_REVISION = "202607221600"
 SKILLS_HEAD_REVISION = "202607221700"
+PRE_SKILL_EXECUTION_BLOCK_REVISION = "202607231330"
+SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
 
 
 @dataclass(frozen=True)
@@ -1728,3 +1730,135 @@ def test_binding_scope_upgrade_keeps_legacy_binding_writes_compatible(
 
     assert rolling_assistant_scope == (tenant_id, space_id)
     assert rolling_app_scope == (tenant_id, space_id)
+
+
+def test_skill_execution_block_migration_enforces_active_lifecycle_and_round_trip(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_SKILL_EXECUTION_BLOCK_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('skill_execution_blocks')")
+        assert cursor.fetchone() == (None,)
+
+    command.upgrade(config, SKILL_EXECUTION_BLOCK_REVISION)
+    tenant_id = _insert_tenant(connection, "execution-block")
+    user_id = _insert_user(connection, tenant_id, "execution-block")
+    organization_space_id = _insert_space(
+        connection,
+        tenant_id,
+        "execution-block-organization",
+    )
+    skill_id, _ = _insert_skill(
+        connection,
+        space_id=organization_space_id,
+        created_by_user_id=user_id,
+        label="execution-block",
+    )
+    other_tenant_id = _insert_tenant(connection, "execution-block-other")
+    sibling_space_id = _insert_space(
+        connection,
+        tenant_id,
+        "execution-block-sibling",
+        tenant_space_id=organization_space_id,
+    )
+
+    _assert_constraint(
+        connection,
+        expected="fk_skill_execution_blocks_tenant_space",
+        statement="""
+            INSERT INTO skill_execution_blocks (
+                tenant_id, skill_space_id, skill_id, blocked_by_user_id, reason
+            )
+            VALUES (%s, %s, %s, %s, 'Foreign tenant scope')
+        """,
+        parameters=(other_tenant_id, organization_space_id, skill_id, user_id),
+    )
+    _assert_constraint(
+        connection,
+        expected="fk_skill_execution_blocks_skill",
+        statement="""
+            INSERT INTO skill_execution_blocks (
+                tenant_id, skill_space_id, skill_id, blocked_by_user_id, reason
+            )
+            VALUES (%s, %s, %s, %s, 'Foreign Skill space')
+        """,
+        parameters=(tenant_id, sibling_space_id, skill_id, user_id),
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO skill_execution_blocks (
+                tenant_id, skill_space_id, skill_id, blocked_by_user_id, reason
+            )
+            VALUES (%s, %s, %s, %s, 'Confirmed unsafe instructions')
+            RETURNING id
+            """,
+            (tenant_id, organization_space_id, skill_id, user_id),
+        )
+        first_block_id = str(cursor.fetchone()[0])
+
+    _assert_constraint(
+        connection,
+        expected="uq_skill_execution_blocks_active_tenant_skill",
+        statement="""
+            INSERT INTO skill_execution_blocks (
+                tenant_id, skill_space_id, skill_id, blocked_by_user_id, reason
+            )
+            VALUES (%s, %s, %s, %s, 'Concurrent incident')
+        """,
+        parameters=(tenant_id, organization_space_id, skill_id, user_id),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_skill_execution_blocks_reason_length",
+        statement="""
+            UPDATE skill_execution_blocks
+            SET reason = '   '
+            WHERE id = %s
+        """,
+        parameters=(first_block_id,),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_skill_execution_blocks_unblock_state",
+        statement="""
+            UPDATE skill_execution_blocks
+            SET unblocked_at = now()
+            WHERE id = %s
+        """,
+        parameters=(first_block_id,),
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE skill_execution_blocks
+            SET unblocked_at = now(),
+                unblocked_by_user_id = %s,
+                unblock_reason = 'Removed the harmful revision'
+            WHERE id = %s
+            """,
+            (user_id, first_block_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO skill_execution_blocks (
+                tenant_id, skill_space_id, skill_id, blocked_by_user_id, reason
+            )
+            VALUES (%s, %s, %s, %s, 'Second incident')
+            """,
+            (tenant_id, organization_space_id, skill_id, user_id),
+        )
+        cursor.execute(
+            "DELETE FROM skill_execution_blocks WHERE skill_id = %s", (skill_id,)
+        )
+
+    command.downgrade(config, PRE_SKILL_EXECUTION_BLOCK_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('skill_execution_blocks')")
+        assert cursor.fetchone() == (None,)
+    command.upgrade(config, SKILL_EXECUTION_BLOCK_REVISION)

@@ -1,7 +1,9 @@
-import type {
-  OrganizationSkillPublic,
-  PublishedSkillPublic,
-  SkillRevisionPublic
+import {
+  EneoError,
+  type OrganizationSkillPublic,
+  type PublishedSkillPublic,
+  type SkillExecutionBlockState,
+  type SkillRevisionPublic
 } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
@@ -94,6 +96,13 @@ function adoptionPage() {
   };
 }
 
+function unblockedState(): SkillExecutionBlockState {
+  return {
+    skill_id: "skill-1",
+    block: null
+  };
+}
+
 describe("organisation Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockReset();
@@ -115,7 +124,13 @@ describe("organisation Skill detail page", () => {
           next_cursor: null
         },
         adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
         eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
           skills: {
             organization: {
               createRevision,
@@ -166,7 +181,13 @@ describe("organisation Skill detail page", () => {
           next_cursor: null
         },
         adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
         eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
           skills: {
             organization: {
               createRevision: vi.fn(),
@@ -238,7 +259,13 @@ describe("organisation Skill detail page", () => {
           next_cursor: null
         },
         adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
         eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
           skills: {
             organization: {
               createRevision: vi.fn(),
@@ -293,7 +320,13 @@ describe("organisation Skill detail page", () => {
           next_cursor: null
         },
         adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
         eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
           skills: {
             organization: {
               createRevision: vi.fn(),
@@ -324,5 +357,321 @@ describe("organisation Skill detail page", () => {
     await expect
       .element(page.getByRole("heading", { name: m.organization_skills_unpublish_title() }))
       .not.toBeInTheDocument();
+  });
+
+  test("requires a reason and keeps saved bindings while blocking execution", async () => {
+    const blockedState: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-1",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-1",
+        reason: "Confirmed unsafe instructions",
+        blocked_at: "2026-07-23T17:30:00Z"
+      }
+    };
+    const blockSkillExecution = vi.fn().mockResolvedValue(blockedState);
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: unblockedState(),
+        eneo: {
+          settings: {
+            blockSkillExecution,
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution: vi.fn()
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_block_action() })
+      .click();
+    const confirm = page
+      .getByRole("button", { name: m.organization_skills_execution_block_confirm() })
+      .last();
+    await expect.element(confirm).toBeDisabled();
+
+    await page
+      .getByLabelText(m.organization_skills_execution_reason_label())
+      .fill("  Confirmed unsafe instructions  ");
+    await expect.element(confirm).toBeEnabled();
+    await confirm.click();
+
+    await vi.waitFor(() =>
+      expect(blockSkillExecution).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        reason: "Confirmed unsafe instructions"
+      })
+    );
+    await expect
+      .element(
+        page
+          .getByRole("alert")
+          .getByText(m.organization_skills_execution_blocked_status(), { exact: true })
+      )
+      .toBeVisible();
+    await expect.element(page.getByText("Confirmed unsafe instructions")).toBeVisible();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: m.organization_skills_adoption_heading()
+        })
+      )
+      .toBeVisible();
+  });
+
+  test("releases only the block reviewed by the administrator", async () => {
+    const initialBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-1",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-1",
+        reason: "Confirmed unsafe instructions",
+        blocked_at: "2026-07-23T17:30:00Z"
+      }
+    };
+    const unblockSkillExecution = vi.fn().mockResolvedValue(unblockedState());
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: initialBlock,
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock: vi.fn(),
+            unblockSkillExecution
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_action() })
+      .click();
+    await page
+      .getByLabelText(m.organization_skills_execution_reason_label())
+      .fill("Removed the harmful revision");
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_confirm() })
+      .last()
+      .click();
+
+    await vi.waitFor(() =>
+      expect(unblockSkillExecution).toHaveBeenCalledWith({
+        skillId: "skill-1",
+        expectedBlockId: "block-1",
+        reason: "Removed the harmful revision"
+      })
+    );
+    await expect
+      .element(page.getByText(m.organization_skills_execution_available_status()))
+      .toBeVisible();
+  });
+
+  test("reloads a concurrent block change without losing the entered reason", async () => {
+    const initialBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-1",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-1",
+        reason: "Initial incident",
+        blocked_at: "2026-07-23T17:30:00Z"
+      }
+    };
+    const replacementBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-2",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-2",
+        reason: "Expanded incident review",
+        blocked_at: "2026-07-23T17:45:00Z"
+      }
+    };
+    const unblockSkillExecution = vi
+      .fn()
+      .mockRejectedValue(
+        new EneoError(
+          "Concurrent change",
+          "RESPONSE",
+          409,
+          9043,
+          {},
+          { endpoint: "POST@execution-block/unblock" }
+        )
+      );
+    const getSkillExecutionBlock = vi.fn().mockResolvedValue(replacementBlock);
+
+    render(OrganizationSkillDetailPage, {
+      data: {
+        skill: updatePendingSkill(),
+        published: publishedSkill(),
+        revisionPage: {
+          items: [],
+          count: 0,
+          limit: 25,
+          next_cursor: null
+        },
+        adoptionPage: Promise.resolve(adoptionPage()),
+        executionBlock: initialBlock,
+        eneo: {
+          settings: {
+            blockSkillExecution: vi.fn(),
+            getSkillExecutionBlock,
+            unblockSkillExecution
+          },
+          skills: {
+            organization: {
+              createRevision: vi.fn(),
+              getAdoption: vi.fn(),
+              getRevision: vi.fn(),
+              listRevisionSummaries: vi.fn(),
+              publish: vi.fn(),
+              restoreRevision: vi.fn(),
+              unpublish: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_action() })
+      .click();
+    const reason = page.getByLabelText(m.organization_skills_execution_reason_label());
+    await reason.fill("Reviewed and remediated");
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_unblock_confirm() })
+      .last()
+      .click();
+
+    await expect
+      .element(page.getByText(m.organization_skills_execution_stale_error()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("alertdialog").getByText("Expanded incident review"))
+      .toBeVisible();
+    await expect.element(reason).toHaveValue("Reviewed and remediated");
+    expect(getSkillExecutionBlock).toHaveBeenCalledWith({ skillId: "skill-1" });
+  });
+
+  test("lets a refreshed loader state replace the committed response override", async () => {
+    const committedBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-1",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-1",
+        reason: "Initial incident",
+        blocked_at: "2026-07-23T17:30:00Z"
+      }
+    };
+    const refreshedBlock: SkillExecutionBlockState = {
+      skill_id: "skill-1",
+      block: {
+        id: "block-2",
+        skill_id: "skill-1",
+        blocked_by_user_id: "admin-2",
+        reason: "Expanded incident review",
+        blocked_at: "2026-07-23T17:45:00Z"
+      }
+    };
+    const data = {
+      skill: updatePendingSkill(),
+      published: publishedSkill(),
+      revisionPage: {
+        items: [],
+        count: 0,
+        limit: 25,
+        next_cursor: null
+      },
+      adoptionPage: Promise.resolve(adoptionPage()),
+      executionBlock: unblockedState(),
+      eneo: {
+        settings: {
+          blockSkillExecution: vi.fn().mockResolvedValue(committedBlock),
+          getSkillExecutionBlock: vi.fn(),
+          unblockSkillExecution: vi.fn()
+        },
+        skills: {
+          organization: {
+            createRevision: vi.fn(),
+            getAdoption: vi.fn(),
+            getRevision: vi.fn(),
+            listRevisionSummaries: vi.fn(),
+            publish: vi.fn(),
+            restoreRevision: vi.fn(),
+            unpublish: vi.fn()
+          }
+        }
+      }
+    };
+    const rendered = render(OrganizationSkillDetailPage, { data: data as never });
+
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_block_action() })
+      .click();
+    await page
+      .getByLabelText(m.organization_skills_execution_reason_label())
+      .fill("Initial incident");
+    await page
+      .getByRole("button", { name: m.organization_skills_execution_block_confirm() })
+      .last()
+      .click();
+    await expect.element(page.getByText("Initial incident")).toBeVisible();
+
+    await rendered.rerender({
+      data: {
+        ...data,
+        executionBlock: refreshedBlock
+      } as never
+    });
+
+    await expect.element(page.getByText("Expanded incident review")).toBeVisible();
+    await expect.element(page.getByText("Initial incident")).not.toBeInTheDocument();
   });
 });

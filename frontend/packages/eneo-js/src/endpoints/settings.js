@@ -88,6 +88,52 @@ export function initSettings(client) {
     },
 
     /**
+     * Get the active execution block for an organisation Skill.
+     * @param {{skillId: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillExecutionBlockState>}
+     */
+    getSkillExecutionBlock: async ({ skillId }) => {
+      return await client.fetch("/api/v1/settings/skills/{skill_id}/execution-block", {
+        method: "get",
+        params: { path: { skill_id: skillId } }
+      });
+    },
+
+    /**
+     * Block an organisation Skill from subsequent runtime composition.
+     * @param {{skillId: string, reason: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillExecutionBlockState>}
+     */
+    blockSkillExecution: async ({ skillId, reason }) => {
+      return await client.fetch("/api/v1/settings/skills/{skill_id}/execution-block", {
+        method: "post",
+        params: { path: { skill_id: skillId } },
+        requestBody: { "application/json": { reason } }
+      });
+    },
+
+    /**
+     * Release the exact execution block reviewed by the administrator.
+     * @param {{skillId: string, expectedBlockId: string, reason: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillExecutionBlockState>}
+     */
+    unblockSkillExecution: async ({ skillId, expectedBlockId, reason }) => {
+      return await client.fetch("/api/v1/settings/skills/{skill_id}/execution-block/unblock", {
+        method: "post",
+        params: { path: { skill_id: skillId } },
+        requestBody: {
+          "application/json": {
+            expected_block_id: expectedBlockId,
+            reason
+          }
+        }
+      });
+    },
+
+    /**
      * Set whether model input/output prices are shown to regular users (org-wide).
      * @param {boolean} enabled Whether to show model pricing to users
      * @throws {EneoError}

@@ -20,6 +20,7 @@ MAX_SKILL_CATALOG_PAGE_LIMIT = 100
 DEFAULT_SKILL_CATALOG_PAGE_LIMIT = 25
 MAX_SKILL_ADOPTION_PAGE_LIMIT = 100
 DEFAULT_SKILL_ADOPTION_PAGE_LIMIT = 25
+MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH = 1000
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -436,6 +437,64 @@ class PublishedSkillDeactivationError(Exception):
 
 class PublishedSkillDeletionError(Exception):
     pass
+
+
+class SkillExecutionBlockConflictError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class SkillExecutionBlock:
+    id: UUID
+    tenant_id: UUID
+    skill_space_id: UUID
+    skill_id: UUID
+    blocked_by_user_id: UUID
+    reason: str
+    blocked_at: datetime
+    unblocked_by_user_id: UUID | None = None
+    unblock_reason: str | None = None
+    unblocked_at: datetime | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.unblocked_at is None
+
+
+@dataclass(frozen=True)
+class SkillExecutionBlockChange:
+    block: SkillExecutionBlock
+    changed: bool
+
+
+class SkillExecutionBlockedException(BadRequestException):
+    def __init__(
+        self,
+        *,
+        block: SkillExecutionBlock,
+        binding: ResolvedSkillBinding,
+    ) -> None:
+        self.block_id = block.id
+        self.skill_id = block.skill_id
+        self.skill_slug = binding.slug
+        self.reason = block.reason
+        self.blocked_at = block.blocked_at
+        super().__init__(
+            f'Organisation Skill "{binding.display_name}" is blocked from execution. '
+            f"Reason: {block.reason}"
+        )
+
+
+def normalize_skill_execution_block_reason(reason: str) -> str:
+    normalized = reason.strip()
+    if not normalized:
+        raise BadRequestException("An incident reason is required")
+    if len(normalized) > MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH:
+        raise BadRequestException(
+            "An incident reason cannot exceed "
+            f"{MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH} characters"
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
