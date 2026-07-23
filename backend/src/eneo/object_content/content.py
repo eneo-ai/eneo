@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,6 +19,11 @@ class ContentState(StrEnum):
     TOMBSTONED = "tombstoned"
 
 
+class StorageKind(StrEnum):
+    POSTGRES_INLINE = "postgres_inline"
+    OBJECT_STORE = "object_store"
+
+
 class ContentAccessClass(StrEnum):
     PRIVATE_RESOURCE = "private_resource"
     PUBLIC_IMMUTABLE = "public_immutable"
@@ -29,8 +34,8 @@ class ContentFailureCode(StrEnum):
     UPLOAD_RETRYABLE = "upload_retryable"
     UPLOAD_REJECTED = "upload_rejected"
     VERIFICATION_MISMATCH = "verification_mismatch"
-    REMOTE_MISSING = "remote_missing"
-    REMOTE_CORRUPT = "remote_corrupt"
+    BACKEND_MISSING = "backend_missing"
+    BACKEND_CORRUPT = "backend_corrupt"
     REFERENCE_DRIFT = "reference_drift"
     DELETE_RETRYABLE = "delete_retryable"
 
@@ -41,10 +46,6 @@ class ObjectContentError(RuntimeError):
 
 class ObjectContentUnavailableError(ObjectContentError):
     code = "object_content_unavailable"
-
-
-class ObjectContentDisabledError(ObjectContentUnavailableError):
-    code = "object_content_disabled"
 
 
 class ObjectContentConfigurationError(ObjectContentUnavailableError):
@@ -185,13 +186,22 @@ class ContentReadGrant:
     access_class: ContentAccessClass
 
 
+@dataclass(frozen=True, slots=True)
+class ContentRead:
+    chunks: AsyncIterator[bytes]
+    content_length: int
+    media_type: str
+    content_range: str | None
+
+
 def content_request_fingerprint(
     intent: ContentIntent,
     content: CapturedContent,
+    storage_kind: StorageKind,
 ) -> bytes:
-    """Bind an idempotency key to owner intent and canonical content facts."""
+    """Bind idempotency to owner intent, byte authority, and content facts."""
     fingerprint = sha256()
-    fingerprint.update(b"eneo-object-content-request-v1\0")
+    fingerprint.update(b"eneo-object-content-request-v2\0")
     created_by = (
         b"" if intent.created_by_user_id is None else intent.created_by_user_id.bytes
     )
@@ -206,6 +216,7 @@ def content_request_fingerprint(
         intent.producer_receipt.encode(),
         created_by,
         intent.access_class.value.encode(),
+        storage_kind.value.encode(),
         minimum_retain_until,
         content.sha256,
         content.size_bytes.to_bytes(8, "big", signed=False),

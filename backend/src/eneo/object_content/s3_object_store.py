@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,7 +25,7 @@ from botocore.response import StreamingBody
 from botocore.session import get_session
 
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ByteRange, CapturedContent
+from eneo.object_content.content import ByteRange, CapturedContent, ContentRead
 from eneo.object_content.lease import OperationCheckpoint
 
 if TYPE_CHECKING:
@@ -74,14 +74,6 @@ class ObjectHead:
     media_type: str
     checksum_sha256: str | None
     checksum_type: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class ObjectRead:
-    chunks: AsyncIterator[bytes]
-    content_length: int
-    media_type: str
-    content_range: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,7 +213,7 @@ def _create_client(
         get_session().create_client(
             "s3",
             endpoint_url=settings.endpoint_url,
-            region_name=settings.region,
+            region_name=settings.signing_region,
             aws_access_key_id=settings.access_key_id.get_secret_value(),
             aws_secret_access_key=settings.secret_access_key.get_secret_value(),
             verify=str(settings.ca_bundle) if settings.ca_bundle is not None else True,
@@ -596,7 +588,7 @@ class S3ObjectStore:
         *,
         expected_size_bytes: int,
         expected_media_type: str,
-    ) -> AsyncGenerator[ObjectRead, None]:
+    ) -> AsyncGenerator[ContentRead, None]:
         self._require_owned_key(key)
         try:
             result = await asyncio.to_thread(
@@ -626,7 +618,7 @@ class S3ObjectStore:
         body = result["Body"]
         chunks = self._stream_body(body, expected_length=expected_size_bytes)
         try:
-            yield ObjectRead(
+            yield ContentRead(
                 chunks=chunks,
                 content_length=expected_size_bytes,
                 media_type=expected_media_type,
@@ -644,7 +636,7 @@ class S3ObjectStore:
         expected_size_bytes: int,
         expected_media_type: str,
         byte_range: ByteRange | None = None,
-    ) -> AsyncGenerator[ObjectRead, None]:
+    ) -> AsyncGenerator[ContentRead, None]:
         """Verify canonical bytes before exposing a full or ranged response."""
         if len(expected_sha256) != _SHA256_BYTES:
             raise ObjectStoreIntegrityError("Canonical SHA-256 has an invalid length")
@@ -684,7 +676,7 @@ class S3ObjectStore:
             await asyncio.to_thread(spool.seek, start)
             chunks = self._stream_file(spool, expected_length=content_length)
             try:
-                yield ObjectRead(
+                yield ContentRead(
                     chunks=chunks,
                     content_length=content_length,
                     media_type=expected_media_type,

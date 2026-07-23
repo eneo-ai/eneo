@@ -9,6 +9,7 @@ from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
     ContentIntent,
+    StorageKind,
     content_request_fingerprint,
 )
 
@@ -38,14 +39,30 @@ def _intent() -> ContentIntent:
 def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
     intent = _intent()
     content = _content()
-    baseline = content_request_fingerprint(intent, content)
+    baseline = content_request_fingerprint(
+        intent,
+        content,
+        StorageKind.OBJECT_STORE,
+    )
 
     assert len(baseline) == 32
-    assert content_request_fingerprint(intent, content) == baseline
+    assert (
+        content_request_fingerprint(intent, content, StorageKind.OBJECT_STORE)
+        == baseline
+    )
+    assert (
+        content_request_fingerprint(
+            intent,
+            content,
+            StorageKind.POSTGRES_INLINE,
+        )
+        != baseline
+    )
     assert (
         content_request_fingerprint(
             replace(intent, producer_receipt="file:other-owner:original:0"),
             content,
+            StorageKind.OBJECT_STORE,
         )
         != baseline
     )
@@ -53,6 +70,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
         content_request_fingerprint(
             intent,
             replace(content, sha256=b"c" * 32),
+            StorageKind.OBJECT_STORE,
         )
         != baseline
     )
@@ -60,6 +78,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
         content_request_fingerprint(
             replace(intent, access_class=ContentAccessClass.PUBLIC_IMMUTABLE),
             content,
+            StorageKind.OBJECT_STORE,
         )
         != baseline
     )
@@ -67,6 +86,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
         content_request_fingerprint(
             replace(intent, created_by_user_id=uuid4()),
             content,
+            StorageKind.OBJECT_STORE,
         )
         != baseline
     )
@@ -77,6 +97,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
                 minimum_retain_until=datetime(2027, 1, 2, tzinfo=timezone.utc),
             ),
             content,
+            StorageKind.OBJECT_STORE,
         )
         != baseline
     )
@@ -93,6 +114,7 @@ def test_request_fingerprint_binds_owner_intent_and_canonical_facts() -> None:
                 ),
             ),
             content,
+            StorageKind.OBJECT_STORE,
         )
         == baseline
     )

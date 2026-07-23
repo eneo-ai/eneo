@@ -15,6 +15,7 @@ from eneo.database.tables.object_content_table import (
     FileContentReferences,
     ObjectContentHolds,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -23,6 +24,7 @@ from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
     ObjectContentBusyError,
+    StorageKind,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.reconciliation_repository import (
@@ -78,7 +80,7 @@ async def _available_content(
         content = ObjectContents(
             tenant_id=tenant_id,
             created_by_user_id=user_id,
-            object_key=f"v1/a2d539affef042aaa7f814376947be2c/{token}",
+            storage_kind=StorageKind.OBJECT_STORE.value,
             state=ContentState.PENDING.value,
             access_class="private_resource",
             sha256=digest,
@@ -91,6 +93,11 @@ async def _available_content(
         )
         session.add_all([owner, content])
         await session.flush()
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{token}"
+        session.add(descriptor)
         session.add(
             FileContentReferences(
                 file_id=owner.id,
@@ -128,7 +135,7 @@ async def _pending_content(
         content = ObjectContents(
             tenant_id=tenant_id,
             created_by_user_id=user_id,
-            object_key=f"v1/a2d539affef042aaa7f814376947be2c/{token}",
+            storage_kind=StorageKind.OBJECT_STORE.value,
             state=ContentState.PENDING.value,
             access_class="private_resource",
             sha256=digest,
@@ -140,6 +147,11 @@ async def _pending_content(
         )
         session.add_all([owner, content])
         await session.flush()
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{token}"
+        session.add(descriptor)
         session.add(
             FileContentReferences(
                 file_id=owner.id,
@@ -173,7 +185,7 @@ async def _fail_and_detach(
         content = await session.get(ObjectContents, owned.content_id)
         assert content is not None
         content.state = ContentState.FAILED.value
-        content.failure_code = ContentFailureCode.REMOTE_CORRUPT.value
+        content.failure_code = ContentFailureCode.BACKEND_CORRUPT.value
         content.failure_detail = "test integrity failure"
         await session.flush()
         await session.execute(
@@ -318,7 +330,7 @@ async def test_elapsed_tombstone_purge_cascades_released_hold(
             text(
                 "UPDATE object_contents "
                 "SET state = 'tombstoned', "
-                "remote_deleted_at = now(), "
+                "payload_deleted_at = now(), "
                 "tombstone_purge_after = now() - interval '1 second' "
                 "WHERE id = :content_id"
             ),
@@ -353,7 +365,7 @@ async def test_tombstone_purge_requires_approved_elapsed_horizon(
         now = await session.scalar(select(func.now()))
         assert now is not None
         content.state = ContentState.TOMBSTONED.value
-        content.remote_deleted_at = now
+        content.payload_deleted_at = now
         content.tombstone_purge_after = (
             None if purge_horizon == "missing" else now + timedelta(days=1)
         )

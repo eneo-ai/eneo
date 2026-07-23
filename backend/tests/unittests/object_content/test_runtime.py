@@ -154,7 +154,7 @@ def test_runtime_fails_closed_before_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_absent_configuration_is_an_explicit_healthy_disabled_state(
+async def test_absent_object_store_is_a_healthy_inline_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in tuple(os.environ):
@@ -167,22 +167,22 @@ async def test_absent_configuration_is_an_explicit_healthy_disabled_state(
     readiness = await runtime.readiness()
     reconciliation = await runtime.reconcile_once()
 
-    assert runtime.state is ObjectContentRuntimeState.DISABLED
-    assert runtime.enabled is False
+    assert runtime.state is ObjectContentRuntimeState.ENABLED
+    assert runtime.enabled is True
+    assert runtime.object_store_configured is False
     assert readiness.ready is True
-    assert readiness.code is ObjectContentReadinessCode.DISABLED
+    assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
     assert reconciliation.content_processed == 0
     assert reconciliation.object_cycle_completed is False
-    with pytest.raises(ObjectContentUnavailableError, match="disabled") as error:
-        runtime.service
-    assert error.value.code == "object_content_disabled"
+    assert runtime.service.object_store_configured is False
+    assert runtime.reconciler is not None
 
     await runtime.stop()
     assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
 
 
 @pytest.mark.asyncio
-async def test_disabled_runtime_fails_closed_when_active_content_exists(
+async def test_absent_object_store_fails_closed_when_remote_content_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in tuple(os.environ):
@@ -193,13 +193,18 @@ async def test_disabled_runtime_fails_closed_when_active_content_exists(
     )
     runtime.start()
 
-    with pytest.raises(ObjectContentUnavailableError, match="active records"):
+    with pytest.raises(
+        ObjectContentUnavailableError, match="required by active content"
+    ):
         await runtime.validate_configuration()
     readiness = await runtime.readiness()
 
     assert readiness.ready is False
     assert readiness.code is ObjectContentReadinessCode.CONFIGURATION_REQUIRED
-    with pytest.raises(ObjectContentUnavailableError, match="active records"):
+    with pytest.raises(
+        ObjectContentUnavailableError,
+        match="required by active content",
+    ):
         await runtime.reconcile_once()
 
 
@@ -228,8 +233,8 @@ async def test_readiness_recovers_after_cache_expiry_without_process_restart(
     now = 1.1
     recovered = await runtime.readiness()
 
-    assert unavailable.ready is False
-    assert unavailable.code is ObjectContentReadinessCode.STORE_UNAVAILABLE
+    assert unavailable.ready is True
+    assert unavailable.code is ObjectContentReadinessCode.STORE_DEGRADED
     assert cached_unavailable == unavailable
     assert store.check_ready_count == 2
     assert recovered.ready is True

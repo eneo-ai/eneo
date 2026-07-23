@@ -1,12 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from hashlib import sha256
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.object_content_table import ObjectContentHolds, ObjectContents
+from eneo.database.tables.object_content_table import (
+    InlineContentPayloads,
+    ObjectContentHolds,
+    ObjectContents,
+    ObjectStoreObjects,
+)
 from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
@@ -16,13 +22,14 @@ from eneo.object_content.content import (
     ObjectContentBusyError,
     ObjectContentIdempotencyConflictError,
     ObjectContentStateError,
+    StorageKind,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedContent:
     id: UUID
-    object_key: str
+    storage_kind: StorageKind
     state: ContentState
     created: bool
 
@@ -40,11 +47,17 @@ class UploadLease:
 @dataclass(frozen=True, slots=True)
 class ReadableContent:
     content_id: UUID
-    object_key: str
+    storage_kind: StorageKind
     sha256: bytes
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectStoreDescriptor:
+    content_id: UUID
+    object_key: str
 
 
 class ObjectContentRepository:
@@ -53,7 +66,7 @@ class ObjectContentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def prepare(
+    async def prepare_object_store(
         self,
         *,
         intent: ContentIntent,
@@ -61,13 +74,92 @@ class ObjectContentRepository:
         object_key: str,
         request_fingerprint: bytes,
     ) -> PreparedContent:
+        row, created = await self._prepare_control(
+            intent=intent,
+            content=content,
+            storage_kind=StorageKind.OBJECT_STORE,
+            state=ContentState.PENDING,
+            request_fingerprint=request_fingerprint,
+        )
+        if created:
+            descriptor = ObjectStoreObjects()
+            descriptor.content_id = row.id
+            descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+            descriptor.object_key = object_key
+            self._session.add(descriptor)
+            await self._session.flush()
+        return PreparedContent(
+            id=row.id,
+            storage_kind=StorageKind(row.storage_kind),
+            state=ContentState(row.state),
+            created=created,
+        )
+
+    async def prepare_inline(
+        self,
+        *,
+        intent: ContentIntent,
+        content: CapturedContent,
+        payload: bytes,
+        request_fingerprint: bytes,
+    ) -> PreparedContent:
+        if len(payload) != content.size_bytes:
+            raise ObjectContentStateError(
+                "Inline payload size does not match captured content"
+            )
+        if sha256(payload).digest() != content.sha256:
+            raise ObjectContentStateError(
+                "Inline payload SHA-256 does not match captured content"
+            )
+        row, created = await self._prepare_control(
+            intent=intent,
+            content=content,
+            storage_kind=StorageKind.POSTGRES_INLINE,
+            state=ContentState.AVAILABLE,
+            request_fingerprint=request_fingerprint,
+        )
+        if created:
+            stored_payload = InlineContentPayloads()
+            stored_payload.content_id = row.id
+            stored_payload.storage_kind = StorageKind.POSTGRES_INLINE.value
+            stored_payload.payload = payload
+            self._session.add(stored_payload)
+            await self._session.flush()
+        else:
+            stored_payload = await self._session.get(InlineContentPayloads, row.id)
+            if row.state == ContentState.TOMBSTONED.value:
+                if stored_payload is not None:
+                    raise ObjectContentStateError(
+                        "Inline content tombstone still owns payload bytes"
+                    )
+            elif stored_payload is None or stored_payload.payload != payload:
+                raise ObjectContentIdempotencyConflictError(
+                    "The idempotency key is bound to different inline bytes"
+                )
+        return PreparedContent(
+            id=row.id,
+            storage_kind=StorageKind(row.storage_kind),
+            state=ContentState(row.state),
+            created=created,
+        )
+
+    async def _prepare_control(
+        self,
+        *,
+        intent: ContentIntent,
+        content: CapturedContent,
+        storage_kind: StorageKind,
+        state: ContentState,
+        request_fingerprint: bytes,
+    ) -> tuple[ObjectContents, bool]:
+        available_at = func.now() if state is ContentState.AVAILABLE else None
         statement = (
             insert(ObjectContents)
             .values(
                 tenant_id=intent.tenant_id,
                 created_by_user_id=intent.created_by_user_id,
-                object_key=object_key,
-                state=ContentState.PENDING.value,
+                storage_kind=storage_kind.value,
+                state=state.value,
                 access_class=intent.access_class.value,
                 sha256=content.sha256,
                 size_bytes=content.size_bytes,
@@ -76,6 +168,7 @@ class ObjectContentRepository:
                 idempotency_key=intent.idempotency_key,
                 request_fingerprint=request_fingerprint,
                 minimum_retain_until=intent.minimum_retain_until,
+                available_at=available_at,
             )
             .on_conflict_do_nothing(
                 constraint="uq_object_contents_tenant_id_idempotency_key"
@@ -99,12 +192,11 @@ class ObjectContentRepository:
             raise ObjectContentIdempotencyConflictError(
                 "The idempotency key is already bound to a different content request"
             )
-        return PreparedContent(
-            id=row.id,
-            object_key=row.object_key,
-            state=ContentState(row.state),
-            created=created,
-        )
+        if row.storage_kind != storage_kind.value:
+            raise ObjectContentIdempotencyConflictError(
+                "The idempotency key is already bound to another byte backend"
+            )
+        return row, created
 
     async def claim_upload(
         self,
@@ -115,11 +207,16 @@ class ObjectContentRepository:
         lease_seconds: int,
     ) -> UploadLease:
         row = await self._content_for_update(content_id)
+        if row.storage_kind != StorageKind.OBJECT_STORE.value:
+            raise ObjectContentStateError(
+                "Only object-store content can acquire an upload lease"
+            )
+        descriptor = await self._object_store_descriptor(content_id, for_update=True)
         self._require_content_matches(row, content)
         if row.state == ContentState.AVAILABLE.value:
             return UploadLease(
                 content_id=row.id,
-                object_key=row.object_key,
+                object_key=descriptor.object_key,
                 state=ContentState.AVAILABLE,
                 attempt_count=row.attempt_count,
                 previous_multipart_upload_id=None,
@@ -140,7 +237,7 @@ class ObjectContentRepository:
                 "Another object-content operation holds the lease"
             )
 
-        previous_upload_id = row.multipart_upload_id
+        previous_upload_id = descriptor.multipart_upload_id
         row.lease_owner = lease_owner
         row.lease_until = now + timedelta(seconds=lease_seconds)
         row.attempt_count += 1
@@ -150,7 +247,7 @@ class ObjectContentRepository:
         await self._session.flush()
         return UploadLease(
             content_id=row.id,
-            object_key=row.object_key,
+            object_key=descriptor.object_key,
             state=ContentState.PENDING,
             attempt_count=row.attempt_count,
             previous_multipart_upload_id=previous_upload_id,
@@ -164,10 +261,11 @@ class ObjectContentRepository:
         lease_owner: str,
         upload_id: str,
     ) -> None:
-        row = await self._leased_content_for_update(content_id, lease_owner)
-        if row.multipart_upload_id == upload_id:
-            row.multipart_upload_id = None
-            row.multipart_initiated_at = None
+        await self._leased_content_for_update(content_id, lease_owner)
+        descriptor = await self._object_store_descriptor(content_id, for_update=True)
+        if descriptor.multipart_upload_id == upload_id:
+            descriptor.multipart_upload_id = None
+            descriptor.multipart_initiated_at = None
             await self._session.flush()
 
     async def record_multipart_started(
@@ -186,12 +284,13 @@ class ObjectContentRepository:
             raise ObjectContentStateError(
                 "Multipart intent no longer belongs to pending content"
             )
-        if row.multipart_upload_id not in {None, upload_id}:
+        descriptor = await self._object_store_descriptor(content_id, for_update=True)
+        if descriptor.multipart_upload_id not in {None, upload_id}:
             raise ObjectContentStateError(
                 "A different multipart upload is already recorded"
             )
-        row.multipart_upload_id = upload_id
-        row.multipart_initiated_at = await self._database_now()
+        descriptor.multipart_upload_id = upload_id
+        descriptor.multipart_initiated_at = await self._database_now()
         await self._session.flush()
 
     async def renew_pending_lease(
@@ -251,8 +350,9 @@ class ObjectContentRepository:
         row.failure_code = None
         row.failure_detail = None
         row.next_attempt_at = None
-        row.multipart_upload_id = None
-        row.multipart_initiated_at = None
+        descriptor = await self._object_store_descriptor(content_id, for_update=True)
+        descriptor.multipart_upload_id = None
+        descriptor.multipart_initiated_at = None
         self._clear_lease(row)
         await self._session.flush()
         return self._readable(row)
@@ -318,8 +418,9 @@ class ObjectContentRepository:
         row.failure_detail = "stale durable intent has no complete object"
         row.delete_requested_at = row.delete_requested_at or now
         row.next_attempt_at = now if row.reference_count == 0 else None
-        row.multipart_upload_id = None
-        row.multipart_initiated_at = None
+        descriptor = await self._object_store_descriptor(content_id, for_update=True)
+        descriptor.multipart_upload_id = None
+        descriptor.multipart_initiated_at = None
         self._clear_lease(row)
         await self._session.flush()
 
@@ -367,13 +468,31 @@ class ObjectContentRepository:
             )
         now = await self._database_now()
         row.state = ContentState.TOMBSTONED.value
-        row.remote_deleted_at = now
+        row.payload_deleted_at = now
         row.tombstone_purge_after = purge_after
         row.failure_code = None
         row.failure_detail = None
         row.next_attempt_at = None
-        row.multipart_upload_id = None
-        row.multipart_initiated_at = None
+        if row.storage_kind == StorageKind.OBJECT_STORE.value:
+            descriptor = await self._object_store_descriptor(
+                content_id,
+                for_update=True,
+            )
+            descriptor.multipart_upload_id = None
+            descriptor.multipart_initiated_at = None
+        elif row.storage_kind == StorageKind.POSTGRES_INLINE.value:
+            payload = (
+                await self._session.scalars(
+                    select(InlineContentPayloads)
+                    .where(InlineContentPayloads.content_id == content_id)
+                    .with_for_update()
+                )
+            ).one_or_none()
+            if payload is None:
+                raise ObjectContentStateError("Inline content payload is missing")
+            await self._session.delete(payload)
+        else:
+            raise ObjectContentStateError("Object content has an invalid storage kind")
         self._clear_lease(row)
         await self._session.flush()
 
@@ -407,17 +526,17 @@ class ObjectContentRepository:
             raise ObjectContentStateError("Object content is not available")
         return self._readable(row)
 
-    async def mark_remote_failure(
+    async def mark_backend_failure(
         self,
         *,
         content_id: UUID,
         failure_code: ContentFailureCode,
     ) -> None:
         if failure_code not in {
-            ContentFailureCode.REMOTE_MISSING,
-            ContentFailureCode.REMOTE_CORRUPT,
+            ContentFailureCode.BACKEND_MISSING,
+            ContentFailureCode.BACKEND_CORRUPT,
         }:
-            raise ValueError("mark_remote_failure requires a remote failure code")
+            raise ValueError("mark_backend_failure requires a backend failure code")
         row = await self._content_for_update(content_id)
         if row.state == ContentState.AVAILABLE.value:
             row.state = ContentState.FAILED.value
@@ -425,6 +544,22 @@ class ObjectContentRepository:
             row.failure_detail = "durable object bytes are unavailable or untrusted"
             row.next_attempt_at = None
             await self._session.flush()
+
+    async def get_inline_payload(self, content_id: UUID) -> bytes:
+        payload = await self._session.get(InlineContentPayloads, content_id)
+        if payload is None:
+            raise ObjectContentStateError("Inline content payload is missing")
+        return payload.payload
+
+    async def get_object_store_descriptor(
+        self,
+        content_id: UUID,
+    ) -> ObjectStoreDescriptor:
+        descriptor = await self._object_store_descriptor(content_id)
+        return ObjectStoreDescriptor(
+            content_id=descriptor.content_id,
+            object_key=descriptor.object_key,
+        )
 
     async def apply_hold(
         self,
@@ -545,6 +680,22 @@ class ObjectContentRepository:
             raise ObjectContentBusyError("The object-content lease changed")
         return row
 
+    async def _object_store_descriptor(
+        self,
+        content_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ObjectStoreObjects:
+        statement = select(ObjectStoreObjects).where(
+            ObjectStoreObjects.content_id == content_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        descriptor = (await self._session.scalars(statement)).one_or_none()
+        if descriptor is None:
+            raise ObjectContentStateError("Object-store descriptor is missing")
+        return descriptor
+
     async def _database_now(self) -> datetime:
         now = await self._session.scalar(select(func.now()))
         if now is None:
@@ -575,7 +726,7 @@ class ObjectContentRepository:
     def _readable(row: ObjectContents) -> ReadableContent:
         return ReadableContent(
             content_id=row.id,
-            object_key=row.object_key,
+            storage_kind=StorageKind(row.storage_kind),
             sha256=row.sha256,
             size_bytes=row.size_bytes,
             media_type=row.verified_media_type,

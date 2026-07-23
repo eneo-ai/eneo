@@ -29,7 +29,7 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
-    # All-absent object-content configuration is a supported disabled state.
+    # Remote configuration is optional; the inline-capable core always starts.
     # Any partial configuration fails construction. Startup then verifies the
     # durable PostgreSQL/object-store pairing before producers or workers run.
     object_content_runtime.start()

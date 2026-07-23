@@ -5,7 +5,9 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
     ObjectContentSettings,
+    load_object_content_core_settings,
     load_object_content_settings,
 )
 
@@ -21,12 +23,28 @@ def test_explicit_object_content_settings_are_mandatory_and_fail_closed() -> Non
         ObjectContentSettings(_env_file=None)
 
 
-def test_absent_object_content_environment_disables_the_capability(
+def test_absent_object_store_environment_keeps_inline_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _clear_object_content_environment(monkeypatch)
 
     assert load_object_content_settings() is None
+    assert load_object_content_core_settings().inline_maximum_bytes == 10 * 1024**2
+
+
+def test_inline_tuning_does_not_require_object_store_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", "2097152")
+    monkeypatch.setenv("OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES", "65536")
+
+    assert load_object_content_settings() is None
+    assert load_object_content_core_settings() == ObjectContentCoreSettings(
+        _env_file=None,
+        inline_maximum_bytes=2 * 1024**2,
+        inline_io_chunk_bytes=64 * 1024,
+    )
 
 
 def test_partial_object_content_environment_fails_closed(

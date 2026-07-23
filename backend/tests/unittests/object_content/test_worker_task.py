@@ -14,6 +14,7 @@ async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
     runtime.reconcile_once = AsyncMock(
         return_value=ReconciliationResult(
             lifecycle_advanced=1,
+            inline_deleted=8,
             content_processed=2,
             references_audited=3,
             reference_drifts=4,
@@ -28,6 +29,7 @@ async def test_worker_task_returns_only_bounded_sanitized_counts() -> None:
 
     assert summary == {
         "lifecycle_advanced": 1,
+        "inline_deleted": 8,
         "content_processed": 2,
         "references_audited": 3,
         "reference_drifts": 4,
