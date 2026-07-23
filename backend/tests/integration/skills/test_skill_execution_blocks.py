@@ -5,8 +5,16 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.skill_table import SkillExecutionBlocks
-from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.database.tables.spaces_table import (
+    Spaces,
+    SpacesTranscriptionModels,
+    SpacesUsers,
+)
+from eneo.database.tables.users_table import users_roles_table
+from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillExecutionBlockConflictError,
@@ -360,16 +368,156 @@ async def test_queued_snapshot_predating_block_fails_at_live_runtime_resolution(
         assert blocked is not None
 
     async with db_container() as container:
-        with pytest.raises(
-            SkillExecutionBlockedException,
-            match="Confirmed unsafe instructions",
-        ):
+        with pytest.raises(SkillExecutionBlockedException) as exc_info:
             await container.skill_service().compose_for_execution_snapshot(
                 tenant_id=admin_user.tenant_id,
                 space_id=target_space_id,
                 provenance=queued.provenance,
                 base_instructions="Base",
             )
+
+    assert blocked.block.reason not in str(exc_info.value)
+    assert exc_info.value.reason == blocked.block.reason
+
+
+async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(
+    client,
+    admin_token,
+    db_container,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    transcription_model_factory,
+    space_factory,
+    app_factory,
+):
+    incident_reason = "Potential personal data exposure in payroll instructions"
+    async with db_container() as container:
+        session = container.session()
+        runner = await user_factory(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        app_role = Roles(
+            name=f"App runner {uuid4().hex[:8]}",
+            permissions=[Permission.APPS.value],
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(app_role)
+        await session.flush()
+        await session.execute(
+            users_roles_table.insert().values(
+                user_id=runner.id,
+                role_id=app_role.id,
+            )
+        )
+        runner_token = container.auth_service().create_access_token_for_user(runner)
+
+        organization = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert organization is not None
+        completion_model = await completion_model_factory(
+            session,
+            "blocked-app-http-model",
+        )
+        transcription_model = await transcription_model_factory(
+            session,
+            "blocked-app-http-transcription-model",
+        )
+        target_space = await space_factory(
+            session,
+            "Blocked App HTTP target",
+            [completion_model.id],
+        )
+        session.add_all(
+            [
+                SpacesTranscriptionModels(
+                    space_id=target_space.id,
+                    transcription_model_id=transcription_model.id,
+                ),
+                SpacesUsers(
+                    space_id=target_space.id,
+                    user_id=admin_user.id,
+                    role="admin",
+                ),
+                SpacesUsers(
+                    space_id=target_space.id,
+                    user_id=runner.id,
+                    role="viewer",
+                ),
+            ]
+        )
+        app = await app_factory(
+            session,
+            "Blocked App HTTP",
+            completion_model.id,
+            space_id=target_space.id,
+            transcription_model_id=transcription_model.id,
+            published=True,
+        )
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"blocked-app-http-{uuid4().hex[:8]}",
+            display_name="Payroll incident guidance",
+            description="Approved App guidance",
+            instructions="Use the approved App guidance.",
+            content_digest="5" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=skill.current_revision.id,
+        )
+        await container.skill_service().replace_app_bindings(
+            space_id=target_space.id,
+            app_id=app.id,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id,
+                    skill_revision_id=skill.current_revision.id,
+                )
+            ],
+        )
+        blocked = await repo.block_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            blocked_by_user_id=admin_user.id,
+            reason=incident_reason,
+        )
+        assert blocked is not None
+        app_id = app.id
+        skill_id = skill.id
+
+    run_response = await client.post(
+        f"/api/v1/apps/{app_id}/runs/",
+        json={"files": [], "text": "Run the published App"},
+        headers={"Authorization": f"Bearer {runner_token}"},
+    )
+
+    assert run_response.status_code == 400, run_response.text
+    assert run_response.json()["message"] == (
+        "An organisation Skill is blocked from execution. Contact an administrator."
+    )
+    assert incident_reason not in run_response.text
+
+    admin_response = await client.get(
+        f"/api/v1/settings/skills/{skill_id}/execution-block",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert admin_response.status_code == 200, admin_response.text
+    assert admin_response.json()["block"]["reason"] == incident_reason
+
+    async with db_container() as container:
+        run_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(AppRuns)
+            .where(AppRuns.app_id == app_id)
+        )
+        assert run_count == 0
 
 
 async def test_execution_block_http_contract_preserves_state_on_stale_unblock(

@@ -480,8 +480,7 @@ class SkillExecutionBlockedException(BadRequestException):
         self.reason = block.reason
         self.blocked_at = block.blocked_at
         super().__init__(
-            f'Organisation Skill "{binding.display_name}" is blocked from execution. '
-            f"Reason: {block.reason}"
+            "An organisation Skill is blocked from execution. Contact an administrator."
         )
 
 

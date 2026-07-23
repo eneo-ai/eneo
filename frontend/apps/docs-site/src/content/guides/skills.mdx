@@ -200,7 +200,8 @@ operate this human-audited control.
 - New Personal Chat and Assistant requests omit the blocked Skill while the
   parent continues to run.
 - Apps configured with the Skill fail before provider work, including queued
-  runs whose saved snapshot predates the block.
+  runs whose saved snapshot predates the block. Runners see a generic stop
+  message; only tenant admins can read the incident reason.
 - A request whose Skill plan was already resolved may finish. The next request
   sees the block.
 - Bindings, publication state, versions, and adoption evidence remain intact.

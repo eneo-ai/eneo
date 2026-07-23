@@ -410,7 +410,7 @@ async def test_policy_runtime_bindings_exclude_blocked_skill():
     repo.replace_policy_bindings.assert_not_awaited()
 
 
-async def test_execution_snapshot_fails_with_incident_reason_when_skill_is_blocked():
+async def test_execution_snapshot_hides_incident_reason_when_skill_is_blocked():
     binding = _binding(position=0)
     reference = _reference(binding)
     tenant_id = uuid4()
@@ -419,10 +419,7 @@ async def test_execution_snapshot_fails_with_incident_reason_when_skill_is_block
     repo.resolve_references_for_execution_snapshot.return_value = [binding]
     repo.list_active_execution_blocks.return_value = {binding.skill_id: block}
 
-    with pytest.raises(
-        SkillExecutionBlockedException,
-        match="Confirmed unsafe instructions",
-    ) as exc_info:
+    with pytest.raises(SkillExecutionBlockedException) as exc_info:
         await _service(repo).compose_for_execution_snapshot(
             tenant_id=tenant_id,
             space_id=uuid4(),
@@ -430,6 +427,7 @@ async def test_execution_snapshot_fails_with_incident_reason_when_skill_is_block
             base_instructions="Base",
         )
 
+    assert block.reason not in str(exc_info.value)
     assert exc_info.value.block_id == block.id
     assert exc_info.value.skill_id == binding.skill_id
     assert exc_info.value.reason == block.reason

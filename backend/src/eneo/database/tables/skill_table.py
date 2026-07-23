@@ -164,6 +164,7 @@ class SkillExecutionBlocks(BasePublic):
             (
                 unblocked_at IS NOT NULL
                 AND unblocked_by_user_id IS NOT NULL
+                AND unblock_reason IS NOT NULL
                 AND char_length(btrim(unblock_reason)) BETWEEN 1 AND 1000
             )
             """,

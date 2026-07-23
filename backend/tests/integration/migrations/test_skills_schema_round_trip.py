@@ -1832,6 +1832,17 @@ def test_skill_execution_block_migration_enforces_active_lifecycle_and_round_tri
         """,
         parameters=(first_block_id,),
     )
+    _assert_constraint(
+        connection,
+        expected="ck_skill_execution_blocks_unblock_state",
+        statement="""
+            UPDATE skill_execution_blocks
+            SET unblocked_at = now(),
+                unblocked_by_user_id = %s
+            WHERE id = %s
+        """,
+        parameters=(user_id, first_block_id),
+    )
 
     with connection.cursor() as cursor:
         cursor.execute(

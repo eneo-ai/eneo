@@ -367,26 +367,24 @@ async def test_queued_app_block_stops_before_files_context_and_provider(
         position=reference.position,
         source=SkillBindingSource.ORGANIZATION,
     )
+    block = SkillExecutionBlock(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        skill_space_id=binding.skill_space_id,
+        skill_id=reference.skill_id,
+        blocked_by_user_id=uuid4(),
+        reason="Confirmed unsafe instructions",
+        blocked_at=datetime.now(timezone.utc),
+    )
     service._get_runnable_app = AsyncMock(return_value=app)  # type: ignore[method-assign]
     service.skill_service.compose_for_execution_snapshot.side_effect = (
         SkillExecutionBlockedException(
-            block=SkillExecutionBlock(
-                id=uuid4(),
-                tenant_id=uuid4(),
-                skill_space_id=binding.skill_space_id,
-                skill_id=reference.skill_id,
-                blocked_by_user_id=uuid4(),
-                reason="Confirmed unsafe instructions",
-                blocked_at=datetime.now(timezone.utc),
-            ),
+            block=block,
             binding=binding,
         )
     )
 
-    with pytest.raises(
-        SkillExecutionBlockedException,
-        match="Confirmed unsafe instructions",
-    ):
+    with pytest.raises(SkillExecutionBlockedException) as exc_info:
         await service.run_app(
             app.id,
             file_ids=[uuid4()],
@@ -394,6 +392,8 @@ async def test_queued_app_block_stops_before_files_context_and_provider(
             skill_provenance=(reference,),
         )
 
+    assert block.reason not in str(exc_info.value)
+    assert exc_info.value.reason == block.reason
     service.file_service.get_files_by_ids.assert_not_awaited()
     app.run.assert_not_awaited()
 
