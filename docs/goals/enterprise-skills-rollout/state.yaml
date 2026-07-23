@@ -4,7 +4,7 @@ goal:
   title: "Enterprise Skills rollout"
   slug: "enterprise-skills-rollout"
   kind: specific
-  tranche: "Complete the O1 general-availability gates on the merged organisation catalogue."
+  tranche: "Close O1 and turn the remaining non-Marketplace Skills roadmap into an ordered implementation blueprint."
   status: active
 
 rules:
@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 2
+  completed_write_tasks_in_thread: 4
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "b186f175d84df3f4c89ef0f244b675f152191934"
+  last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
 
-active_task: T007
+active_task: T011
 
 tasks:
   - id: T001
@@ -476,7 +476,7 @@ tasks:
   - id: T007
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Close the O1 deletion and retained-provenance contract before general availability."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/579"
@@ -501,7 +501,32 @@ tasks:
     stop_if:
       - "Closing the contract requires duplicating App-run lifecycle state."
       - "A behavior proof fails and the fix needs production files outside this contract-lock slice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Locked the existing deletion/terminal-run recovery contract with PostgreSQL behavior proof and concise operator documentation, without changing production behavior, then squash-merged PR #580."
+      merged_pr: 580
+      source_head: "83be4bef82f40bf79e63d24cbd0402ed5e02289e"
+      merge_commit: "c642da4953102718c4031c4004e3c6a83d956f4a"
+      merged_at: "2026-07-23T21:04:00Z"
+      review_url: "https://github.com/eneo-ai/eneo/pull/580#issuecomment-5063221359"
+      changed_files:
+        - "backend/tests/integration/skills/test_skill_concurrency.py"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - cmd: "uv run pytest tests/integration/skills/test_skill_concurrency.py tests/unittests/apps/app_runs/test_app_run_provenance.py -q"
+          result: "pass: 21 tests"
+        - cmd: "uv run pytest tests/integration/skills/test_skill_concurrency.py::test_queued_app_run_snapshot_blocks_concurrent_skill_deletion_until_terminal -q"
+          result: "pass: 2 tests after final cleanup"
+        - cmd: "backend Ruff check and format; docs Prettier and production build; Goal Maker checker; git diff --check"
+          result: pass
+        - cmd: "GitHub PR #580 required checks"
+          result: "pass: 17 successful, 3 scope-skipped, 0 failing"
+      verification:
+        - "Complete and failed App runs release an otherwise eligible Skill for hard deletion."
+        - "The Skill and revision rows are deleted while body-free ID/revision/digest/position provenance remains readable."
+        - "The fresh full-coverage review found no current in-scope findings on the merged head."
 
   - id: T008
     type: worker
@@ -538,6 +563,130 @@ tasks:
       - "Keyboard, responsive, loading, empty, and error states"
     stop_if:
       - "There is no measured or observed need beyond the existing source labels and search."
+    receipt: null
+
+  - id: T010
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Adjudicate an implementation-ready, highest-ROI delivery order for Task #553 and the remaining non-Marketplace Enterprise Skills roadmap before any production code changes."
+    inputs:
+      - "origin/develop at c642da4953102718c4031c4004e3c6a83d956f4a"
+      - "Issue #553 and PR #538 at 89694fd450b375b9d3eaed45b9699f38b641f9bf"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "Flow package/export mechanics on refactor/flows-clean at 77202b4f61374a12733fcba1a1f684bb725385c5"
+      - "Official Agent Skills, Codex, Claude Code, Open WebUI, LibreChat, Onyx, Flowise, AnythingLLM, and Dify references"
+    constraints:
+      - "Do not implement production code."
+      - "Use one repo-grounded Fable Max planning review after independently identifying current owners, contradictions, scale limits, failure modes, and the actual remaining roadmap."
+      - "Reconcile Issue #553 with the newer roadmap and ADR; one fallback contract must win before implementation."
+      - "Treat PR #538 as comparison evidence; its loopback FastMCP, identity-token, knowledge, and file stack is not a merge dependency for #553."
+      - "Use the existing completion loop and one concrete frozen Skill plan; do not create a one-method port or generic effect framework."
+      - "Keep Group Chat routing and App on-demand out of scope."
+      - "Plan O2 and S2 only to the reviewable contract and dependency depth needed for ordering; do not implement them in this task."
+      - "Keep external Marketplace implementation last and out of scope."
+      - "Do not add a generic selector, plugin, policy, or multi-tenancy framework."
+    expected_output:
+      - "Canonical owner and dependency decision"
+      - "One explicit no-tool fallback and 100-plus-Skill descriptor/budget contract"
+      - "Small reviewable vertical slices with acceptance, behavior tests, recovery, and stop conditions"
+      - "Evidence-based ROI and dependency order for #553, T008, O2, T009, S2, and Marketplace-last"
+      - "Minimal O2 lifecycle/schema boundary and its explicit separation from S2 package mechanics"
+      - "Updated roadmap, Goal Maker state, and Issue #553 contract"
+    stop_if:
+      - "The plan requires a production edit to prove a disputed behavior."
+      - "The only proposed path is to merge the stacked PR #538 wholesale."
+      - "The review cannot inspect bounded source evidence for the claimed canonical owners."
+    receipt:
+      result: done
+      summary: "Reconciled the remaining non-Marketplace roadmap into an implementation-ready #553-first sequence, corrected the copied discovery budget and loopback-MCP dependency, and synced the accepted contract to live Issue #553 without production edits."
+      planning_pr: 581
+      planning_pr_status: "opened for CI and fresh review"
+      issue: "https://github.com/eneo-ai/eneo/issues/553"
+      issue_updated_at: "2026-07-23T22:06:02Z"
+      changed_files:
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      review:
+        session: "eneo-enterprise-skills-o2-blueprint-max"
+        iteration_1: ".codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-20260723T211419Z.md; changes required"
+        iteration_2: ".codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-verification-20260723T214123Z.md; architecture accepted, three wording blockers"
+        iteration_3: ".codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-verification-3-20260723T220002Z.md; green, minimum score 8"
+      evidence:
+        - "Actual LiteLLM counters measured 1/20/50/100 descriptor sets for 128k and 200k model windows; 10% is a measured total Skill-context seed, not a hard-coded model truth."
+        - "PR #538's 21-file, 1,188-change loopback FastMCP stack was verified as comparison evidence rather than a #553 merge dependency."
+        - "refactor/flows-clean at 77202b4f contains the Flow-specific package vertical and must land before S2 extracts mechanics with two consumers."
+        - "Governance Policy owns the union of explicit and provider-selected models; the exact Assistant-versus-policy save condition now matches current resolver semantics."
+        - "The current SettingsRepository is user-bound; the plan reuses Admin Settings as a surface while eneo.skills owns typed organisation runtime policy."
+      validation:
+        - cmd: "bunx prettier@3.9.4 --check docs/enterprise-skills-roadmap.md docs/adr/marketplace-hub-package-portability-and-skills.md frontend/apps/docs-site/src/content/guides/skills.mdx"
+          result: pass
+        - cmd: "node /Users/ccimen/.codex/skills/goal-maker/scripts/check-goal-state.mjs docs/goals/enterprise-skills-rollout/state.yaml"
+          result: pass
+        - cmd: "git diff --check"
+          result: pass
+        - cmd: "bun run --cwd apps/docs-site build"
+          result: "pass; existing Nextra Git timestamp and no-img-element warnings only"
+
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 1 as a dormant, closed Assistant and Governance Policy binding-mode contract while preserving byte-equivalent all-always behavior."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "PR #581 after merge into develop"
+      - "docs/enterprise-skills-roadmap.md selective activation boundary and slices"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md selective activation delivery gate"
+      - "Current Assistant, Governance Policy, Skill binding, migration, and generated-contract owners"
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/database/tables/skill_table.py"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/integration/assistants/"
+      - "backend/tests/integration/governance_policy/"
+      - "backend/tests/integration/migrations/"
+      - "backend/tests/integration/skills/"
+      - "backend/tests/unittests/assistants/"
+      - "backend/tests/unittests/governance_policy/"
+      - "backend/tests/unittests/skills/"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+    constraints:
+      - "Do not begin until PR #581 is merged and the new branch is based on that exact develop revision."
+      - "Add a closed internal always | on_demand value only where Assistant and Governance Policy bindings canonically own it; Apps gain no mode."
+      - "Backfill and default every existing row to always."
+      - "Do not accept public on_demand writes, add runtime activation, change provider payloads, or expose mode controls."
+      - "Reuse current binding tables, repositories, parent writes, and generated contracts; create no parallel binding API or generic mode framework."
+      - "Keep schema, domain, persistence, and internal projections typed; add no Any, ignores, or compatibility shim."
+    expected_output:
+      - "One reversible migration and typed closed mode"
+      - "Internal Assistant and Governance Policy binding round-trip with always defaults"
+      - "Byte-equivalent zero-Skill and all-always composition behavior"
+      - "Public request contracts reject or cannot express on_demand"
+      - "Migration, repository, service, schema, and behavior tests"
+      - "Updated concise docs and validation receipt"
+    verify:
+      - "Focused migration round-trip and PostgreSQL constraint tests"
+      - "Assistant and Governance Policy binding repository/service behavior tests"
+      - "Zero-Skill and all-always provider-payload equivalence tests"
+      - "OpenAPI and generated SDK drift checks"
+      - "Backend Ruff, format, strict Pyright, relevant suites, and docs build"
+      - "Required GitHub CI, fresh /review, same-session Claude peer verification, and PM audit"
+    stop_if:
+      - "PR #581 is not merged or develop no longer matches its accepted contract."
+      - "The slice requires provider-loop, token-policy, evidence, or frontend mode-control changes."
+      - "A public generated input can accept on_demand before runtime exists."
+      - "App bindings would gain a mode or require a compatibility branch."
     receipt: null
 
   - id: T999

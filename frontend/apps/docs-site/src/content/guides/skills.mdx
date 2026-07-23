@@ -228,6 +228,24 @@ Review the adoption view and update or remove unsafe versions before unblocking.
   automatically.
 - This release has no external Skill marketplace or package installation flow.
 
+## Planned next steps
+
+The next runtime change will let Assistant builders and tenant admins choose
+between **always** and **on demand** for each approved binding. On-demand Skills
+will advertise a compact description and load the exact pinned instructions only
+when a tool-capable model requests them. Apps will remain eager.
+
+Eneo will show the selected model, measured Skill budget, and whether every
+attached Skill is discoverable. Tenant admins will be able to change the seeded
+10% total Skill-context share in **Admin > Overview** without a code change or
+deployment; the model window and platform safety bounds still apply. Eneo will
+reject a new configuration in which an advertised Skill could never be loaded,
+instead of hiding a subset. Models without tool calling will keep only
+**always** Skills and show that limitation.
+
+Editable Space copies with explicit source updates come later. External
+Marketplace distribution remains a separate final phase.
+
 ## FAQ
 
 ### Does editing a Skill immediately change every Assistant that uses it?
