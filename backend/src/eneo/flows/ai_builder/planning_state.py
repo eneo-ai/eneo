@@ -1,13 +1,18 @@
-"""Typed PlanningState persisted in `builder_sessions.planning_state_jsonb`.
+"""Typed derived PlanningState cache persisted in session JSONB.
 
-PlanningState replaces the turn-by-turn reconstruction of discovery
-state and is the single source of truth for what the planner has
-learned and committed to. It does not mirror session or plan lifecycle
-status; those stay on their own tables. Business logic consumes the
-typed Pydantic model here — partial JSONB operators
-(`jsonb_set`, `||`, path updates) are forbidden. Every mutation follows
-load → validate → mutate-in-python → serialize-full-snapshot, so the
-JSONB column never drifts out of Pydantic's typed world.
+PlanningState is rebuilt each turn from the compacted persisted conversation;
+it does not replace turn-by-turn reconstruction or become the sole authority
+for learned state. Slots, signals, and classifier semantics are derived from
+that conversation, whose compaction retains the latest effective typed
+classifier classes needed by rebuild. When conversation derivation does not
+own a prior or current fact, rebuild carries exactly `architecture_commit`,
+`output_schema_evidence`, and `file_roles`. Session and plan lifecycle status
+remain on their own tables.
+
+Business logic consumes the typed Pydantic model here. Partial JSONB operators
+(`jsonb_set`, `||`, path updates) are forbidden. Every mutation follows load →
+validate → mutate-in-python → serialize-full-snapshot, so the JSONB column
+never drifts out of Pydantic's typed world.
 
 Three first-class version stamps travel on every persisted state:
 `fcm_version` (the Flow Capability Manifest in force), a
