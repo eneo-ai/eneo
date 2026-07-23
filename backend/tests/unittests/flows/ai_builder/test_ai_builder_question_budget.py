@@ -1,7 +1,7 @@
 """Question-budget helper.
 
-`has_explicit_step_plan → 1`, everything else → 3. Rich prompts must not
-receive FEWER questions than short prompts.
+Build-plan intent → 0, `has_explicit_step_plan → 1`, everything else → 3.
+Rich prompts must not receive FEWER questions than short prompts.
 """
 
 from __future__ import annotations
@@ -15,6 +15,68 @@ from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
 
 
 class TestComputeQuestionBudget:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                "Vid körning laddar användaren upp en ljudfil och flödet transkriberar den.",
+                id="executed-prompt-with-korning",
+            ),
+            pytest.param(
+                "Användaren laddar upp en ljudfil och flödet transkriberar den.",
+                id="executed-prompt-without-korning",
+            ),
+        ],
+    )
+    def test_executed_swedish_prompt_pair_keeps_question_budget(
+        self, text: str
+    ) -> None:
+        assert compute_question_budget(text) == 3
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("Bygg planen!", id="bygg-planen"),
+            pytest.param("BUILD THE PLAN!", id="build-the-plan"),
+            pytest.param("Skapa—planen!", id="skapa-planen"),
+            pytest.param("CREATE, THE PLAN!", id="create-the-plan"),
+            pytest.param("Det stämmer!", id="det-stammer"),
+            pytest.param("THAT IS CORRECT!", id="that-is-correct"),
+            pytest.param("That—looks right!", id="that-looks-right"),
+            pytest.param("Gå vidare!", id="ga-vidare"),
+            pytest.param("GO, AHEAD!", id="go-ahead"),
+            pytest.param("Fortsätt!", id="fortsatt"),
+            pytest.param("CONTINUE!", id="continue"),
+            pytest.param("KÖR!", id="kor"),
+        ],
+    )
+    def test_supported_build_plan_intent_returns_zero(self, text: str) -> None:
+        assert compute_question_budget(text) == 0
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                "Användaren väljer språk för varje körning.",
+                id="kor-inside-korning",
+            ),
+            pytest.param(
+                "Beskriv hur flödet ska fortsätta efter ett fel.",
+                id="fortsatt-inside-fortsatta",
+            ),
+            pytest.param(
+                "Use continued validation for every run.",
+                id="continue-inside-continued",
+            ),
+            pytest.param(
+                "The designer will build the planner next.",
+                id="build-the-plan-inside-build-the-planner",
+            ),
+        ],
+    )
+    def test_incidental_build_plan_substrings_return_three(self, text: str) -> None:
+        assert compute_question_budget(text) == 3
+
     def test_explicit_step_plan_in_swedish_returns_one(self) -> None:
         assert (
             compute_question_budget(

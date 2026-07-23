@@ -24,6 +24,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     localized_text,
     question_exposure_for_id,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_phrase,
+    normalize_discovery_text,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -404,8 +408,8 @@ def has_explicit_step_plan(text: str) -> bool:
 
 
 def has_build_plan_intent(text: str) -> bool:
-    return mentions_any(
-        text.casefold(),
+    return contains_any_phrase(
+        normalize_discovery_text(text),
         (
             "bygg planen",
             "build the plan",
