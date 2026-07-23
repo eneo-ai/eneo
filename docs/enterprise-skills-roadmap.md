@@ -245,6 +245,12 @@ O2 should provide:
 - one canonical installation per source Skill and target Space;
 - a clear `up to date | update available | locally modified` state;
 - preview and explicit approval before replacing a local copy's contents;
+- explicit tenant-admin emergency block and unblock of each installed local
+  identity through the existing central execution-block owner, enforced in
+  Assistant composition and queued App pre-provider checks;
+- install and update that fail closed while the source is currently blocked;
+- affected-copy visibility when a source is blocked, with each unsafe local
+  identity blocked explicitly instead of silently propagating the source block;
 - no automatic update, text merge, or silent parent rebinding; and
 - unchanged parent pins after installing or updating the local copy.
 
@@ -802,6 +808,11 @@ flowchart LR
 - Adoption counts are tenant-scoped, exact, paginated, and free of N+1 queries.
 - O2 install and update are idempotent, previewed, explicit, and leave parent
   pins unchanged.
+- A bound, locally modified installed copy can be blocked through the central
+  execution-block owner with tenant-admin authority; Assistant composition and
+  queued App pre-provider checks enforce that local-identity block, and
+  install/update from a currently blocked source fails closed. Behaviour tests
+  cover the queued-App path.
 
 ### Task #553
 
@@ -860,6 +871,7 @@ flowchart LR
 | Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                          |
 | Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                     |
 | Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.            |
+| Blocked source has installed local copies       | Copies keep their independent identity. Admins see affected copies, block each unsafe local identity explicitly, and install/update from the blocked source fails closed. |
 | Skill deletion could invalidate a queued run    | Bindings and retained queued/running App-run evidence block deletion; terminal runs retain body-free IDs and digests.       |
 | Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                          |
 | End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                        |

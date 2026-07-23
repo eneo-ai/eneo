@@ -687,11 +687,23 @@ text, overwrites history, advances existing Assistant/App pins, or updates
 silently. A manager may instead fork the local content into a new independent
 Skill.
 
-An installed copy has an independent local execution identity. A later
-unpublication or execution block on the source does not silently disable a
-locally modified copy, but the source state remains visible in install/update
-status so administrators can inspect and block affected local identities
-explicitly.
+An installed copy has an independent local execution identity, and the central
+execution-block owner covers that identity. A tenant administrator may block an
+installed local identity explicitly through the same owner, authorization, and
+audit record as an organisation block: Assistant composition excludes the
+blocked local identity, and an App run that has not started provider execution
+fails closed before provider work, even when its saved snapshot predates the
+block. Installing from or applying an update of a currently blocked source
+fails closed with a typed reason.
+
+A later unpublication or execution block on the source still does not silently
+disable a locally modified copy. The source state remains visible in
+install/update status, administrators receive affected-copy visibility for a
+blocked source, and each unsafe local identity is blocked explicitly rather
+than through silent propagation from the source. O2 behavior tests must cover
+a bound, locally modified installed copy whose source is blocked — including
+the queued-App pre-provider path — proving the local identity keeps running
+until its own block exists and stops when that block is set.
 
 Three version concepts remain separate:
 
