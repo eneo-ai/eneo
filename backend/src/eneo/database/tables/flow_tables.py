@@ -798,6 +798,7 @@ class FlowRuns(BasePublic):
         ),
         UniqueConstraint("id", "tenant_id", name="uq_flow_runs_id_tenant_id"),
         UniqueConstraint("id", "flow_id", name="uq_flow_runs_id_flow_id"),
+        Index("ix_flow_runs_job_id", "job_id"),
         Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
         Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
         Index(
