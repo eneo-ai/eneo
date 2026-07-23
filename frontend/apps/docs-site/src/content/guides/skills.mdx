@@ -9,7 +9,8 @@ Assistant, App, or Personal Chat.
   **TL;DR:** Keep identity, tone, and general rules in the parent instructions.
   Put reusable specialist guidance in a Skill. Eneo keeps immutable versions,
   pins every attachment to an exact version, and separates local authoring from
-  organisation-wide approval.
+  organisation-wide approval. An admin can block a previously published
+  organisation Skill everywhere without deleting bindings or history.
 </Callout>
 
 ## Choose your path
@@ -22,6 +23,8 @@ Assistant, App, or Personal Chat.
 - **Administering Eneo:** start with
   [Scopes and permissions](#scopes-and-permissions) and
   [Governance and audit](#governance-and-audit).
+- **Handling an incident:** go to
+  [Emergency execution block](#emergency-execution-block).
 
 ## The mental model
 
@@ -111,6 +114,19 @@ order. Selective per-question activation is not implemented.
 
 ## Scopes and permissions
 
+### How a Skill reaches users
+
+| Surface       | Selection owner                                              | Runtime effect                                      |
+| ------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| Personal Chat | Tenant admin in Personal Chat settings                       | Ordered versions apply to every user's new requests |
+| Assistant     | Builder with **Use Skills** and edit access to the Assistant | Exact versions apply when that Assistant runs       |
+| App           | Builder with **Use Skills** and edit access to the App       | Exact versions apply when that App runs             |
+
+A Space controls where local Skills can be authored and attached. It does not
+silently add them to every resource or user in that Space. Organisation
+publication makes an approved version available; it does not attach the Skill
+by itself.
+
 ### Space Skills
 
 Space Skills are authored and reused inside one Space. Local authoring requires:
@@ -172,6 +188,36 @@ audit metadata.
 See the [Audit Logging Guide](/guides/audit-logging) for access, retention, and
 export behavior.
 
+### Emergency execution block
+
+A tenant admin can block execution of any organisation Skill that has been
+published before. Use this for a confirmed safety, security, compliance, or
+operational incident. Reading or changing the incident state requires a signed-in
+tenant admin or their user-owned tenant admin API key; service credentials cannot
+operate this human-audited control.
+
+- The block covers every saved version in Personal Chat, Assistants, and Apps.
+- New Personal Chat and Assistant requests omit the blocked Skill while the
+  parent continues to run.
+- Apps configured with the Skill fail before provider work, including queued
+  runs whose saved snapshot predates the block. Runners see a generic stop
+  message; only tenant admins can read the incident reason.
+- A request whose Skill plan was already resolved may finish. The next request
+  sees the block.
+- Bindings, publication state, versions, and adoption evidence remain intact.
+- Blocking and unblocking both require a reason. The lifecycle record remains
+  durable even when optional audit logging is disabled.
+
+Unblocking restores the Skill to Personal Chat and Assistants and lets affected
+Apps run again. This applies immediately to resources pinned to older versions.
+Review the adoption view and update or remove unsafe versions before unblocking.
+
+<Callout type="warning">
+  **Unpublish is not an emergency stop.** Unpublishing prevents new organisation
+  attachments, while existing exact-version pins remain usable. Use **Block
+  execution** to stop those existing pins at runtime.
+</Callout>
+
 ## Current boundaries
 
 - Skills contain instructions and metadata. They do not execute scripts or
@@ -180,6 +226,7 @@ export behavior.
 - Every attached Skill currently enters every request in its listed order.
 - Organisation approval and exact pins do not update existing resources
   automatically.
+- This release has no external Skill marketplace or package installation flow.
 
 ## FAQ
 
@@ -214,3 +261,9 @@ version, which an admin can review and publish without deleting history.
 It preserves one policy owner. The catalogue governs approved Skill content;
 Personal Chat settings govern which approved instructions apply to all Personal
 Chat requests.
+
+### Does an emergency block remove the Skill from configured resources?
+
+No. It stops runtime composition while preserving exact pins and adoption
+evidence. This lets administrators see the full impact, remediate resources,
+and later unblock with an auditable reason.

@@ -8,6 +8,8 @@ Verifies that all 4 toggle methods produce audit log entries with:
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -17,7 +19,9 @@ import pytest
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.main.exceptions import UnauthorizedException
 from eneo.settings.setting_service import SettingService
+from eneo.skills.domain.skill import SkillExecutionBlock, SkillExecutionBlockChange
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -66,6 +70,7 @@ def _make_service(
 
     audit_service = AsyncMock()
     audit_service.log_async = AsyncMock(return_value=uuid4())
+    skill_repo = AsyncMock()
 
     service = SettingService(
         repo=repo,
@@ -74,6 +79,7 @@ def _make_service(
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        skill_repo=skill_repo,
     )
 
     return service, audit_service
@@ -106,6 +112,98 @@ class TestSettingToggleAuditLogging:
         # old value comes from check_is_feature_enabled mock (returns False)
         assert call_kwargs["metadata"]["changes"]["using_templates"]["old"] is False
 
+
+class TestSkillExecutionBlockAudit:
+    @staticmethod
+    def _block(service: SettingService) -> SkillExecutionBlock:
+        now = datetime.now(timezone.utc)
+        return SkillExecutionBlock(
+            id=uuid4(),
+            tenant_id=service.user.tenant_id,
+            skill_space_id=uuid4(),
+            skill_id=uuid4(),
+            blocked_by_user_id=service.user.id,
+            reason="Confirmed unsafe instructions",
+            blocked_at=now,
+        )
+
+    @pytest.mark.asyncio
+    async def test_block_records_typed_old_and_new_setting_values(self):
+        service, audit_mock = _make_service()
+        block = self._block(service)
+        service.skill_repo.get_organization_for_tenant.return_value = SimpleNamespace(
+            first_published_at=datetime.now(timezone.utc)
+        )
+        service.skill_repo.block_organization_skill.return_value = (
+            SkillExecutionBlockChange(block=block, changed=True)
+        )
+
+        state = await service.block_skill_execution(
+            skill_id=block.skill_id,
+            reason="  Confirmed unsafe instructions  ",
+        )
+
+        assert state.block is not None
+        assert state.block.id == block.id
+        service.skill_repo.block_organization_skill.assert_awaited_once_with(
+            tenant_id=service.user.tenant_id,
+            skill_id=block.skill_id,
+            blocked_by_user_id=service.user.id,
+            reason="Confirmed unsafe instructions",
+        )
+        call_kwargs = audit_mock.log_async.call_args.kwargs
+        assert call_kwargs["action"] == ActionType.TENANT_SETTINGS_UPDATED
+        assert call_kwargs["entity_type"] == EntityType.TENANT_SETTINGS
+        assert call_kwargs["metadata"]["setting"] == "skill_execution_block"
+        change = call_kwargs["metadata"]["changes"]["skill_execution_block"]
+        assert change["old"] is None
+        assert change["new"]["id"] == str(block.id)
+        assert change["new"]["reason"] == block.reason
+
+    @pytest.mark.asyncio
+    async def test_execution_block_state_requires_tenant_admin(self):
+        service, _ = _make_service(user=_make_user(permissions=[]))
+
+        with pytest.raises(UnauthorizedException, match="Need permission admin"):
+            await service.get_skill_execution_block(skill_id=uuid4())
+
+        service.skill_repo.get_organization_for_tenant.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unblock_records_recovery_reason_and_closed_time(self):
+        service, audit_mock = _make_service()
+        active = self._block(service)
+        released = replace(
+            active,
+            unblocked_by_user_id=service.user.id,
+            unblock_reason="Removed the harmful revision",
+            unblocked_at=datetime.now(timezone.utc),
+        )
+        service.skill_repo.get_organization_for_tenant.return_value = SimpleNamespace(
+            first_published_at=datetime.now(timezone.utc)
+        )
+        service.skill_repo.unblock_organization_skill.return_value = (
+            SkillExecutionBlockChange(block=released, changed=True)
+        )
+
+        state = await service.unblock_skill_execution(
+            skill_id=active.skill_id,
+            expected_block_id=active.id,
+            reason=" Removed the harmful revision ",
+        )
+
+        assert state.block is None
+        call_kwargs = audit_mock.log_async.call_args.kwargs
+        change = call_kwargs["metadata"]["changes"]["skill_execution_block"]
+        assert change["old"]["id"] == str(active.id)
+        assert change["new"] is None
+        assert call_kwargs["metadata"]["reason"] == released.unblock_reason
+        assert call_kwargs["metadata"]["changed_at"] == (
+            released.unblocked_at.isoformat()
+        )
+
+
+class TestSettingToggleAuditLoggingAdditional:
     @pytest.mark.asyncio
     async def test_update_audit_logging_setting_logs_audit(self):
         service, audit_mock = _make_service()

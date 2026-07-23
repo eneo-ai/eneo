@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -5,6 +6,10 @@ from pydantic import BaseModel, Field
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from eneo.main.models import InDB
+from eneo.skills.domain.skill import (
+    MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH,
+    SkillExecutionBlock,
+)
 
 
 class SettingsBase(BaseModel):
@@ -41,3 +46,56 @@ class GetModelsResponse(BaseModel):
 
 class ToggleSettingUpdate(BaseModel):
     enabled: bool
+
+
+class SkillExecutionBlockUpdate(BaseModel):
+    reason: str = Field(
+        min_length=1,
+        max_length=MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH,
+    )
+
+
+class SkillExecutionUnblockUpdate(SkillExecutionBlockUpdate):
+    expected_block_id: UUID
+
+
+class SkillExecutionBlockPublic(BaseModel):
+    id: UUID
+    skill_id: UUID
+    blocked_by_user_id: UUID
+    reason: str
+    blocked_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls,
+        block: SkillExecutionBlock,
+    ) -> "SkillExecutionBlockPublic":
+        return cls(
+            id=block.id,
+            skill_id=block.skill_id,
+            blocked_by_user_id=block.blocked_by_user_id,
+            reason=block.reason,
+            blocked_at=block.blocked_at,
+        )
+
+
+class SkillExecutionBlockState(BaseModel):
+    skill_id: UUID
+    block: SkillExecutionBlockPublic | None
+
+    @classmethod
+    def from_domain(
+        cls,
+        *,
+        skill_id: UUID,
+        block: SkillExecutionBlock | None,
+    ) -> "SkillExecutionBlockState":
+        return cls(
+            skill_id=skill_id,
+            block=(
+                SkillExecutionBlockPublic.from_domain(block)
+                if block is not None
+                else None
+            ),
+        )
