@@ -9,6 +9,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.skill_table import (
     AppSkillBindings,
@@ -18,6 +19,7 @@ from eneo.database.tables.skill_table import (
     Skills,
 )
 from eneo.database.tables.spaces_table import Spaces
+from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     PublishedSkill,
@@ -26,6 +28,13 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
+    SkillAdoptionCursor,
+    SkillAdoptionDrift,
+    SkillAdoptionPersonalChat,
+    SkillAdoptionResource,
+    SkillAdoptionResourceKind,
+    SkillAdoptionRevisionCount,
+    SkillAdoptionSummary,
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
@@ -160,6 +169,60 @@ class SkillRepoImpl:
             Spaces.user_id.is_(None),
             Spaces.tenant_space_id.is_(None),
         )
+
+    @staticmethod
+    def _organization_adoption_facts(
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ):
+        empty_space_id = sa.cast(sa.null(), AssistantSkillBindings.space_id.type)
+        return sa.union_all(
+            sa.select(
+                sa.literal(SkillAdoptionResourceKind.ASSISTANT.value).label("kind"),
+                AssistantSkillBindings.skill_revision_id.label("revision_id"),
+                AssistantSkillBindings.space_id.label("space_id"),
+            ).where(
+                AssistantSkillBindings.tenant_id == tenant_id,
+                AssistantSkillBindings.skill_id == skill_id,
+            ),
+            sa.select(
+                sa.literal(SkillAdoptionResourceKind.APP.value).label("kind"),
+                AppSkillBindings.skill_revision_id.label("revision_id"),
+                AppSkillBindings.space_id.label("space_id"),
+            ).where(
+                AppSkillBindings.tenant_id == tenant_id,
+                AppSkillBindings.skill_id == skill_id,
+            ),
+            sa.select(
+                sa.literal("personal_chat").label("kind"),
+                GovernancePolicySkillBindings.skill_revision_id.label("revision_id"),
+                empty_space_id.label("space_id"),
+            )
+            .join(
+                GovernancePolicies,
+                GovernancePolicies.id == GovernancePolicySkillBindings.policy_id,
+            )
+            .where(
+                GovernancePolicySkillBindings.tenant_id == tenant_id,
+                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicies.tenant_id == tenant_id,
+                GovernancePolicies.scope
+                == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+            ),
+        ).cte("organization_skill_adoption_facts")
+
+    @staticmethod
+    def _adoption_drift(
+        *,
+        revision_number: int,
+        published_revision_number: int | None,
+    ) -> SkillAdoptionDrift:
+        if published_revision_number is None:
+            return SkillAdoptionDrift.UNPUBLISHED
+        if revision_number == published_revision_number:
+            return SkillAdoptionDrift.CURRENT
+        return SkillAdoptionDrift.BEHIND
 
     @staticmethod
     def _summary_query(
@@ -390,6 +453,226 @@ class SkillRepoImpl:
         )
         row = result.one_or_none()
         return self._to_skill(row[0], row[1]) if row is not None else None
+
+    async def get_organization_adoption_summary(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        published_revision_number: int | None,
+    ) -> SkillAdoptionSummary:
+        facts = self._organization_adoption_facts(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        revision_rows = await self.session.execute(
+            sa.select(
+                facts.c.revision_id,
+                SkillRevisions.revision_number,
+                sa.func.count()
+                .filter(facts.c.kind == SkillAdoptionResourceKind.ASSISTANT.value)
+                .label("assistant_count"),
+                sa.func.count()
+                .filter(facts.c.kind == SkillAdoptionResourceKind.APP.value)
+                .label("app_count"),
+                sa.func.bool_or(facts.c.kind == "personal_chat").label(
+                    "personal_chat_pinned"
+                ),
+            )
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.id == facts.c.revision_id,
+                    SkillRevisions.skill_id == skill_id,
+                ),
+            )
+            .group_by(facts.c.revision_id, SkillRevisions.revision_number)
+            .order_by(SkillRevisions.revision_number)
+        )
+        revision_counts: list[SkillAdoptionRevisionCount] = []
+        personal_chat: SkillAdoptionPersonalChat | None = None
+        for (
+            revision_id,
+            revision_number,
+            assistant_count,
+            app_count,
+            personal_chat_pinned,
+        ) in revision_rows.tuples():
+            revision_counts.append(
+                SkillAdoptionRevisionCount(
+                    revision_id=revision_id,
+                    revision_number=revision_number,
+                    assistant_count=int(assistant_count),
+                    app_count=int(app_count),
+                    personal_chat_pinned=bool(personal_chat_pinned),
+                )
+            )
+            if personal_chat_pinned:
+                personal_chat = SkillAdoptionPersonalChat(
+                    revision_id=revision_id,
+                    revision_number=revision_number,
+                    drift=self._adoption_drift(
+                        revision_number=revision_number,
+                        published_revision_number=published_revision_number,
+                    ),
+                )
+
+        behind_predicate: ColumnElement[bool]
+        if published_revision_number is None:
+            behind_predicate = sa.false()
+        else:
+            behind_predicate = (
+                SkillRevisions.revision_number != published_revision_number
+            )
+        totals = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count()
+                    .filter(facts.c.kind == SkillAdoptionResourceKind.ASSISTANT.value)
+                    .label("assistant_count"),
+                    sa.func.count()
+                    .filter(facts.c.kind == SkillAdoptionResourceKind.APP.value)
+                    .label("app_count"),
+                    sa.func.count(sa.distinct(facts.c.space_id))
+                    .filter(
+                        facts.c.kind.in_(
+                            (
+                                SkillAdoptionResourceKind.ASSISTANT.value,
+                                SkillAdoptionResourceKind.APP.value,
+                            )
+                        )
+                    )
+                    .label("distinct_space_count"),
+                    sa.func.count()
+                    .filter(behind_predicate)
+                    .label("behind_published_count"),
+                )
+                .select_from(facts)
+                .join(
+                    SkillRevisions,
+                    sa.and_(
+                        SkillRevisions.id == facts.c.revision_id,
+                        SkillRevisions.skill_id == skill_id,
+                    ),
+                )
+            )
+        ).one()
+        return SkillAdoptionSummary(
+            assistant_count=int(totals.assistant_count),
+            app_count=int(totals.app_count),
+            distinct_space_count=int(totals.distinct_space_count),
+            behind_published_count=int(totals.behind_published_count),
+            personal_chat=personal_chat,
+            revision_counts=tuple(revision_counts),
+        )
+
+    async def list_organization_adoption_resources(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        published_revision_number: int | None,
+        limit: int,
+        after: SkillAdoptionCursor | None,
+    ) -> list[SkillAdoptionResource]:
+        resources = sa.union_all(
+            sa.select(
+                sa.literal(0).label("kind_rank"),
+                sa.literal(SkillAdoptionResourceKind.ASSISTANT.value).label("kind"),
+                Assistants.id.label("resource_id"),
+                Assistants.name.label("name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                SkillRevisions.id.label("revision_id"),
+                SkillRevisions.revision_number.label("revision_number"),
+            )
+            .select_from(AssistantSkillBindings)
+            .join(
+                Assistants,
+                Assistants.id == AssistantSkillBindings.assistant_id,
+            )
+            .join(Spaces, Spaces.id == AssistantSkillBindings.space_id)
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.id == AssistantSkillBindings.skill_revision_id,
+                    SkillRevisions.skill_id == skill_id,
+                ),
+            )
+            .where(
+                AssistantSkillBindings.tenant_id == tenant_id,
+                AssistantSkillBindings.skill_id == skill_id,
+                Spaces.tenant_id == tenant_id,
+            ),
+            sa.select(
+                sa.literal(1).label("kind_rank"),
+                sa.literal(SkillAdoptionResourceKind.APP.value).label("kind"),
+                Apps.id.label("resource_id"),
+                Apps.name.label("name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                SkillRevisions.id.label("revision_id"),
+                SkillRevisions.revision_number.label("revision_number"),
+            )
+            .select_from(AppSkillBindings)
+            .join(Apps, Apps.id == AppSkillBindings.app_id)
+            .join(Spaces, Spaces.id == AppSkillBindings.space_id)
+            .join(
+                SkillRevisions,
+                sa.and_(
+                    SkillRevisions.id == AppSkillBindings.skill_revision_id,
+                    SkillRevisions.skill_id == skill_id,
+                ),
+            )
+            .where(
+                AppSkillBindings.tenant_id == tenant_id,
+                AppSkillBindings.skill_id == skill_id,
+                Apps.tenant_id == tenant_id,
+                Spaces.tenant_id == tenant_id,
+            ),
+        ).subquery("organization_skill_adoption_resources")
+        statement = (
+            sa.select(resources)
+            .order_by(resources.c.kind_rank, resources.c.resource_id)
+            .limit(limit)
+        )
+        if after is not None:
+            after_rank = 0 if after.kind is SkillAdoptionResourceKind.ASSISTANT else 1
+            statement = statement.where(
+                sa.or_(
+                    resources.c.kind_rank > after_rank,
+                    sa.and_(
+                        resources.c.kind_rank == after_rank,
+                        resources.c.resource_id > after.resource_id,
+                    ),
+                )
+            )
+        rows = await self.session.execute(statement)
+        return [
+            SkillAdoptionResource(
+                kind=SkillAdoptionResourceKind(kind),
+                resource_id=resource_id,
+                name=name,
+                space_id=space_id,
+                space_name=space_name,
+                revision_id=revision_id,
+                revision_number=revision_number,
+                drift=self._adoption_drift(
+                    revision_number=revision_number,
+                    published_revision_number=published_revision_number,
+                ),
+            )
+            for (
+                _kind_rank,
+                kind,
+                resource_id,
+                name,
+                space_id,
+                space_name,
+                revision_id,
+                revision_number,
+            ) in rows.tuples()
+        ]
 
     async def list_published_for_tenant(
         self,

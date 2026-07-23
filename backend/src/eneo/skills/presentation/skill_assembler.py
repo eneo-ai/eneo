@@ -3,6 +3,11 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
+    SkillAdoptionPersonalChat,
+    SkillAdoptionProjectionPage,
+    SkillAdoptionResource,
+    SkillAdoptionRevisionCount,
+    SkillAdoptionSummary,
     SkillBindingReference,
     SkillCatalogEntry,
     SkillRevision,
@@ -15,6 +20,11 @@ from eneo.skills.presentation.skill_models import (
     PublishedSkillPublic,
     PublishedSkillRevisionPublic,
     PublishedSkillSummaryPublic,
+    SkillAdoptionPersonalChatPublic,
+    SkillAdoptionProjectionPagePublic,
+    SkillAdoptionResourcePublic,
+    SkillAdoptionRevisionCountPublic,
+    SkillAdoptionSummaryPublic,
     SkillBindingReferenceInput,
     SkillBindingSummary,
     SkillPublic,
@@ -52,6 +62,79 @@ def skill_binding_audit_entries(
 
 
 class SkillAssembler:
+    @staticmethod
+    def adoption_resource_to_public(
+        resource: SkillAdoptionResource,
+    ) -> SkillAdoptionResourcePublic:
+        return SkillAdoptionResourcePublic(
+            kind=resource.kind,
+            resource_id=resource.resource_id,
+            name=resource.name,
+            space_id=resource.space_id,
+            space_name=resource.space_name,
+            revision_id=resource.revision_id,
+            revision_number=resource.revision_number,
+            drift=resource.drift,
+        )
+
+    @staticmethod
+    def adoption_personal_chat_to_public(
+        personal_chat: SkillAdoptionPersonalChat,
+    ) -> SkillAdoptionPersonalChatPublic:
+        return SkillAdoptionPersonalChatPublic(
+            revision_id=personal_chat.revision_id,
+            revision_number=personal_chat.revision_number,
+            drift=personal_chat.drift,
+        )
+
+    @staticmethod
+    def adoption_revision_count_to_public(
+        revision_count: SkillAdoptionRevisionCount,
+    ) -> SkillAdoptionRevisionCountPublic:
+        return SkillAdoptionRevisionCountPublic(
+            revision_id=revision_count.revision_id,
+            revision_number=revision_count.revision_number,
+            assistant_count=revision_count.assistant_count,
+            app_count=revision_count.app_count,
+            personal_chat_pinned=revision_count.personal_chat_pinned,
+        )
+
+    @classmethod
+    def adoption_summary_to_public(
+        cls,
+        summary: SkillAdoptionSummary,
+    ) -> SkillAdoptionSummaryPublic:
+        return SkillAdoptionSummaryPublic(
+            assistant_count=summary.assistant_count,
+            app_count=summary.app_count,
+            distinct_space_count=summary.distinct_space_count,
+            behind_published_count=summary.behind_published_count,
+            personal_chat=(
+                cls.adoption_personal_chat_to_public(summary.personal_chat)
+                if summary.personal_chat is not None
+                else None
+            ),
+            revision_counts=[
+                cls.adoption_revision_count_to_public(revision_count)
+                for revision_count in summary.revision_counts
+            ],
+        )
+
+    @classmethod
+    def adoption_projection_to_public(
+        cls,
+        projection: SkillAdoptionProjectionPage,
+    ) -> SkillAdoptionProjectionPagePublic:
+        return SkillAdoptionProjectionPagePublic(
+            summary=cls.adoption_summary_to_public(projection.summary),
+            items=[
+                cls.adoption_resource_to_public(resource)
+                for resource in projection.items
+            ],
+            limit=projection.limit,
+            next_cursor=projection.next_cursor,
+        )
+
     @staticmethod
     def revision_to_public(revision: SkillRevision) -> SkillRevisionPublic:
         return SkillRevisionPublic(

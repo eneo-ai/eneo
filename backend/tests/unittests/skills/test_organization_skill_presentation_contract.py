@@ -12,6 +12,13 @@ from eneo.skills.domain.skill import (
     PublishedSkill,
     PublishedSkillSummary,
     Skill,
+    SkillAdoptionDrift,
+    SkillAdoptionPersonalChat,
+    SkillAdoptionProjectionPage,
+    SkillAdoptionResource,
+    SkillAdoptionResourceKind,
+    SkillAdoptionRevisionCount,
+    SkillAdoptionSummary,
     SkillPublicationChange,
     SkillPublicationState,
     SkillRevision,
@@ -23,6 +30,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.skills.presentation.organization_skill_router import (
     create_organization_skill_revision,
+    get_organization_skill_adoption,
     list_organization_skill_revisions,
     publish_organization_skill,
     restore_organization_skill_revision,
@@ -72,6 +80,7 @@ def test_catalogue_and_management_have_separate_read_contracts():
         "/skills/catalogue/{skill_id}/",
         "/skills/organization/",
         "/skills/organization/{skill_id}/",
+        "/skills/organization/{skill_id}/adoption/",
     }
     methods_by_path = {path: set() for path in paths}
     for route in router.routes:
@@ -83,7 +92,77 @@ def test_catalogue_and_management_have_separate_read_contracts():
         "/skills/catalogue/{skill_id}/": {"GET"},
         "/skills/organization/": {"GET", "POST"},
         "/skills/organization/{skill_id}/": {"GET", "DELETE"},
+        "/skills/organization/{skill_id}/adoption/": {"GET"},
     }
+
+
+async def test_adoption_route_projects_structural_metadata_without_skill_content():
+    revision_id = uuid4()
+    resource = SkillAdoptionResource(
+        kind=SkillAdoptionResourceKind.ASSISTANT,
+        resource_id=uuid4(),
+        name="Payroll Assistant",
+        space_id=uuid4(),
+        space_name="People Operations",
+        revision_id=revision_id,
+        revision_number=1,
+        drift=SkillAdoptionDrift.BEHIND,
+    )
+    summary = SkillAdoptionSummary(
+        assistant_count=1,
+        app_count=0,
+        distinct_space_count=1,
+        behind_published_count=2,
+        personal_chat=SkillAdoptionPersonalChat(
+            revision_id=revision_id,
+            revision_number=1,
+            drift=SkillAdoptionDrift.BEHIND,
+        ),
+        revision_counts=(
+            SkillAdoptionRevisionCount(
+                revision_id=revision_id,
+                revision_number=1,
+                assistant_count=1,
+                app_count=0,
+                personal_chat_pinned=True,
+            ),
+        ),
+    )
+    projection = SkillAdoptionProjectionPage(
+        summary=summary,
+        items=(resource,),
+        limit=25,
+        next_cursor="opaque-cursor",
+    )
+    service = SimpleNamespace(
+        get_adoption_projection=AsyncMock(return_value=projection)
+    )
+    container = SimpleNamespace(
+        organization_skill_service=lambda: service,
+        skill_assembler=lambda: SkillAssembler(),
+    )
+    skill_id = uuid4()
+
+    response = await get_organization_skill_adoption(
+        skill_id=skill_id,
+        limit=25,
+        cursor=None,
+        container=container,
+    )
+
+    service.get_adoption_projection.assert_awaited_once_with(
+        skill_id=skill_id,
+        limit=25,
+        cursor=None,
+    )
+    assert response.summary.assistant_count == 1
+    assert response.summary.personal_chat is not None
+    assert response.summary.personal_chat.revision_id == revision_id
+    assert response.items[0].resource_id == resource.resource_id
+    assert response.items[0].drift is SkillAdoptionDrift.BEHIND
+    serialized = response.model_dump()
+    assert "instructions" not in str(serialized)
+    assert "content_digest" not in str(serialized)
 
 
 def test_organization_revision_creation_documents_created_and_noop_responses():

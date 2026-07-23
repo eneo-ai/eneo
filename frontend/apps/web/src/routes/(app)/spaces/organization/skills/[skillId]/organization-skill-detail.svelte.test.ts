@@ -78,6 +78,22 @@ function publishedSkill(): PublishedSkillPublic {
   };
 }
 
+function adoptionPage() {
+  return {
+    summary: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      behind_published_count: 0,
+      personal_chat: null,
+      revision_counts: []
+    },
+    items: [],
+    limit: 25,
+    next_cursor: null
+  };
+}
+
 describe("organisation Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockReset();
@@ -98,10 +114,12 @@ describe("organisation Skill detail page", () => {
           limit: 25,
           next_cursor: null
         },
+        adoptionPage: Promise.resolve(adoptionPage()),
         eneo: {
           skills: {
             organization: {
               createRevision,
+              getAdoption: vi.fn(),
               getRevision: vi.fn(),
               listRevisionSummaries: vi.fn(),
               publish: vi.fn(),
@@ -136,7 +154,7 @@ describe("organisation Skill detail page", () => {
     expect(createRevision).toHaveBeenCalledTimes(1);
   });
 
-  test("places content and the approved version before publication controls in reading order", () => {
+  test("places adoption oversight after publication and before revision history", async () => {
     render(OrganizationSkillDetailPage, {
       data: {
         skill: updatePendingSkill(),
@@ -147,10 +165,12 @@ describe("organisation Skill detail page", () => {
           limit: 25,
           next_cursor: null
         },
+        adoptionPage: Promise.resolve(adoptionPage()),
         eneo: {
           skills: {
             organization: {
               createRevision: vi.fn(),
+              getAdoption: vi.fn(),
               get: vi.fn(),
               getRevision: vi.fn(),
               listRevisionSummaries: vi.fn(),
@@ -170,14 +190,35 @@ describe("organisation Skill detail page", () => {
       .querySelector("#organization-skill-approved-heading")
       ?.closest("section");
     const publication = document.querySelector("aside[aria-labelledby]");
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: m.organization_skills_adoption_heading()
+        })
+      )
+      .toBeVisible();
+    const adoption = document
+      .querySelector("#organization-skill-adoption-heading")
+      ?.closest("section");
+    const history = document
+      .querySelector("#organization-skill-history-heading")
+      ?.closest("section");
 
     expect(content).not.toBeNull();
     expect(approved).not.toBeNull();
     expect(publication).not.toBeNull();
+    expect(adoption).not.toBeNull();
+    expect(history).not.toBeNull();
     expect(content?.compareDocumentPosition(approved as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
     expect(approved?.compareDocumentPosition(publication as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(publication?.compareDocumentPosition(adoption as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(adoption?.compareDocumentPosition(history as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
   });
@@ -196,10 +237,12 @@ describe("organisation Skill detail page", () => {
           limit: 25,
           next_cursor: null
         },
+        adoptionPage: Promise.resolve(adoptionPage()),
         eneo: {
           skills: {
             organization: {
               createRevision: vi.fn(),
+              getAdoption: vi.fn(),
               getRevision: vi.fn(),
               listRevisionSummaries: vi.fn(),
               publish,
@@ -249,10 +292,12 @@ describe("organisation Skill detail page", () => {
           limit: 25,
           next_cursor: null
         },
+        adoptionPage: Promise.resolve(adoptionPage()),
         eneo: {
           skills: {
             organization: {
               createRevision: vi.fn(),
+              getAdoption: vi.fn(),
               getRevision: vi.fn(),
               listRevisionSummaries: vi.fn(),
               publish: vi.fn(),

@@ -14,6 +14,8 @@ from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     PublishedSkillSummaryPage,
     Skill,
+    SkillAdoptionCursor,
+    SkillAdoptionProjectionPage,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillPublicationChange,
@@ -129,6 +131,42 @@ class OrganizationSkillService:
         if skill is None:
             raise NotFoundException()
         return skill
+
+    async def get_adoption_projection(
+        self,
+        *,
+        skill_id: UUID,
+        limit: int,
+        cursor: str | None,
+    ) -> SkillAdoptionProjectionPage:
+        skill = await self.get_organization_skill(skill_id=skill_id)
+        after = SkillAdoptionCursor.parse(cursor)
+        summary = await self.repo.get_organization_adoption_summary(
+            tenant_id=self.user.tenant_id,
+            skill_id=skill.id,
+            published_revision_number=skill.published_revision_number,
+        )
+        resources = await self.repo.list_organization_adoption_resources(
+            tenant_id=self.user.tenant_id,
+            skill_id=skill.id,
+            published_revision_number=skill.published_revision_number,
+            limit=limit + 1,
+            after=after,
+        )
+        visible = resources[:limit]
+        next_cursor = None
+        if len(resources) > limit and visible:
+            last = visible[-1]
+            next_cursor = SkillAdoptionCursor(
+                kind=last.kind,
+                resource_id=last.resource_id,
+            ).serialize()
+        return SkillAdoptionProjectionPage(
+            summary=summary,
+            items=tuple(visible),
+            limit=limit,
+            next_cursor=next_cursor,
+        )
 
     async def create_organization_skill(
         self,

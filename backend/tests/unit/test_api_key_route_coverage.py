@@ -480,6 +480,17 @@ class TestHighRiskExactRouteGuards:
     from broad prefix exemptions on privileged routes.
     """
 
+    def test_organization_skill_adoption_rejects_api_keys(self):
+        route = _find_route_by_method_and_paths(
+            "GET",
+            "/skills/organization/{skill_id}/adoption/",
+            "/skills/organization/{skill_id}/adoption",
+        )
+        assert _route_has_dep_name(route, "require_session_auth"), (
+            "GET /skills/organization/{skill_id}/adoption/ must remain "
+            "session-only; OrganizationSkillService performs the tenant-admin check"
+        )
+
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
             "GET", "/integrations/", "/integrations"

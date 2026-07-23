@@ -5939,6 +5939,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/skills/organization/{skill_id}/adoption/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Organization Skill Adoption
+     * @description List structural Assistant and App adoption of an organisation Skill, with full-result revision totals.
+     */
+    get: operations["get_organization_skill_adoption_api_v1_skills_organization__skill_id__adoption__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/skills/organization/{skill_id}/revisions/": {
     parameters: {
       query?: never;
@@ -15949,6 +15969,93 @@ export interface components {
     SkillActiveUpdateRequest: {
       /** Is Active */
       is_active: boolean;
+    };
+    /**
+     * SkillAdoptionDrift
+     * @enum {string}
+     */
+    SkillAdoptionDrift: "current" | "behind" | "unpublished";
+    /** SkillAdoptionPersonalChatPublic */
+    SkillAdoptionPersonalChatPublic: {
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      drift: components["schemas"]["SkillAdoptionDrift"];
+    };
+    /** SkillAdoptionProjectionPagePublic */
+    SkillAdoptionProjectionPagePublic: {
+      summary: components["schemas"]["SkillAdoptionSummaryPublic"];
+      /** Items */
+      items: components["schemas"]["SkillAdoptionResourcePublic"][];
+      /** Limit */
+      limit: number;
+      /** Next Cursor */
+      next_cursor?: string | null;
+    };
+    /**
+     * SkillAdoptionResourceKind
+     * @enum {string}
+     */
+    SkillAdoptionResourceKind: "assistant" | "app";
+    /** SkillAdoptionResourcePublic */
+    SkillAdoptionResourcePublic: {
+      kind: components["schemas"]["SkillAdoptionResourceKind"];
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /** Name */
+      name: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      drift: components["schemas"]["SkillAdoptionDrift"];
+    };
+    /** SkillAdoptionRevisionCountPublic */
+    SkillAdoptionRevisionCountPublic: {
+      /**
+       * Revision Id
+       * Format: uuid
+       */
+      revision_id: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
+    /** SkillAdoptionSummaryPublic */
+    SkillAdoptionSummaryPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Behind Published Count */
+      behind_published_count: number;
+      personal_chat: components["schemas"]["SkillAdoptionPersonalChatPublic"] | null;
+      /** Revision Counts */
+      revision_counts: components["schemas"]["SkillAdoptionRevisionCountPublic"][];
     };
     /** SkillBindingReferenceInput */
     SkillBindingReferenceInput: {
@@ -39347,6 +39454,58 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_organization_skill_adoption_api_v1_skills_organization__skill_id__adoption__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillAdoptionProjectionPagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

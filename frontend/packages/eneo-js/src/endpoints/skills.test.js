@@ -277,6 +277,49 @@ test("organisation revision summaries use the shared cursor contract", async () 
   ]);
 });
 
+test("organisation adoption uses the bounded read-only projection route", async () => {
+  const page = {
+    items: [],
+    summary: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      behind_published_count: 0,
+      personal_chat: null,
+      revision_counts: []
+    },
+    limit: 25,
+    next_cursor: null
+  };
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return page;
+    }
+  });
+
+  const result = await skills.organization.getAdoption({
+    skillId: "skill-1",
+    limit: 25,
+    cursor: "opaque-cursor"
+  });
+
+  assert.equal(result, page);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/{skill_id}/adoption/",
+      request: {
+        method: "get",
+        params: {
+          path: { skill_id: "skill-1" },
+          query: { limit: 25, cursor: "opaque-cursor" }
+        }
+      }
+    }
+  ]);
+});
+
 test("catalogue reads use the tenant-scoped projection", async () => {
   const calls = [];
   const page = { items: [], limit: 25, next_cursor: null };

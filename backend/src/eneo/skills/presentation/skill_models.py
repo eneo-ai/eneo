@@ -8,6 +8,8 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    SkillAdoptionDrift,
+    SkillAdoptionResourceKind,
     SkillBindingSource,
     SkillPublicationState,
 )
@@ -93,6 +95,47 @@ class OrganizationSkillSummaryPublic(SkillSparse):
 
 class OrganizationSkillPublic(OrganizationSkillSummaryPublic):
     current_revision: SkillRevisionPublic
+
+
+class SkillAdoptionResourcePublic(BaseModel):
+    kind: SkillAdoptionResourceKind
+    resource_id: UUID
+    name: str
+    space_id: UUID
+    space_name: str
+    revision_id: UUID
+    revision_number: int
+    drift: SkillAdoptionDrift
+
+
+class SkillAdoptionPersonalChatPublic(BaseModel):
+    revision_id: UUID
+    revision_number: int
+    drift: SkillAdoptionDrift
+
+
+class SkillAdoptionRevisionCountPublic(BaseModel):
+    revision_id: UUID
+    revision_number: int
+    assistant_count: int
+    app_count: int
+    personal_chat_pinned: bool
+
+
+class SkillAdoptionSummaryPublic(BaseModel):
+    assistant_count: int
+    app_count: int
+    distinct_space_count: int
+    behind_published_count: int
+    personal_chat: SkillAdoptionPersonalChatPublic | None
+    revision_counts: list[SkillAdoptionRevisionCountPublic]
+
+
+class SkillAdoptionProjectionPagePublic(BaseModel):
+    summary: SkillAdoptionSummaryPublic
+    items: list[SkillAdoptionResourcePublic]
+    limit: int
+    next_cursor: str | None = None
 
 
 class OrganizationSkillSummaryPagePublic(
