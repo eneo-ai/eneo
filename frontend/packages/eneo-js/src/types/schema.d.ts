@@ -6440,7 +6440,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 150 actions with their enabled status for the modal UI.
+     * @description Retrieve all 152 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -9211,7 +9211,9 @@ export interface components {
       | "flow_run_review_checkpoint_expired"
       | "ai_builder_session_created"
       | "ai_builder_plan_approved"
+      | "ai_builder_plan_revised"
       | "ai_builder_flow_applied"
+      | "ai_builder_attachment_detached"
       | "ai_builder_session_cancelled"
       | "security_classification_created"
       | "security_classification_updated"
@@ -10865,7 +10867,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 66,
+     *           "action_count": 68,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [

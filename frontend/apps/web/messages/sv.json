@@ -5172,8 +5172,12 @@
   "audit_action_ai_builder_session_created_description": "En Flow AI Builder-session skapades.",
   "audit_action_ai_builder_plan_approved": "AI Builder-plan godkänd",
   "audit_action_ai_builder_plan_approved_description": "En Flow AI Builder-plan godkändes.",
+  "audit_action_ai_builder_plan_revised": "AI Builder-plan reviderad",
+  "audit_action_ai_builder_plan_revised_description": "En Flow AI Builder-plan reviderades.",
   "audit_action_ai_builder_flow_applied": "AI Builder-flöde tillämpat",
   "audit_action_ai_builder_flow_applied_description": "En Flow AI Builder-plan tillämpades på ett flöde.",
+  "audit_action_ai_builder_attachment_detached": "AI Builder-bilaga frånkopplad",
+  "audit_action_ai_builder_attachment_detached_description": "En referensfil kopplades från en Flow AI Builder-session.",
   "audit_action_ai_builder_session_cancelled": "AI Builder-session avbruten",
   "audit_action_ai_builder_session_cancelled_description": "En Flow AI Builder-session avbröts."
 }

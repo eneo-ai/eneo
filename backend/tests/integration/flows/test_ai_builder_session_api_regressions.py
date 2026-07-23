@@ -1454,12 +1454,35 @@ async def test_revise_plan_api_creates_replacement_without_active_send(
             tenant_id=tenant_id,
         )
         fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        audit_event = (
+            await container.session().execute(
+                select(
+                    AuditLogTable.actor_id,
+                    AuditLogTable.entity_type,
+                    AuditLogTable.entity_id,
+                    AuditLogTable.log_metadata,
+                ).where(
+                    AuditLogTable.tenant_id == tenant_id,
+                    AuditLogTable.action == ActionType.AI_BUILDER_PLAN_REVISED.value,
+                    AuditLogTable.entity_id == session_id,
+                )
+            )
+        ).one()
 
     statuses = {plan.id: plan.status for plan in plans}
     assert statuses[old_plan_id] == PlanStatus.SUPERSEDED
     assert statuses[new_plan_id] == PlanStatus.PROPOSED
     assert fetched.latest_plan_id == new_plan_id
     assert fetched.status == SessionStatus.AWAITING_APPROVAL
+    assert str(audit_event.actor_id) == audit_event.log_metadata["actor"]["id"]
+    assert audit_event.entity_type == EntityType.AI_BUILDER_SESSION.value
+    assert audit_event.entity_id == session_id
+    assert audit_event.log_metadata["target"]["id"] == str(session_id)
+    assert audit_event.log_metadata["extra"] == {
+        "old_plan_id": str(old_plan_id),
+        "new_plan_id": str(new_plan_id),
+        "revision_type": "keep_current_description",
+    }
 
 
 @pytest.mark.integration
@@ -1511,11 +1534,19 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
             tenant_id=tenant_id,
         )
         fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        audit_count = await container.session().scalar(
+            select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == tenant_id,
+                AuditLogTable.action == ActionType.AI_BUILDER_PLAN_REVISED.value,
+                AuditLogTable.entity_id == session_id,
+            )
+        )
 
     assert [plan.id for plan in plans] == [old_plan_id]
     assert plans[0].status == PlanStatus.PROPOSED
     assert fetched.latest_plan_id == old_plan_id
     assert fetched.status == SessionStatus.AWAITING_APPROVAL
+    assert audit_count == 0
 
 
 @pytest.mark.integration
@@ -3608,9 +3639,29 @@ async def test_ai_builder_detach_attachment_reconciles_expired_turn(
                 )
             )
         ).one()
+        audit_event = (
+            await session.execute(
+                select(
+                    AuditLogTable.actor_id,
+                    AuditLogTable.entity_type,
+                    AuditLogTable.entity_id,
+                    AuditLogTable.log_metadata,
+                ).where(
+                    AuditLogTable.tenant_id == user.tenant_id,
+                    AuditLogTable.action
+                    == ActionType.AI_BUILDER_ATTACHMENT_DETACHED.value,
+                    AuditLogTable.entity_id == UUID(session_id),
+                )
+            )
+        ).one()
 
     assert membership is None
     assert tuple(row) == (None, None, None, None, expected_state)
+    assert str(audit_event.actor_id) == audit_event.log_metadata["actor"]["id"]
+    assert audit_event.entity_type == EntityType.AI_BUILDER_SESSION.value
+    assert audit_event.entity_id == UUID(session_id)
+    assert audit_event.log_metadata["target"]["id"] == session_id
+    assert audit_event.log_metadata["extra"] == {"file_id": file_id}
 
 
 @pytest.mark.integration
@@ -3682,6 +3733,13 @@ async def test_ai_builder_detach_attachment_rejects_live_turn_and_preserves_memb
                 BuilderSessions.tenant_id == user.tenant_id,
             )
         )
+        audit_count = await session.scalar(
+            select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == user.tenant_id,
+                AuditLogTable.action == ActionType.AI_BUILDER_ATTACHMENT_DETACHED.value,
+                AuditLogTable.entity_id == UUID(session_id),
+            )
+        )
 
     assert membership == UUID(file_id)
     assert lock[0] == turn.lease.request_id
@@ -3689,6 +3747,7 @@ async def test_ai_builder_detach_attachment_rejects_live_turn_and_preserves_memb
     assert lock[2] is not None
     assert lock[3] is not None
     assert state == "open"
+    assert audit_count == 0
 
 
 @pytest.mark.integration

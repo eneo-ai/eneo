@@ -1127,6 +1127,7 @@ class TestGetSessionEndpoint:
     @pytest.mark.anyio
     async def test_detach_session_attachment_calls_service(self):
         container = _make_container()
+        user = container.user.return_value
         session = _make_session_domain(actor_user_id=container.user.return_value.id)
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
@@ -1144,6 +1145,36 @@ class TestGetSessionEndpoint:
             session_id=session.id,
             file_id=file_id,
         )
+        audit_service = container.audit_service.return_value
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["user"] is user
+        assert call_kwargs["action"] == ActionType.AI_BUILDER_ATTACHMENT_DETACHED
+        assert call_kwargs["entity_type"] == EntityType.AI_BUILDER_SESSION
+        assert call_kwargs["entity_id"] == session.id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(session.id)
+        assert metadata["extra"] == {"file_id": str(file_id)}
+
+    @pytest.mark.anyio
+    async def test_detach_rejection_does_not_log_audit_event(self):
+        container = _make_container(can_edit_flows=False)
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        with pytest.raises(UnauthorizedException):
+            await detach_session_attachment(
+                request=MagicMock(),
+                session_id=session.id,
+                file_id=uuid4(),
+                container=container,
+            )
+
+        service.detach_session_attachment.assert_not_awaited()
+        container.audit_service.return_value.log.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -2424,6 +2455,7 @@ class TestRevisePlanEndpoint:
     @pytest.mark.anyio
     async def test_revises_plan_and_returns_response(self):
         container = _make_container()
+        user = container.user.return_value
         plan = _make_plan_domain(status=PlanStatus.PROPOSED)
         revised = _make_plan_domain(
             session_id=plan.session_id,
@@ -2450,6 +2482,22 @@ class TestRevisePlanEndpoint:
             plan_id=plan.id,
             revision_type="keep_current_description",
         )
+        audit_service = container.audit_service.return_value
+        audit_service.log.assert_awaited_once()
+        call_kwargs = audit_service.log.await_args.kwargs
+        assert call_kwargs["tenant_id"] == user.tenant_id
+        assert call_kwargs["user"] is user
+        assert call_kwargs["action"] == ActionType.AI_BUILDER_PLAN_REVISED
+        assert call_kwargs["entity_type"] == EntityType.AI_BUILDER_SESSION
+        assert call_kwargs["entity_id"] == session.id
+        metadata = call_kwargs["metadata"]
+        assert metadata["actor"]["id"] == str(user.id)
+        assert metadata["target"]["id"] == str(session.id)
+        assert metadata["extra"] == {
+            "old_plan_id": str(plan.id),
+            "new_plan_id": str(revised.id),
+            "revision_type": "keep_current_description",
+        }
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -2467,6 +2515,9 @@ class TestRevisePlanEndpoint:
                 body=RevisePlanRequest(type="keep_current_description"),
                 container=container,
             )
+
+        service.revise_plan.assert_not_awaited()
+        container.audit_service.return_value.log.assert_not_awaited()
 
 
 class TestCreatePlanEndpoint:

@@ -1201,6 +1201,23 @@ async def detach_session_attachment(
         require_creator=True,
     )
     await service.detach_session_attachment(session_id=session.id, file_id=file_id)
+
+    user = container.user()
+    audit_service = _get_audit_service(container)
+    await audit_service.log(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.AI_BUILDER_ATTACHMENT_DETACHED,
+        entity_type=EntityType.AI_BUILDER_SESSION,
+        entity_id=session.id,
+        description="Detached AI builder session attachment",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=session,
+            extra={"file_id": str(file_id)},
+        ),
+    )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1701,6 +1718,26 @@ async def revise_plan(
     new_plan: BuilderPlan = await service.revise_plan(
         plan_id=plan_id,
         revision_type=body.type,
+    )
+
+    user = container.user()
+    audit_service = _get_audit_service(container)
+    await audit_service.log(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.AI_BUILDER_PLAN_REVISED,
+        entity_type=EntityType.AI_BUILDER_SESSION,
+        entity_id=session.id,
+        description="Revised AI builder plan",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=session,
+            extra={
+                "old_plan_id": str(plan.id),
+                "new_plan_id": str(new_plan.id),
+                "revision_type": body.type,
+            },
+        ),
     )
 
     return _to_plan_response(new_plan)

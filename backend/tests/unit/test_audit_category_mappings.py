@@ -107,7 +107,9 @@ class TestCategoryMappings:
         expected_actions = {
             ActionType.AI_BUILDER_SESSION_CREATED,
             ActionType.AI_BUILDER_PLAN_APPROVED,
+            ActionType.AI_BUILDER_PLAN_REVISED,
             ActionType.AI_BUILDER_FLOW_APPLIED,
+            ActionType.AI_BUILDER_ATTACHMENT_DETACHED,
             ActionType.AI_BUILDER_SESSION_CANCELLED,
         }
 

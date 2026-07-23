@@ -5172,8 +5172,12 @@
   "audit_action_ai_builder_session_created_description": "A Flow AI Builder session was created.",
   "audit_action_ai_builder_plan_approved": "AI Builder Plan Approved",
   "audit_action_ai_builder_plan_approved_description": "A Flow AI Builder plan was approved.",
+  "audit_action_ai_builder_plan_revised": "AI Builder Plan Revised",
+  "audit_action_ai_builder_plan_revised_description": "A Flow AI Builder plan was revised.",
   "audit_action_ai_builder_flow_applied": "AI Builder Flow Applied",
   "audit_action_ai_builder_flow_applied_description": "A Flow AI Builder plan was applied to a flow.",
+  "audit_action_ai_builder_attachment_detached": "AI Builder Attachment Detached",
+  "audit_action_ai_builder_attachment_detached_description": "A reference file was detached from a Flow AI Builder session.",
   "audit_action_ai_builder_session_cancelled": "AI Builder Session Cancelled",
   "audit_action_ai_builder_session_cancelled_description": "A Flow AI Builder session was cancelled."
 }
