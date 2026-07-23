@@ -1,7 +1,7 @@
 """add cursor indexes for Skill adoption resources
 
 Revision ID: 202607231330
-Revises: 202607221700
+Revises: 202607231200
 Create Date: 2026-07-23 13:30:00.000000
 """
 
@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202607231330"
-down_revision: str | None = "202607221700"
+down_revision: str | None = "202607231200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
