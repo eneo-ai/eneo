@@ -37,7 +37,7 @@
   });
 
   function canDelete(skill: OrganizationSkillSummaryPublic): boolean {
-    return skill.publication_state === "draft" || skill.publication_state === "unpublished";
+    return skill.publication_state === "draft";
   }
 
   function formatDate(value: string): string {

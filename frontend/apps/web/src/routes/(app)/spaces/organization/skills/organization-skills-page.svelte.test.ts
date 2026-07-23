@@ -53,7 +53,7 @@ describe("organisation Skill catalogue page", () => {
     invalidate.mockResolvedValue(undefined);
   });
 
-  test("deletes drafts and unpublished Skills, then removes the deleted row", async () => {
+  test("deletes only never-published drafts, then removes the deleted row", async () => {
     const draft = skill("draft", "draft");
     const unpublished = skill("unpublished", "unpublished");
     const published = skill("published", "published");
@@ -96,7 +96,7 @@ describe("organisation Skill catalogue page", () => {
           name: m.skills_library_delete_aria({ name: unpublished.display_name })
         })
       )
-      .toBeVisible();
+      .not.toBeInTheDocument();
     await expect
       .element(
         page.getByRole("button", {
@@ -114,14 +114,14 @@ describe("organisation Skill catalogue page", () => {
 
     await page
       .getByRole("button", {
-        name: m.skills_library_delete_aria({ name: unpublished.display_name })
+        name: m.skills_library_delete_aria({ name: draft.display_name })
       })
       .click();
     await expect
       .element(
         page.getByText(
           m.organization_skills_delete_description({
-            name: unpublished.display_name
+            name: draft.display_name
           })
         )
       )
@@ -130,12 +130,12 @@ describe("organisation Skill catalogue page", () => {
 
     await vi.waitFor(() =>
       expect(deleteSkill).toHaveBeenCalledWith({
-        skillId: unpublished.id
+        skillId: draft.id
       })
     );
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
-    await expect.element(page.getByText(unpublished.display_name)).not.toBeInTheDocument();
-    await expect.element(page.getByText(draft.display_name)).toBeVisible();
+    await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
+    await expect.element(page.getByText(unpublished.display_name)).toBeVisible();
   });
 
   test("keeps the catalogue table keyboard-scrollable", async () => {

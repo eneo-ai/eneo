@@ -3298,7 +3298,7 @@
   "organization_skills_loading_more": "Läser in Skills…",
   "organization_skills_load_more_error": "Fler Skills kunde inte läsas in.",
   "organization_skills_refresh_after_mutation_warning": "Ändringen sparades, men sidan kunde inte uppdateras. Ladda om sidan för att se aktuellt läge.",
-  "organization_skills_delete_description": "Radera {name}? Hela versionshistoriken tas bort permanent. Publicerade Skills måste avpubliceras först.",
+  "organization_skills_delete_description": "Radera {name}? Hela versionshistoriken tas bort permanent. Skills som har publicerats tidigare behålls som revisionshistorik och kan inte raderas.",
   "organization_skills_delete_error": "Skillen kunde inte raderas. Den kan ha publicerats eller fortfarande användas.",
   "organization_skills_new_page_title": "Eneo.ai – Skapa Skill för organisationen",
   "organization_skills_new_heading": "Börja med en fokuserad förmåga",

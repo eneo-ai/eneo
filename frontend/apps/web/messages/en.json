@@ -3265,7 +3265,7 @@
   "organization_skills_loading_more": "Loading Skills…",
   "organization_skills_load_more_error": "More Skills could not be loaded.",
   "organization_skills_refresh_after_mutation_warning": "The change was saved, but this page could not be updated. Reload the page to see the current state.",
-  "organization_skills_delete_description": "Delete {name}? Its complete version history will be removed permanently. Published Skills must be unpublished first.",
+  "organization_skills_delete_description": "Delete {name}? Its complete version history will be removed permanently. Previously published Skills are retained as audit history and cannot be deleted.",
   "organization_skills_delete_error": "The Skill could not be deleted. It may have been published or still be in use.",
   "organization_skills_new_page_title": "Eneo.ai – Create organisation Skill",
   "organization_skills_new_heading": "Start with one focused capability",
