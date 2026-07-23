@@ -4,7 +4,7 @@ goal:
   title: "Enterprise Skills rollout"
   slug: "enterprise-skills-rollout"
   kind: specific
-  tranche: "Complete the O1 general-availability gates on the merged organisation catalogue."
+  tranche: "Close O1 and turn the remaining non-Marketplace Skills roadmap into an ordered implementation blueprint."
   status: active
 
 rules:
@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 2
+  completed_write_tasks_in_thread: 3
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "b186f175d84df3f4c89ef0f244b675f152191934"
+  last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
 
-active_task: T007
+active_task: T010
 
 tasks:
   - id: T001
@@ -476,7 +476,7 @@ tasks:
   - id: T007
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Close the O1 deletion and retained-provenance contract before general availability."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/579"
@@ -501,7 +501,32 @@ tasks:
     stop_if:
       - "Closing the contract requires duplicating App-run lifecycle state."
       - "A behavior proof fails and the fix needs production files outside this contract-lock slice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Locked the existing deletion/terminal-run recovery contract with PostgreSQL behavior proof and concise operator documentation, without changing production behavior, then squash-merged PR #580."
+      merged_pr: 580
+      source_head: "83be4bef82f40bf79e63d24cbd0402ed5e02289e"
+      merge_commit: "c642da4953102718c4031c4004e3c6a83d956f4a"
+      merged_at: "2026-07-23T21:04:00Z"
+      review_url: "https://github.com/eneo-ai/eneo/pull/580#issuecomment-5063221359"
+      changed_files:
+        - "backend/tests/integration/skills/test_skill_concurrency.py"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      commands:
+        - cmd: "uv run pytest tests/integration/skills/test_skill_concurrency.py tests/unittests/apps/app_runs/test_app_run_provenance.py -q"
+          result: "pass: 21 tests"
+        - cmd: "uv run pytest tests/integration/skills/test_skill_concurrency.py::test_queued_app_run_snapshot_blocks_concurrent_skill_deletion_until_terminal -q"
+          result: "pass: 2 tests after final cleanup"
+        - cmd: "backend Ruff check and format; docs Prettier and production build; Goal Maker checker; git diff --check"
+          result: pass
+        - cmd: "GitHub PR #580 required checks"
+          result: "pass: 17 successful, 3 scope-skipped, 0 failing"
+      verification:
+        - "Complete and failed App runs release an otherwise eligible Skill for hard deletion."
+        - "The Skill and revision rows are deleted while body-free ID/revision/digest/position provenance remains readable."
+        - "The fresh full-coverage review found no current in-scope findings on the merged head."
 
   - id: T008
     type: worker
@@ -538,6 +563,42 @@ tasks:
       - "Keyboard, responsive, loading, empty, and error states"
     stop_if:
       - "There is no measured or observed need beyond the existing source labels and search."
+    receipt: null
+
+  - id: T010
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Adjudicate an implementation-ready, highest-ROI delivery order for Task #553 and the remaining non-Marketplace Enterprise Skills roadmap before any production code changes."
+    inputs:
+      - "origin/develop at c642da4953102718c4031c4004e3c6a83d956f4a"
+      - "Issue #553 and PR #538 at 89694fd450b375b9d3eaed45b9699f38b641f9bf"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "Flow package/export mechanics on refactor/flows-clean at 77202b4f61374a12733fcba1a1f684bb725385c5"
+      - "Official Agent Skills, Codex, Claude Code, Open WebUI, LibreChat, Onyx, Flowise, AnythingLLM, and Dify references"
+    constraints:
+      - "Do not implement production code."
+      - "Use one repo-grounded Fable Max planning review after independently identifying current owners, contradictions, scale limits, failure modes, and the actual remaining roadmap."
+      - "Reconcile Issue #553 with the newer roadmap and ADR; one fallback contract must win before implementation."
+      - "Treat PR #538 as comparison evidence; its loopback FastMCP, identity-token, knowledge, and file stack is not a merge dependency for #553."
+      - "Use the existing completion loop and one concrete frozen Skill plan; do not create a one-method port or generic effect framework."
+      - "Keep Group Chat routing and App on-demand out of scope."
+      - "Plan O2 and S2 only to the reviewable contract and dependency depth needed for ordering; do not implement them in this task."
+      - "Keep external Marketplace implementation last and out of scope."
+      - "Do not add a generic selector, plugin, policy, or multi-tenancy framework."
+    expected_output:
+      - "Canonical owner and dependency decision"
+      - "One explicit no-tool fallback and 100-plus-Skill descriptor/budget contract"
+      - "Small reviewable vertical slices with acceptance, behavior tests, recovery, and stop conditions"
+      - "Evidence-based ROI and dependency order for #553, T008, O2, T009, S2, and Marketplace-last"
+      - "Minimal O2 lifecycle/schema boundary and its explicit separation from S2 package mechanics"
+      - "Updated roadmap, Goal Maker state, and Issue #553 contract"
+    stop_if:
+      - "The plan requires a production edit to prove a disputed behavior."
+      - "The only proposed path is to merge the stacked PR #538 wholesale."
+      - "The review cannot inspect bounded source evidence for the claimed canonical owners."
     receipt: null
 
   - id: T999
