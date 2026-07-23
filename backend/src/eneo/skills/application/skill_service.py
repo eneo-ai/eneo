@@ -373,7 +373,8 @@ class SkillService:
             deleted = await self.repo.delete(skill_id=skill.id)
         except PublishedSkillDeletionError as error:
             raise NameCollisionException(
-                "Unpublish this Skill before deleting it."
+                "Previously published Skills are retained for audit history "
+                "and cannot be deleted."
             ) from error
         except SkillHasActiveAppRunsError as error:
             raise NameCollisionException(

@@ -475,7 +475,7 @@ async def test_admin_can_unpublish_without_changing_revision_history():
     )
 
 
-async def test_published_skill_must_be_unpublished_before_deletion():
+async def test_previously_published_skill_cannot_be_deleted():
     organization = _organization()
     repo = AsyncMock()
     repo.delete_organization.side_effect = PublishedSkillDeletionError
@@ -485,7 +485,7 @@ async def test_published_skill_must_be_unpublished_before_deletion():
         repo=repo,
     )
 
-    with pytest.raises(NameCollisionException, match="Unpublish"):
+    with pytest.raises(NameCollisionException, match="retained for audit history"):
         await service.delete(skill_id=uuid4())
 
 

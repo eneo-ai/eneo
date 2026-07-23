@@ -586,7 +586,7 @@ def _insert_populated_resource_bindings(
     return str(assistant_id[0]), str(app_id[0])
 
 
-def test_resource_binding_validation_does_not_retain_exclusive_table_locks(
+def test_resource_binding_migration_never_queues_exclusive_table_locks(
     pre_skills_database: MigrationDatabase,
     test_settings,
 ):
@@ -618,6 +618,7 @@ def test_resource_binding_validation_does_not_retain_exclusive_table_locks(
     writer_iterations = [0]
     writer_errors: list[BaseException] = []
     migration_errors: list[BaseException] = []
+    probe_errors: list[BaseException] = []
 
     def keep_reader_and_writer_active() -> None:
         writer_connection = psycopg2.connect(
@@ -696,55 +697,68 @@ def test_resource_binding_validation_does_not_retain_exclusive_table_locks(
     assert not writer_errors
     assert writer_iterations[0] >= 2
 
+    blocker = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    probe = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    probe.autocommit = True
+    with blocker.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE assistant_skill_bindings
+            SET updated_at = updated_at
+            WHERE assistant_id = %s AND skill_id = %s
+            """,
+            (assistant_id, skill_id),
+        )
+
     migration = Thread(target=run_scope_migration, daemon=True)
     migration.start()
 
-    observed_validations: set[str] = set()
-    exclusive_locks_during_validation: list[str] = []
-    while migration.is_alive():
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT activity.query,
-                       EXISTS (
-                           SELECT 1
-                           FROM pg_locks AS held_lock
-                           JOIN pg_class AS relation
-                             ON relation.oid = held_lock.relation
-                           WHERE held_lock.pid = activity.pid
-                             AND held_lock.granted
-                             AND held_lock.mode = 'AccessExclusiveLock'
-                             AND relation.relname = ANY(%s)
-                       )
-                FROM pg_stat_activity AS activity
-                WHERE activity.datname = current_database()
-                  AND activity.pid <> pg_backend_pid()
-                  AND activity.query LIKE 'ALTER TABLE %%VALIDATE CONSTRAINT%%'
-                """,
-                (list(("assistant_skill_bindings", "app_skill_bindings")),),
-            )
-            validation_rows = cursor.fetchall()
-
-        for query, has_exclusive_lock in validation_rows:
-            for table in ("assistant_skill_bindings", "app_skill_bindings"):
-                if f"ALTER TABLE {table} VALIDATE CONSTRAINT" in query:
-                    observed_validations.add(table)
-                    if has_exclusive_lock:
-                        exclusive_locks_during_validation.append(table)
-        sleep(0.001)
-
-    migration.join(timeout=5)
-    stop_writer.set()
-    writer.join(timeout=5)
+    try:
+        # Keep issuing ordinary reads while the existing write transaction
+        # prevents the metadata phase from acquiring its exclusive lock. A
+        # queued DDL request would put these later compatible reads behind it.
+        probe_deadline = monotonic() + 1.0
+        with probe.cursor() as cursor:
+            cursor.execute("SET statement_timeout = '100ms'")
+            while monotonic() < probe_deadline and not probe_errors:
+                try:
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM assistant_skill_bindings
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    sleep(0.01)
+                except BaseException as error:
+                    probe_errors.append(error)
+    finally:
+        blocker.rollback()
+        blocker.close()
+        probe.close()
+        migration.join(timeout=10)
+        stop_writer.set()
+        writer.join(timeout=5)
 
     assert not migration_errors
     assert not writer_errors
+    assert not probe_errors
     assert writer_iterations[0] > 2
-    assert observed_validations == {
-        "assistant_skill_bindings",
-        "app_skill_bindings",
-    }
-    assert exclusive_locks_during_validation == []
+    assert not migration.is_alive()
 
 
 def test_upgrade_recovers_indexes_and_round_trips_role_backfill(

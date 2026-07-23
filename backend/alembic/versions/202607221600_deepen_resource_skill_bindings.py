@@ -6,8 +6,10 @@ Create Date: 2026-07-20 18:30:00.000000
 """
 
 from collections.abc import Sequence
+from time import monotonic, sleep
 
 import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 
 from alembic import op
 
@@ -19,35 +21,67 @@ depends_on: str | Sequence[str] | None = None
 _BACKFILL_BATCH_SIZE = 1_000
 _BINDING_TABLES = ("assistant_skill_bindings", "app_skill_bindings")
 _SCOPE_TRIGGER_FUNCTION = "eneo_fill_resource_skill_binding_scope"
-_CONTRACT_LOCK_TIMEOUT = "5s"
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+_METADATA_LOCK_RETRY_SECONDS = 5.0
+_METADATA_LOCK_RETRY_INTERVAL_SECONDS = 0.025
 
 
-def _execute_with_contract_lock_timeout(statement: str) -> None:
-    op.execute(f"SET lock_timeout = '{_CONTRACT_LOCK_TIMEOUT}'")
-    try:
-        op.execute(statement)
-    finally:
-        op.execute("RESET lock_timeout")
+def _execute_with_immediate_table_lock(
+    *,
+    table: str,
+    statements: tuple[str, ...],
+    referenced_tables: tuple[str, ...] = (),
+) -> None:
+    """Run one short metadata phase without joining PostgreSQL's lock queue."""
+    bind = op.get_bind()
+    deadline = monotonic() + _METADATA_LOCK_RETRY_SECONDS
+
+    while True:
+        bind.exec_driver_sql("BEGIN")
+        try:
+            bind.exec_driver_sql(f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE NOWAIT")
+            if referenced_tables:
+                bind.exec_driver_sql(
+                    "LOCK TABLE "
+                    f"{', '.join(referenced_tables)} "
+                    "IN SHARE ROW EXCLUSIVE MODE NOWAIT"
+                )
+            for statement in statements:
+                bind.exec_driver_sql(statement)
+            bind.exec_driver_sql("COMMIT")
+            return
+        except DBAPIError as error:
+            bind.exec_driver_sql("ROLLBACK")
+            sqlstate = getattr(error.orig, "sqlstate", None) or getattr(
+                error.orig, "pgcode", None
+            )
+            if sqlstate != _LOCK_NOT_AVAILABLE_SQLSTATE or monotonic() >= deadline:
+                raise
+            sleep(_METADATA_LOCK_RETRY_INTERVAL_SECONDS)
+        except Exception:
+            bind.exec_driver_sql("ROLLBACK")
+            raise
 
 
 def _add_scope_columns_and_legacy_write_trigger(*, table: str) -> None:
     # IF NOT EXISTS keeps the migration restartable because the concurrent index
     # phase below commits independently of Alembic's surrounding transaction.
-    _execute_with_contract_lock_timeout(
-        f"""
-        ALTER TABLE {table}
-            ADD COLUMN IF NOT EXISTS tenant_id UUID,
-            ADD COLUMN IF NOT EXISTS skill_space_id UUID
-        """
-    )
-    _execute_with_contract_lock_timeout(
-        f"""
-        DROP TRIGGER IF EXISTS fill_resource_skill_binding_scope ON {table};
-        CREATE TRIGGER fill_resource_skill_binding_scope
-        BEFORE INSERT OR UPDATE OF space_id, tenant_id, skill_space_id ON {table}
-        FOR EACH ROW
-        EXECUTE FUNCTION {_SCOPE_TRIGGER_FUNCTION}()
-        """
+    _execute_with_immediate_table_lock(
+        table=table,
+        statements=(
+            f"""
+            ALTER TABLE {table}
+                ADD COLUMN IF NOT EXISTS tenant_id UUID,
+                ADD COLUMN IF NOT EXISTS skill_space_id UUID
+            """,
+            f"DROP TRIGGER IF EXISTS fill_resource_skill_binding_scope ON {table}",
+            f"""
+            CREATE TRIGGER fill_resource_skill_binding_scope
+            BEFORE INSERT OR UPDATE OF space_id, tenant_id, skill_space_id ON {table}
+            FOR EACH ROW
+            EXECUTE FUNCTION {_SCOPE_TRIGGER_FUNCTION}()
+            """,
+        ),
     )
 
 
@@ -124,31 +158,35 @@ def _replace_binding_scope_constraints(*, table: str) -> None:
     # One ALTER makes the old-FK/new-NOT-VALID contract swap atomic. Each target
     # constraint is dropped first so a retry after a later committed migration
     # phase remains deterministic.
-    _execute_with_contract_lock_timeout(
-        f"""
-        ALTER TABLE {table}
-            DROP CONSTRAINT IF EXISTS fk_{table}_parent_space,
-            DROP CONSTRAINT IF EXISTS fk_{table}_skill_space,
-            DROP CONSTRAINT IF EXISTS fk_{table}_skill,
-            DROP CONSTRAINT IF EXISTS {tenant_not_null},
-            DROP CONSTRAINT IF EXISTS {skill_space_not_null},
-            ADD CONSTRAINT fk_{table}_parent_space
-                FOREIGN KEY (tenant_id, space_id)
-                REFERENCES spaces (tenant_id, id)
-                ON DELETE NO ACTION NOT VALID,
-            ADD CONSTRAINT fk_{table}_skill_space
-                FOREIGN KEY (tenant_id, skill_space_id)
-                REFERENCES spaces (tenant_id, id)
-                ON DELETE NO ACTION NOT VALID,
-            ADD CONSTRAINT fk_{table}_skill
-                FOREIGN KEY (skill_space_id, skill_id)
-                REFERENCES skills (space_id, id)
-                ON DELETE NO ACTION NOT VALID,
-            ADD CONSTRAINT {tenant_not_null}
-                CHECK (tenant_id IS NOT NULL) NOT VALID,
-            ADD CONSTRAINT {skill_space_not_null}
-                CHECK (skill_space_id IS NOT NULL) NOT VALID
-        """
+    _execute_with_immediate_table_lock(
+        table=table,
+        referenced_tables=("spaces", "skills"),
+        statements=(
+            f"""
+            ALTER TABLE {table}
+                DROP CONSTRAINT IF EXISTS fk_{table}_parent_space,
+                DROP CONSTRAINT IF EXISTS fk_{table}_skill_space,
+                DROP CONSTRAINT IF EXISTS fk_{table}_skill,
+                DROP CONSTRAINT IF EXISTS {tenant_not_null},
+                DROP CONSTRAINT IF EXISTS {skill_space_not_null},
+                ADD CONSTRAINT fk_{table}_parent_space
+                    FOREIGN KEY (tenant_id, space_id)
+                    REFERENCES spaces (tenant_id, id)
+                    ON DELETE NO ACTION NOT VALID,
+                ADD CONSTRAINT fk_{table}_skill_space
+                    FOREIGN KEY (tenant_id, skill_space_id)
+                    REFERENCES spaces (tenant_id, id)
+                    ON DELETE NO ACTION NOT VALID,
+                ADD CONSTRAINT fk_{table}_skill
+                    FOREIGN KEY (skill_space_id, skill_id)
+                    REFERENCES skills (space_id, id)
+                    ON DELETE NO ACTION NOT VALID,
+                ADD CONSTRAINT {tenant_not_null}
+                    CHECK (tenant_id IS NOT NULL) NOT VALID,
+                ADD CONSTRAINT {skill_space_not_null}
+                    CHECK (skill_space_id IS NOT NULL) NOT VALID
+            """,
+        ),
     )
 
 
@@ -171,14 +209,17 @@ def _contract_binding_scope_columns(*, table: str) -> None:
     # The validated checks let PostgreSQL prove NOT NULL without another table
     # scan. Keep the two column changes and helper-check removal in one short,
     # retry-safe contract statement.
-    _execute_with_contract_lock_timeout(
-        f"""
-        ALTER TABLE {table}
-            ALTER COLUMN tenant_id SET NOT NULL,
-            ALTER COLUMN skill_space_id SET NOT NULL,
-            DROP CONSTRAINT IF EXISTS {tenant_not_null},
-            DROP CONSTRAINT IF EXISTS {skill_space_not_null}
-        """
+    _execute_with_immediate_table_lock(
+        table=table,
+        statements=(
+            f"""
+            ALTER TABLE {table}
+                ALTER COLUMN tenant_id SET NOT NULL,
+                ALTER COLUMN skill_space_id SET NOT NULL,
+                DROP CONSTRAINT IF EXISTS {tenant_not_null},
+                DROP CONSTRAINT IF EXISTS {skill_space_not_null}
+            """,
+        ),
     )
 
 

@@ -3,12 +3,17 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.jobs.job_models import Task
 from eneo.main.exceptions import NameCollisionException, NotFoundException
+from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     SkillBindingReference,
     SkillBindingSource,
+    SkillExecutionReference,
     SkillPublicationState,
     SkillRevisionConflictError,
 )
@@ -22,6 +27,21 @@ async def _organization_space(session, *, tenant_id):
             Spaces.tenant_space_id.is_(None),
         )
     )
+
+
+def _serialize_provenance(
+    provenance: tuple[SkillExecutionReference, ...],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "skill_id": str(reference.skill_id),
+            "skill_revision_id": str(reference.skill_revision_id),
+            "revision_number": reference.revision_number,
+            "content_digest": reference.content_digest,
+            "position": reference.position,
+        }
+        for reference in provenance
+    ]
 
 
 async def test_catalogue_reads_only_the_tenants_exact_published_revision(
@@ -301,6 +321,28 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
             base_instructions="App base",
         )
         assert "approved catalogue instructions" in app_composition.prompt
+        job_id = uuid4()
+        app_run_id = uuid4()
+        session.add(
+            Jobs(
+                id=job_id,
+                user_id=admin_user.id,
+                task=Task.RUN_APP.value,
+                status=Status.COMPLETE.value,
+            )
+        )
+        session.add(
+            AppRuns(
+                id=app_run_id,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                app_id=app.id,
+                job_id=job_id,
+                completion_model_id=model.id,
+                skill_provenance=_serialize_provenance(app_composition.provenance),
+            )
+        )
+        await session.flush()
 
         for reference in (
             SkillBindingReference(
@@ -372,8 +414,32 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
 
         assert snapshot.provenance == app_composition.provenance
         assert "approved catalogue instructions" in snapshot.prompt
-        with pytest.raises(NameCollisionException, match="still attached"):
+        await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=assistant.id,
+            references=[],
+        )
+        await service.replace_app_bindings(
+            space_id=target_space.id,
+            app_id=app.id,
+            references=[],
+        )
+        with pytest.raises(NameCollisionException, match="retained for audit history"):
             await container.organization_skill_service().delete(skill_id=published.id)
+        retained_revision = await repo.get_revision(
+            skill_id=published.id,
+            revision_id=app_composition.provenance[0].skill_revision_id,
+        )
+        retained_app_run = await session.get(AppRuns, app_run_id)
+        assert retained_revision is not None
+        assert (
+            retained_revision.content_digest
+            == app_composition.provenance[0].content_digest
+        )
+        assert retained_app_run is not None
+        assert retained_app_run.skill_provenance == _serialize_provenance(
+            app_composition.provenance
+        )
 
 
 async def test_catalogue_search_treats_like_metacharacters_as_literals(
@@ -518,6 +584,22 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
             )
             is None
         )
+        with pytest.raises(PublishedSkillDeletionError):
+            await repo.delete_organization(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+            )
+        retained = await repo.get_organization_for_tenant(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+        )
+        assert retained is not None
+        assert retained.first_published_at == unpublished.skill.first_published_at
+        retained_revision = await repo.get_revision(
+            skill_id=skill.id,
+            revision_id=pending.revision.id,
+        )
+        assert retained_revision == pending.revision
 
         republished = await repo.publish_organization(
             tenant_id=admin_user.tenant_id,

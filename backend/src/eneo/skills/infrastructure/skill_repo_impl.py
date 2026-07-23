@@ -791,7 +791,7 @@ class SkillRepoImpl:
         )
 
     async def _delete_locked_skill(self, *, skill: Skill) -> Skill:
-        if skill.published_revision_number is not None:
+        if skill.first_published_at is not None:
             raise PublishedSkillDeletionError
         if await self._is_bound(skill_id=skill.id):
             raise SkillHasBindingsError
