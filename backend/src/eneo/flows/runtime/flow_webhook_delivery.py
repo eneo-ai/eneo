@@ -77,6 +77,16 @@ class FlowWebhookDeliveryResult:
     retry_scheduled_count: int = 0
     dead_lettered_count: int = 0
 
+    def combine(self, other: FlowWebhookDeliveryResult) -> FlowWebhookDeliveryResult:
+        return FlowWebhookDeliveryResult(
+            attempted_count=self.attempted_count + other.attempted_count,
+            delivered_count=self.delivered_count + other.delivered_count,
+            retry_scheduled_count=(
+                self.retry_scheduled_count + other.retry_scheduled_count
+            ),
+            dead_lettered_count=self.dead_lettered_count + other.dead_lettered_count,
+        )
+
     def to_task_payload(self) -> dict[str, int | str]:
         return {
             "status": "ok",
@@ -85,6 +95,12 @@ class FlowWebhookDeliveryResult:
             "retry_scheduled": self.retry_scheduled_count,
             "dead_lettered": self.dead_lettered_count,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class FlowWebhookDeliveryBatch:
+    claimed_rows: list[FlowRunWebhookDeliveryRow]
+    result: FlowWebhookDeliveryResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,32 +156,38 @@ class FlowRunWebhookDeliveryService:
         now: datetime,
         limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     ) -> FlowWebhookDeliveryResult:
+        batch = await self.claim_due_batch(now=now, limit=limit)
+        await self.webhook_delivery_repo.session.commit()
+        result = batch.result
+        for row in batch.claimed_rows:
+            result = result.combine(await self.deliver_claimed(row=row, now=now))
+        return result
+
+    async def claim_due_batch(
+        self,
+        *,
+        now: datetime,
+        limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
+    ) -> FlowWebhookDeliveryBatch:
         if limit <= 0:
-            return FlowWebhookDeliveryResult()
-
-        processed = 0
-        attempted = 0
-        delivered = 0
-        retry_scheduled = 0
-        dead_lettered = 0
-        started_at = monotonic()
-        while processed < limit:
-            if (
-                processed > 0
-                and monotonic() - started_at >= FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS
-            ):
-                break
-
-            exhausted_rows = (
-                await self.webhook_delivery_repo.lock_expired_at_budget_delivery_rows(
-                    now=now,
-                    limit=1,
-                    max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
-                )
+            return FlowWebhookDeliveryBatch(
+                claimed_rows=[],
+                result=FlowWebhookDeliveryResult(),
             )
-            if exhausted_rows:
+
+        started_at = monotonic()
+        exhausted_rows = (
+            await self.webhook_delivery_repo.lock_expired_at_budget_delivery_rows(
+                now=now,
+                limit=limit,
+                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+            )
+        )
+        dead_lettered = 0
+        for row in exhausted_rows:
+            try:
                 await self._record_failure(
-                    row=exhausted_rows[0],
+                    row=row,
                     now=now,
                     error=WebhookDeliveryAttemptBudgetExhaustedError(
                         "Webhook delivery claim expired after the final allowed "
@@ -174,141 +196,152 @@ class FlowRunWebhookDeliveryService:
                     ),
                     force_dead_letter=True,
                 )
-            await self.webhook_delivery_repo.session.commit()
-            if exhausted_rows:
-                processed += 1
-                dead_lettered += 1
+            except WebhookDeliveryClaimLostError:
                 continue
+            dead_lettered += 1
 
-            rows = await self.webhook_delivery_repo.claim_due_delivery_rows(
+        remaining_limit = limit - len(exhausted_rows)
+        claimed_rows: list[FlowRunWebhookDeliveryRow] = []
+        if (
+            remaining_limit > 0
+            and monotonic() - started_at < FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS
+        ):
+            claimed_rows = await self.webhook_delivery_repo.claim_due_delivery_rows(
                 now=now,
-                limit=1,
+                limit=remaining_limit,
                 claim_ttl_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
                 max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
             )
-            await self.webhook_delivery_repo.session.commit()
-            if not rows:
-                break
+        return FlowWebhookDeliveryBatch(
+            claimed_rows=claimed_rows,
+            result=FlowWebhookDeliveryResult(dead_lettered_count=dead_lettered),
+        )
 
-            row = rows[0]
-            processed += 1
-            attempted += 1
-            payload_prepared = False
+    async def deliver_claimed(
+        self,
+        *,
+        row: FlowRunWebhookDeliveryRow,
+        now: datetime,
+    ) -> FlowWebhookDeliveryResult:
+        attempted_result = FlowWebhookDeliveryResult(attempted_count=1)
+        payload_prepared = False
+        try:
+            async with self.webhook_delivery_repo.session.begin():
+                payload = await self._prepare_delivery_payload(row=row)
+            payload_prepared = True
+            try:
+                await self._deliver_payload(row=row, payload=payload)
+            finally:
+                # Audit policy reads share this task-scoped session. Discard
+                # their read transaction before persisting the delivery outcome.
+                if self.webhook_delivery_repo.session.in_transaction():
+                    await self.webhook_delivery_repo.session.rollback()
+        except (
+            BadRequestException,
+            FlowPublishedDefinitionWithoutExecutableStepsError,
+        ) as exc:
+            resolver_text_failure = (
+                payload_prepared
+                and isinstance(exc.__cause__, TypedIOValidationException)
+                and exc.__cause__.code
+                in {
+                    FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+                    FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                }
+            )
+            terminal_error = (
+                self._terminal_error_for_definition_failure(
+                    error=exc,
+                    step_order=row.step_order,
+                )
+                if not payload_prepared
+                else None
+            )
             try:
                 async with self.webhook_delivery_repo.session.begin():
-                    payload = await self._prepare_delivery_payload(row=row)
-                payload_prepared = True
-                try:
-                    await self._deliver_payload(row=row, payload=payload)
-                finally:
-                    # Audit policy reads share this task-scoped session. Discard
-                    # their read transaction before persisting the delivery outcome.
-                    if self.webhook_delivery_repo.session.in_transaction():
-                        await self.webhook_delivery_repo.session.rollback()
-            except (
-                BadRequestException,
-                FlowPublishedDefinitionWithoutExecutableStepsError,
-            ) as exc:
-                resolver_text_failure = (
-                    payload_prepared
-                    and isinstance(exc.__cause__, TypedIOValidationException)
-                    and exc.__cause__.code
-                    in {
-                        FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
-                        FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-                    }
-                )
-                terminal_error = (
-                    self._terminal_error_for_definition_failure(
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        now=now,
                         error=exc,
-                        step_order=row.step_order,
+                        force_dead_letter=(
+                            terminal_error is not None or resolver_text_failure
+                        ),
+                        terminal_error=terminal_error,
                     )
-                    if not payload_prepared
-                    else None
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(
+                    dead_lettered_count=int(did_dead_letter),
+                    retry_scheduled_count=int(not did_dead_letter),
                 )
-                try:
-                    async with self.webhook_delivery_repo.session.begin():
-                        did_dead_letter = await self._record_failure(
-                            row=row,
-                            now=now,
-                            error=exc,
-                            force_dead_letter=(
-                                terminal_error is not None or resolver_text_failure
-                            ),
-                            terminal_error=terminal_error,
-                        )
-                except WebhookDeliveryClaimLostError:
-                    continue
-                if did_dead_letter:
-                    dead_lettered += 1
-                else:
-                    retry_scheduled += 1
-            except ValueError as exc:
-                try:
-                    async with self.webhook_delivery_repo.session.begin():
-                        did_dead_letter = await self._record_failure(
-                            row=row,
-                            now=now,
-                            error=exc,
-                            force_dead_letter=True,
-                        )
-                except WebhookDeliveryClaimLostError:
-                    continue
-                if did_dead_letter:
-                    dead_lettered += 1
-            except WebhookDeliveryError as exc:
-                terminal_http_failure = (
-                    exc.status_code is not None
-                    and 400 <= exc.status_code < 500
-                    and exc.status_code not in {408, 429}
+            )
+        except ValueError as exc:
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        now=now,
+                        error=exc,
+                        force_dead_letter=True,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(dead_lettered_count=int(did_dead_letter))
+            )
+        except WebhookDeliveryError as exc:
+            terminal_http_failure = (
+                exc.status_code is not None
+                and 400 <= exc.status_code < 500
+                and exc.status_code not in {408, 429}
+            )
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        now=now,
+                        error=exc,
+                        force_dead_letter=terminal_http_failure,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(
+                    dead_lettered_count=int(did_dead_letter),
+                    retry_scheduled_count=int(not did_dead_letter),
                 )
-                try:
-                    async with self.webhook_delivery_repo.session.begin():
-                        did_dead_letter = await self._record_failure(
-                            row=row,
-                            now=now,
-                            error=exc,
-                            force_dead_letter=terminal_http_failure,
-                        )
-                except WebhookDeliveryClaimLostError:
-                    continue
-                if did_dead_letter:
-                    dead_lettered += 1
-                else:
-                    retry_scheduled += 1
-            except Exception as exc:
-                try:
-                    async with self.webhook_delivery_repo.session.begin():
-                        did_dead_letter = await self._record_failure(
-                            row=row,
-                            now=now,
-                            error=exc,
-                            force_dead_letter=False,
-                        )
-                except WebhookDeliveryClaimLostError:
-                    continue
-                if did_dead_letter:
-                    dead_lettered += 1
-                else:
-                    retry_scheduled += 1
-            else:
-                try:
-                    async with self.webhook_delivery_repo.session.begin():
-                        did_mark = await self._record_success(
-                            row=row,
-                            now=now,
-                            payload=payload,
-                        )
-                except WebhookDeliveryClaimLostError:
-                    continue
-                if did_mark:
-                    delivered += 1
-        return FlowWebhookDeliveryResult(
-            attempted_count=attempted,
-            delivered_count=delivered,
-            retry_scheduled_count=retry_scheduled,
-            dead_lettered_count=dead_lettered,
-        )
+            )
+        except Exception as exc:
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        now=now,
+                        error=exc,
+                        force_dead_letter=False,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(
+                    dead_lettered_count=int(did_dead_letter),
+                    retry_scheduled_count=int(not did_dead_letter),
+                )
+            )
+        else:
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_mark = await self._record_success(
+                        row=row,
+                        now=now,
+                        payload=payload,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(delivered_count=int(did_mark))
+            )
 
     @staticmethod
     def _terminal_error_for_definition_failure(

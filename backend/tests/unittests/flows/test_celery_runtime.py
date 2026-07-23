@@ -1581,3 +1581,207 @@ def test_redispatch_due_list_transaction_closes_before_dispatch_coordinator(
         i for i, e in enumerate(events) if e == "commit" and list_idx < i < dispatch_idx
     ]
     assert commits_between, events
+
+
+@pytest.mark.asyncio
+async def test_webhook_outbox_overlaps_rows_with_distinct_sessions_and_services(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    delivery_module = importlib.import_module(
+        "eneo.flows.runtime.flow_webhook_delivery"
+    )
+    rows = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
+    sessions: list[object] = []
+    services: list[object] = []
+    active_deliveries = 0
+    peak_deliveries = 0
+    both_started = asyncio.Event()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            session = _fake_flow_task_session()
+            sessions.append(session)
+            return session
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    class _Service:
+        def __init__(self, session):
+            self.session = session
+            services.append(self)
+
+        async def claim_due_batch(self, **_kwargs):
+            return delivery_module.FlowWebhookDeliveryBatch(
+                claimed_rows=rows,
+                result=delivery_module.FlowWebhookDeliveryResult(),
+            )
+
+        async def deliver_claimed(self, *, row, **_kwargs):
+            nonlocal active_deliveries, peak_deliveries
+            active_deliveries += 1
+            peak_deliveries = max(peak_deliveries, active_deliveries)
+            if active_deliveries == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            active_deliveries -= 1
+            if row.id == rows[0].id:
+                return delivery_module.FlowWebhookDeliveryResult(
+                    attempted_count=1,
+                    delivered_count=1,
+                )
+            return delivery_module.FlowWebhookDeliveryResult(
+                attempted_count=1,
+                retry_scheduled_count=1,
+            )
+
+    class _Container:
+        def __init__(self, *, session):
+            self.session = session()
+
+        def flow_run_webhook_delivery_service(self):
+            return _Service(self.session)
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = await tasks_module._deliver_flow_webhook_outbox(limit=2)
+
+    assert result == {
+        "status": "ok",
+        "attempted": 2,
+        "delivered": 1,
+        "retry_scheduled": 1,
+        "dead_lettered": 0,
+    }
+    assert peak_deliveries == 2
+    assert len(sessions) == 3
+    assert len({id(session) for session in sessions}) == 3
+    assert len(services) == 3
+    assert len({id(service) for service in services}) == 3
+
+
+@pytest.mark.asyncio
+async def test_webhook_outbox_worker_exception_does_not_cancel_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    delivery_module = importlib.import_module(
+        "eneo.flows.runtime.flow_webhook_delivery"
+    )
+    rows = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
+    both_started = asyncio.Event()
+    started_rows: set[object] = set()
+    completed_rows: set[object] = set()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return _fake_flow_task_session()
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    class _Service:
+        async def claim_due_batch(self, **_kwargs):
+            return delivery_module.FlowWebhookDeliveryBatch(
+                claimed_rows=rows,
+                result=delivery_module.FlowWebhookDeliveryResult(),
+            )
+
+        async def deliver_claimed(self, *, row, **_kwargs):
+            started_rows.add(row.id)
+            if len(started_rows) == len(rows):
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            if row.id == rows[0].id:
+                raise RuntimeError("worker failed")
+            completed_rows.add(row.id)
+            return delivery_module.FlowWebhookDeliveryResult(
+                attempted_count=1,
+                delivered_count=1,
+            )
+
+    class _Container:
+        def __init__(self, *, session):
+            pass
+
+        def flow_run_webhook_delivery_service(self):
+            return _Service()
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    result = await tasks_module._deliver_flow_webhook_outbox(limit=2)
+
+    assert started_rows == {row.id for row in rows}
+    assert completed_rows == {rows[1].id}
+    assert result == {
+        "status": "ok",
+        "attempted": 2,
+        "delivered": 1,
+        "retry_scheduled": 0,
+        "dead_lettered": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_webhook_outbox_cancellation_drains_all_delivery_workers(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    tasks_module = importlib.import_module("eneo.flows.runtime.tasks")
+    delivery_module = importlib.import_module(
+        "eneo.flows.runtime.flow_webhook_delivery"
+    )
+    rows = [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
+    both_started = asyncio.Event()
+    cancelled_rows: set[object] = set()
+    started_rows: set[object] = set()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return _fake_flow_task_session()
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    class _Service:
+        async def claim_due_batch(self, **_kwargs):
+            return delivery_module.FlowWebhookDeliveryBatch(
+                claimed_rows=rows,
+                result=delivery_module.FlowWebhookDeliveryResult(),
+            )
+
+        async def deliver_claimed(self, *, row, **_kwargs):
+            started_rows.add(row.id)
+            if len(started_rows) == len(rows):
+                both_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled_rows.add(row.id)
+                raise
+
+    class _Container:
+        def __init__(self, *, session):
+            pass
+
+        def flow_run_webhook_delivery_service(self):
+            return _Service()
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+
+    cadence = asyncio.create_task(tasks_module._deliver_flow_webhook_outbox(limit=2))
+    await asyncio.wait_for(both_started.wait(), timeout=1)
+    cadence.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cadence
+
+    assert cancelled_rows == started_rows == {row.id for row in rows}

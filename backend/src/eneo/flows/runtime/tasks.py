@@ -27,6 +27,7 @@ from eneo.flows.application.flow_run_audit_outbox_policy import (
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+    FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
 )
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
@@ -47,6 +48,9 @@ from eneo.flows.flow_run_dispatch_request import (
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRow,
+)
 from eneo.flows.runtime.celery_app import celery_app
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from eneo.flows.runtime.flow_run_actor import (
@@ -55,6 +59,7 @@ from eneo.flows.runtime.flow_run_actor import (
     FlowRunServicePrincipalInactiveError,
 )
 from eneo.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
+from eneo.flows.runtime.flow_webhook_delivery import FlowWebhookDeliveryResult
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
@@ -796,15 +801,54 @@ async def _deliver_flow_audit_outbox(
 async def _deliver_flow_webhook_outbox(
     *, limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE
 ) -> dict[str, int | str]:
+    if limit <= 0:
+        return FlowWebhookDeliveryResult().to_task_payload()
+
+    now = datetime.now(timezone.utc)
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
-        container = Container(session=providers.Object(session))
-        service = container.flow_run_webhook_delivery_service()
-        result = await service.deliver_due(
-            now=datetime.now(timezone.utc),
-            limit=limit,
-        )
-        return result.to_task_payload()
+        async with session.begin():
+            container = Container(session=providers.Object(session))
+            service = container.flow_run_webhook_delivery_service()
+            batch = await service.claim_due_batch(now=now, limit=limit)
+
+    concurrency = min(FLOW_WEBHOOK_DELIVERY_CONCURRENCY, len(batch.claimed_rows))
+    if concurrency == 0:
+        return batch.result.to_task_payload()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _deliver_claimed(
+        row: FlowRunWebhookDeliveryRow,
+    ) -> FlowWebhookDeliveryResult:
+        async with semaphore:
+            try:
+                async with sessionmanager.session() as delivery_session:
+                    enable_autobegin_for_flow_task_session(delivery_session)
+                    delivery_container = Container(
+                        session=providers.Object(delivery_session)
+                    )
+                    delivery_service = (
+                        delivery_container.flow_run_webhook_delivery_service()
+                    )
+                    return await delivery_service.deliver_claimed(row=row, now=now)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Flow webhook delivery worker failed before recording an outcome",
+                    extra={"delivery_id": str(row.id)},
+                )
+                return FlowWebhookDeliveryResult(attempted_count=1)
+
+    delivery_tasks: list[asyncio.Task[FlowWebhookDeliveryResult]] = []
+    async with asyncio.TaskGroup() as task_group:
+        for row in batch.claimed_rows:
+            delivery_tasks.append(task_group.create_task(_deliver_claimed(row)))
+
+    result = batch.result
+    for delivery_task in delivery_tasks:
+        result = result.combine(delivery_task.result())
+    return result.to_task_payload()
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]

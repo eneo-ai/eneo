@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -147,8 +148,9 @@ async def _create_running_webhook_run(
     assistant_factory,
     output_config: dict[str, object] | None = None,
     prior_output_payload: dict[str, object] | None = None,
+    model_name: str = "gpt-4o-mini",
 ):
-    model = await completion_model_factory(session, "gpt-4o-mini")
+    model = await completion_model_factory(session, model_name)
     space = await space_factory(session, "Webhook outbox delivery space", [model.id])
     assistant = await assistant_factory(
         session,
@@ -592,6 +594,76 @@ async def test_flow_webhook_delivery_claim_charges_attempt_before_outcome(
 
     assert did_record is True
     assert attempts_after_outcome == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_batch_claim_is_distinct_across_competing_sessions(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as setup_session:
+        enable_autobegin_for_flow_task_session(setup_session)
+        delivery_ids: list[UUID] = []
+        for row_no in range(2):
+            flow, run, step = await _create_running_webhook_run(
+                session=setup_session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                model_name=f"webhook-batch-model-{row_no}",
+            )
+            delivery_ids.append(
+                await FlowRunWebhookDeliveryRepository(
+                    session=setup_session
+                ).insert_pending_delivery(
+                    flow_id=flow.id,
+                    tenant_id=admin_user.tenant_id,
+                    intent=_intent(run_id=run.id, step_id=step.id),
+                )
+            )
+        await setup_session.commit()
+
+    now = datetime.now(timezone.utc)
+
+    async def _claim_batch():
+        async with sessionmanager.session() as claim_session:
+            enable_autobegin_for_flow_task_session(claim_session)
+            rows = await FlowRunWebhookDeliveryRepository(
+                session=claim_session
+            ).claim_due_delivery_rows(
+                now=now,
+                limit=2,
+                claim_ttl_seconds=120,
+                max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+            )
+            await claim_session.commit()
+            return rows
+
+    competing_claims = await asyncio.gather(_claim_batch(), _claim_batch())
+    claimed_rows = [row for batch in competing_claims for row in batch]
+
+    async with sessionmanager.session() as check_session:
+        enable_autobegin_for_flow_task_session(check_session)
+        attempts = (
+            await check_session.execute(
+                sa.select(
+                    FlowRunWebhookDeliveries.id,
+                    FlowRunWebhookDeliveries.delivery_attempts,
+                ).where(FlowRunWebhookDeliveries.id.in_(delivery_ids))
+            )
+        ).all()
+
+    assert {row.id for row in claimed_rows} == set(delivery_ids)
+    assert len(claimed_rows) == len(delivery_ids)
+    assert {row.delivery_attempts for row in claimed_rows} == {1}
+    assert {attempt.id: attempt.delivery_attempts for attempt in attempts} == {
+        delivery_id: 1 for delivery_id in delivery_ids
+    }
 
 
 @pytest.mark.asyncio
