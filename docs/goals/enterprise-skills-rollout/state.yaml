@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 1
-  handoff_note: notes/handoff.md
-  last_handoff_at: "2026-07-23T16:52:16Z"
-  last_verified_revision: "dfe9dbe7b6ed8c899c08acf15df84cd8e609934b"
+  completed_write_tasks_in_thread: 2
+  handoff_note: null
+  last_handoff_at: null
+  last_verified_revision: "b186f175d84df3f4c89ef0f244b675f152191934"
 
-active_task: T006
+active_task: T007
 
 tasks:
   - id: T001
@@ -380,7 +380,7 @@ tasks:
   - id: T006
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add the organisation-wide emergency Skill execution block before O1 becomes generally available."
     inputs:
@@ -433,14 +433,53 @@ tasks:
     stop_if:
       - "The implementation mutates or silently advances retained bindings."
       - "Closing the provider-start boundary requires a new distributed lease or retry owner rather than deepening the existing immutable execution-plan boundary."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Added the organisation-wide emergency Skill execution block, closed the final review findings, passed all local and GitHub gates, and squash-merged PR #577."
+      merged_pr: 577
+      source_head: "629844805028446bb4530a27b78bddabfe38128d"
+      merge_commit: "b186f175d84df3f4c89ef0f244b675f152191934"
+      merged_at: "2026-07-23T19:58:44Z"
+      github_checks: "All 18 reported checks reached a terminal non-failing state; 16 passed and 2 scope-dependent checks were skipped."
+      review: "Review 3 inspected the final head, confirmed F2-F3 resolved, and found no current in-scope findings."
+      review_url: "https://github.com/eneo-ai/eneo/pull/577#issuecomment-5062578555"
+      changed_files:
+        - "backend/alembic/versions/202607231730_add_skill_execution_blocks.py"
+        - "backend/src/eneo/settings/"
+        - "backend/src/eneo/skills/"
+        - "backend/tests/integration/migrations/test_skills_schema_round_trip.py"
+        - "backend/tests/integration/skills/test_skill_execution_blocks.py"
+        - "backend/tests/unittests/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+        - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/"
+        - "frontend/packages/eneo-js/"
+      commands:
+        - cmd: "focused backend unit suites"
+          status: pass
+        - cmd: "focused PostgreSQL execution-block integration suite"
+          status: pass
+        - cmd: "isolated execution-block migration test"
+          status: pass
+        - cmd: "backend Ruff, Ruff format, Pyright, and uv lock checks"
+          status: pass
+        - cmd: "frontend Prettier and docs-site production build"
+          status: pass
+        - cmd: "required GitHub CI and final /review"
+          status: pass
+      verification:
+        - "53 focused unit tests passed."
+        - "8 focused PostgreSQL execution-block integration tests passed."
+        - "The isolated execution-block migration test passed."
+        - "Backend Ruff, Ruff format, Pyright, and uv lock checks passed."
+        - "Frontend Prettier and the docs-site production build passed."
 
   - id: T007
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Close the O1 deletion and retained-provenance contract before general availability."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/579"
     inputs:
       - "Merged Skill deletion, binding, audit, and queued App-run contracts"
       - "docs/enterprise-skills-roadmap.md"
@@ -448,12 +487,20 @@ tasks:
       - "Keep instruction bodies out of retained runtime evidence."
       - "Serialize deletion with canonical binding and App-run owners."
       - "Document an explicit retention and terminal-run recovery contract."
+      - "Treat this as a contract-lock slice: add no production code when the missing behavior proofs pass on the merged implementation."
+      - "Do not add a reverse delete-before-queue test: an App binding already blocks deletion, so a later snapshot cannot retain the deleted Skill."
+    allowed_files:
+      - "backend/tests/integration/skills/test_skill_concurrency.py"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/state.yaml"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
     verify:
       - "Bound and nonterminal-run deletion conflicts"
-      - "Terminal-run recovery and bounded ID/digest provenance"
+      - "Complete and failed terminal-run recovery, hard-deleted Skill/revision rows, and readable bounded ID/digest provenance"
       - "Deletion and queue concurrency behavior"
     stop_if:
       - "Closing the contract requires duplicating App-run lifecycle state."
+      - "A behavior proof fails and the fix needs production files outside this contract-lock slice."
     receipt: null
 
   - id: T008
@@ -516,10 +563,10 @@ checks:
   dirty_fingerprint: "main worktree contains unrelated user-owned changes; roadmap files are isolated"
   last_verification:
     result: pass
-    task: T001
+    task: T006
     commands:
-      - "backend: 3709 non-integration tests passed"
-      - "backend: 63 focused Skill/session tests passed"
-      - "backend: Ruff check and format passed"
-      - "backend: Pyright 0 errors, 0 warnings"
-      - "frontend: 45 files, 244 unit tests passed"
+      - "GitHub: all 18 reported PR #577 checks reached a terminal non-failing state"
+      - "backend: 53 focused unit tests passed"
+      - "backend: 8 focused PostgreSQL execution-block integration tests passed"
+      - "backend: isolated migration test, Ruff, format, Pyright, and uv lock checks passed"
+      - "frontend: Prettier and docs-site production build passed"

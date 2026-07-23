@@ -267,3 +267,12 @@ Chat requests.
 No. It stops runtime composition while preserving exact pins and adoption
 evidence. This lets administrators see the full impact, remediate resources,
 and later unblock with an auditable reason.
+
+### When can I delete a Skill?
+
+First detach it from every Assistant, App, and Personal Chat policy. A queued or
+running App run whose history still exists also blocks deletion until it
+completes or fails. Completed and failed runs keep only the Skill and revision
+IDs, revision number, digest, and position—not the instruction body. Previously
+published organisation Skills remain as audit history and cannot be
+hard-deleted.
