@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 
@@ -10,6 +12,11 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
     conversation_serialized_size_bytes,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_from_metadata,
+    slot_classification_metadata_from_result,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
@@ -18,6 +25,18 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedEvidence,
+    ClassifiedFileRole,
+    ClassifiedFormIntake,
+    ClassifiedSlot,
+    SlotClassificationInput,
+    SlotClassificationResult,
+    SlotClassificationSource,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
 )
 
 
@@ -36,6 +55,376 @@ def _msg(
         tool_calls=tool_calls,
         tool_call_id=tool_call_id,
     )
+
+
+def _classifier_msg(
+    message_id: str,
+    *,
+    slot_name: str,
+    value: str,
+    confidence: str = "high",
+) -> ConversationMessage:
+    source_id = f"user_message:{message_id}"
+    quote = f"{slot_name} is {value}"
+    return _classifier_result_msg(
+        message_id,
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name=slot_name,
+                    value=value,
+                    confidence=confidence,
+                    reason="typed test classification",
+                    evidence=(ClassifiedEvidence(source_id=source_id, quote=quote),),
+                ),
+            )
+        ),
+    )
+
+
+def _classifier_result_msg(
+    message_id: str,
+    result: SlotClassificationResult,
+    *,
+    uploaded_file_id: UUID | None = None,
+) -> ConversationMessage:
+    source_id = (
+        f"uploaded_file:{uploaded_file_id}"
+        if uploaded_file_id is not None
+        else f"user_message:{message_id}"
+    )
+    evidence_quotes = [
+        evidence.quote
+        for evidence in (
+            *[evidence for slot in result.slots for evidence in slot.evidence],
+            *[
+                evidence
+                for file_role in result.file_roles
+                for evidence in file_role.evidence
+            ],
+            *([] if result.form_intake is None else result.form_intake.evidence),
+        )
+    ]
+    source_text = "\n".join(evidence_quotes) or "classifier source"
+    classification = slot_classification_metadata_from_result(
+        result,
+        prompt_hash=hashlib.sha256(message_id.encode()).hexdigest(),
+        classification_input=SlotClassificationInput(
+            sources=(
+                SlotClassificationSource(
+                    source_id=source_id,
+                    kind="uploaded_file"
+                    if uploaded_file_id is not None
+                    else "user_message",
+                    text=source_text,
+                    message_id=None if uploaded_file_id is not None else message_id,
+                    file_id=uploaded_file_id,
+                    coverage="fully_seen" if uploaded_file_id is not None else None,
+                ),
+            )
+        ),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert classification is not None
+    metadata = metadata_with_slot_classification(None, classification)
+    assert metadata is not None
+    return ConversationMessage(
+        message_id=message_id,
+        role="assistant",
+        content="Classifier diagnostic.",
+        metadata=metadata,
+    )
+
+
+def test_count_compaction_retains_latest_corrected_classifier_slot_for_rebuild() -> (
+    None
+):
+    conversation = [
+        _classifier_msg(
+            "classification-1",
+            slot_name="terminal_output",
+            value="structured_text",
+        ),
+        _classifier_msg(
+            "classification-2",
+            slot_name="terminal_output",
+            value="docx_document",
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(20)],
+        _msg("user", content="continue"),
+    ]
+
+    expected = build_planning_state_from_conversation(conversation)
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=6,
+        tail_messages=4,
+    )
+    rebuilt = build_planning_state_from_conversation(compacted)
+
+    assert expected.resolved_slots["terminal_output"].value == "docx_document"
+    assert rebuilt == expected
+
+
+def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
+    file_id = UUID("00000000-0000-0000-0000-000000000701")
+    file_source_id = f"uploaded_file:{file_id}"
+    form_source_id = "user_message:form-new"
+    conversation = [
+        _classifier_msg(
+            "slot-old",
+            slot_name="terminal_output",
+            value="structured_text",
+        ),
+        _classifier_msg(
+            "slot-new",
+            slot_name="terminal_output",
+            value="docx_document",
+        ),
+        _classifier_result_msg(
+            "file-old",
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=file_id,
+                        role="context_only",
+                        confidence="high",
+                        reason="old file role",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id=file_source_id,
+                                quote="old context file",
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            uploaded_file_id=file_id,
+        ),
+        _classifier_result_msg(
+            "file-new",
+            SlotClassificationResult(
+                file_roles=(
+                    ClassifiedFileRole(
+                        file_id=file_id,
+                        role="template",
+                        confidence="high",
+                        reason="corrected file role",
+                        evidence=(
+                            ClassifiedEvidence(
+                                source_id=file_source_id,
+                                quote="use this as the template",
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            uploaded_file_id=file_id,
+        ),
+        _classifier_result_msg(
+            "form-old",
+            SlotClassificationResult(
+                form_intake=ClassifiedFormIntake(
+                    needs_form_fields=True,
+                    sectioned_form_intake=True,
+                    confidence="high",
+                    reason="old sectioned form",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id="user_message:form-old",
+                            quote="one field per section",
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "form-new",
+            SlotClassificationResult(
+                form_intake=ClassifiedFormIntake(
+                    needs_form_fields=True,
+                    sectioned_form_intake=False,
+                    confidence="high",
+                    reason="corrected simple form",
+                    evidence=(
+                        ClassifiedEvidence(
+                            source_id=form_source_id,
+                            quote="one simple form field",
+                        ),
+                    ),
+                )
+            ),
+        ),
+        _classifier_result_msg(
+            "obligations",
+            SlotClassificationResult(secondary_obligations=("risks", "actions")),
+        ),
+        _classifier_result_msg(
+            "notes-only",
+            SlotClassificationResult(
+                assumptions=("diagnostic assumption is not a rebuild fact",),
+                contradictions=("diagnostic contradiction is not a rebuild fact",),
+            ),
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(20)],
+        _msg("user", content="continue"),
+    ]
+
+    expected = build_planning_state_from_conversation(conversation)
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=8,
+        tail_messages=3,
+    )
+    rebuilt = build_planning_state_from_conversation(compacted)
+
+    assert rebuilt == expected
+    assert [
+        signal.value
+        for signal in rebuilt.signals
+        if signal.question_id == "form_intake_pattern"
+    ] == ["needs_form_fields"]
+    assert {
+        signal.value
+        for signal in rebuilt.signals
+        if signal.question_id == "result_obligation"
+    } == {"risks", "actions"}
+    classifications = [
+        parsed
+        for message in compacted
+        if (parsed := slot_classification_from_metadata(message.metadata)) is not None
+    ]
+    assert [slot.value for item in classifications for slot in item.slots] == [
+        "docx_document"
+    ]
+    assert [role.role for item in classifications for role in item.file_roles] == [
+        "template"
+    ]
+    retained_file_run = next(item for item in classifications if item.file_roles)
+    assert retained_file_run.source_inventory[0].file_id == file_id
+    assert [note for item in classifications for note in item.contradictions] == [
+        "conversation_compaction:count"
+    ]
+    assert not any(item.assumptions for item in classifications)
+
+
+def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
+    conversation = [
+        _classifier_msg(
+            "byte-old",
+            slot_name="terminal_output",
+            value="structured_text",
+        ),
+        _classifier_msg(
+            "byte-new",
+            slot_name="terminal_output",
+            value="docx_document",
+        ),
+        _msg("assistant", content="x" * 2_000),
+        _msg("user", content="continue"),
+    ]
+    expected = build_planning_state_from_conversation(conversation)
+    without_old = conversation_serialized_size_bytes(conversation[1:])
+
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_conversation_bytes=without_old + 100,
+    )
+
+    assert conversation_serialized_size_bytes(compacted) <= without_old + 100
+    assert build_planning_state_from_conversation(compacted) == expected
+    classification = next(
+        parsed
+        for message in compacted
+        if (parsed := slot_classification_from_metadata(message.metadata)) is not None
+    )
+    assert classification.contradictions == ["conversation_compaction:bytes"]
+
+
+def test_compaction_retains_explicit_unknown_that_clears_older_model_slot() -> None:
+    conversation = [
+        _classifier_msg(
+            "known-slot",
+            slot_name="terminal_output",
+            value="structured_text",
+        ),
+        _classifier_msg(
+            "unknown-slot",
+            slot_name="terminal_output",
+            value="unknown",
+            confidence="low",
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+
+    expected = build_planning_state_from_conversation(conversation)
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert "terminal_output" not in expected.resolved_slots
+    assert build_planning_state_from_conversation(compacted) == expected
+    retained_values = [
+        slot.value
+        for message in compacted
+        if (classification := slot_classification_from_metadata(message.metadata))
+        for slot in classification.slots
+    ]
+    assert retained_values == ["unknown"]
+
+
+def test_compaction_keeps_older_effective_slot_when_later_confidence_is_low() -> None:
+    conversation = [
+        _classifier_msg(
+            "effective-slot",
+            slot_name="terminal_output",
+            value="structured_text",
+        ),
+        _classifier_msg(
+            "low-slot",
+            slot_name="terminal_output",
+            value="docx_document",
+            confidence="low",
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+
+    expected = build_planning_state_from_conversation(conversation)
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=5,
+        tail_messages=3,
+    )
+
+    assert expected.resolved_slots["terminal_output"].value == "structured_text"
+    assert build_planning_state_from_conversation(compacted) == expected
+
+
+def test_exact_limits_do_not_mark_classifier_diagnostics_degraded() -> None:
+    classification = _classifier_msg(
+        "exact-limit",
+        slot_name="terminal_output",
+        value="structured_text",
+    )
+    final = _msg("user", content="continue")
+    conversation = [classification, final]
+    exact_bytes = conversation_serialized_size_bytes(conversation)
+
+    at_count_limit = compact_ai_builder_conversation(
+        conversation,
+        max_messages=2,
+        tail_messages=2,
+        max_conversation_bytes=exact_bytes,
+    )
+
+    parsed = slot_classification_from_metadata(at_count_limit[0].metadata)
+    assert parsed is not None
+    assert parsed.contradictions == []
 
 
 def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Mapping
+from typing import Iterable, Literal, cast
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SLOT_CLASSIFICATION_METADATA_KEY,
+    ClassifierRetentionIdentity,
     metadata_has_requirements_summary,
+    metadata_with_slot_classification,
     question_answer_from_metadata,
     question_answer_question_id,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_version_from_metadata,
+    slot_classification_from_metadata,
     tool_call_ids,
     tool_calls_from_message,
 )
@@ -39,7 +44,6 @@ def compact_ai_builder_conversation(
     max_message_bytes: int = MAX_SESSION_MESSAGE_BYTES,
     max_conversation_bytes: int = MAX_SESSION_CONVERSATION_BYTES,
 ) -> list[ConversationMessage]:
-    retention_units = _conversation_retention_units(conversation)
     message_sizes = [
         _message_serialized_size_bytes(message) for message in conversation
     ]
@@ -48,6 +52,28 @@ def compact_ai_builder_conversation(
             raise ValueError(
                 "AI Builder conversation message exceeds the serialized byte limit."
             )
+
+    original_serialized_size = _conversation_size_from_message_sizes(message_sizes)
+    compaction_limits: set[Literal["count", "bytes"]] = set()
+    if len(conversation) > max_messages:
+        compaction_limits.add("count")
+    if original_serialized_size > max_conversation_bytes:
+        compaction_limits.add("bytes")
+    if compaction_limits:
+        conversation = _retain_latest_classifier_semantics(
+            conversation,
+            compaction_limits=frozenset(compaction_limits),
+        )
+        message_sizes = [
+            _message_serialized_size_bytes(message) for message in conversation
+        ]
+        if any(message_size > max_message_bytes for message_size in message_sizes):
+            raise ValueError(
+                "Required AI Builder conversation context exceeds the serialized byte "
+                "limit."
+            )
+
+    retention_units = _conversation_retention_units(conversation)
 
     compacted = _compact_by_message_count(
         conversation,
@@ -199,7 +225,64 @@ def _required_message_indices(
             required_indices.add(confirmation_index)
     required_indices.update(_latest_structured_answer_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
+    required_indices.update(_classifier_semantic_indices(conversation))
     return required_indices
+
+
+def _retain_latest_classifier_semantics(
+    conversation: list[ConversationMessage],
+    *,
+    compaction_limits: frozenset[Literal["count", "bytes"]],
+) -> list[ConversationMessage]:
+    selected_by_index: dict[int, frozenset[ClassifierRetentionIdentity]] = {}
+    seen: set[ClassifierRetentionIdentity] = set()
+    for index in range(len(conversation) - 1, -1, -1):
+        classification = slot_classification_from_metadata(conversation[index].metadata)
+        if classification is None:
+            continue
+        selected = classification.effective_retention_identities() - seen
+        if selected:
+            selected_by_index[index] = frozenset(selected)
+            seen.update(selected)
+
+    latest_selected_index = max(selected_by_index, default=None)
+    retained: list[ConversationMessage] = []
+    for index, message in enumerate(conversation):
+        classification = slot_classification_from_metadata(message.metadata)
+        if classification is None:
+            retained.append(message)
+            continue
+        metadata = (
+            dict(cast(Mapping[str, object], message.metadata))
+            if isinstance(message.metadata, Mapping)
+            else {}
+        )
+        metadata.pop(SLOT_CLASSIFICATION_METADATA_KEY, None)
+        selected = selected_by_index.get(index)
+        if selected:
+            projected = classification.retain_effective_semantics(
+                selected,
+                compaction_limits=(
+                    compaction_limits if index == latest_selected_index else frozenset()
+                ),
+            )
+            metadata = (
+                metadata_with_slot_classification(metadata, projected) or metadata
+            )
+        retained.append(message.model_copy(update={"metadata": metadata or None}))
+    return retained
+
+
+def _classifier_semantic_indices(
+    conversation: list[ConversationMessage],
+) -> Iterable[int]:
+    return [
+        index
+        for index, message in enumerate(conversation)
+        if (classification := slot_classification_from_metadata(message.metadata))
+        is not None
+        and classification.effective_retention_identities()
+    ]
 
 
 def _latest_requirements_summary_index(

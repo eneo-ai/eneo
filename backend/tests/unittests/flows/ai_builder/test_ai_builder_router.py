@@ -63,6 +63,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
+    _classifier_diagnostic_runs,
     ai_builder_enveloped_error_handler,
     apply_plan,
     approve_and_apply_create_plan,
@@ -568,6 +569,31 @@ def _make_plan_stream_event():
 # ---------------------------------------------------------------------------
 # Helper function tests
 # ---------------------------------------------------------------------------
+
+
+def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> None:
+    runs = _classifier_diagnostic_runs(
+        [
+            ConversationMessage(
+                message_id="classification-compacted",
+                role="assistant",
+                metadata={
+                    "slot_classification": {
+                        "schema_version": 13,
+                        "prompt_hash": "a" * 64,
+                        "model": "openai/gpt-test",
+                        "provider": "openai",
+                        "source_inventory": [],
+                        "slots": [],
+                        "contradictions": ["conversation_compaction:count,bytes"],
+                    }
+                },
+            )
+        ]
+    )
+
+    assert len(runs) == 1
+    assert runs[0].contradictions == ["conversation_compaction:count,bytes"]
 
 
 class TestAuthorizeAIBuilderRequest:

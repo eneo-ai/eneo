@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    ClassifierRetentionClass,
     question_answer_from_metadata,
     question_answer_question_id,
     question_answer_values,
@@ -215,6 +216,9 @@ _OUTPUT_SCHEMA_PROMOTABLE_TERMINAL_OUTPUT_SOURCES: frozenset[SlotSource] = froze
         "heuristic",
         "model",
     }
+)
+CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
+    {"slot", "file_role", "form_intake", "secondary_obligation"}
 )
 
 
@@ -728,6 +732,13 @@ def _merge_model_form_intake(
     if not _model_form_intake_is_persistable(form_intake):
         return
     assert form_intake is not None
+    state.signals = [
+        signal
+        for signal in state.signals
+        if not (
+            signal.question_id == FORM_INTAKE_SIGNAL_ID and signal.source == "model"
+        )
+    ]
     existing = {
         signal.value
         for signal in state.signals
@@ -828,12 +839,6 @@ def _model_file_role_can_replace(
     if existing_role_source == "heuristic" and existing_role != "context_only":
         return False
     if existing_role_source == "heuristic" and existing_role_confidence == "high":
-        return False
-    if (
-        existing_role_source == "model"
-        and existing_role_confidence == "high"
-        and classified_role.confidence != "high"
-    ):
         return False
     return True
 
@@ -1079,6 +1084,8 @@ def _model_slot_can_replace(
     if existing_slot.source == "heuristic":
         if existing_slot.confidence == "high":
             return model_confidence == "high"
+        return model_confidence in {"high", "medium"}
+    if existing_slot.source == "model":
         return model_confidence in {"high", "medium"}
     return False
 

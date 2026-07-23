@@ -95,6 +95,16 @@ LLMResolvableSlotName: TypeAlias = Literal[
     "structured_io_contract",
     "runtime_metadata_fields",
 ]
+ClassifierRetentionClass: TypeAlias = Literal[
+    "slot",
+    "file_role",
+    "form_intake",
+    "secondary_obligation",
+]
+ClassifierRetentionIdentity: TypeAlias = tuple[ClassifierRetentionClass, str]
+CLASSIFIER_RETENTION_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
+    {"slot", "file_role", "form_intake", "secondary_obligation"}
+)
 
 _MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 _MAX_QUESTION_ANSWER_SELECTIONS = 20
@@ -381,6 +391,95 @@ class SlotClassificationMetadata(BaseModel):
             secondary_obligations=tuple(self.secondary_obligations),
             assumptions=tuple(self.assumptions),
             contradictions=tuple(self.contradictions),
+        )
+
+    def effective_retention_identities(self) -> frozenset[ClassifierRetentionIdentity]:
+        """Return classifier facts that can affect deterministic rebuild replay."""
+        identities: set[ClassifierRetentionIdentity] = set()
+        for slot in self.slots:
+            if slot.value == UNKNOWN_SLOT_VALUE or (
+                slot.confidence != "low" and slot.evidence
+            ):
+                identities.add(("slot", slot.slot_name))
+        identities.update(
+            ("file_role", str(file_role.file_id))
+            for file_role in self.file_roles
+            if file_role.confidence != "low" and file_role.evidence
+        )
+        if (
+            self.form_intake is not None
+            and self.form_intake.confidence != "low"
+            and self.form_intake.evidence
+        ):
+            identities.add(("form_intake", "form_intake"))
+        identities.update(
+            ("secondary_obligation", obligation)
+            for obligation in self.secondary_obligations
+        )
+        return frozenset(identities)
+
+    def retain_effective_semantics(
+        self,
+        identities: frozenset[ClassifierRetentionIdentity],
+        *,
+        compaction_limits: frozenset[Literal["count", "bytes"]] = frozenset(),
+    ) -> "SlotClassificationMetadata":
+        """Project one classifier run to effective rebuild facts and their sources."""
+        slots = [slot for slot in self.slots if ("slot", slot.slot_name) in identities]
+        file_roles = [
+            file_role
+            for file_role in self.file_roles
+            if ("file_role", str(file_role.file_id)) in identities
+        ]
+        form_intake = (
+            self.form_intake if ("form_intake", "form_intake") in identities else None
+        )
+        secondary_obligations = [
+            obligation
+            for obligation in self.secondary_obligations
+            if ("secondary_obligation", obligation) in identities
+        ]
+        evidence_source_ids = {
+            evidence.source_id
+            for evidence in (
+                *[evidence for slot in slots for evidence in slot.evidence],
+                *[
+                    evidence
+                    for file_role in file_roles
+                    for evidence in file_role.evidence
+                ],
+                *([] if form_intake is None else form_intake.evidence),
+            )
+        }
+        retained_file_ids = {file_role.file_id for file_role in file_roles}
+        source_inventory = [
+            source
+            for source in self.source_inventory
+            if source.source_id in evidence_source_ids
+            or source.file_id in retained_file_ids
+        ]
+        contradictions = (
+            [
+                "conversation_compaction:"
+                + ",".join(
+                    limit for limit in ("count", "bytes") if limit in compaction_limits
+                )
+            ]
+            if compaction_limits
+            else []
+        )
+        return self.model_copy(
+            update={
+                "source_inventory": source_inventory,
+                "slots": slots,
+                "file_roles": file_roles,
+                "secondary_obligations": secondary_obligations,
+                "form_intake": form_intake,
+                # Free-form model notes are diagnostics, not rebuild facts. Compaction
+                # keeps only its typed, consumer-visible degradation marker here.
+                "assumptions": [],
+                "contradictions": contradictions,
+            }
         )
 
 

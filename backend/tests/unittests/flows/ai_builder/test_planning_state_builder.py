@@ -1680,7 +1680,7 @@ class TestSlotClassificationMetadataReplay:
         assert report_disposition.source == "structured_answer"
         assert report_disposition.confidence == "high"
 
-    def test_replays_metadata_in_conversation_order_without_replacing_model_slots(
+    def test_replays_metadata_in_conversation_order_with_latest_model_correction(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1705,9 +1705,9 @@ class TestSlotClassificationMetadataReplay:
         )
 
         slot = state.resolved_slots["terminal_output"]
-        assert slot.value == "structured_text"
+        assert slot.value == "structured_json"
         assert slot.evidence == [
-            "model:terminal_output:" + "a" * 64,
+            "model:terminal_output:" + "b" * 64,
             "quote:user_message:test-source:terminal_output evidence",
         ]
 

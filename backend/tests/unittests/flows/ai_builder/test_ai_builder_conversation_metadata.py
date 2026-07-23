@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from eneo.flows.ai_builder import ai_builder_conversation_metadata as metadata_module
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
     loose_tool_call_name,
@@ -36,6 +37,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
+from eneo.flows.ai_builder.planning_state_builder import (
+    CLASSIFIER_REBUILD_INPUT_CLASSES,
+)
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
@@ -360,6 +364,44 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert parsed.model == "openai/gpt-test"
     assert parsed.provider == "openai"
     assert parsed.source_inventory[0].source_id == _CLASSIFICATION_SOURCE_ID
+
+
+def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None:
+    assert CLASSIFIER_REBUILD_INPUT_CLASSES == CLASSIFIER_RETENTION_CLASSES
+
+
+def test_classifier_retention_identities_follow_replay_confidence_rules() -> None:
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_text",
+                    confidence="low",
+                    reason="not effective",
+                    evidence=(_classified_evidence("weak output guess"),),
+                ),
+                ClassifiedSlot(
+                    slot_name="primary_runtime_input",
+                    value="unknown",
+                    confidence="low",
+                    reason="explicit clearing result",
+                    evidence=(),
+                ),
+            ),
+            assumptions=("diagnostic note",),
+            contradictions=("another diagnostic note",),
+        ),
+        prompt_hash="a" * 64,
+        classification_input=_classification_input("weak output guess"),
+        model="openai/gpt-test",
+        provider="openai",
+    )
+
+    assert classification is not None
+    assert classification.effective_retention_identities() == frozenset(
+        {("slot", "primary_runtime_input")}
+    )
 
 
 def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
