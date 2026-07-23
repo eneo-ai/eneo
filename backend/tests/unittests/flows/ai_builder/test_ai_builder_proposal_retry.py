@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -11,6 +11,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.flows.ai_builder import (
+    ai_builder_proposal_retry as proposal_retry_module,
+)
 from eneo.flows.ai_builder import (
     ai_builder_proposal_telemetry as proposal_telemetry_module,
 )
@@ -89,6 +92,25 @@ def _captured_proposal_telemetry() -> Iterator[list[logging.LogRecord]]:
     finally:
         proposal_telemetry_module.logger.removeHandler(handler)
         proposal_telemetry_module.logger.setLevel(old_level)
+
+
+@contextmanager
+def _captured_proposal_retry_logs() -> Generator[list[logging.LogRecord]]:
+    records: list[logging.LogRecord] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = CaptureHandler()
+    old_level = proposal_retry_module.logger.level
+    proposal_retry_module.logger.setLevel(logging.WARNING)
+    proposal_retry_module.logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        proposal_retry_module.logger.removeHandler(handler)
+        proposal_retry_module.logger.setLevel(old_level)
 
 
 def _failed_turn_payloads(
@@ -687,6 +709,100 @@ async def test_run_forced_tool_retry_after_text_preserves_information_request_em
 
     assert result == ForcedToolRetryOutcome()
     call_proposal_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repair_loop_logs_only_bounded_failure_classification() -> None:
+    assistant_secret = "MODEL_ASSISTANT_SECRET_bm42"
+    json_text_secret = "MODEL_JSON_TEXT_SECRET_bm42"
+    feedback_secret = "USER_DERIVED_FEEDBACK_SECRET_bm42"
+    failure_codes = frozenset({"empty_steps"})
+
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=assistant_secret, tool_calls=None),
+                finish_reason="stop",
+            )
+        ]
+    )
+    forced_tool_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={"flow_name": "Invalid", "steps": []},
+    )
+    failed_repair = ToolProcessingResult(
+        feedback=feedback_secret,
+        failure_kind="quality",
+        failure_codes=failure_codes,
+    )
+
+    with _captured_proposal_retry_logs() as records:
+        events = [
+            event
+            async for event in run_tool_self_correction(
+                _make_self_correction_request(
+                    repair_completion=AsyncMock(
+                        side_effect=[text_response, forced_tool_response]
+                    ),
+                    process_tool_invocation=AsyncMock(return_value=failed_repair),
+                    self_correction_temperature=0.35,
+                    self_correction_bumped_temperature=0.6,
+                    max_self_correction_retries=1,
+                    forced_proposal_temperature=0.1,
+                    target_kind=TargetKind.CREATE,
+                )
+            )
+        ]
+        json_text_outcome = await run_forced_tool_retry_after_text(
+            _make_forced_tool_after_text_request(
+                assistant_text=json.dumps({"flow_name": json_text_secret, "steps": []}),
+                repair_completion=AsyncMock(),
+                process_tool_invocation=AsyncMock(return_value=failed_repair),
+                forced_proposal_temperature=0.1,
+                target_kind=TargetKind.CREATE,
+            )
+        )
+
+    assert events[-1].event == "error"
+    assert json_text_outcome.failure_kind == "quality"
+    assert len(records) == 3
+    for record in records:
+        rendered_message = record.getMessage()
+        serialized_args = repr(record.args)
+        structured_fields = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in {"args", "msg"}
+        }
+        serialized_structured_fields = json.dumps(structured_fields, default=str)
+        for secret in (assistant_secret, json_text_secret, feedback_secret):
+            assert secret not in rendered_message
+            assert secret not in serialized_args
+            assert secret not in serialized_structured_fields
+
+        assert structured_fields["failure_kind"] == "quality"
+        assert structured_fields["failure_codes_count"] == 1
+
+    assistant_bail_record = next(
+        record
+        for record in records
+        if record.getMessage().startswith("Self-correction bailed")
+    )
+    assert assistant_bail_record.__dict__["assistant_text_present"] is True
+    assert assistant_bail_record.__dict__["assistant_text_length"] == len(
+        assistant_secret
+    )
+
+    feedback_records = [
+        record for record in records if record is not assistant_bail_record
+    ]
+    assert all(
+        record.__dict__["feedback_present"] is True for record in feedback_records
+    )
+    assert all(
+        record.__dict__["feedback_length"] == len(feedback_secret)
+        for record in feedback_records
+    )
 
 
 def test_proposal_provider_call_budget_includes_initial_and_repairs() -> None:

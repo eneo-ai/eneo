@@ -880,8 +880,13 @@ async def _request_self_correction_events(
                 continue
 
             logger.warning(
-                "Self-correction bailed to conversational text after forced retry: %s",
-                assistant_text,
+                "Self-correction bailed to conversational text after forced retry",
+                extra={
+                    "failure_kind": forced_failure_kind,
+                    "failure_codes_count": len(forced_outcome.failure_codes),
+                    "assistant_text_present": True,
+                    "assistant_text_length": len(assistant_text),
+                },
             )
             _log_self_correction_validation_failed_turn(
                 ctx=ctx,
@@ -1017,9 +1022,13 @@ async def _execute_forced_tool_retry(
                 failure_codes=repair_outcome.failure_codes,
             )
             logger.warning(
-                "Forced tool retry returned %s issue: %s",
-                repair_outcome.failure_kind or "unknown",
-                repair_outcome.feedback or "missing feedback",
+                "Forced tool retry returned an invalid result",
+                extra={
+                    "failure_kind": repair_outcome.failure_kind or "unknown",
+                    "failure_codes_count": len(repair_outcome.failure_codes),
+                    "feedback_present": bool(repair_outcome.feedback),
+                    "feedback_length": len(repair_outcome.feedback or ""),
+                },
             )
 
         return repair_outcome
@@ -1076,10 +1085,13 @@ async def _try_process_json_text_as_tool_arguments(
     )
 
     logger.warning(
-        "JSON text fallback for %s returned %s issue: %s",
-        PROPOSE_FLOW_TOOL_NAME,
-        repair_outcome.failure_kind or "unknown",
-        repair_outcome.feedback or "missing feedback",
+        "JSON text fallback for propose_flow returned an invalid result",
+        extra={
+            "failure_kind": repair_outcome.failure_kind or "unknown",
+            "failure_codes_count": len(repair_outcome.failure_codes),
+            "feedback_present": bool(repair_outcome.feedback),
+            "feedback_length": len(repair_outcome.feedback or ""),
+        },
     )
     return repair_outcome
 
