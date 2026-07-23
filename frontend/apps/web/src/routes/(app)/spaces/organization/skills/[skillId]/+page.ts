@@ -3,9 +3,16 @@ export const load = async (event) => {
   const { eneo } = await event.parent();
   const skillId = event.params.skillId;
 
-  const skill = await eneo.skills.organization.get({ skillId });
+  const skillPromise = eneo.skills.organization.get({ skillId });
+  const revisionPagePromise = eneo.skills.organization.listRevisionSummaries({ skillId });
+  const adoptionPage = eneo.skills.organization.getAdoption({ skillId });
+  // Both requests can settle before the Skill lookup. Keep their original
+  // rejections observable while preventing transient unhandled rejections.
+  revisionPagePromise.catch(() => {});
+  adoptionPage.catch(() => {});
+  const skill = await skillPromise;
   const [revisionPage, published] = await Promise.all([
-    eneo.skills.organization.listRevisionSummaries({ skillId }),
+    revisionPagePromise,
     skill.published_revision_number === null
       ? Promise.resolve(null)
       : eneo.skills.catalogue.get({ skillId })
@@ -13,6 +20,7 @@ export const load = async (event) => {
   return {
     skill,
     revisionPage,
-    published
+    published,
+    adoptionPage
   };
 };

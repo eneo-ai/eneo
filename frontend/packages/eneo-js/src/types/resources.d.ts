@@ -19,6 +19,8 @@ export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
 export type OrganizationSkillSummaryPagePublic =
   components["schemas"]["OrganizationSkillSummaryPagePublic"];
+export type SkillAdoptionProjectionPagePublic =
+  components["schemas"]["SkillAdoptionProjectionPagePublic"];
 export type PublishedSkillPublic = components["schemas"]["PublishedSkillPublic"];
 export type PublishedSkillSummaryPublic = components["schemas"]["PublishedSkillSummaryPublic"];
 export type PublishedSkillSummaryPagePublic =

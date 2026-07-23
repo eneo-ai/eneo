@@ -11,6 +11,10 @@ from eneo.main.container.container import Container
 from eneo.main.models import CursorPaginatedResponse
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.skills.domain.skill import (
+    DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
+    MAX_SKILL_ADOPTION_PAGE_LIMIT,
+)
 from eneo.skills.presentation.skill_audit import (
     audit_skill_created,
     skill_audit_extra,
@@ -20,6 +24,7 @@ from eneo.skills.presentation.skill_models import (
     OrganizationSkillSummaryPagePublic,
     PublishedSkillPublic,
     PublishedSkillSummaryPagePublic,
+    SkillAdoptionProjectionPagePublic,
     SkillCreateRequest,
     SkillPublishRequest,
     SkillRevisionCreateRequest,
@@ -140,6 +145,32 @@ async def get_organization_skill(
         skill_id=skill_id
     )
     return container.skill_assembler().organization_to_public(skill)
+
+
+@router.get(
+    "/organization/{skill_id}/adoption/",
+    response_model=SkillAdoptionProjectionPagePublic,
+    description=(
+        "List structural Assistant and App adoption of an organisation Skill, "
+        "with full-result revision totals."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def get_organization_skill_adoption(
+    skill_id: UUID,
+    container: _ContainerWithUser,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=MAX_SKILL_ADOPTION_PAGE_LIMIT),
+    ] = DEFAULT_SKILL_ADOPTION_PAGE_LIMIT,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+) -> SkillAdoptionProjectionPagePublic:
+    projection = await container.organization_skill_service().get_adoption_projection(
+        skill_id=skill_id,
+        limit=limit,
+        cursor=cursor,
+    )
+    return container.skill_assembler().adoption_projection_to_public(projection)
 
 
 @router.get(

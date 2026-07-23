@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -16,6 +18,8 @@ MAX_SKILL_DESCRIPTION_LENGTH = 1024
 MAX_SKILL_CATALOG_QUERY_LENGTH = 200
 MAX_SKILL_CATALOG_PAGE_LIMIT = 100
 DEFAULT_SKILL_CATALOG_PAGE_LIMIT = 25
+MAX_SKILL_ADOPTION_PAGE_LIMIT = 100
+DEFAULT_SKILL_ADOPTION_PAGE_LIMIT = 25
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -51,6 +55,50 @@ def parse_skill_revision_cursor(cursor: str | None) -> int | None:
     if revision_number < 1:
         raise BadRequestException("Invalid Skill revision cursor")
     return revision_number
+
+
+class SkillAdoptionResourceKind(str, Enum):
+    ASSISTANT = "assistant"
+    APP = "app"
+
+
+class SkillAdoptionDrift(str, Enum):
+    CURRENT = "current"
+    BEHIND = "behind"
+    UNPUBLISHED = "unpublished"
+
+
+@dataclass(frozen=True)
+class SkillAdoptionCursor:
+    kind: SkillAdoptionResourceKind
+    resource_id: UUID
+
+    def serialize(self) -> str:
+        payload = f"{self.kind.value}:{self.resource_id}".encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+    @classmethod
+    def parse(cls, cursor: str | None) -> "SkillAdoptionCursor | None":
+        if cursor is None:
+            return None
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            decoded = base64.b64decode(
+                cursor + padding,
+                altchars=b"-_",
+                validate=True,
+            ).decode()
+            kind_value, resource_id_value = decoded.split(":", maxsplit=1)
+            return cls(
+                kind=SkillAdoptionResourceKind(kind_value),
+                resource_id=UUID(resource_id_value),
+            )
+        except (
+            binascii.Error,
+            UnicodeDecodeError,
+            ValueError,
+        ) as error:
+            raise BadRequestException("Invalid Skill adoption cursor") from error
 
 
 def normalize_skill_content(
@@ -269,6 +317,52 @@ class SkillSummaryPage:
 @dataclass(frozen=True)
 class PublishedSkillSummaryPage:
     items: tuple[PublishedSkillSummary, ...]
+    limit: int
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class SkillAdoptionRevisionCount:
+    revision_id: UUID
+    revision_number: int
+    assistant_count: int
+    app_count: int
+    personal_chat_pinned: bool
+
+
+@dataclass(frozen=True)
+class SkillAdoptionPersonalChat:
+    revision_id: UUID
+    revision_number: int
+    drift: SkillAdoptionDrift
+
+
+@dataclass(frozen=True)
+class SkillAdoptionSummary:
+    assistant_count: int
+    app_count: int
+    distinct_space_count: int
+    behind_published_count: int
+    personal_chat: SkillAdoptionPersonalChat | None
+    revision_counts: tuple[SkillAdoptionRevisionCount, ...]
+
+
+@dataclass(frozen=True)
+class SkillAdoptionResource:
+    kind: SkillAdoptionResourceKind
+    resource_id: UUID
+    name: str
+    space_id: UUID
+    space_name: str
+    revision_id: UUID
+    revision_number: int
+    drift: SkillAdoptionDrift
+
+
+@dataclass(frozen=True)
+class SkillAdoptionProjectionPage:
+    summary: SkillAdoptionSummary | None
+    items: tuple[SkillAdoptionResource, ...]
     limit: int
     next_cursor: str | None
 

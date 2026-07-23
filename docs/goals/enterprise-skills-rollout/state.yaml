@@ -4,7 +4,7 @@ goal:
   title: "Enterprise Skills rollout"
   slug: "enterprise-skills-rollout"
   kind: specific
-  tranche: "Land PRs #559 and #560 on merged S1 with CI, review, Fable, and PM gates."
+  tranche: "Complete the O1 general-availability gates on the merged organisation catalogue."
   status: active
 
 rules:
@@ -27,15 +27,15 @@ continuity:
   rotate_after_completed_write_tasks: 2
   rotate_after_hours: 6
   rotate_when_slow: true
-  current_thread_id: "019f654f-1989-7692-b9fd-0a4a94dd83f1"
-  previous_thread_id: null
+  current_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
+  previous_thread_id: "019f654f-1989-7692-b9fd-0a4a94dd83f1"
   rotation_count: 0
-  completed_write_tasks_in_thread: 2
+  completed_write_tasks_in_thread: 3
   handoff_note: notes/handoff.md
   last_handoff_at: null
-  last_verified_revision: "8ef9639049e652427f7dc2c7e34d76d98c34eff4"
+  last_verified_revision: "71de15e5013a566a4a54875b0bd189f0d258e205"
 
-active_task: T003
+active_task: T005
 
 tasks:
   - id: T001
@@ -147,7 +147,7 @@ tasks:
   - id: T003
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Rebase and complete PR #560 as the O1 authority and catalogue UX correction, then verify, review, gate, and merge it."
     allowed_files:
@@ -205,12 +205,43 @@ tasks:
       - "Permission semantics conflict with the accepted Fable roadmap."
       - "The merge base differs from the verified #559 squash result."
       - "The implementation is not yet stable enough to render and inspect as one coherent flow."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Completed the O1 organisation catalogue foundation and merged PR #560 on the verified #559 foundation."
+      merged_pr: 560
+      merge_commit: "71de15e5013a566a4a54875b0bd189f0d258e205"
+      merged_at: "2026-07-23T09:38:35Z"
+      changed_files:
+        - "backend/alembic/versions/202607221300_backfill_skills_permission.py"
+        - "backend/alembic/versions/202607221500_add_skill_publication_lifecycle.py"
+        - "backend/alembic/versions/202607221600_deepen_resource_skill_bindings.py"
+        - "backend/alembic/versions/202607221700_converge_default_skill_permissions.py"
+        - "backend/src/eneo/skills/"
+        - "backend/tests/integration/skills/"
+        - "backend/tests/unittests/skills/"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/enterprise-skills-roadmap.md"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+        - "frontend/packages/eneo-js/"
+      commands:
+        - cmd: "required GitHub CI for PR #560"
+          status: pass
+        - cmd: "fresh /review after final fixes"
+          status: pass
+        - cmd: "same-session Fable high merge gate"
+          status: pass
+      review: "Fresh review found no current findings after the accepted migration, lifecycle-retention, exact-revision metadata, and UI corrections."
+      review_url: "https://github.com/eneo-ai/eneo/pull/560#issuecomment-5056754634"
+      gates:
+        - "Required GitHub checks were green before merge."
+        - "Fable high reviewed roadmap alignment, access semantics, architecture, maintainability, and merge worthiness."
+        - "The user approved the rendered organisation catalogue and binding UX."
 
   - id: T004
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Audit the O1 foundation, order the required O1 completion and general-availability gates, and activate the next bounded gate."
     inputs:
@@ -226,28 +257,90 @@ tasks:
       - "allowed_files"
       - "verify"
       - "stop_if"
-    receipt: null
+    receipt:
+      result: done
+      verified_revision: "71de15e5013a566a4a54875b0bd189f0d258e205"
+      decision: "PR #560 is merged on origin/develop; activate T005 adoption projection first, then T006 emergency execution block, then T007 retained-provenance/deletion closure before O1 general availability."
+      next_allowed_task: T005
+      ordered_followups:
+        - T006
+        - T007
+      evidence:
+        - "71de15e is origin/develop, has subject refactor(skills): add governed organisation catalogue (#560), and directly follows merged #559 at 8ef96390."
+        - "T005 reuses the canonical organisation Skill detail and indexed binding owners without runtime or schema changes."
+        - "T006 depends on affected-resource adoption facts; T007 already has substantial foundation behavior but remains a required closure gate."
 
   - id: T005
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Add the tenant-scoped adoption projection required to complete O1 without deriving counts in the UI."
+    objective: "Add the tenant-scoped adoption projection required to complete O1, finish the accepted responsive catalogue polish, and document the governed user flow without deriving counts in the UI."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/572"
     inputs:
       - "Merged O1 publication and exact-binding contracts"
       - "docs/enterprise-skills-roadmap.md#configuration-and-adoption-statistics"
     constraints:
       - "Reuse the Skill detail owner; do not add a second admin dashboard."
       - "Return structural binding facts only; do not claim model use or outcome attribution."
+      - "Paginate only Assistant and App rows by stable resource identity; report the single Personal Chat policy in the summary."
+      - "Define drift explicitly as current, behind, or unpublished against the exact published revision."
+      - "Count distinct Spaces across the union of Assistant and App bindings so a shared Space is counted once."
       - "Keep the projection paginated and avoid N+1 queries and join cross-products."
+      - "Do not change publication, exact pins, parent saves, runtime composition, App-run lifecycle, deletion, organisation settings, or permissions."
+      - "Reuse the existing Skill pages, Eneo design system, and Skills guide; do not add a dashboard, documentation tree, or frontend abstraction."
+      - "Keep the guide concise and local-catalogue focused; the external Marketplace is outside the current product scope."
+    allowed_files:
+      - ".gitignore"
+      - "backend/alembic/versions/202607231330_add_skill_adoption_cursor_indexes.py"
+      - "backend/src/eneo/database/tables/skill_table.py"
+      - "backend/src/eneo/skills/domain/skill.py"
+      - "backend/src/eneo/skills/domain/skill_repo.py"
+      - "backend/src/eneo/skills/infrastructure/skill_repo_impl.py"
+      - "backend/src/eneo/skills/application/organization_skill_service.py"
+      - "backend/src/eneo/skills/presentation/skill_models.py"
+      - "backend/src/eneo/skills/presentation/skill_assembler.py"
+      - "backend/src/eneo/skills/presentation/organization_skill_router.py"
+      - "backend/tests/integration/skills/test_skill_adoption_projection.py"
+      - "backend/tests/unittests/skills/test_organization_skill_service.py"
+      - "backend/tests/unittests/skills/test_organization_skill_presentation_contract.py"
+      - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "frontend/apps/docs-site/src/content/guides/index.mdx"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/features/skills/SkillAdoptionProjection.svelte"
+      - "frontend/apps/web/src/lib/features/skills/SkillAdoptionProjection.svelte.test.ts"
+      - "frontend/apps/web/src/lib/features/skills/SkillRevisionHistory.svelte"
+      - "frontend/apps/web/src/lib/features/skills/SkillRevisionHistory.svelte.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/page.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/organization-skills-page.svelte.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/page.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/+page.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/organization-skill-detail.svelte.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/page.test.ts"
+      - "frontend/apps/web/tests/skills-catalogue.spec.ts"
+      - "frontend/packages/eneo-js/src/endpoints/skills.js"
+      - "frontend/packages/eneo-js/src/endpoints/skills.test.js"
+      - "frontend/packages/eneo-js/src/types/resources.d.ts"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
     verify:
-      - "Tenant isolation and exact-revision adoption counts"
-      - "Assistant, App, Personal Chat, distinct-Space, and update-drift coverage"
+      - "Tenant isolation with foreign Skills and bindings, plus exact-revision adoption counts"
+      - "Assistant, App, Personal Chat summary, cross-kind distinct-Space, and three-state drift coverage"
       - "Generated contracts and accessible detail-page states"
+      - "Stable cursor pagination, full-result totals, duplicate prevention, and bounded query-plan evidence"
+      - "Focused organisation catalogue regressions plus backend and frontend quality checks"
+      - "No ordinary desktop horizontal scrollbar, with readable responsive catalogue, revision, and adoption states"
+      - "Docs-site build plus a concise Skills guide covering permissions, organisation flow, Spaces, Personal Chat, adoption, governance, and FAQ"
     stop_if:
       - "The design requires runtime activation evidence owned by Task #553."
       - "The implementation creates a fleet-wide Skill dashboard instead of deepening the existing detail owner."
+      - "Correct tenant isolation or bounded aggregation requires schema changes beyond the reviewed cursor indexes."
+      - "Counts must be calculated in Svelte/TypeScript or through one request per Skill, revision, or resource."
+      - "The projection cannot distinguish unpublished state from behind-published-revision drift without inventing semantics."
     receipt: null
 
   - id: T006

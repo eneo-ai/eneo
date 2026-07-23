@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 from uuid import uuid4
 
 import pytest
@@ -18,6 +18,14 @@ from eneo.skills.application.organization_skill_service import (
 )
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
+    SkillAdoptionCursor,
+    SkillAdoptionDrift,
+    SkillAdoptionPersonalChat,
+    SkillAdoptionProjectionPage,
+    SkillAdoptionResource,
+    SkillAdoptionResourceKind,
+    SkillAdoptionRevisionCount,
+    SkillAdoptionSummary,
     SkillPublicationChange,
     SkillRevision,
     SkillRevisionChange,
@@ -501,3 +509,204 @@ async def test_missing_tenant_skill_is_not_exposed():
 
     with pytest.raises(NotFoundException):
         await service.get_organization_skill(skill_id=uuid4())
+
+
+async def test_skills_permission_does_not_grant_adoption_projection_access():
+    organization = _organization()
+    repo = AsyncMock()
+    service = _service(
+        organization=organization,
+        permissions={Permission.SKILLS},
+        repo=repo,
+    )
+
+    with pytest.raises(UnauthorizedException):
+        await service.get_adoption_projection(
+            skill_id=uuid4(),
+            limit=25,
+            cursor=None,
+        )
+
+    repo.get_organization_for_tenant.assert_not_awaited()
+    repo.get_organization_adoption_projection_page.assert_not_awaited()
+
+
+async def test_missing_tenant_skill_has_no_adoption_projection():
+    organization = _organization()
+    skill_id = uuid4()
+    repo = AsyncMock()
+    repo.get_organization_adoption_projection_page.return_value = None
+    service = _service(
+        organization=organization,
+        permissions={Permission.ADMIN},
+        repo=repo,
+    )
+
+    with pytest.raises(NotFoundException):
+        await service.get_adoption_projection(
+            skill_id=skill_id,
+            limit=25,
+            cursor=None,
+        )
+
+    repo.get_organization_adoption_projection_page.assert_awaited_once_with(
+        tenant_id=organization.tenant_id,
+        skill_id=skill_id,
+        limit=25,
+        after=None,
+    )
+
+
+async def test_adoption_projection_uses_an_opaque_stable_cursor_without_duplicates():
+    organization = _organization()
+    skill = SimpleNamespace(id=uuid4(), published_revision_number=2)
+    revision_one_id = uuid4()
+    revision_two_id = uuid4()
+    summary = SkillAdoptionSummary(
+        assistant_count=1,
+        app_count=2,
+        distinct_space_count=2,
+        behind_published_count=2,
+        personal_chat=SkillAdoptionPersonalChat(
+            revision_id=revision_one_id,
+            revision_number=1,
+            drift=SkillAdoptionDrift.BEHIND,
+        ),
+        revision_counts=(
+            SkillAdoptionRevisionCount(
+                revision_id=revision_one_id,
+                revision_number=1,
+                assistant_count=1,
+                app_count=1,
+                personal_chat_pinned=True,
+            ),
+            SkillAdoptionRevisionCount(
+                revision_id=revision_two_id,
+                revision_number=2,
+                assistant_count=0,
+                app_count=1,
+                personal_chat_pinned=False,
+            ),
+        ),
+    )
+    resources = (
+        SkillAdoptionResource(
+            kind=SkillAdoptionResourceKind.ASSISTANT,
+            resource_id=uuid4(),
+            name="Payroll assistant",
+            space_id=uuid4(),
+            space_name="Payroll",
+            revision_id=revision_one_id,
+            revision_number=1,
+            drift=SkillAdoptionDrift.BEHIND,
+        ),
+        SkillAdoptionResource(
+            kind=SkillAdoptionResourceKind.APP,
+            resource_id=uuid4(),
+            name="Payroll app",
+            space_id=uuid4(),
+            space_name="Payroll",
+            revision_id=revision_one_id,
+            revision_number=1,
+            drift=SkillAdoptionDrift.BEHIND,
+        ),
+        SkillAdoptionResource(
+            kind=SkillAdoptionResourceKind.APP,
+            resource_id=uuid4(),
+            name="Payroll review app",
+            space_id=uuid4(),
+            space_name="Finance",
+            revision_id=revision_two_id,
+            revision_number=2,
+            drift=SkillAdoptionDrift.CURRENT,
+        ),
+    )
+    repo = AsyncMock()
+    first_projection = SkillAdoptionProjectionPage(
+        summary=summary,
+        items=resources[:2],
+        limit=2,
+        next_cursor=SkillAdoptionCursor(
+            kind=resources[1].kind,
+            resource_id=resources[1].resource_id,
+        ).serialize(),
+    )
+    second_projection = SkillAdoptionProjectionPage(
+        summary=None,
+        items=resources[2:],
+        limit=2,
+        next_cursor=None,
+    )
+    repo.get_organization_adoption_projection_page.side_effect = [
+        first_projection,
+        second_projection,
+    ]
+    service = _service(
+        organization=organization,
+        permissions={Permission.ADMIN},
+        repo=repo,
+    )
+
+    first_page = await service.get_adoption_projection(
+        skill_id=skill.id,
+        limit=2,
+        cursor=None,
+    )
+    assert first_page.summary is summary
+    assert first_page.items == resources[:2]
+    assert first_page.next_cursor is not None
+
+    decoded_cursor = SkillAdoptionCursor.parse(first_page.next_cursor)
+    assert decoded_cursor == SkillAdoptionCursor(
+        kind=resources[1].kind,
+        resource_id=resources[1].resource_id,
+    )
+
+    second_page = await service.get_adoption_projection(
+        skill_id=skill.id,
+        limit=2,
+        cursor=first_page.next_cursor,
+    )
+    assert second_page.summary is None
+    assert second_page.items == resources[2:]
+    assert second_page.next_cursor is None
+    assert {
+        resource.resource_id for resource in first_page.items + second_page.items
+    } == {resource.resource_id for resource in resources}
+
+    assert repo.get_organization_adoption_projection_page.await_args_list == [
+        call(
+            tenant_id=organization.tenant_id,
+            skill_id=skill.id,
+            limit=2,
+            after=None,
+        ),
+        call(
+            tenant_id=organization.tenant_id,
+            skill_id=skill.id,
+            limit=2,
+            after=decoded_cursor,
+        ),
+    ]
+
+
+@pytest.mark.parametrize("cursor", ["not-base64!", "dW5rbm93bjox"])
+async def test_adoption_projection_rejects_malformed_cursors(cursor: str):
+    organization = _organization()
+    skill = SimpleNamespace(id=uuid4(), published_revision_number=1)
+    repo = AsyncMock()
+    repo.get_organization_for_tenant.return_value = skill
+    service = _service(
+        organization=organization,
+        permissions={Permission.ADMIN},
+        repo=repo,
+    )
+
+    with pytest.raises(BadRequestException, match="adoption cursor"):
+        await service.get_adoption_projection(
+            skill_id=skill.id,
+            limit=25,
+            cursor=cursor,
+        )
+
+    repo.get_organization_adoption_projection_page.assert_not_awaited()

@@ -6,6 +6,8 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
+    SkillAdoptionCursor,
+    SkillAdoptionProjectionPage,
     SkillBindingReference,
     SkillCatalogEntry,
     SkillPublicationChange,
@@ -64,6 +66,15 @@ class SkillRepo(Protocol):
         tenant_id: UUID,
         skill_id: UUID,
     ) -> Skill | None: ...
+
+    async def get_organization_adoption_projection_page(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        limit: int,
+        after: SkillAdoptionCursor | None,
+    ) -> SkillAdoptionProjectionPage | None: ...
 
     async def list_published_for_tenant(
         self,

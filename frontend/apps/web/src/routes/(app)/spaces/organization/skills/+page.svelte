@@ -214,36 +214,28 @@
           {/if}
         </div>
       {:else}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
-        <div
-          class="border-border focus-visible:ring-ring overflow-x-auto border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-          role="region"
-          aria-label={m.organization_skills_table_scroll_region_label({
-            count: String(items.length)
-          })}
-          tabindex="0"
-        >
-          <Table.Root class="w-full min-w-0 table-fixed md:min-w-[860px]">
+        <div class="border-border @container border-y">
+          <Table.Root class="w-full table-fixed">
             <Table.Header>
               <Table.Row>
-                <Table.Head class="w-auto md:w-[24%]">{m.name()}</Table.Head>
-                <Table.Head class="hidden md:table-cell">{m.description()}</Table.Head>
-                <Table.Head class="hidden md:table-cell">{m.status()}</Table.Head>
-                <Table.Head class="hidden md:table-cell">
+                <Table.Head class="w-auto @4xl:w-[22%]">{m.name()}</Table.Head>
+                <Table.Head class="hidden w-[30%] @4xl:table-cell">{m.description()}</Table.Head>
+                <Table.Head class="hidden w-32 @md:table-cell">{m.status()}</Table.Head>
+                <Table.Head class="hidden w-24 @4xl:table-cell">
                   {m.skills_library_revision_column()}
                 </Table.Head>
-                <Table.Head class="hidden md:table-cell">
+                <Table.Head class="hidden w-32 @4xl:table-cell">
                   {m.skills_library_updated_column()}
                 </Table.Head>
                 <Table.Head class="w-16 text-right">
-                  <span class="sr-only md:not-sr-only">{m.actions()}</span>
+                  <span class="sr-only @4xl:not-sr-only">{m.actions()}</span>
                 </Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
               {#each items as skill (skill.id)}
                 <Table.Row class="[&>td]:align-top">
-                  <Table.Cell class="min-w-0 font-medium md:w-[24%]">
+                  <Table.Cell class="min-w-0 font-medium @4xl:w-[22%]">
                     <a
                       href={resolve(`/spaces/organization/skills/${skill.id}`)}
                       class="text-foreground hover:text-accent-default focus-visible:ring-ring line-clamp-2 break-words whitespace-normal rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
@@ -253,18 +245,18 @@
                     <p class="text-muted-foreground mt-0.5 break-all whitespace-normal text-xs">
                       {skill.slug}
                     </p>
-                    <div class="mt-2 md:hidden">
+                    <div class="mt-2 @md:hidden">
                       <Badge variant={publicationVariant(skill)}>{publicationLabel(skill)}</Badge>
                     </div>
                     <p
-                      class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 md:hidden"
+                      class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
                     >
                       {skill.description}
                     </p>
                     <dl
-                      class="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal md:hidden"
+                      class="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal"
                     >
-                      <div class="flex gap-1">
+                      <div class="flex gap-1 @4xl:hidden">
                         <dt>{m.skills_library_revision_column()}:</dt>
                         <dd>
                           {m.organization_skills_version({
@@ -272,26 +264,26 @@
                           })}
                         </dd>
                       </div>
-                      <div class="flex gap-1">
+                      <div class="flex gap-1 @4xl:hidden">
                         <dt>{m.skills_library_updated_column()}:</dt>
                         <dd>{formatDate(skill.updated_at)}</dd>
                       </div>
                     </dl>
                   </Table.Cell>
                   <Table.Cell
-                    class="text-muted-foreground hidden w-[40%] max-w-lg whitespace-normal md:table-cell"
+                    class="text-muted-foreground hidden w-[30%] max-w-lg whitespace-normal @4xl:table-cell"
                   >
                     <p class="line-clamp-2">{skill.description}</p>
                   </Table.Cell>
-                  <Table.Cell class="hidden md:table-cell">
+                  <Table.Cell class="hidden @md:table-cell">
                     <Badge variant={publicationVariant(skill)}>{publicationLabel(skill)}</Badge>
                   </Table.Cell>
-                  <Table.Cell class="text-muted-foreground hidden text-sm md:table-cell">
+                  <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                     {m.organization_skills_version({
                       version: String(skill.current_revision_number)
                     })}
                   </Table.Cell>
-                  <Table.Cell class="text-muted-foreground hidden text-sm md:table-cell">
+                  <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                     {formatDate(skill.updated_at)}
                   </Table.Cell>
                   <Table.Cell class="text-right">

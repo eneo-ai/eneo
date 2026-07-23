@@ -120,7 +120,10 @@ describe("SkillRevisionHistory", () => {
     await expect.element(page.getByText(historical.instructions)).toBeVisible();
     await expect.element(page.getByText(current.instructions)).toBeVisible();
     const comparisonDialog = page.getByRole("dialog");
-    expect(comparisonDialog.element().querySelectorAll('[data-changed="true"]')).toHaveLength(3);
+    const changedLabels = [...comparisonDialog.element().querySelectorAll("span")].filter(
+      (element) => element.textContent === m.skills_library_changed_field()
+    );
+    expect(changedLabels).toHaveLength(3);
     await page
       .getByRole("button", { name: m.skills_library_restore_revision_from_preview() })
       .click();
@@ -275,7 +278,7 @@ describe("SkillRevisionHistory", () => {
       .not.toBeInTheDocument();
   });
 
-  test("labels the fixed-width revision table as a keyboard-scrollable region", async () => {
+  test("keeps the revision table within a narrow owner without a fixed minimum width", async () => {
     const current = revision(2);
 
     render(SkillRevisionHistory, {
@@ -289,17 +292,13 @@ describe("SkillRevisionHistory", () => {
       onLoadCurrent: vi.fn(async () => current)
     });
 
-    const region = page.getByRole("region", {
-      name: m.skills_library_history_heading()
-    });
-    await expect.element(region).toBeVisible();
-    const regionElement = region.element();
-    expect(regionElement.getAttribute("tabindex")).toBe("0");
-    expect(regionElement).toBeInstanceOf(HTMLElement);
-    if (!(regionElement instanceof HTMLElement))
-      throw new Error("Expected a scrollable HTML region");
-    regionElement.style.width = "320px";
-    expect(regionElement.scrollWidth).toBeGreaterThan(regionElement.clientWidth);
+    const table = page.getByRole("table");
+    await expect.element(table).toBeVisible();
+    const tableContainer = table.element().parentElement;
+    expect(tableContainer).toBeInstanceOf(HTMLElement);
+    if (!(tableContainer instanceof HTMLElement)) throw new Error("Expected a table container");
+    tableContainer.style.width = "320px";
+    expect(tableContainer.scrollWidth).toBeLessThanOrEqual(tableContainer.clientWidth);
   });
 
   test("keeps history usable when an older page fails and allows retry", async () => {

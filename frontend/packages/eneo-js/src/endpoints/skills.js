@@ -7,6 +7,7 @@
 /** @typedef {import('../types/resources').SkillBindingSummary} SkillBindingSummary */
 /** @typedef {import('../types/resources').OrganizationSkillPublic} OrganizationSkillPublic */
 /** @typedef {import('../types/resources').OrganizationSkillSummaryPagePublic} OrganizationSkillSummaryPagePublic */
+/** @typedef {import('../types/resources').SkillAdoptionProjectionPagePublic} SkillAdoptionProjectionPagePublic */
 /** @typedef {import('../types/resources').PublishedSkillPublic} PublishedSkillPublic */
 /** @typedef {import('../types/resources').PublishedSkillSummaryPagePublic} PublishedSkillSummaryPagePublic */
 
@@ -214,6 +215,22 @@ export function initSkills(client) {
         return await client.fetch("/api/v1/skills/organization/{skill_id}/", {
           method: "get",
           params: { path: { skill_id: skillId } }
+        });
+      },
+
+      /**
+       * List the structural adoption of an organisation Skill.
+       * @param {{skillId: string, limit?: number, cursor?: string | null}} params
+       * @returns {Promise<SkillAdoptionProjectionPagePublic>}
+       * @throws {EneoError}
+       */
+      getAdoption: async ({ skillId, limit, cursor }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/adoption/", {
+          method: "get",
+          params: {
+            path: { skill_id: skillId },
+            query: { limit, cursor }
+          }
         });
       },
 

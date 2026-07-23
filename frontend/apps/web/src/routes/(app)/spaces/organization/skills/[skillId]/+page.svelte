@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { OrganizationSkillPublic, SkillRevisionRestorePublic } from "@eneo/eneo-js";
+  import type {
+    OrganizationSkillPublic,
+    SkillAdoptionProjectionPagePublic,
+    SkillRevisionRestorePublic
+  } from "@eneo/eneo-js";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -13,6 +17,7 @@
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
+  import SkillAdoptionProjection from "$lib/features/skills/SkillAdoptionProjection.svelte";
   import { Info, RefreshCw, ShieldCheck } from "lucide-svelte";
   import { tick } from "svelte";
 
@@ -97,6 +102,17 @@
   async function loadCurrentRevision() {
     const skill = await data.eneo.skills.organization.get({ skillId: data.skill.id });
     return skill.current_revision;
+  }
+
+  async function getOrganizationSkillAdoption(
+    skillId: string,
+    options: { limit: number; cursor: string | null }
+  ): Promise<SkillAdoptionProjectionPagePublic> {
+    return data.eneo.skills.organization.getAdoption({
+      skillId,
+      limit: options.limit,
+      cursor: options.cursor
+    });
   }
 
   async function refreshAfterRestore(outcome: SkillRevisionRestorePublic) {
@@ -244,7 +260,7 @@
         </div>
 
         <aside
-          class="border-border border-t pt-6 lg:sticky lg:top-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8"
+          class="border-border border-t pt-6 lg:sticky lg:top-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0"
           aria-labelledby="organization-skill-publication-heading"
         >
           <div class="flex flex-col gap-5">
@@ -334,6 +350,28 @@
           </div>
         </aside>
       </div>
+
+      {#await data.adoptionPage}
+        <SkillAdoptionProjection
+          skillId={data.skill.id}
+          initialPage={null}
+          initialLoading
+          {getOrganizationSkillAdoption}
+        />
+      {:then adoptionPage}
+        <SkillAdoptionProjection
+          skillId={data.skill.id}
+          initialPage={adoptionPage}
+          {getOrganizationSkillAdoption}
+        />
+      {:catch}
+        <SkillAdoptionProjection
+          skillId={data.skill.id}
+          initialPage={null}
+          initialError
+          {getOrganizationSkillAdoption}
+        />
+      {/await}
 
       <section aria-labelledby="organization-skill-history-heading">
         <h2
