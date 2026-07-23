@@ -1216,7 +1216,8 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     }
     assert "input_material_mode" not in question_ids
     assert "final_output_mode" not in question_ids
-    assert analysis.ready_for_confirmation is True
+    assert question_ids == {"runtime_metadata_fields"}
+    assert analysis.ready_for_confirmation is False
     assert result.slot_classification_metadata is not None
     assert result.slot_classification_metadata.provider == (
         slot_classification_provider_identity(
@@ -1347,7 +1348,8 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
     assert "input_material_mode" not in question_ids
     assert "document_material_scope" not in question_ids
     assert "final_output_mode" not in question_ids
-    assert analysis.ready_for_confirmation is True
+    assert question_ids == {"runtime_metadata_fields"}
+    assert analysis.ready_for_confirmation is False
     assert result.slot_classification_metadata is not None
     assert {
         slot.slot_name: slot.value for slot in result.slot_classification_metadata.slots
@@ -1409,8 +1411,16 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
         analysis=result.discovery_analysis,
     )
 
-    assert message is None
-    assert result.discovery_analysis.ready_for_confirmation is True
+    assert message == (
+        "Det är fortfarande oklart om användaren ska ange extra metadata vid körning."
+    )
+    assert result.discovery_analysis.next_issue is not None
+    assert result.discovery_analysis.next_issue.suggestion is not None
+    assert (
+        result.discovery_analysis.next_issue.suggestion.question_id
+        == "runtime_metadata_fields"
+    )
+    assert result.discovery_analysis.ready_for_confirmation is False
     assert result.planning_state.resolved_slots["primary_runtime_input"].source == (
         "model"
     )

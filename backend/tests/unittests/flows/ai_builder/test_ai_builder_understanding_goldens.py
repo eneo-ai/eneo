@@ -31,18 +31,18 @@ def _question_ids_for(conversation: list[ConversationMessage]) -> list[str]:
     [
         (
             "Bygg ett flöde som genererar en DOCX-rapport från uppladdade PDF-dokument.",
-            None,
-            None,
+            "runtime_metadata_fields",
+            "runtime_metadata_fields",
         ),
         (
             "Bygg ett flöde som genererar en DOCX-rapport utan mall från uppladdade PDF-dokument.",
-            None,
-            None,
+            "runtime_metadata_fields",
+            "runtime_metadata_fields",
         ),
         (
             "Bygg ett flöde som fyller en DOCX-mall med data från uppladdade PDF-dokument.",
-            None,
-            None,
+            "runtime_metadata_fields",
+            "runtime_metadata_fields",
         ),
     ],
 )
@@ -86,7 +86,6 @@ def test_docx_output_deterministic_routing(
                     "policy_default",
                 ),
                 ("post_processing_goal", "structure_key_information", "heuristic"),
-                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
         (
@@ -101,7 +100,6 @@ def test_docx_output_deterministic_routing(
                     "policy_default",
                 ),
                 ("post_processing_goal", "structure_key_information", "heuristic"),
-                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
         (
@@ -116,7 +114,6 @@ def test_docx_output_deterministic_routing(
                     "policy_default",
                 ),
                 ("post_processing_goal", "extract_key_information", "heuristic"),
-                ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
     ],

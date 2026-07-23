@@ -648,8 +648,6 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
 def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "runtime_metadata_fields"):
         return False
-    if not profile.case_like_flow:
-        return False
     if profile.resolved_slot("runtime_metadata_fields") is not None:
         return False
     answers = profile.answers

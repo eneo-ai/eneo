@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -1073,7 +1074,7 @@ class TestExtendedClarificationHints:
         assert "flow_input_architecture" not in question_ids
         assert "terminal_output" not in question_ids
 
-    def test_swedish_audio_prompt_with_terminal_word_file_is_ready_for_confirmation(
+    def test_swedish_audio_prompt_asks_runtime_metadata_before_confirmation(
         self,
     ) -> None:
         conversation = [
@@ -1094,7 +1095,10 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.ready_for_confirmation is True
+        assert analysis.ready_for_confirmation is False
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
+        assert "runtime_metadata_fields" in question_ids
         assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "terminal_output" not in question_ids
@@ -1548,7 +1552,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue is not None
         assert analysis.next_issue.issue_id == "terminal_output"
 
-    def test_generic_uploaded_pdf_docx_prompt_defaults_generated_docx_without_reasking(
+    def test_generic_uploaded_pdf_docx_prompt_asks_runtime_metadata_only(
         self,
     ) -> None:
         conversation = [
@@ -1568,11 +1572,13 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.next_issue is None
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
+        assert "runtime_metadata_fields" in question_ids
         assert "document_kind" not in question_ids
         assert "docx_output_mode" not in question_ids
 
-    def test_audio_docx_extraction_does_not_create_structured_analysis_slot(
+    def test_audio_docx_extraction_asks_runtime_metadata_without_structured_analysis_slot(
         self,
     ) -> None:
         conversation = [
@@ -1589,7 +1595,8 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
         state = build_planning_state_from_conversation(conversation)
 
-        assert analysis.next_issue is None
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "runtime_metadata_fields"
         assert state.resolved_slots["post_processing_goal"].value == (
             "extract_key_information"
         )
@@ -2808,7 +2815,42 @@ class TestExtendedClarificationHints:
         assert "structured_analysis_need" not in question_ids
         assert "runtime_metadata_fields" not in question_ids
 
-    def test_case_like_flow_with_resolved_core_requirements_defaults_runtime_metadata_fields(
+    def test_generic_flow_with_resolved_core_requirements_asks_runtime_metadata_fields(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Build a flow that summarizes uploaded documents.",
+                metadata={"ui_language": "en"},
+            )
+        ]
+        planning_state = PlanningState.empty()
+        planning_state.resolved_slots = {
+            "primary_runtime_input": _resolved_slot(
+                "primary_runtime_input",
+                "documents",
+            ),
+            "document_material_scope": _resolved_slot(
+                "document_material_scope",
+                "single_document_case",
+            ),
+            "terminal_output": _resolved_slot(
+                "terminal_output",
+                "structured_text",
+            ),
+        }
+
+        analysis = analyze_discovery(conversation, planning_state=planning_state)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "runtime_metadata_fields" in question_ids
+
+    def test_case_like_flow_with_spent_question_budget_surfaces_runtime_metadata_assumption(
         self,
     ) -> None:
         conversation = [
@@ -2875,6 +2917,11 @@ class TestExtendedClarificationHints:
         ]
 
         assert "runtime_metadata_fields" not in question_ids
+        assert analysis.ready_for_confirmation is True
+        assert analysis.assumptions == (
+            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
+            "du kan lägga till dem innan du bekräftar.",
+        )
 
     def test_case_like_flow_with_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
         self,
@@ -3247,7 +3294,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_audio_docx_extraction_derives_structured_analysis_before_proposal(
+    async def test_audio_docx_extraction_asks_runtime_metadata_before_proposal(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -3306,7 +3353,10 @@ class TestPlannerDiscoveryQuestionDispatch:
             ):
                 events.append(encode_ai_builder_stream_event(event))
 
-        assert [event["event"] for event in events] == ["status", "done"]
+        assert [event["event"] for event in events] == ["text", "question", "done"]
+        assert json.loads(events[1]["data"])["question_id"] == (
+            "runtime_metadata_fields"
+        )
         repo.commit_turn.assert_awaited_once()
 
 

@@ -924,7 +924,7 @@ class TestPolicyDefaults:
         assert slot.evidence == ["question_answer:report_disposition"]
         assert question_is_already_resolved("report_disposition", conversation)
 
-    def test_document_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+    def test_document_input_does_not_default_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [
                 ConversationMessage(
@@ -937,11 +937,9 @@ class TestPolicyDefaults:
             ]
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
-    def test_audio_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+    def test_audio_input_does_not_default_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [
                 ConversationMessage(
@@ -954,11 +952,9 @@ class TestPolicyDefaults:
             ]
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
-    def test_text_input_defaults_to_no_extra_runtime_metadata(self) -> None:
+    def test_text_input_does_not_default_runtime_metadata(self) -> None:
         state = build_planning_state_from_conversation(
             [
                 ConversationMessage(
@@ -971,11 +967,9 @@ class TestPolicyDefaults:
             ]
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
-    def test_runtime_input_fields_are_not_overwritten_by_no_metadata_default(
+    def test_explicit_runtime_input_fields_resolve_heuristically(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1064,9 +1058,7 @@ class TestPolicyDefaults:
         assert state.resolved_slots["primary_runtime_input"].value == "audio"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
-        assert state.resolved_slots["runtime_metadata_fields"].value == (
-            "no_extra_metadata"
-        )
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
     def test_swedish_audio_docx_prompt_with_no_input_fields_keeps_metadata_absent(
         self,
@@ -1108,9 +1100,7 @@ class TestPolicyDefaults:
         assert state.resolved_slots["primary_runtime_input"].value == "audio"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
-        assert state.resolved_slots["runtime_metadata_fields"].value == (
-            "no_extra_metadata"
-        )
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
     def test_explicit_audio_meeting_docx_prompt_resolves_audio_with_high_confidence(
         self,
@@ -1351,9 +1341,7 @@ class TestRuntimeMetadataClassificationBoundaries:
             freeform_text="",
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
     def test_classifier_source_derived_document_sections_do_not_become_runtime_metadata(
         self,
@@ -1393,9 +1381,7 @@ class TestRuntimeMetadataClassificationBoundaries:
             freeform_text="",
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert "runtime_metadata_fields" not in state.resolved_slots
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
 

@@ -46,7 +46,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     has_explicit_docx_mode_text,
     has_explicit_pdf_mode_text,
     has_explicit_structured_answer,
-    mentions_runtime_metadata,
     resolve_output_intent,
     slot_names_blocked_by_explicit_uncertainty,
 )
@@ -164,10 +163,6 @@ _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
     "document_material_scope": _PolicyDefaultRule(
         default_value="flexible_document_case",
         has_explicit_text=_never_explicit_text,
-    ),
-    "runtime_metadata_fields": _PolicyDefaultRule(
-        default_value="no_extra_metadata",
-        has_explicit_text=mentions_runtime_metadata,
     ),
     "docx_output_mode": _PolicyDefaultRule(
         default_value="generated_docx",
@@ -881,20 +876,6 @@ def apply_policy_defaults_from_resolved_slots(
                 ],
                 confidence="medium",
             )
-        if (
-            "runtime_metadata_fields" not in state.resolved_slots
-            and not mentions_runtime_metadata(freeform_text)
-        ):
-            state.resolved_slots["runtime_metadata_fields"] = ResolvedSlot(
-                name="runtime_metadata_fields",
-                value="no_extra_metadata",
-                source="policy_default",
-                evidence=[
-                    "policy_default:runtime_metadata_fields=no_extra_metadata",
-                ],
-                confidence="medium",
-            )
-
     terminal_output = state.resolved_slots.get("terminal_output")
     if terminal_output is not None:
         if (
@@ -1220,12 +1201,6 @@ def _resolve_slots(
         flow_defaults=flow_defaults,
         question_id="runtime_metadata_fields",
     )
-    if (
-        runtime_metadata_fields is None
-        and primary_runtime_input != "unknown"
-        and not mentions_runtime_metadata(freeform_text)
-    ):
-        runtime_metadata_fields = "no_extra_metadata"
     if runtime_metadata_fields is not None:
         slots["runtime_metadata_fields"] = _build_slot(
             name="runtime_metadata_fields",

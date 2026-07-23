@@ -143,6 +143,14 @@ def apply_discovery_decision_engine(
             spent_user_questions + len(selected_question_ids) >= max_questions
             and candidate.impact != "architecture"
         ):
+            if candidate.issue_id == "runtime_metadata_fields":
+                assumptions.append(
+                    localized_text(
+                        profile.language,
+                        "Antar tills vidare att inga extra formulärfält behövs vid körning; du kan lägga till dem innan du bekräftar.",
+                        "Assuming no extra form fields are needed at runtime for now; you can add them before confirming.",
+                    )
+                )
             continue
 
         selected.append(issue)
