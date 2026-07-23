@@ -41,6 +41,7 @@ settings_admin_router = APIRouter()
 async def get_skill_execution_block(
     skill_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
 ):
     return await container.settings_service().get_skill_execution_block(
         skill_id=skill_id
@@ -61,6 +62,7 @@ async def block_skill_execution(
     skill_id: UUID,
     data: SkillExecutionBlockUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
 ):
     return await container.settings_service().block_skill_execution(
         skill_id=skill_id,
@@ -81,6 +83,7 @@ async def unblock_skill_execution(
     skill_id: UUID,
     data: SkillExecutionUnblockUpdate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(auth_dependencies.require_user_identity),
 ):
     return await container.settings_service().unblock_skill_execution(
         skill_id=skill_id,

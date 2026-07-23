@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -42,6 +43,29 @@ async def _organization_space(session, *, tenant_id):
             Spaces.tenant_space_id.is_(None),
         )
     )
+
+
+async def _create_published_organization_skill(client, *, token: str) -> dict:
+    headers = {"Authorization": f"Bearer {token}"}
+    create_response = await client.post(
+        "/api/v1/skills/organization/",
+        json={
+            "slug": f"emergency-{uuid4().hex[:8]}",
+            "display_name": "Emergency guidance",
+            "description": "Approved organisation guidance",
+            "instructions": "Use the approved organisation guidance.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    skill = create_response.json()
+    publish_response = await client.post(
+        f"/api/v1/skills/organization/{skill['id']}/publish/",
+        json={"expected_revision_id": skill["current_revision"]["id"]},
+        headers=headers,
+    )
+    assert publish_response.status_code == 200, publish_response.text
+    return skill
 
 
 async def test_execution_block_lifecycle_retains_history_and_rejects_stale_unblock(
@@ -355,25 +379,8 @@ async def test_execution_block_http_contract_preserves_state_on_stale_unblock(
     db_container,
 ):
     headers = {"Authorization": f"Bearer {admin_token}"}
-    create_response = await client.post(
-        "/api/v1/skills/organization/",
-        json={
-            "slug": f"emergency-{uuid4().hex[:8]}",
-            "display_name": "Emergency guidance",
-            "description": "Approved organisation guidance",
-            "instructions": "Use the approved organisation guidance.",
-        },
-        headers=headers,
-    )
-    assert create_response.status_code == 201, create_response.text
-    skill = create_response.json()
+    skill = await _create_published_organization_skill(client, token=admin_token)
     skill_id = skill["id"]
-    publish_response = await client.post(
-        f"/api/v1/skills/organization/{skill_id}/publish/",
-        json={"expected_revision_id": skill["current_revision"]["id"]},
-        headers=headers,
-    )
-    assert publish_response.status_code == 200, publish_response.text
 
     forbidden_response = await client.get(
         f"/api/v1/settings/skills/{skill_id}/execution-block",
@@ -437,3 +444,166 @@ async def test_execution_block_http_contract_preserves_state_on_stale_unblock(
         assert history[0].reason == "Confirmed unsafe instructions"
         assert history[0].unblock_reason == "Removed the harmful revision"
         assert history[0].unblocked_at is not None
+
+
+async def test_execution_block_controls_require_a_real_tenant_admin(
+    client,
+    admin_token,
+    admin_user_api_key,
+    db_container,
+):
+    skill = await _create_published_organization_skill(client, token=admin_token)
+    skill_id = skill["id"]
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    service_key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"skill-incident-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "admin",
+            "scope_type": "tenant",
+            "ownership": "service",
+            "expires_at": expires_at,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert service_key_response.status_code == 201, service_key_response.text
+    service_headers = {"X-API-Key": service_key_response.json()["secret"]}
+    block_path = f"/api/v1/settings/skills/{skill_id}/execution-block"
+
+    rejected_requests = [
+        await client.get(block_path, headers=service_headers),
+        await client.post(
+            block_path,
+            json={"reason": "Service principal incident"},
+            headers=service_headers,
+        ),
+        await client.post(
+            f"{block_path}/unblock",
+            json={
+                "expected_block_id": str(uuid4()),
+                "reason": "Service principal recovery",
+            },
+            headers=service_headers,
+        ),
+    ]
+    for response in rejected_requests:
+        assert response.status_code == 403, response.text
+        assert response.json()["code"] == "user_identity_required"
+
+    async with db_container() as container:
+        incident_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(SkillExecutionBlocks)
+            .where(SkillExecutionBlocks.skill_id == skill_id)
+        )
+        assert incident_count == 0
+
+    user_key_headers = {"X-API-Key": admin_user_api_key.key}
+    empty_response = await client.get(block_path, headers=user_key_headers)
+    assert empty_response.status_code == 200, empty_response.text
+
+    block_response = await client.post(
+        block_path,
+        json={"reason": "Human-reviewed incident"},
+        headers=user_key_headers,
+    )
+    assert block_response.status_code == 200, block_response.text
+    block_id = block_response.json()["block"]["id"]
+
+    unblock_response = await client.post(
+        f"{block_path}/unblock",
+        json={
+            "expected_block_id": block_id,
+            "reason": "Human-reviewed recovery",
+        },
+        headers=user_key_headers,
+    )
+    assert unblock_response.status_code == 200, unblock_response.text
+
+
+async def test_scoped_api_keys_cannot_manage_execution_blocks(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    app_factory,
+):
+    skill = await _create_published_organization_skill(client, token=admin_token)
+    skill_id = skill["id"]
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "skill-scope-model")
+        space = await space_factory(session, "Skill scope", [model.id])
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Skill scope Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        app = await app_factory(
+            session,
+            "Skill scope App",
+            model.id,
+            space_id=space.id,
+        )
+        assert space.tenant_id == admin_user.tenant_id
+        scope_targets = (
+            ("space", space.id),
+            ("assistant", assistant.id),
+            ("app", app.id),
+        )
+
+    block_path = f"/api/v1/settings/skills/{skill_id}/execution-block"
+    for scope_type, scope_id in scope_targets:
+        key_response = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": f"skill-{scope_type}-{uuid4().hex[:8]}",
+                "key_type": "sk_",
+                "permission": "admin",
+                "scope_type": scope_type,
+                "scope_id": str(scope_id),
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert key_response.status_code == 201, key_response.text
+        scoped_headers = {"X-API-Key": key_response.json()["secret"]}
+
+        rejected_requests = [
+            await client.get(block_path, headers=scoped_headers),
+            await client.post(
+                block_path,
+                json={"reason": "Scoped key incident"},
+                headers=scoped_headers,
+            ),
+            await client.post(
+                f"{block_path}/unblock",
+                json={
+                    "expected_block_id": str(uuid4()),
+                    "reason": "Scoped key recovery",
+                },
+                headers=scoped_headers,
+            ),
+        ]
+        for response in rejected_requests:
+            assert response.status_code == 403, response.text
+            assert response.json()["code"] == "insufficient_scope"
+
+    async with db_container() as container:
+        incident_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(SkillExecutionBlocks)
+            .where(SkillExecutionBlocks.skill_id == skill_id)
+        )
+        assert incident_count == 0

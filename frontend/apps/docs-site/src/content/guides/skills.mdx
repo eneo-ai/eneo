@@ -192,7 +192,9 @@ export behavior.
 
 A tenant admin can block execution of any organisation Skill that has been
 published before. Use this for a confirmed safety, security, compliance, or
-operational incident.
+operational incident. Reading or changing the incident state requires a signed-in
+tenant admin or their user-owned tenant admin API key; service credentials cannot
+operate this human-audited control.
 
 - The block covers every saved version in Personal Chat, Assistants, and Apps.
 - New Personal Chat and Assistant requests omit the blocked Skill while the
