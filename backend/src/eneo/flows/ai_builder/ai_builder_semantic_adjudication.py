@@ -10,7 +10,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderProviderOutcomeUnknownException,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
@@ -106,11 +105,11 @@ async def adjudicate_pending_question_answer(
             **completion_kwargs,
         )
     except Exception as error:
-        record_ai_builder_provider_failure(
+        failure = record_ai_builder_provider_failure(
             error,
             stage="semantic_adjudication",
         )
-        raise AIBuilderProviderOutcomeUnknownException() from error
+        raise failure.as_exception() from error
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():

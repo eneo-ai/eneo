@@ -7,13 +7,21 @@ from typing import get_args
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from litellm.exceptions import (
     APIConnectionError,
     APIError,
+    AuthenticationError,
+    BadGatewayError,
     BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
     RateLimitError,
+    ServiceUnavailableError,
     Timeout,
+    UnprocessableEntityError,
 )
 from pydantic import ValidationError
 
@@ -26,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY,
+    AIBuilderErrorCode,
     AIBuilderProviderFailureKind,
     AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
@@ -62,6 +71,13 @@ _FAILURE_KIND_SOURCE_FILES = (
     _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py",
     _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_edit_proposal.py",
 )
+
+
+def _provider_response(status_code: int) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        request=httpx.Request("POST", "https://provider.invalid/v1/completions"),
+    )
 
 
 def _tool_processing_failure_kinds_from_source() -> set[str]:
@@ -190,6 +206,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
         "expected_status_code",
         "expected_status_class",
         "expected_exception_class",
+        "expected_turn_state",
     ),
     [
         (
@@ -202,6 +219,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             400,
             "4xx",
             "bad_request",
+            "committed",
         ),
         (
             RateLimitError(
@@ -213,6 +231,57 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             429,
             "4xx",
             "rate_limit",
+            "committed",
+        ),
+        (
+            AuthenticationError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+            401,
+            "4xx",
+            "authentication",
+            "committed",
+        ),
+        (
+            NotFoundError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+            404,
+            "4xx",
+            "not_found",
+            "committed",
+        ),
+        (
+            PermissionDeniedError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+                response=_provider_response(403),
+            ),
+            "rejected",
+            403,
+            "4xx",
+            "permission_denied",
+            "committed",
+        ),
+        (
+            UnprocessableEntityError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+                response=_provider_response(422),
+            ),
+            "rejected",
+            422,
+            "4xx",
+            "unprocessable_entity",
+            "committed",
         ),
         (
             Timeout(
@@ -224,6 +293,7 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             408,
             "4xx",
             "timeout",
+            "provider_outcome_unknown",
         ),
         (
             APIConnectionError(
@@ -235,6 +305,43 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             None,
             None,
             "api_connection",
+            "provider_outcome_unknown",
+        ),
+        (
+            BadGatewayError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+            502,
+            "5xx",
+            "bad_gateway",
+            "provider_outcome_unknown",
+        ),
+        (
+            InternalServerError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+            500,
+            "5xx",
+            "internal_server",
+            "provider_outcome_unknown",
+        ),
+        (
+            ServiceUnavailableError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+            503,
+            "5xx",
+            "service_unavailable",
+            "provider_outcome_unknown",
         ),
         (
             APIError(
@@ -243,10 +350,19 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "transport_ambiguous",
+            503,
+            "5xx",
+            "api_error",
+            "provider_outcome_unknown",
+        ),
+        (
+            RuntimeError("sensitive-provider-material"),
             "unknown",
             None,
             None,
             "unknown",
+            "provider_outcome_unknown",
         ),
     ],
 )
@@ -256,6 +372,7 @@ def test_provider_failure_classification_uses_only_known_adapter_evidence(
     expected_status_code: int | None,
     expected_status_class: str | None,
     expected_exception_class: str,
+    expected_turn_state: str,
 ) -> None:
     failure = classify_ai_builder_provider_failure(
         error,
@@ -267,6 +384,16 @@ def test_provider_failure_classification_uses_only_known_adapter_evidence(
     assert failure.status_code == expected_status_code
     assert failure.status_class == expected_status_class
     assert failure.exception_class == expected_exception_class
+    assert failure.turn_state == expected_turn_state
+    assert failure.retry_scope == (
+        "new_turn" if expected_turn_state == "committed" else "acknowledged_same_turn"
+    )
+    assert failure.another_call_permitted is False
+    assert failure.public_error.code == (
+        AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+        if expected_turn_state == "committed"
+        else AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
+    )
     assert failure.fingerprint == make_failure_fingerprint(
         "ai_builder_provider",
         "proposal_completion",

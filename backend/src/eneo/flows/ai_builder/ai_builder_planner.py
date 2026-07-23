@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorEvent,
+    AIBuilderKnownProviderRejectionException,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import (
@@ -128,6 +129,15 @@ class AIBuilderPlanner:
             quality_retry_warning_codes=quality_retry_warning_codes,
         )
 
+    async def _complete_known_provider_rejection(
+        self,
+        *,
+        turn: "SessionSendTurn",
+        error: AIBuilderKnownProviderRejectionException,
+    ) -> AIBuilderErrorEvent:
+        await self.repo.complete_session_turn(turn=turn, error=error.public_error)
+        return AIBuilderErrorEvent(data=error.public_error)
+
     async def _stream_proposal_events(
         self,
         *,
@@ -142,30 +152,36 @@ class AIBuilderPlanner:
         assistant_snapshots: AssistantAuthoringSnapshots | None,
         before_provider_call: Callable[[], Awaitable[None]],
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        events = [
-            event
-            async for event in self.proposal_processor.propose_plan(
-                turn=turn,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                llm_messages=proposal_request.llm_messages,
-                completion_model_route=completion_model_route,
-                available_model_refs=proposal_request.resource_catalog.model_refs,
-                available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
-                resource_catalog=proposal_request.resource_catalog,
-                max_output_tokens=max_output_tokens,
-                proposal_temperature=self.planner_temperature,
-                request_id=request_id,
-                flow=flow,
-                assistant_snapshots=assistant_snapshots,
-                assistant_metadata=build_assistant_message_metadata(conversation),
-                planning_state=proposal_request.planning_state,
-                requested_output_sections=(proposal_request.requested_output_sections),
-                plan_edit_context=proposal_request.plan_edit_context,
-                prior_plan_for_revision=proposal_request.prior_plan_for_revision,
-                before_provider_call=before_provider_call,
-            )
-        ]
+        try:
+            events = [
+                event
+                async for event in self.proposal_processor.propose_plan(
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    llm_messages=proposal_request.llm_messages,
+                    completion_model_route=completion_model_route,
+                    available_model_refs=proposal_request.resource_catalog.model_refs,
+                    available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
+                    resource_catalog=proposal_request.resource_catalog,
+                    max_output_tokens=max_output_tokens,
+                    proposal_temperature=self.planner_temperature,
+                    request_id=request_id,
+                    flow=flow,
+                    assistant_snapshots=assistant_snapshots,
+                    assistant_metadata=build_assistant_message_metadata(conversation),
+                    planning_state=proposal_request.planning_state,
+                    requested_output_sections=(
+                        proposal_request.requested_output_sections
+                    ),
+                    plan_edit_context=proposal_request.plan_edit_context,
+                    prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                    before_provider_call=before_provider_call,
+                )
+            ]
+        except AIBuilderKnownProviderRejectionException as error:
+            yield await self._complete_known_provider_rejection(turn=turn, error=error)
+            return
         error = next(
             (event.data for event in events if isinstance(event, AIBuilderErrorEvent)),
             None,
@@ -328,16 +344,24 @@ class AIBuilderPlanner:
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
             )
-            metadata_resolution = await resolve_user_question_metadata(
-                litellm_client=self.litellm_client,
-                conversation=conversation,
-                message=message,
-                question_answer=question_answer,
-                ui_language=ui_language,
-                completion_model_route=completion_model_route,
-                prepared=prepared_metadata,
-                before_provider_call=mark_provider_work_started,
-            )
+            try:
+                metadata_resolution = await resolve_user_question_metadata(
+                    litellm_client=self.litellm_client,
+                    conversation=conversation,
+                    message=message,
+                    question_answer=question_answer,
+                    ui_language=ui_language,
+                    completion_model_route=completion_model_route,
+                    prepared=prepared_metadata,
+                    before_provider_call=mark_provider_work_started,
+                )
+            except AIBuilderKnownProviderRejectionException as error:
+                yield await self._complete_known_provider_rejection(
+                    turn=turn,
+                    error=error,
+                )
+                yield build_done_event()
+                return
             metadata = metadata_resolution.metadata
             if plan_edit_context is not None:
                 metadata = {
@@ -352,31 +376,39 @@ class AIBuilderPlanner:
                 if metadata or file_ids
                 else None
             )
-            prepared_request = await prepare_planner_request(
-                PlannerRequestPreparationInput(
-                    conversation=conversation,
-                    message=message,
-                    litellm_client=self.litellm_client,
-                    completion_model_route=completion_model_route,
-                    available_models=available_models,
-                    available_kbs=available_kbs,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                    attachment_files=attachment_files or [],
-                    max_input_tokens=max_input_tokens,
-                    max_output_tokens=max_output_tokens,
-                    budget_policy=budget_policy,
-                    plan_edit_context=plan_edit_context,
-                    prior_plan_for_revision=prior_plan_for_revision,
-                    allow_discovery_semantic_adjudication=(
-                        not metadata_resolution.used_auxiliary_llm
-                    ),
-                    persisted_planning_state=persisted_planning_state,
-                    base_planning_state_version=turn.base_planning_state_version,
-                    tenant_id=self.user.tenant_id,
-                    before_provider_call=mark_provider_work_started,
+            try:
+                prepared_request = await prepare_planner_request(
+                    PlannerRequestPreparationInput(
+                        conversation=conversation,
+                        message=message,
+                        litellm_client=self.litellm_client,
+                        completion_model_route=completion_model_route,
+                        available_models=available_models,
+                        available_kbs=available_kbs,
+                        flow=flow,
+                        assistant_snapshots=assistant_snapshots,
+                        attachment_files=attachment_files or [],
+                        max_input_tokens=max_input_tokens,
+                        max_output_tokens=max_output_tokens,
+                        budget_policy=budget_policy,
+                        plan_edit_context=plan_edit_context,
+                        prior_plan_for_revision=prior_plan_for_revision,
+                        allow_discovery_semantic_adjudication=(
+                            not metadata_resolution.used_auxiliary_llm
+                        ),
+                        persisted_planning_state=persisted_planning_state,
+                        base_planning_state_version=turn.base_planning_state_version,
+                        tenant_id=self.user.tenant_id,
+                        before_provider_call=mark_provider_work_started,
+                    )
                 )
-            )
+            except AIBuilderKnownProviderRejectionException as error:
+                yield await self._complete_known_provider_rejection(
+                    turn=turn,
+                    error=error,
+                )
+                yield build_done_event()
+                return
             requirements_state = prepared_request.requirements_state
             ui_language = prepared_request.ui_language
             user_message.metadata = metadata_with_slot_classification(

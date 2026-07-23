@@ -17,7 +17,6 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderProviderOutcomeUnknownException,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
@@ -214,12 +213,12 @@ async def classify_slots(
             **completion_kwargs,
         )
     except Exception as error:
-        record_ai_builder_provider_failure(
+        failure = record_ai_builder_provider_failure(
             error,
             stage="slot_classification",
             tenant_id=tenant_id,
         )
-        raise AIBuilderProviderOutcomeUnknownException() from error
+        raise failure.as_exception() from error
 
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():

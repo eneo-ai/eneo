@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from litellm.exceptions import (
     APIConnectionError,
+    APIError,
     BadRequestError,
     RateLimitError,
     Timeout,
@@ -2198,7 +2199,7 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("provider_error", "expected_failure_kind"),
+    ("provider_error", "expected_exception_class"),
     [
         (
             BadRequestError(
@@ -2206,7 +2207,7 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
                 model="private-model",
                 llm_provider="private-provider",
             ),
-            "rejected",
+            "bad_request",
         ),
         (
             RateLimitError(
@@ -2214,8 +2215,143 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
                 model="private-model",
                 llm_provider="private-provider",
             ),
-            "rate_limited",
+            "rate_limit",
         ),
+    ],
+    ids=["bad_request", "rate_limit"],
+)
+@pytest.mark.asyncio
+async def test_ai_builder_known_provider_rejection_commits_and_replays_without_recall(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    provider_error: Exception,
+    expected_exception_class: str,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name=f"AI Builder Known Rejection {expected_exception_class}",
+    )
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+    client_turn_id = uuid4()
+    message = "Hjälp mig bygga ett flöde."
+    completion = AsyncMock(
+        side_effect=[
+            provider_error,
+            _make_llm_response(content="Jag kan hjälpa dig bygga flödet."),
+        ]
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=completion,
+    ):
+        with patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ):
+            first_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message=message,
+                client_turn_id=client_turn_id,
+            )
+            assert [event["event"] for event in first_events] == ["error", "done"]
+            first_error = cast(dict[str, object], first_events[0]["data"])
+            assert first_error["code"] == "planner_upstream_error"
+            assert first_error["details"] == {
+                "another_call_permitted": False,
+                "provider_disposition": "known_rejection",
+                "provider_exception_class": expected_exception_class,
+                "retry_scope": "new_turn",
+            }
+            encoded_error = json.dumps(first_error)
+            assert "sensitive-provider-material" not in encoded_error
+            assert "private-model" not in encoded_error
+            assert "private-provider" not in encoded_error
+            calls_after_rejection = completion.await_count
+            assert calls_after_rejection == 1
+
+            committed_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert committed_session.status_code == 200, committed_session.text
+            latest_turn = committed_session.json()["latest_turn"]
+            assert latest_turn["state"] == "committed"
+            assert (
+                latest_turn["requires_duplicate_provider_spend_acknowledgement"]
+                is False
+            )
+            persisted_error = cast(dict[str, object], latest_turn["error"])
+            assert {
+                key: value
+                for key, value in persisted_error.items()
+                if key != "diagnostic_context"
+            } == {
+                key: value
+                for key, value in first_error.items()
+                if key != "diagnostic_context"
+            }
+            persisted_diagnostic_context = cast(
+                dict[str, object], persisted_error["diagnostic_context"]
+            )
+            assert {
+                key: value
+                for key, value in persisted_diagnostic_context.items()
+                if value is not None
+            } == first_error["diagnostic_context"]
+
+            replay_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message=message,
+                client_turn_id=client_turn_id,
+            )
+            assert [event["event"] for event in replay_events] == ["error", "done"]
+            assert replay_events[0]["data"] == first_error
+            assert completion.await_count == calls_after_rejection
+
+            changed_response = await client.post(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+                json={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Bygg ett annat flöde.",
+                    "ui_language": "sv",
+                },
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert changed_response.status_code == 409
+            assert changed_response.json()["code"] == (
+                "session_turn_idempotency_conflict"
+            )
+            assert completion.await_count == calls_after_rejection
+
+            new_turn_events = await _send_builder_message(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                message=message,
+                client_turn_id=uuid4(),
+            )
+            assert any(event["event"] == "text" for event in new_turn_events)
+            assert completion.await_count == calls_after_rejection + 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("provider_error", "expected_failure_kind"),
+    [
         (
             Timeout(
                 "sensitive-provider-material",
@@ -2226,6 +2362,15 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
         ),
         (
             APIConnectionError(
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "transport_ambiguous",
+        ),
+        (
+            APIError(
+                503,
                 "sensitive-provider-material",
                 model="private-model",
                 llm_provider="private-provider",

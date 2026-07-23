@@ -13,7 +13,6 @@ from eneo.completion_models.infrastructure.completion_service import (
     completion_evidence_json_type,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderProviderOutcomeUnknownException,
     AIBuilderProviderRequestEvidence,
     record_ai_builder_provider_failure,
 )
@@ -102,16 +101,14 @@ async def call_proposal_completion(
             **provider_kwargs,
         )
     except Exception as error:
-        record_ai_builder_provider_failure(
+        failure = record_ai_builder_provider_failure(
             error,
             stage="proposal_completion",
             usage_tracker=usage_tracker,
             request_id=usage_tracker.request_id if usage_tracker is not None else None,
             incident_evidence=incident_evidence,
         )
-        if before_provider_call is not None:
-            raise AIBuilderProviderOutcomeUnknownException() from error
-        raise
+        raise failure.as_exception() from error
     response = normalize_litellm_completion_response(raw_response)
     if usage_tracker is not None:
         completion_text, finish_reason = _first_text_and_finish_reason(response)

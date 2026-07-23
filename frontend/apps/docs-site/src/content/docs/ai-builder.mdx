@@ -109,6 +109,19 @@ Retry behavior depends on the persisted turn state:
 | `processing`               | Wait and reload the session. Do not create a second logical turn.                                                                                                                                                   |
 | `committed`                | Use the committed conversation, plan state, and typed `latest_turn.error` (when present) returned by the session. A same-key replay returns that exact error and then completes without calling the provider again. |
 
+A typed provider rejection, including a rate limit, is a known rejection. The
+server commits its typed error with `provider_disposition=known_rejection`,
+`retry_scope=new_turn`, and `another_call_permitted=false`. Replay the same turn
+to recover the same error without another provider call. To try provider work
+again, create a new turn; do not set duplicate-spend acknowledgement and do not
+recall the provider with the rejected turn ID. Rate-limit errors identify
+`provider_exception_class=rate_limit` but do not promise a retry delay.
+
+Timeouts, connection failures, provider `5xx` responses, and unknown failures are
+ambiguous. They leave the turn in `provider_outcome_unknown`; never retry them
+automatically. The only same-turn retry path is the exact persisted
+`retry_request` with explicit `acknowledge_duplicate_provider_spend=true`.
+
 The deduplication horizon is intentionally bounded to the latest accepted turn
 for a session. A different accepted message receives a new `client_turn_id`.
 Deleting the session also deletes this recovery record. These guarantees cover

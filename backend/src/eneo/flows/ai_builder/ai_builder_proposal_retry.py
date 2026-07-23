@@ -18,10 +18,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorEvent,
     AIBuilderErrorPhase,
-    AIBuilderProviderOutcomeUnknownException,
     JsonScalar,
     build_ai_builder_error_event,
 )
@@ -649,15 +649,16 @@ async def _request_self_correction_events(
                     counts_as_repair=True,
                 )
             )
-        except AIBuilderProviderOutcomeUnknownException:
+        except AIBuilderBadRequestException:
             raise
         except Exception as error:
-            _record_attempt_failure(ctx, failure_kind="provider_error")
-            logger.error("Self-correction LLM call failed", exc_info=error)
+            if ctx.usage_tracker is not None:
+                ctx.usage_tracker.finalize_pending_attempt()
+            logger.error("Self-correction completion processing failed", exc_info=error)
             _log_self_correction_failed_turn(
                 ctx=ctx,
                 branch="self_correction_completion_error",
-                final_failure_kind="provider_error",
+                final_failure_kind="internal_error",
                 final_error_code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
             )
             yield build_ai_builder_error_event(
@@ -956,12 +957,13 @@ async def _execute_forced_tool_retry(
                 counts_as_repair=True,
             )
         )
-    except AIBuilderProviderOutcomeUnknownException:
+    except AIBuilderBadRequestException:
         raise
     except Exception as error:
-        _record_attempt_failure(ctx, failure_kind="provider_error")
+        if ctx.usage_tracker is not None:
+            ctx.usage_tracker.finalize_pending_attempt()
         logger.error(
-            "Forced proposal retry failed",
+            "Forced proposal retry completion processing failed",
             exc_info=error,
             extra={"request_id": ctx.request_id},
         )

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 from litellm.exceptions import (
     APIConnectionError,
@@ -13,6 +14,7 @@ from litellm.exceptions import (
     BadRequestError,
     RateLimitError,
     Timeout,
+    UnprocessableEntityError,
 )
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
@@ -29,7 +31,9 @@ from eneo.flows.ai_builder import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderKnownProviderRejectionException,
     AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
@@ -61,6 +65,21 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
+
+
+def _unprocessable_entity_error() -> UnprocessableEntityError:
+    return UnprocessableEntityError(
+        "sensitive-provider-material",
+        model="private-model",
+        llm_provider="private-provider",
+        response=httpx.Response(
+            422,
+            request=httpx.Request(
+                "POST",
+                "https://provider.invalid/v1/chat/completions",
+            ),
+        ),
     )
 
 
@@ -288,7 +307,13 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_kind"),
+    (
+        "error",
+        "expected_kind",
+        "expected_exception_class",
+        "expected_exception",
+        "expected_code",
+    ),
     [
         (
             BadRequestError(
@@ -297,6 +322,9 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
                 llm_provider="private-provider",
             ),
             "rejected",
+            "bad_request",
+            AIBuilderKnownProviderRejectionException,
+            AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
         ),
         (
             RateLimitError(
@@ -305,6 +333,16 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
                 llm_provider="private-provider",
             ),
             "rate_limited",
+            "rate_limit",
+            AIBuilderKnownProviderRejectionException,
+            AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+        ),
+        (
+            _unprocessable_entity_error(),
+            "rejected",
+            "unprocessable_entity",
+            AIBuilderKnownProviderRejectionException,
+            AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
         ),
         (
             Timeout(
@@ -313,6 +351,9 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
                 llm_provider="private-provider",
             ),
             "timeout",
+            "timeout",
+            AIBuilderProviderOutcomeUnknownException,
+            AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         ),
         (
             APIConnectionError(
@@ -321,6 +362,9 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
                 llm_provider="private-provider",
             ),
             "transport_ambiguous",
+            "api_connection",
+            AIBuilderProviderOutcomeUnknownException,
+            AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         ),
         (
             APIError(
@@ -329,14 +373,27 @@ async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "transport_ambiguous",
+            "api_error",
+            AIBuilderProviderOutcomeUnknownException,
+            AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
+        ),
+        (
+            RuntimeError("sensitive-provider-material"),
             "unknown",
+            "unknown",
+            AIBuilderProviderOutcomeUnknownException,
+            AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         ),
     ],
 )
 @pytest.mark.asyncio
-async def test_proposal_post_start_failure_keeps_unknown_public_contract(
+async def test_proposal_provider_failure_uses_typed_disposition(
     error: Exception,
     expected_kind: str,
+    expected_exception_class: str,
+    expected_exception: type[Exception],
+    expected_code: AIBuilderErrorCode,
 ) -> None:
     litellm_client = SimpleNamespace(acompletion=AsyncMock(side_effect=error))
     before_provider_call = AsyncMock()
@@ -348,7 +405,7 @@ async def test_proposal_post_start_failure_keeps_unknown_public_contract(
     tracker.start_attempt(counts_as_repair=False)
 
     with patch.object(error_contract_module.logger, "info") as event_log:
-        with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
             await call_proposal_completion(
                 litellm_client=litellm_client,
                 request=ProposalCompletionRequest(
@@ -362,9 +419,30 @@ async def test_proposal_post_start_failure_keeps_unknown_public_contract(
                 before_provider_call=before_provider_call,
             )
 
-    assert exc_info.value.code == (
-        AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
+    assert isinstance(exc_info.value, expected_exception)
+    assert exc_info.value.code == expected_code
+    assert isinstance(
+        exc_info.value,
+        (
+            AIBuilderKnownProviderRejectionException,
+            AIBuilderProviderOutcomeUnknownException,
+        ),
     )
+    assert exc_info.value.public_error is not None
+    assert exc_info.value.public_error.details == {
+        "another_call_permitted": False,
+        "provider_disposition": (
+            "known_rejection"
+            if expected_exception is AIBuilderKnownProviderRejectionException
+            else "provider_outcome_unknown"
+        ),
+        "provider_exception_class": expected_exception_class,
+        "retry_scope": (
+            "new_turn"
+            if expected_exception is AIBuilderKnownProviderRejectionException
+            else "acknowledged_same_turn"
+        ),
+    }
     before_provider_call.assert_awaited_once_with()
     assert litellm_client.acompletion.await_count == 1
     failure_calls = [
@@ -421,7 +499,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
     )
 
     with patch.object(error_contract_module.logger, "info") as event_log:
-        with pytest.raises(BadRequestError):
+        with pytest.raises(AIBuilderKnownProviderRejectionException):
             await call_proposal_completion(
                 litellm_client=litellm_client,
                 request=ProposalCompletionRequest(

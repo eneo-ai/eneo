@@ -146,9 +146,16 @@ How this is configured is an infrastructure concern, but the NDJSON format is de
 
 After an AI Builder provider call has started, a caught failure emits exactly one
 `failure_event` log row with `attributes.event` set to
-`ai_builder.provider.failure`. This is an internal diagnostic contract; the API
-continues to return the generic `session_turn_provider_outcome_unknown` error and
-requires explicit duplicate-spend acknowledgement before another attempt.
+`ai_builder.provider.failure`. Typed provider rejections, including rate limits,
+commit a replayable public error on the turn. An identical same-key request
+replays that error without another provider call; retrying provider work requires
+a new turn and does not require duplicate-spend acknowledgement. Rate-limit
+errors expose `provider_exception_class=rate_limit`, not an invented retry delay.
+
+Timeouts, connection failures, typed API `5xx` failures, and unclassified
+exceptions remain `provider_outcome_unknown`. They require explicit
+duplicate-spend acknowledgement before the exact same turn can call the provider
+again. Neither disposition enables automatic retry.
 
 The bounded fields are:
 
@@ -166,7 +173,10 @@ Only recognized adapter exception types can supply a status. An exception that
 merely resembles an adapter error—for example, an arbitrary object with a
 `status_code` attribute—fails closed to `unknown` with no status. Timeout and
 transport ambiguity remain provider-outcome-unknown even when their internal
-class is known; no failure class enables automatic retry.
+class is known. The public error details distinguish `known_rejection` with
+`retry_scope=new_turn` from `provider_outcome_unknown` with
+`retry_scope=acknowledged_same_turn`; both set `another_call_permitted=false` for
+the current disposition.
 
 These events never contain prompts, user messages, model or provider names,
 request/response bodies, raw provider responses, exception text or tracebacks,

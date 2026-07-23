@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from litellm.exceptions import RateLimitError
 
 from eneo.flows.ai_builder import (
     ai_builder_proposal_retry as proposal_retry_module,
@@ -26,6 +27,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderKnownProviderRejectionException,
+    classify_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
@@ -1386,7 +1391,9 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
 
 
 @pytest.mark.asyncio
-async def test_run_tool_self_correction_completion_error_logs_failed_turn() -> None:
+async def test_run_tool_self_correction_internal_completion_error_logs_failed_turn() -> (
+    None
+):
     tracker = ProposalTurnTelemetry(
         request_id="req-repair-provider-error",
         model="openai/gpt-5.4-nano",
@@ -1422,10 +1429,49 @@ async def test_run_tool_self_correction_completion_error_logs_failed_turn() -> N
     assert payload["code"] == "planner_upstream_error"
     failed_payload = _single_failed_turn_payload(telemetry_records)
     assert failed_payload["branch"] == "self_correction_completion_error"
-    assert failed_payload["final_failure_kind"] == "provider_error"
+    assert failed_payload["final_failure_kind"] == "internal_error"
     assert failed_payload["final_error_code"] == "planner_upstream_error"
     assert failed_payload["repair_attempts"] == 1
     assert failed_payload["llm_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_propagates_known_rejection_without_retry() -> (
+    None
+):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-repair-rate-limit",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    rejection = classify_ai_builder_provider_failure(
+        RateLimitError(
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="proposal_completion",
+        request_id=tracker.request_id,
+    ).as_exception()
+    repair_completion = AsyncMock(side_effect=rejection)
+    request = _make_self_correction_request(
+        request_id=tracker.request_id,
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=2,
+        forced_proposal_temperature=0.1,
+        repair_completion=repair_completion,
+        process_tool_invocation=AsyncMock(),
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        _ = [event async for event in run_tool_self_correction(request)]
+
+    assert repair_completion.await_count == 1
 
 
 @pytest.mark.asyncio

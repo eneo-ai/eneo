@@ -61,7 +61,6 @@ ProposalRepairReason = Literal[
     "missing_submission_tool",
 ]
 ProposalFailedTurnBranch = Literal[
-    "provider_completion_error",
     "internal_submission_error",
     "empty_completion_choices",
     "provider_truncation",

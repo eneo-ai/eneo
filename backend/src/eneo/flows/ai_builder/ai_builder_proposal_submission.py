@@ -256,16 +256,18 @@ class ProposalSubmissionOwner:
                 ),
                 before_provider_call=before_provider_call,
             )
-        except (AIBuilderBadRequestException, AIBuilderProviderOutcomeUnknownException):
+        except AIBuilderBadRequestException:
             raise
         except Exception as error:
-            usage_tracker.record_attempt_failure(failure_kind="provider_error")
-            logger.error("AI Builder proposal task failed", exc_info=error)
+            usage_tracker.finalize_pending_attempt()
+            logger.error(
+                "AI Builder proposal completion processing failed", exc_info=error
+            )
             log_proposal_failed_turn(
                 usage_tracker=usage_tracker,
                 session_id=turn.session_id,
-                branch="provider_completion_error",
-                final_failure_kind="provider_error",
+                branch="internal_submission_error",
+                final_failure_kind="internal_error",
                 final_error_code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR.value,
             )
             yield build_ai_builder_error_event(
@@ -653,7 +655,7 @@ class ProposalSubmissionOwner:
 
             for event in result.events:
                 yield event
-        except AIBuilderProviderOutcomeUnknownException:
+        except AIBuilderBadRequestException:
             raise
         except AIBuilderArchitectureError as error:
             if not is_create:

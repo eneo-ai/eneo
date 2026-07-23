@@ -500,7 +500,7 @@ async def test_propose_plan_edit_compile_bug_preserves_provider_outcome_unknown(
 
 
 @pytest.mark.asyncio
-async def test_propose_plan_provider_error_still_yields_planner_upstream_error() -> (
+async def test_propose_plan_internal_completion_error_yields_planner_upstream_error() -> (
     None
 ):
     processor = _make_processor()
@@ -540,10 +540,10 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     assert failed_payload["request_id"] == "req-first-attempt-provider-error"
     assert failed_payload["session_id"] == str(session_id)
     assert failed_payload["target_kind"] == "create"
-    assert failed_payload["branch"] == "provider_completion_error"
+    assert failed_payload["branch"] == "internal_submission_error"
     assert failed_payload["repair_attempts"] == 0
     assert failed_payload["llm_calls"] == 1
-    assert failed_payload["final_failure_kind"] == "provider_error"
+    assert failed_payload["final_failure_kind"] == "internal_error"
     assert failed_payload["final_error_code"] == "planner_upstream_error"
 
 

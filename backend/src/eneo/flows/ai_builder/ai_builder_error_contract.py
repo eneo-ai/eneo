@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from litellm.exceptions import (
     APIConnectionError,
+    APIError,
     AuthenticationError,
     BadGatewayError,
     BadRequestError,
@@ -58,9 +59,12 @@ AIBuilderProviderFailureStage = Literal[
     "slot_classification",
     "semantic_adjudication",
 ]
+AIBuilderProviderTurnState = Literal["committed", "provider_outcome_unknown"]
+AIBuilderProviderRetryScope = Literal["new_turn", "acknowledged_same_turn"]
 AIBuilderProviderStatusClass = Literal["1xx", "2xx", "3xx", "4xx", "5xx"]
 AIBuilderProviderExceptionClass = Literal[
     "api_connection",
+    "api_error",
     "authentication",
     "bad_gateway",
     "bad_request",
@@ -90,17 +94,22 @@ AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY = "ai_builder_provider_incident_ev
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION = (
     "ai-builder-provider-incident-evidence.v1"
 )
-_PROVIDER_REJECTION_ERRORS = (
+_KNOWN_PROVIDER_REJECTION_ERRORS = (
     AuthenticationError,
-    BadGatewayError,
     BadRequestError,
-    InternalServerError,
     NotFoundError,
     PermissionDeniedError,
-    ServiceUnavailableError,
+    RateLimitError,
     UnprocessableEntityError,
 )
-
+_AMBIGUOUS_PROVIDER_ERRORS = (
+    APIConnectionError,
+    APIError,
+    BadGatewayError,
+    InternalServerError,
+    ServiceUnavailableError,
+    Timeout,
+)
 logger = get_logger(__name__)
 
 
@@ -199,16 +208,41 @@ class AIBuilderBadRequestException(BadRequestException):
 
 
 class AIBuilderProviderOutcomeUnknownException(AIBuilderBadRequestException):
-    def __init__(self) -> None:
+    def __init__(self, public_error: AIBuilderPublicError | None = None) -> None:
+        if public_error is None:
+            super().__init__(
+                "The provider outcome is unknown. Explicitly acknowledge possible duplicate provider work before retrying this turn.",
+                code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
+            )
+            self.public_error = None
+            return
         super().__init__(
-            "The provider outcome is unknown. Explicitly acknowledge possible duplicate provider work before retrying this turn.",
-            code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
+            public_error.message,
+            code=public_error.code,
+            context={
+                "request_id": public_error.request_id,
+                **(public_error.details or {}),
+            },
         )
+        self.public_error = public_error
+
+
+class AIBuilderKnownProviderRejectionException(AIBuilderBadRequestException):
+    def __init__(self, public_error: AIBuilderPublicError) -> None:
+        super().__init__(
+            public_error.message,
+            code=public_error.code,
+            context={
+                "request_id": public_error.request_id,
+                **(public_error.details or {}),
+            },
+        )
+        self.public_error = public_error
 
 
 @dataclass(frozen=True, slots=True)
 class AIBuilderProviderFailure:
-    """Bounded internal diagnosis for a provider call that already started."""
+    """One typed provider disposition spanning diagnostics and turn behavior."""
 
     kind: AIBuilderProviderFailureKind
     stage: AIBuilderProviderFailureStage
@@ -217,6 +251,20 @@ class AIBuilderProviderFailure:
     exception_class: AIBuilderProviderExceptionClass
     parameter: str | None
     fingerprint: str
+    turn_state: AIBuilderProviderTurnState
+    public_error: AIBuilderPublicError
+    retry_scope: AIBuilderProviderRetryScope
+    another_call_permitted: bool
+
+    def as_exception(
+        self,
+    ) -> (
+        AIBuilderKnownProviderRejectionException
+        | AIBuilderProviderOutcomeUnknownException
+    ):
+        if self.turn_state == "committed":
+            return AIBuilderKnownProviderRejectionException(self.public_error)
+        return AIBuilderProviderOutcomeUnknownException(self.public_error)
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,10 +315,12 @@ def classify_ai_builder_provider_failure(
     error: Exception,
     *,
     stage: AIBuilderProviderFailureStage,
+    request_id: str | None = None,
 ) -> AIBuilderProviderFailure:
     """Classify only adapter types whose semantics are part of our dependency."""
 
     status_code: int | None = None
+    known_rejection = isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS)
     if isinstance(error, RateLimitError):
         kind: AIBuilderProviderFailureKind = "rate_limited"
         status_code = _bounded_provider_status(error.status_code)
@@ -279,18 +329,28 @@ def classify_ai_builder_provider_failure(
         status_code = _bounded_provider_status(error.status_code)
     elif isinstance(error, APIConnectionError):
         kind = "transport_ambiguous"
-    elif isinstance(error, _PROVIDER_REJECTION_ERRORS):
+    elif isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS):
         kind = "rejected"
-        status_code = _bounded_provider_status(error.status_code)
+        status_code = _bounded_provider_status(getattr(error, "status_code", None))
+    elif isinstance(error, _AMBIGUOUS_PROVIDER_ERRORS):
+        kind = "transport_ambiguous"
+        status_code = _bounded_provider_status(getattr(error, "status_code", None))
     else:
         kind = "unknown"
 
+    exception_class = _provider_exception_class(error)
+    turn_state: AIBuilderProviderTurnState = (
+        "committed" if known_rejection else "provider_outcome_unknown"
+    )
+    retry_scope: AIBuilderProviderRetryScope = (
+        "new_turn" if known_rejection else "acknowledged_same_turn"
+    )
     return AIBuilderProviderFailure(
         kind=kind,
         stage=stage,
         status_code=status_code,
         status_class=_provider_status_class(status_code),
-        exception_class=_provider_exception_class(error),
+        exception_class=exception_class,
         parameter=_provider_parameter(error),
         fingerprint=make_failure_fingerprint(
             "ai_builder_provider",
@@ -298,6 +358,15 @@ def classify_ai_builder_provider_failure(
             kind,
             status_code,
         ),
+        turn_state=turn_state,
+        public_error=_provider_public_error(
+            exception_class=exception_class,
+            turn_state=turn_state,
+            retry_scope=retry_scope,
+            request_id=request_id,
+        ),
+        retry_scope=retry_scope,
+        another_call_permitted=False,
     )
 
 
@@ -313,7 +382,11 @@ def record_ai_builder_provider_failure(
 ) -> AIBuilderProviderFailure:
     """Record one safe event while preserving coarse persisted turn telemetry."""
 
-    failure = classify_ai_builder_provider_failure(error, stage=stage)
+    failure = classify_ai_builder_provider_failure(
+        error,
+        stage=stage,
+        request_id=request_id,
+    )
     if usage_tracker is not None:
         usage_tracker.record_attempt_failure(failure_kind="provider_error")
     safe_detail: dict[str, object] | None = None
@@ -371,6 +444,8 @@ def _provider_exception_class(
         return "service_unavailable"
     if isinstance(error, UnprocessableEntityError):
         return "unprocessable_entity"
+    if isinstance(error, APIError):
+        return "api_error"
     return "unknown"
 
 
@@ -378,10 +453,8 @@ def _provider_parameter(error: Exception) -> str | None:
     if not isinstance(
         error,
         (
-            RateLimitError,
-            Timeout,
-            APIConnectionError,
-            *_PROVIDER_REJECTION_ERRORS,
+            *_KNOWN_PROVIDER_REJECTION_ERRORS,
+            *_AMBIGUOUS_PROVIDER_ERRORS,
         ),
     ):
         return None
@@ -414,6 +487,48 @@ def _provider_status_class(
     if status_class == "4xx":
         return "4xx"
     return "5xx"
+
+
+def _provider_public_error(
+    *,
+    exception_class: AIBuilderProviderExceptionClass,
+    turn_state: AIBuilderProviderTurnState,
+    retry_scope: AIBuilderProviderRetryScope,
+    request_id: str | None,
+) -> AIBuilderPublicError:
+    details: dict[str, object] = {
+        "another_call_permitted": False,
+        "provider_disposition": (
+            "known_rejection"
+            if turn_state == "committed"
+            else "provider_outcome_unknown"
+        ),
+        "provider_exception_class": exception_class,
+        "retry_scope": retry_scope,
+    }
+    if turn_state == "committed":
+        message = (
+            "The AI provider did not accept this request because of a rate limit. "
+            "Start a new turn to try again."
+            if exception_class == "rate_limit"
+            else (
+                "The AI provider rejected this request. Start a new turn to try again."
+            )
+        )
+        code = AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+    else:
+        message = (
+            "The provider outcome is unknown. Explicitly acknowledge possible "
+            "duplicate provider work before retrying this turn."
+        )
+        code = AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN
+    return build_ai_builder_error(
+        message=message,
+        code=code,
+        phase=AIBuilderErrorPhase.PLANNER,
+        request_id=request_id,
+        details=details,
+    )
 
 
 class AIBuilderNotFoundException(NotFoundException):
