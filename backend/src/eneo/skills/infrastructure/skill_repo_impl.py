@@ -29,6 +29,7 @@ from eneo.skills.domain.skill import (
     PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
+    SkillActivationMode,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
@@ -1480,6 +1481,8 @@ class SkillRepoImpl:
         attachable_revision_id: UUID | None,
         attachable_revision_number: int | None,
         position: int,
+        *,
+        activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS,
     ) -> ResolvedSkillBinding:
         return ResolvedSkillBinding(
             skill_id=skill.id,
@@ -1502,6 +1505,7 @@ class SkillRepoImpl:
             is_active=skill.is_active,
             attachable_revision_id=attachable_revision_id,
             attachable_revision_number=attachable_revision_number,
+            activation_mode=activation_mode,
         )
 
     async def _resolve_references(
@@ -1738,6 +1742,7 @@ class SkillRepoImpl:
                 attachable_revision_id,
                 attachable_revision_number,
                 binding.position,
+                activation_mode=SkillActivationMode(binding.activation_mode),
             )
             for (
                 binding,
@@ -1786,6 +1791,7 @@ class SkillRepoImpl:
                         "skill_id": binding.skill_id,
                         "skill_revision_id": binding.skill_revision_id,
                         "position": position,
+                        "activation_mode": binding.activation_mode.value,
                     }
                     for position, binding in enumerate(bindings)
                 ],
@@ -1893,6 +1899,7 @@ class SkillRepoImpl:
                 attachable_revision_id,
                 attachable_revision_number,
                 binding.position,
+                activation_mode=SkillActivationMode(binding.activation_mode),
             )
             for (
                 binding,
@@ -1929,6 +1936,7 @@ class SkillRepoImpl:
                         "skill_id": binding.skill_id,
                         "skill_revision_id": binding.skill_revision_id,
                         "position": position,
+                        "activation_mode": binding.activation_mode.value,
                     }
                     for position, binding in enumerate(bindings)
                 ],
