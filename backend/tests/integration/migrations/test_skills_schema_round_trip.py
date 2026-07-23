@@ -37,6 +37,7 @@ PRE_PERMISSION_CONVERGENCE_REVISION = "202607221600"
 SKILLS_HEAD_REVISION = "202607221700"
 PRE_SKILL_EXECUTION_BLOCK_REVISION = "202607231330"
 SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
+BINDING_ACTIVATION_MODE_REVISION = "202607240115"
 
 
 @dataclass(frozen=True)
@@ -1873,3 +1874,128 @@ def test_skill_execution_block_migration_enforces_active_lifecycle_and_round_tri
         cursor.execute("SELECT to_regclass('skill_execution_blocks')")
         assert cursor.fetchone() == (None,)
     command.upgrade(config, SKILL_EXECUTION_BLOCK_REVISION)
+
+
+def _activation_mode_column_exists(connection: PgConnection, table: str) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT count(*)
+            FROM information_schema.columns
+            WHERE table_name = %s AND column_name = 'activation_mode'
+            """,
+            (table,),
+        )
+        return cursor.fetchone()[0] == 1
+
+
+def test_binding_activation_mode_migration_backfills_and_round_trips(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, SKILL_EXECUTION_BLOCK_REVISION)
+
+    tenant_id = _insert_tenant(connection, "activation-mode")
+    user_id = _insert_user(connection, tenant_id, "activation-mode")
+    space_id = _insert_space(connection, tenant_id, "activation-mode")
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=space_id,
+        created_by_user_id=user_id,
+        label="activation-mode",
+    )
+    assistant_id = _insert_assistant(connection, user_id=user_id, space_id=space_id)
+    policy_id = _insert_policy(connection, tenant_id)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+            """,
+            (assistant_id, tenant_id, space_id, space_id, skill_id, revision_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO governance_policy_skill_bindings (
+                policy_id, tenant_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, 0)
+            """,
+            (policy_id, tenant_id, space_id, skill_id, revision_id),
+        )
+
+    command.upgrade(config, BINDING_ACTIVATION_MODE_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT activation_mode FROM assistant_skill_bindings "
+            "WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+        assert cursor.fetchone() == ("always",)
+        cursor.execute(
+            "SELECT activation_mode FROM governance_policy_skill_bindings "
+            "WHERE policy_id = %s",
+            (policy_id,),
+        )
+        assert cursor.fetchone() == ("always",)
+
+    assert not _activation_mode_column_exists(connection, "app_skill_bindings")
+
+    _assert_constraint(
+        connection,
+        expected="ck_assistant_skill_bindings_activation_mode",
+        statement="""
+            UPDATE assistant_skill_bindings
+            SET activation_mode = 'sometimes'
+            WHERE assistant_id = %s
+        """,
+        parameters=(assistant_id,),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_governance_policy_skill_bindings_activation_mode",
+        statement="""
+            UPDATE governance_policy_skill_bindings
+            SET activation_mode = 'sometimes'
+            WHERE policy_id = %s
+        """,
+        parameters=(policy_id,),
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE governance_policy_skill_bindings
+            SET activation_mode = 'on_demand'
+            WHERE policy_id = %s
+            """,
+            (policy_id,),
+        )
+        cursor.execute(
+            "SELECT activation_mode FROM governance_policy_skill_bindings "
+            "WHERE policy_id = %s",
+            (policy_id,),
+        )
+        assert cursor.fetchone() == ("on_demand",)
+
+    command.downgrade(config, SKILL_EXECUTION_BLOCK_REVISION)
+    assert not _activation_mode_column_exists(connection, "assistant_skill_bindings")
+    assert not _activation_mode_column_exists(
+        connection, "governance_policy_skill_bindings"
+    )
+
+    command.upgrade(config, BINDING_ACTIVATION_MODE_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT activation_mode FROM assistant_skill_bindings "
+            "WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+        assert cursor.fetchone() == ("always",)
