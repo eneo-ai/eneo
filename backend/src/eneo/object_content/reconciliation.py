@@ -7,7 +7,10 @@ from time import monotonic
 from uuid import UUID
 
 from eneo.database.database import DatabaseSessionManager, sessionmanager
-from eneo.object_content.configuration import ObjectContentSettings
+from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
+    ObjectContentSettings,
+)
 from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
@@ -35,6 +38,7 @@ from eneo.object_content.s3_object_store import (
 @dataclass(frozen=True, slots=True)
 class ReconciliationResult:
     lifecycle_advanced: int
+    inline_deleted: int
     content_processed: int
     references_audited: int
     reference_drifts: int
@@ -47,6 +51,7 @@ class ReconciliationResult:
     def empty(cls) -> "ReconciliationResult":
         return cls(
             lifecycle_advanced=0,
+            inline_deleted=0,
             content_processed=0,
             references_audited=0,
             reference_drifts=0,
@@ -62,30 +67,67 @@ class ObjectContentReconciler:
 
     def __init__(
         self,
-        settings: ObjectContentSettings,
-        store: S3ObjectStore,
+        core_settings: ObjectContentCoreSettings,
         database: DatabaseSessionManager = sessionmanager,
+        *,
+        object_store_settings: ObjectContentSettings | None = None,
+        object_store: S3ObjectStore | None = None,
     ) -> None:
-        self._settings = settings
-        self._store = store
+        if (object_store_settings is None) != (object_store is None):
+            raise ValueError(
+                "Object-store settings and adapter must be supplied together"
+            )
+        self._core_settings = core_settings
+        self._object_store_settings = object_store_settings
+        self._store = object_store
         self._database = database
 
     async def run_once(self) -> ReconciliationResult:
+        async with self._database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            lifecycle_advanced = await repository.advance_local_lifecycle(
+                limit=self._core_settings.reconciliation_batch_size,
+                pending_stale_seconds=self._core_settings.pending_stale_seconds,
+            )
+            inline_deleted = await repository.tombstone_inline_deletions(
+                limit=self._core_settings.reconciliation_batch_size,
+            )
+
+        settings = self._object_store_settings
+        store = self._store
+        if settings is None or store is None:
+            async with self._database.session() as session, session.begin():
+                (
+                    references_audited,
+                    reference_drifts,
+                ) = await ObjectContentReconciliationRepository(
+                    session
+                ).audit_reference_counts(
+                    limit=self._core_settings.reconciliation_batch_size
+                )
+            return ReconciliationResult(
+                lifecycle_advanced=lifecycle_advanced,
+                inline_deleted=inline_deleted,
+                content_processed=0,
+                references_audited=references_audited,
+                reference_drifts=reference_drifts,
+                missing_objects=0,
+                object_cycle_completed=False,
+                multipart_aborted=0,
+                orphan_objects_deleted=0,
+            )
+
         lease_owner = token_hex(16)
         content_lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             repository = ObjectContentReconciliationRepository(session)
-            lifecycle_advanced = await repository.advance_local_lifecycle(
-                limit=self._settings.reconciliation_batch_size,
-                pending_stale_seconds=self._settings.pending_stale_seconds,
-            )
             work = await repository.claim_content_work(
                 lease_owner=lease_owner,
-                lease_seconds=self._settings.reconciliation_lease_seconds,
-                pending_stale_seconds=self._settings.pending_stale_seconds,
+                lease_seconds=settings.reconciliation_lease_seconds,
+                pending_stale_seconds=settings.pending_stale_seconds,
                 limit=min(
-                    self._settings.reconciliation_batch_size,
-                    self._settings.reconciliation_concurrency,
+                    settings.reconciliation_batch_size,
+                    settings.reconciliation_concurrency,
                 ),
             )
 
@@ -100,27 +142,37 @@ class ObjectContentReconciler:
             )
         )
 
+        object_cycle_completed = False
+        missing_objects = 0
+        multipart_aborted = 0
+        orphan_objects_deleted = 0
+        try:
+            object_cycle_completed = await self._reconcile_object_page()
+            async with self._database.session() as session, session.begin():
+                missing_objects = await ObjectContentReconciliationRepository(
+                    session
+                ).mark_missing_from_completed_inventory(
+                    limit=settings.reconciliation_batch_size
+                )
+            multipart_aborted = await self._reconcile_multipart_page()
+            orphan_objects_deleted = await self._delete_orphans(lease_owner)
+        except ObjectStoreUnavailableError:
+            # Each preceding phase commits independently. Preserve its result
+            # when a later object-store call becomes unavailable so the worker
+            # summary agrees with the durable transitions already recorded.
+            pass
         async with self._database.session() as session, session.begin():
-            repository = ObjectContentReconciliationRepository(session)
             (
                 references_audited,
                 reference_drifts,
-            ) = await repository.audit_reference_counts(
-                limit=self._settings.reconciliation_batch_size
-            )
-
-        object_cycle_completed = await self._reconcile_object_page()
-        async with self._database.session() as session, session.begin():
-            missing_objects = await ObjectContentReconciliationRepository(
+            ) = await ObjectContentReconciliationRepository(
                 session
-            ).mark_missing_from_completed_inventory(
-                limit=self._settings.reconciliation_batch_size
+            ).audit_reference_counts(
+                limit=self._core_settings.reconciliation_batch_size
             )
-
-        multipart_aborted = await self._reconcile_multipart_page()
-        orphan_objects_deleted = await self._delete_orphans(lease_owner)
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
+            inline_deleted=inline_deleted,
             content_processed=len(work),
             references_audited=references_audited,
             reference_drifts=reference_drifts,
@@ -164,29 +216,31 @@ class ObjectContentReconciler:
         *,
         lease_started_at: float,
     ) -> None:
+        settings, store = self._require_object_store()
+
         async def renew_pending_lease() -> None:
             async with self._database.session() as session, session.begin():
                 await ObjectContentRepository(session).renew_pending_lease(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
-                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                    lease_seconds=settings.reconciliation_lease_seconds,
                 )
 
         lease_checkpoint = OperationLeaseCheckpoint(
             lease_started_at=lease_started_at,
-            lease_seconds=self._settings.reconciliation_lease_seconds,
-            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_pending_lease,
         )
 
         try:
             if work.multipart_upload_id is not None:
-                await self._store.abort_multipart(
+                await store.abort_multipart(
                     work.object_key,
                     work.multipart_upload_id,
                     operation_checkpoint=lease_checkpoint,
                 )
-            digest = await self._store.recompute_sha256(
+            digest = await store.recompute_sha256(
                 work.object_key,
                 expected_size_bytes=work.size_bytes,
                 expected_media_type=work.media_type,
@@ -230,22 +284,24 @@ class ObjectContentReconciler:
         *,
         lease_started_at: float,
     ) -> None:
+        settings, store = self._require_object_store()
+
         async def renew_delete_lease() -> None:
             async with self._database.session() as session, session.begin():
                 await ObjectContentRepository(session).renew_delete_lease(
                     content_id=work.content_id,
                     lease_owner=lease_owner,
-                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                    lease_seconds=settings.reconciliation_lease_seconds,
                 )
 
         lease_checkpoint = OperationLeaseCheckpoint(
             lease_started_at=lease_started_at,
-            lease_seconds=self._settings.reconciliation_lease_seconds,
-            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_delete_lease,
         )
         try:
-            await self._store.delete_and_confirm(
+            await store.delete_and_confirm(
                 work.object_key,
                 operation_checkpoint=lease_checkpoint,
             )
@@ -289,8 +345,8 @@ class ObjectContentReconciler:
         )
         delay = retry_delay_seconds(
             work.attempt_count,
-            base_seconds=self._settings.reconciliation_retry_base_seconds,
-            maximum_seconds=self._settings.reconciliation_retry_max_seconds,
+            base_seconds=self._core_settings.reconciliation_retry_base_seconds,
+            maximum_seconds=self._core_settings.reconciliation_retry_max_seconds,
         )
         async with self._database.session() as session, session.begin():
             await ObjectContentRepository(session).record_reconciliation_retry(
@@ -301,11 +357,12 @@ class ObjectContentReconciler:
             )
 
     async def _reconcile_object_page(self) -> bool:
+        settings, store = self._require_object_store()
         async with self._database.session() as session, session.begin():
             cursor = await ObjectContentReconciliationRepository(
                 session
             ).object_inventory_cursor()
-        page = await self._store.list_object_page(
+        page = await store.list_object_page(
             continuation_token=cursor.continuation_token
         )
         async with self._database.session() as session, session.begin():
@@ -315,15 +372,16 @@ class ObjectContentReconciler:
                 cursor=cursor,
                 objects=page.objects,
                 next_token=page.next_token,
-                orphan_grace_seconds=self._settings.orphan_grace_seconds,
+                orphan_grace_seconds=settings.orphan_grace_seconds,
             )
 
     async def _reconcile_multipart_page(self) -> int:
+        settings, store = self._require_object_store()
         async with self._database.session() as session, session.begin():
             cursor = await ObjectContentReconciliationRepository(
                 session
             ).multipart_inventory_cursor()
-        page = await self._store.list_multipart_page(
+        page = await store.list_multipart_page(
             key_marker=cursor.key_marker,
             upload_id_marker=cursor.upload_id_marker,
         )
@@ -333,7 +391,7 @@ class ObjectContentReconciler:
                 uploads=page.uploads,
                 next_key_marker=page.next_key_marker,
                 next_upload_id_marker=page.next_upload_id_marker,
-                orphan_grace_seconds=self._settings.orphan_grace_seconds,
+                orphan_grace_seconds=settings.orphan_grace_seconds,
             )
         multipart_lease_owner = token_hex(16)
         async with self._database.session() as session, session.begin():
@@ -341,10 +399,10 @@ class ObjectContentReconciler:
                 session
             ).claim_multipart_aborts(
                 lease_owner=multipart_lease_owner,
-                lease_seconds=self._settings.reconciliation_lease_seconds,
+                lease_seconds=settings.reconciliation_lease_seconds,
                 limit=min(
-                    self._settings.reconciliation_batch_size,
-                    self._settings.reconciliation_concurrency,
+                    settings.reconciliation_batch_size,
+                    settings.reconciliation_concurrency,
                 ),
             )
         results = await asyncio.gather(
@@ -360,6 +418,7 @@ class ObjectContentReconciler:
         lease: MultipartAbortLease,
         lease_owner: str,
     ) -> int:
+        settings, store = self._require_object_store()
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             confirmed = await ObjectContentReconciliationRepository(
@@ -367,7 +426,7 @@ class ObjectContentReconciler:
             ).confirm_multipart_abort_lease(
                 lease=lease,
                 lease_owner=lease_owner,
-                lease_seconds=self._settings.reconciliation_lease_seconds,
+                lease_seconds=settings.reconciliation_lease_seconds,
             )
         if not confirmed:
             return 0
@@ -379,17 +438,17 @@ class ObjectContentReconciler:
                 ).renew_multipart_abort_lease(
                     lease=lease,
                     lease_owner=lease_owner,
-                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                    lease_seconds=settings.reconciliation_lease_seconds,
                 )
 
         lease_checkpoint = OperationLeaseCheckpoint(
             lease_started_at=lease_started_at,
-            lease_seconds=self._settings.reconciliation_lease_seconds,
-            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_multipart_abort_lease,
         )
         try:
-            await self._store.abort_multipart(
+            await store.abort_multipart(
                 lease.object_key,
                 lease.upload_id,
                 operation_checkpoint=lease_checkpoint,
@@ -418,16 +477,17 @@ class ObjectContentReconciler:
         return 1
 
     async def _delete_orphans(self, lease_owner: str) -> int:
+        settings, _store = self._require_object_store()
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
             leases = await ObjectContentReconciliationRepository(
                 session
             ).claim_orphan_deletes(
                 lease_owner=lease_owner,
-                lease_seconds=self._settings.reconciliation_lease_seconds,
+                lease_seconds=settings.reconciliation_lease_seconds,
                 limit=min(
-                    self._settings.reconciliation_batch_size,
-                    self._settings.reconciliation_concurrency,
+                    settings.reconciliation_batch_size,
+                    settings.reconciliation_concurrency,
                 ),
             )
         results = await asyncio.gather(
@@ -449,6 +509,7 @@ class ObjectContentReconciler:
         *,
         lease_started_at: float,
     ) -> int:
+        settings, store = self._require_object_store()
         async with self._database.session() as session, session.begin():
             confirmed = await ObjectContentReconciliationRepository(
                 session
@@ -466,17 +527,17 @@ class ObjectContentReconciler:
                 ).renew_orphan_delete_lease(
                     object_key=lease.object_key,
                     lease_owner=lease_owner,
-                    lease_seconds=self._settings.reconciliation_lease_seconds,
+                    lease_seconds=settings.reconciliation_lease_seconds,
                 )
 
         lease_checkpoint = OperationLeaseCheckpoint(
             lease_started_at=lease_started_at,
-            lease_seconds=self._settings.reconciliation_lease_seconds,
-            request_budget_seconds=self._settings.sdk_request_budget_seconds,
+            lease_seconds=settings.reconciliation_lease_seconds,
+            request_budget_seconds=settings.sdk_request_budget_seconds,
             renew=renew_orphan_delete_lease,
         )
         try:
-            await self._store.delete_and_confirm(
+            await store.delete_and_confirm(
                 lease.object_key,
                 operation_checkpoint=lease_checkpoint,
             )
@@ -497,3 +558,10 @@ class ObjectContentReconciler:
                 lease_owner=lease_owner,
             )
         return 1
+
+    def _require_object_store(self) -> tuple[ObjectContentSettings, S3ObjectStore]:
+        settings = self._object_store_settings
+        store = self._store
+        if settings is None or store is None:
+            raise RuntimeError("Object-store reconciliation is not configured")
+        return settings, store

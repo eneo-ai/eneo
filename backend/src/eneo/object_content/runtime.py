@@ -5,20 +5,22 @@ from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
 
-from sqlalchemy import exists, select, text
+from sqlalchemy import exists, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.database.tables.object_content_table import ObjectContents
 from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
     ObjectContentSettings,
+    load_object_content_core_settings,
     load_object_content_settings,
 )
 from eneo.object_content.content import (
     ContentState,
     ObjectContentConfigurationError,
-    ObjectContentDisabledError,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.reconciliation import (
@@ -38,11 +40,11 @@ _READINESS_CACHE_SECONDS = 1.0
 
 class ObjectContentReadinessCode(StrEnum):
     READY = "ready"
-    DISABLED = "disabled"
+    OBJECT_STORE_NOT_CONFIGURED = "object_store_not_configured"
     NOT_INITIALIZED = "not_initialized"
     CONFIGURATION_REQUIRED = "configuration_required"
     DATABASE_UNAVAILABLE = "database_unavailable"
-    STORE_UNAVAILABLE = "store_unavailable"
+    STORE_DEGRADED = "store_degraded"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +55,6 @@ class ObjectContentReadiness:
 
 class ObjectContentRuntimeState(StrEnum):
     NOT_STARTED = "not_started"
-    DISABLED = "disabled"
     ENABLED = "enabled"
 
 
@@ -63,6 +64,7 @@ class ObjectContentRuntime:
     def __init__(self, database: DatabaseSessionManager = sessionmanager) -> None:
         self._database = database
         self._state = ObjectContentRuntimeState.NOT_STARTED
+        self._core_settings: ObjectContentCoreSettings | None = None
         self._settings: ObjectContentSettings | None = None
         self._store: S3ObjectStore | None = None
         self._service: ObjectContentService | None = None
@@ -73,6 +75,7 @@ class ObjectContentRuntime:
     def start(
         self,
         *,
+        core_settings: ObjectContentCoreSettings | None = None,
         settings: ObjectContentSettings | None = None,
         store: S3ObjectStore | None = None,
     ) -> None:
@@ -80,6 +83,11 @@ class ObjectContentRuntime:
             raise RuntimeError("Object-content runtime is already initialized")
 
         self._readiness_cache = None
+        resolved_core_settings = (
+            core_settings
+            if core_settings is not None
+            else load_object_content_core_settings()
+        )
         resolved_settings = (
             settings if settings is not None else load_object_content_settings()
         )
@@ -88,27 +96,30 @@ class ObjectContentRuntime:
                 raise ValueError(
                     "An object-content store cannot be supplied without settings"
                 )
-            self._state = ObjectContentRuntimeState.DISABLED
-            return
-
-        resolved_store = store or S3ObjectStore(resolved_settings)
+            resolved_store = None
+        else:
+            resolved_store = store or S3ObjectStore(resolved_settings)
+        self._core_settings = resolved_core_settings
         self._settings = resolved_settings
         self._store = resolved_store
         self._service = ObjectContentService(
-            resolved_settings,
-            resolved_store,
+            resolved_core_settings,
             self._database,
+            object_store_settings=resolved_settings,
+            object_store=resolved_store,
         )
         self._reconciler = ObjectContentReconciler(
-            resolved_settings,
-            resolved_store,
+            resolved_core_settings,
             self._database,
+            object_store_settings=resolved_settings,
+            object_store=resolved_store,
         )
         self._state = ObjectContentRuntimeState.ENABLED
 
     async def stop(self) -> None:
         store = self._store
         self._readiness_cache = None
+        self._core_settings = None
         self._settings = None
         self._store = None
         self._service = None
@@ -126,11 +137,13 @@ class ObjectContentRuntime:
         return self._state is ObjectContentRuntimeState.ENABLED
 
     @property
+    def object_store_configured(self) -> bool:
+        return self._settings is not None
+
+    @property
     def service(self) -> ObjectContentService:
         service = self._service
         if service is None:
-            if self._state is ObjectContentRuntimeState.DISABLED:
-                raise ObjectContentDisabledError("Durable object content is disabled")
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
@@ -140,8 +153,6 @@ class ObjectContentRuntime:
     def reconciler(self) -> ObjectContentReconciler:
         reconciler = self._reconciler
         if reconciler is None:
-            if self._state is ObjectContentRuntimeState.DISABLED:
-                raise ObjectContentDisabledError("Durable object content is disabled")
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
@@ -181,25 +192,6 @@ class ObjectContentRuntime:
         return readiness
 
     async def _refresh_readiness(self) -> ObjectContentReadiness:
-        if self._state is ObjectContentRuntimeState.DISABLED:
-            # PostgreSQL must remain reachable to prove disabled is still safe.
-            try:
-                await self.validate_configuration()
-            except ObjectContentConfigurationError:
-                return ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
-                )
-            except ObjectContentUnavailableError:
-                return ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
-                )
-            return ObjectContentReadiness(
-                ready=True,
-                code=ObjectContentReadinessCode.DISABLED,
-            )
-
         service = self._service
         if service is None:
             return ObjectContentReadiness(
@@ -208,9 +200,8 @@ class ObjectContentRuntime:
             )
 
         try:
-            async with self._database.connect() as connection:
-                await connection.execute(text("SELECT 1"))
-        except (OSError, SQLAlchemyError):
+            active_object_store_content = await self._has_active_object_store_content()
+        except ObjectContentUnavailableError:
             # Readiness is a failure boundary: driver and pool failures must
             # produce one sanitized status instead of escaping through the
             # public probe.
@@ -218,8 +209,20 @@ class ObjectContentRuntime:
                 ready=False,
                 code=ObjectContentReadinessCode.DATABASE_UNAVAILABLE,
             )
+
+        if not self.object_store_configured:
+            if active_object_store_content:
+                return ObjectContentReadiness(
+                    ready=False,
+                    code=ObjectContentReadinessCode.CONFIGURATION_REQUIRED,
+                )
+            return ObjectContentReadiness(
+                ready=True,
+                code=ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED,
+            )
+
         try:
-            await self.validate_configuration()
+            await service.check_object_store_ready()
         except ObjectContentConfigurationError:
             return ObjectContentReadiness(
                 ready=False,
@@ -227,8 +230,8 @@ class ObjectContentRuntime:
             )
         except ObjectContentUnavailableError:
             return ObjectContentReadiness(
-                ready=False,
-                code=ObjectContentReadinessCode.STORE_UNAVAILABLE,
+                ready=True,
+                code=ObjectContentReadinessCode.STORE_DEGRADED,
             )
         return ObjectContentReadiness(
             ready=True,
@@ -236,41 +239,60 @@ class ObjectContentRuntime:
         )
 
     async def validate_configuration(self) -> None:
-        """Fail closed if disabled storage would strand durable content."""
+        """Validate that configured byte authorities remain reachable by design."""
         if self._state is ObjectContentRuntimeState.NOT_STARTED:
             raise ObjectContentUnavailableError(
                 "Durable object content is not initialized"
             )
-        if self._state is ObjectContentRuntimeState.ENABLED:
-            await self.service.check_ready()
+        active_object_store_content = await self._has_active_object_store_content()
+        if not self.object_store_configured:
+            if active_object_store_content:
+                raise ObjectContentConfigurationError(
+                    "Object-store configuration is required by active content"
+                )
             return
+        await self.service.check_object_store_ready()
 
+    async def _has_active_object_store_content(self) -> bool:
         try:
             async with self._database.connect() as connection:
-                active_content = (
-                    await connection.execute(
-                        select(
-                            exists().where(
-                                ObjectContents.state.in_(_ACTIVE_CONTENT_STATES)
-                            )
+                result = await connection.execute(
+                    select(
+                        exists().where(
+                            ObjectContents.storage_kind
+                            == StorageKind.OBJECT_STORE.value,
+                            ObjectContents.state.in_(_ACTIVE_CONTENT_STATES),
                         )
                     )
-                ).scalar_one()
+                )
+                active_content = bool(result.scalar_one())
         except (OSError, SQLAlchemyError) as error:
             raise ObjectContentUnavailableError(
-                "Unable to verify the disabled object-content state"
+                "Unable to verify object-content authority state"
             ) from error
-
-        if active_content:
-            raise ObjectContentConfigurationError(
-                "Durable object content cannot be disabled while active records exist"
-            )
+        return active_content
 
     async def reconcile_once(self) -> ReconciliationResult:
-        if self._state is ObjectContentRuntimeState.DISABLED:
-            await self.validate_configuration()
-            return ReconciliationResult.empty()
-        await self.validate_configuration()
+        if self._state is ObjectContentRuntimeState.NOT_STARTED:
+            raise ObjectContentUnavailableError(
+                "Durable object content is not initialized"
+            )
+        if (
+            not self.object_store_configured
+            and await self._has_active_object_store_content()
+        ):
+            raise ObjectContentConfigurationError(
+                "Object-store configuration is required by active content"
+            )
+        if self.object_store_configured:
+            try:
+                await self.service.check_object_store_ready()
+            except ObjectContentConfigurationError:
+                raise
+            except ObjectContentUnavailableError:
+                # The reconciler still advances local lifecycle/audit work and
+                # treats a transient object-store outage as a bounded no-op.
+                pass
         return await self.reconciler.run_once()
 
     async def health_facts(self) -> ObjectContentHealthFacts:

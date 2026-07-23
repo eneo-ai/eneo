@@ -6,7 +6,7 @@ from datetime import timedelta
 from hashlib import sha256
 from threading import Event
 from typing import TYPE_CHECKING, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from botocore.config import Config
@@ -19,6 +19,7 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -33,6 +34,7 @@ from eneo.object_content.content import (
     ObjectContentIntegrityError,
     ObjectContentStateError,
     ObjectContentUnavailableError,
+    StorageKind,
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
@@ -178,6 +180,42 @@ def _raw_client(real_store: RealObjectStore) -> "S3Client":
     )
 
 
+def _service(
+    settings: ObjectContentSettings,
+    store: S3ObjectStore,
+    database: DatabaseSessionManager,
+) -> ObjectContentService:
+    return ObjectContentService(
+        settings,
+        database,
+        object_store_settings=settings,
+        object_store=store,
+    )
+
+
+def _reconciler(
+    settings: ObjectContentSettings,
+    store: S3ObjectStore,
+    database: DatabaseSessionManager,
+) -> ObjectContentReconciler:
+    return ObjectContentReconciler(
+        settings,
+        database,
+        object_store_settings=settings,
+        object_store=store,
+    )
+
+
+async def _object_key(
+    database: DatabaseSessionManager,
+    content_id: UUID,
+) -> str:
+    async with database.session() as session, session.begin():
+        descriptor = await session.get(ObjectStoreObjects, content_id)
+        assert descriptor is not None
+        return descriptor.object_key
+
+
 @pytest.mark.asyncio
 async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
     monkeypatch: pytest.MonkeyPatch,
@@ -199,7 +237,7 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
         real_object_store.settings,
         client=cast("S3Client", delayed_client),
     )
-    service = ObjectContentService(
+    service = _service(
         real_object_store.settings,
         delayed_store,
         object_content_database,
@@ -243,6 +281,7 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
                         producer_receipt=f"file:{owner.id}:original:0",
                     ),
                     content=captured,
+                    storage_kind=StorageKind.OBJECT_STORE,
                 )
                 session.add(
                     FileContentReferences(
@@ -279,7 +318,7 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
             await _wait_for(delayed_client.head_started)
 
             try:
-                concurrent = await ObjectContentReconciler(
+                concurrent = await _reconciler(
                     real_object_store.settings,
                     real_object_store.store,
                     object_content_database,
@@ -298,7 +337,9 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
         delayed_client.release_put.set()
         delayed_client.release_head.set()
         if "prepared" in locals():
-            await real_object_store.store.delete_and_confirm(prepared.object_key)
+            await real_object_store.store.delete_and_confirm(
+                await _object_key(object_content_database, prepared.id)
+            )
         raw_client.close()
 
 
@@ -324,7 +365,7 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
         settings,
         client=cast("S3Client", delayed_client),
     )
-    service = ObjectContentService(settings, delayed_store, object_content_database)
+    service = _service(settings, delayed_store, object_content_database)
     payload = b"x" * (5 * _MEBIBYTE + 17)
 
     try:
@@ -364,6 +405,7 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
                         producer_receipt=f"file:{owner.id}:original:0",
                     ),
                     content=captured,
+                    storage_kind=StorageKind.OBJECT_STORE,
                 )
                 session.add(
                     FileContentReferences(
@@ -381,7 +423,7 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
             await _wait_for(delayed_client.first_part_finished)
             await asyncio.sleep(settings.reconciliation_lease_seconds + 0.1)
 
-            concurrent = await ObjectContentReconciler(
+            concurrent = await _reconciler(
                 settings,
                 real_object_store.store,
                 object_content_database,
@@ -399,7 +441,9 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
                 await upload
         if "prepared" in locals():
             try:
-                await real_object_store.store.delete_and_confirm(prepared.object_key)
+                await real_object_store.store.delete_and_confirm(
+                    await _object_key(object_content_database, prepared.id)
+                )
             except ObjectStoreNotFoundError:
                 pass
         raw_client.close()
@@ -411,12 +455,12 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
     real_object_store: RealObjectStore,
 ) -> None:
     settings = real_object_store.settings
-    service = ObjectContentService(
+    service = _service(
         settings,
         real_object_store.store,
         object_content_database,
     )
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         settings,
         real_object_store.store,
         object_content_database,
@@ -461,6 +505,7 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
                     producer_receipt=f"file:{owner_id}:original:0",
                 ),
                 content=captured,
+                storage_kind=StorageKind.OBJECT_STORE,
             )
             session.add(
                 FileContentReferences(
@@ -505,7 +550,7 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
             settings,
             client=cast("S3Client", _TimeoutReadClient(size_bytes)),
         )
-        timeout_service = ObjectContentService(
+        timeout_service = _service(
             settings,
             timeout_store,
             object_content_database,
@@ -543,7 +588,9 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
         assert row is not None
         assert row.state == ContentState.TOMBSTONED.value
     with pytest.raises(ObjectStoreNotFoundError):
-        await real_object_store.store.head(prepared.object_key)
+        await real_object_store.store.head(
+            await _object_key(object_content_database, prepared.id)
+        )
 
 
 @pytest.mark.asyncio
@@ -556,7 +603,7 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
     original = b"abcdefghij"
     replacement = b"0123456789"
     settings = real_object_store.settings
-    service = ObjectContentService(
+    service = _service(
         settings,
         real_object_store.store,
         object_content_database,
@@ -598,6 +645,7 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
                     producer_receipt=f"file:{owner.id}:original:0",
                 ),
                 content=captured,
+                storage_kind=StorageKind.OBJECT_STORE,
             )
             session.add(
                 FileContentReferences(
@@ -614,7 +662,7 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
     try:
         client.put_object(
             Bucket=settings.bucket,
-            Key=prepared.object_key,
+            Key=await _object_key(object_content_database, prepared.id),
             Body=replacement,
             ContentLength=len(replacement),
             ContentType="application/octet-stream",
@@ -639,7 +687,9 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
             row = await session.get(ObjectContents, prepared.id)
             assert row is not None
             assert row.state == ContentState.FAILED.value
-            assert row.failure_code == ContentFailureCode.REMOTE_CORRUPT.value
+            assert row.failure_code == ContentFailureCode.BACKEND_CORRUPT.value
     finally:
-        await real_object_store.store.delete_and_confirm(prepared.object_key)
+        await real_object_store.store.delete_and_confirm(
+            await _object_key(object_content_database, prepared.id)
+        )
         client.close()

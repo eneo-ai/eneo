@@ -1,9 +1,9 @@
 # Object Content Architecture
 
-Eneo separates durable content identity from durable bytes. PostgreSQL is the
-control plane. A private S3-compatible bucket is the byte plane. This boundary
-keeps authorization and lifecycle decisions in typed application data while
-allowing operators to choose a compatible storage service.
+Eneo has one durable-content control plane and two explicit byte backends.
+PostgreSQL always owns identity, integrity, authorization, and lifecycle. A
+content record stores its bounded payload either in PostgreSQL or in one
+private S3-compatible endpoint.
 
 import { Callout } from "nextra/components";
 
@@ -14,16 +14,17 @@ import { Callout } from "nextra/components";
 
 ## Ownership boundary
 
-| PostgreSQL control plane                              | S3-compatible byte plane                           |
-| ----------------------------------------------------- | -------------------------------------------------- |
-| Content identity and lifecycle state                  | Original and derived byte streams                  |
-| Authorization references, holds, and retention        | Opaque objects addressed by deployment-scoped keys |
-| Canonical SHA-256, exact size, and media type         | S3 protocol checksums and ETags                    |
-| Durable intent, audit facts, and reconciliation state | Multipart state and deletion visibility            |
+| PostgreSQL control plane                              | Chosen byte backend                                   |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| Content identity and lifecycle state                  | `postgres_inline`: bounded one-to-one BYTEA payload   |
+| Authorization references, holds, and retention        | `object_store`: opaque object in one private endpoint |
+| Canonical SHA-256, exact size, and media type         | Backend-specific transport and deletion state         |
+| Durable intent, audit facts, and reconciliation state | Bytes only; never authorization or product policy     |
 
-The bucket never decides who may read content or when Eneo may delete it.
-Object keys contain neither filenames nor organization identifiers, and
-ordinary APIs return neither endpoint, bucket, key, nor provider details.
+The chosen backend is immutable for that record. Eneo never silently retries an
+inline write in object storage, or copies a failed object-store write into
+PostgreSQL. Object keys contain neither filenames nor organization identifiers,
+and ordinary APIs expose neither backend infrastructure nor provider details.
 
 ```mermaid
 flowchart LR
@@ -31,23 +32,27 @@ flowchart LR
   api --> service[Object-content lifecycle]
   worker[Worker and reconciler] --> service
   service --> postgres[(PostgreSQL\ncontrol plane)]
-  service --> s3[(Private S3-compatible\nbyte plane)]
+  service --> inline[(PostgreSQL\nbounded inline bytes)]
+  service --> s3[(Optional private S3-compatible\nlarge-byte plane)]
   postgres -. durable intent and identity .-> service
-  s3 -. byte stream and inventory .-> service
+  inline -. one explicit byte authority .-> service
+  s3 -. one explicit byte authority .-> service
 ```
 
 ## Write, read, and delete invariants
 
-Eneo records durable PostgreSQL intent before remote object-store work. Uploads
-compute the canonical full-byte SHA-256 while streaming. S3 ETags, CRCs, and
-multipart composite checksums help with transport, but they never replace that
-digest.
+Every write computes a canonical full-byte SHA-256 over the bounded input. An
+inline write verifies the digest and size, then commits the payload, immediately
+available control row, and exactly one first owner reference atomically. An
+object-store write commits `pending` intent, an opaque descriptor, and exactly
+one first reference before remote I/O begins.
 
-Eneo verifies the full object against the PostgreSQL digest before returning
-bytes. A range response also verifies and spools the full object before slicing
-the requested interval. Memory use stays bounded; larger objects use temporary
-disk. Operators must therefore size temporary storage for the largest allowed
-object multiplied by measured concurrent reads and uploads.
+Inline bytes have a documented deployment ceiling and are verified against the
+control row before a full or single-range response. Object-store uploads compute
+the same canonical digest while streaming. S3 ETags, CRCs, and multipart
+composite checksums help with transport, but never replace it. Object-store
+reads verify and spool the full object before serving full or range bytes;
+memory use stays bounded and larger objects spill to temporary disk.
 
 Deletion starts with irreversible PostgreSQL intent. Holds and retention block
 hard deletion. A tombstone becomes purgeable only after its database-owned
@@ -55,7 +60,8 @@ purge time exists and has passed. Missing purge time means retain, not delete.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending
+  [*] --> available: inline payload + first reference commit
+  [*] --> pending: object descriptor + first reference commit
   pending --> available: upload verified
   pending --> failed: upload cannot converge
   available --> retained: hold or retention applies
@@ -68,10 +74,15 @@ stateDiagram-v2
 
 ## Crash recovery and reconciliation
 
-Network and process failures can interrupt the gap between a committed intent
-and remote work. Bounded leases, idempotent retries, multipart abort records,
-and a queue-neutral reconciler close that gap. The current worker schedules the
-reconciler with ARQ, but the lifecycle code does not depend on ARQ.
+Inline creation has no database/object-store crash gap: payload and intent share
+one transaction. Network and process failures can interrupt object-store work
+after its intent commits. Bounded leases, idempotent retries, multipart abort
+records, and a queue-neutral reconciler close that gap. The current worker
+schedules the reconciler with ARQ, but lifecycle code does not depend on ARQ.
+
+Local lifecycle, retention, reference audit, and inline deletion reconciliation
+continue even when no endpoint is configured or a configured endpoint is
+temporarily unavailable.
 
 The reconciler trusts an inventory only after every page returns a complete,
 advancing cursor. An invalid or non-advancing page fails the run before Eneo
@@ -90,21 +101,23 @@ intent, creates a non-overwriting marker in the bucket, and confirms the pair
 in PostgreSQL. Other API and worker processes wait, then verify the confirmed
 pair.
 
-Startup, readiness, and reconciliation all verify this binding before mutating
-content. Eneo does not adopt a reachable empty or foreign bucket. A missing or
-mismatched marker yields `configuration_required`, which forces an operator to
-restore the matching database and byte-store pair instead of silently accepting
-data loss.
+When object storage is configured, startup, readiness, and remote reconciliation
+verify this binding before mutating objects. Eneo does not adopt a reachable
+empty or foreign bucket. A missing or mismatched marker yields
+`configuration_required`, which forces an operator to restore the matching
+database and byte-store pair instead of silently accepting data loss. Inline
+mode does not create or require a bucket binding.
 
 `OBJECT_CONTENT_DEPLOYMENT_ID` adds a stable namespace to opaque object keys.
 Operators generate it once and preserve it through upgrades and restores. It is
 not a feature toggle, credential, or migration mechanism.
 
-## Provider-independent contract
+## Optional provider-independent contract
 
-The application has one S3-compatible adapter. The bundled SeaweedFS service,
-external MinIO, and other endpoints use the same path. There is no provider
-registry or Amazon-specific product branch.
+The default reference deployment needs no S3-compatible service. When enabled,
+the application has one S3-compatible adapter. Bundled SeaweedFS, external
+MinIO, and other endpoints use the same path. There is no provider registry or
+Amazon-specific product branch.
 
 The supported contract includes:
 
@@ -120,10 +133,10 @@ Eneo verifies a full read before serving a range.
 
 ## Why the reference deployment uses SeaweedFS
 
-The Docker Compose stack needs a private S3-compatible byte plane that can run
-beside the backend and worker without adding a public service. SeaweedFS fits
-that reference role and supports the required protocol subset. It does not
-become an application dependency: an operator can replace it with any endpoint
+Some installations need a private S3-compatible byte plane that can run beside
+the backend and worker without adding a public service. The optional Compose
+profile uses SeaweedFS for that reference role. It does not become an
+application dependency: an operator may stay inline-only or use any endpoint
 that passes the same contract.
 
 The bundled service is intentionally single-node. Organizations that require
@@ -177,10 +190,13 @@ commands.
 
 ## Operational consequences
 
-- PostgreSQL and the object store must share one backup and restore point.
+- Inline-only backups contain control and bytes in PostgreSQL.
+- If object-store rows exist, PostgreSQL and the object store must share one
+  backup and restore point.
 - The stable deployment ID and internal marker must survive restoration.
-- Readiness can fail while liveness stays healthy; Eneo never falls back to a
-  filesystem or PostgreSQL byte column.
+- A transient optional-endpoint outage degrades its capability while liveness,
+  core readiness, and inline work continue.
+- Eneo never falls back between backends or to a filesystem.
 - Endpoint capacity, PostgreSQL state, reconciliation lag, temporary spool
   space, and multipart cleanup all need monitoring.
 - Changing provider is a verified content migration, not an endpoint edit

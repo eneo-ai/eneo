@@ -67,8 +67,8 @@ def test_liveness_stays_green_while_object_store_readiness_recovers(
         AsyncMock(
             side_effect=(
                 ObjectContentReadiness(
-                    ready=False,
-                    code=ObjectContentReadinessCode.STORE_UNAVAILABLE,
+                    ready=True,
+                    code=ObjectContentReadinessCode.STORE_DEGRADED,
                 ),
                 ObjectContentReadiness(
                     ready=True,
@@ -80,15 +80,16 @@ def test_liveness_stays_green_while_object_store_readiness_recovers(
     client = TestClient(get_application())
 
     live = client.get("/api/livez")
-    unavailable = client.get("/api/readyz")
+    degraded = client.get("/api/readyz")
     recovered = client.get("/api/readyz")
 
     assert live.status_code == 200
     assert live.json() == {"detail": {"status": "HEALTHY"}}
-    assert unavailable.status_code == 503
-    assert unavailable.json()["detail"]["object_content"] == {
-        "status": "UNHEALTHY",
-        "code": "store_unavailable",
+    assert degraded.status_code == 200
+    assert degraded.json()["detail"]["status"] == "DEGRADED"
+    assert degraded.json()["detail"]["object_content"] == {
+        "status": "DEGRADED",
+        "code": "store_degraded",
     }
     assert recovered.status_code == 200
     assert recovered.json()["detail"]["object_content"] == {
@@ -97,7 +98,7 @@ def test_liveness_stays_green_while_object_store_readiness_recovers(
     }
 
 
-def test_readiness_is_healthy_and_explicit_when_object_content_is_disabled(
+def test_readiness_is_healthy_when_object_store_is_not_configured(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -111,7 +112,7 @@ def test_readiness_is_healthy_and_explicit_when_object_content_is_disabled(
         AsyncMock(
             return_value=ObjectContentReadiness(
                 ready=True,
-                code=ObjectContentReadinessCode.DISABLED,
+                code=ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED,
             )
         ),
     )
@@ -121,8 +122,8 @@ def test_readiness_is_healthy_and_explicit_when_object_content_is_disabled(
 
     assert response.status_code == 200
     assert response.json()["detail"]["object_content"] == {
-        "status": "DISABLED",
-        "code": "disabled",
+        "status": "NOT_CONFIGURED",
+        "code": "object_store_not_configured",
     }
 
 

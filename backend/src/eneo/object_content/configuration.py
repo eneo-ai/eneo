@@ -16,7 +16,7 @@ _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
 
 
-class ObjectContentSettings(BaseSettings):
+class ObjectContentCoreSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="OBJECT_CONTENT_",
         env_file=None,
@@ -24,6 +24,36 @@ class ObjectContentSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
+    inline_maximum_bytes: int = Field(default=10 * _MEBIBYTE, ge=1)
+    inline_io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
+    reconciliation_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=_MAXIMUM_S3_PAGE_SIZE,
+    )
+    reconciliation_concurrency: int = Field(default=4, ge=1, le=32)
+    reconciliation_lease_seconds: int = Field(default=300, ge=1)
+    reconciliation_retry_base_seconds: int = Field(default=30, ge=1)
+    reconciliation_retry_max_seconds: int = Field(default=3600, ge=1)
+    pending_stale_seconds: int = Field(default=300, ge=1)
+
+    @model_validator(mode="after")
+    def validate_core_bounds(self) -> Self:
+        if self.inline_io_chunk_bytes > self.inline_maximum_bytes:
+            raise ValueError(
+                "inline_io_chunk_bytes must not exceed inline_maximum_bytes"
+            )
+        if (
+            self.reconciliation_retry_max_seconds
+            < self.reconciliation_retry_base_seconds
+        ):
+            raise ValueError(
+                "reconciliation_retry_max_seconds must be at least the base delay"
+            )
+        return self
+
+
+class ObjectContentSettings(ObjectContentCoreSettings):
     endpoint_url: str
     region: str = Field(min_length=1, max_length=128)
     bucket: str = Field(min_length=3, max_length=63)
@@ -52,16 +82,6 @@ class ObjectContentSettings(BaseSettings):
         ge=1,
         le=_MAXIMUM_MULTIPART_PART_BYTES,
     )
-    reconciliation_batch_size: int = Field(
-        default=100,
-        ge=1,
-        le=_MAXIMUM_S3_PAGE_SIZE,
-    )
-    reconciliation_concurrency: int = Field(default=4, ge=1, le=32)
-    reconciliation_lease_seconds: int = Field(default=300, ge=1)
-    reconciliation_retry_base_seconds: int = Field(default=30, ge=1)
-    reconciliation_retry_max_seconds: int = Field(default=3600, ge=1)
-    pending_stale_seconds: int = Field(default=300, ge=1)
     delete_visibility_timeout_seconds: int = Field(default=30, ge=1)
     delete_poll_interval_seconds: float = Field(default=0.25, gt=0)
     orphan_grace_seconds: int = Field(default=3600, ge=1)
@@ -117,13 +137,6 @@ class ObjectContentSettings(BaseSettings):
             )
         if self.io_chunk_bytes > self.spool_memory_bytes:
             raise ValueError("io_chunk_bytes must not exceed spool_memory_bytes")
-        if (
-            self.reconciliation_retry_max_seconds
-            < self.reconciliation_retry_base_seconds
-        ):
-            raise ValueError(
-                "reconciliation_retry_max_seconds must be at least the base delay"
-            )
         if self.delete_poll_interval_seconds > self.delete_visibility_timeout_seconds:
             raise ValueError(
                 "delete_poll_interval_seconds must not exceed the visibility timeout"
@@ -161,12 +174,31 @@ class ObjectContentSettings(BaseSettings):
         )
 
     @property
+    def signing_region(self) -> str:
+        """Return the endpoint's signing scope, not a data-residency choice."""
+        return self.region
+
+    @property
     def object_key_prefix(self) -> str:
         return f"v1/{self.deployment_id.hex}/"
 
 
 def load_object_content_settings() -> ObjectContentSettings | None:
-    if not any(name.upper().startswith("OBJECT_CONTENT_") for name in os.environ):
+    core_fields = ObjectContentCoreSettings.model_fields
+    remote_environment_names = {
+        f"OBJECT_CONTENT_{name.upper()}"
+        for name in ObjectContentSettings.model_fields
+        if name not in core_fields
+    }
+    if not any(name.upper() in remote_environment_names for name in os.environ):
         return None
     settings_factory = cast(Callable[[], ObjectContentSettings], ObjectContentSettings)
+    return settings_factory()
+
+
+def load_object_content_core_settings() -> ObjectContentCoreSettings:
+    settings_factory = cast(
+        Callable[[], ObjectContentCoreSettings],
+        ObjectContentCoreSettings,
+    )
     return settings_factory()

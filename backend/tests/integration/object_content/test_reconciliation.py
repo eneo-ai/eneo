@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from threading import Event
 from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +23,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContentOrphanCandidates,
     ObjectContentReconciliationState,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -30,6 +32,7 @@ from eneo.object_content.content import (
     ContentFailureCode,
     ContentState,
     ObjectContentBusyError,
+    StorageKind,
     capture_content,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
@@ -40,6 +43,7 @@ from eneo.object_content.reconciliation_repository import (
 from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
+    ObjectStoreUnavailableError,
     S3ObjectStore,
     new_object_key,
 )
@@ -202,7 +206,7 @@ async def _create_pending(
         content = ObjectContents(
             tenant_id=tenant_id,
             created_by_user_id=user_id,
-            object_key=object_key,
+            storage_kind=StorageKind.OBJECT_STORE.value,
             state=ContentState.PENDING.value,
             access_class="private_resource",
             sha256=digest,
@@ -214,6 +218,11 @@ async def _create_pending(
         )
         session.add_all([owner, content])
         await session.flush()
+        descriptor = ObjectStoreObjects()
+        descriptor.content_id = content.id
+        descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+        descriptor.object_key = object_key
+        session.add(descriptor)
         session.add(
             FileContentReferences(
                 file_id=owner.id,
@@ -273,6 +282,19 @@ def _raw_client(real_store: RealObjectStore) -> "S3Client":
     )
 
 
+def _reconciler(
+    settings: ObjectContentSettings,
+    store: S3ObjectStore,
+    database: DatabaseSessionManager,
+) -> ObjectContentReconciler:
+    return ObjectContentReconciler(
+        settings,
+        database,
+        object_store_settings=settings,
+        object_store=store,
+    )
+
+
 @pytest.mark.asyncio
 async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones(
     object_content_database: DatabaseSessionManager,
@@ -288,7 +310,7 @@ async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones
         real_object_store,
         upload_remote=False,
     )
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -318,7 +340,7 @@ async def test_reconciler_promotes_ambiguous_upload_fails_missing_and_tombstones
         complete_row = await session.get(ObjectContents, complete.content_id)
         assert complete_row is not None
         assert complete_row.state == ContentState.TOMBSTONED.value
-        assert complete_row.remote_deleted_at is not None
+        assert complete_row.payload_deleted_at is not None
         assert complete_row.tombstone_purge_after is None
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(complete.object_key)
@@ -334,7 +356,7 @@ async def test_reconciliation_preserves_bytes_behind_an_active_hold(
         real_object_store,
         upload_remote=True,
     )
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -388,7 +410,7 @@ async def test_completed_inventory_reports_missing_retained_bytes_once(
         real_object_store,
         upload_remote=True,
     )
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -428,7 +450,66 @@ async def test_completed_inventory_reports_missing_retained_bytes_once(
         content = await session.get(ObjectContents, pending.content_id)
         assert content is not None
         assert content.state == ContentState.RETAINED.value
-        assert content.failure_code == ContentFailureCode.REMOTE_MISSING.value
+        assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
+
+
+@pytest.mark.asyncio
+async def test_multipart_outage_preserves_committed_object_inventory_result(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    reconciler = _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    await reconciler.run_once()
+
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        actor_user_id = (await session.scalars(select(Users.id))).one()
+        assert content is not None
+        await ObjectContentRepository(session).apply_hold(
+            tenant_id=content.tenant_id,
+            content_id=content.id,
+            kind="legal",
+            reason="retain missing bytes for late-outage reporting",
+            actor_user_id=actor_user_id,
+            expires_at=None,
+        )
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+
+    await real_object_store.store.delete_and_confirm(pending.object_key)
+    observation_boundary = await reconciler.run_once()
+    assert observation_boundary.missing_objects == 0
+
+    monkeypatch.setattr(
+        real_object_store.store,
+        "list_multipart_page",
+        AsyncMock(
+            side_effect=ObjectStoreUnavailableError("multipart inventory unavailable")
+        ),
+    )
+    result = await reconciler.run_once()
+
+    assert result.object_cycle_completed is True
+    assert result.missing_objects == 1
+    assert result.multipart_aborted == 0
+    assert result.orphan_objects_deleted == 0
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, pending.content_id)
+        assert content is not None
+        assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
 
 
 @pytest.mark.asyncio
@@ -441,7 +522,7 @@ async def test_invalid_truncated_inventory_cannot_complete_a_cycle(
         real_object_store,
         upload_remote=True,
     )
-    healthy_reconciler = ObjectContentReconciler(
+    healthy_reconciler = _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -458,7 +539,7 @@ async def test_invalid_truncated_inventory_cannot_complete_a_cycle(
             client=cast("S3Client", _TruncatedObjectInventoryClient()),
         )
         with pytest.raises(ObjectStoreIntegrityError, match="pagination"):
-            await ObjectContentReconciler(
+            await _reconciler(
                 real_object_store.settings,
                 invalid_store,
                 object_content_database,
@@ -504,7 +585,7 @@ async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
             seconds=real_object_store.settings.pending_stale_seconds + 1
         )
 
-    result = await ObjectContentReconciler(
+    result = await _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -515,7 +596,7 @@ async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
         row = await session.get(ObjectContents, pending.content_id)
         assert row is not None
         assert row.state == ContentState.TOMBSTONED.value
-        assert row.remote_deleted_at is not None
+        assert row.payload_deleted_at is not None
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(pending.object_key)
 
@@ -563,7 +644,7 @@ async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
         client=cast("S3Client", delayed_client),
     )
     first_run = asyncio.create_task(
-        ObjectContentReconciler(
+        _reconciler(
             real_object_store.settings,
             delayed_store,
             object_content_database,
@@ -588,7 +669,7 @@ async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
         delayed_client.release_delete.set()
         await _wait_for(delayed_client.head_started)
 
-        concurrent = await ObjectContentReconciler(
+        concurrent = await _reconciler(
             real_object_store.settings,
             real_object_store.store,
             object_content_database,
@@ -605,7 +686,7 @@ async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
         row = await session.get(ObjectContents, pending.content_id)
         assert row is not None
         assert row.state == ContentState.TOMBSTONED.value
-        assert row.remote_deleted_at is not None
+        assert row.payload_deleted_at is not None
 
 
 @pytest.mark.asyncio
@@ -637,17 +718,17 @@ async def test_reconciler_converges_multipart_crashes_before_and_after_completio
 
     async def record_completed_upload(upload_id: str) -> None:
         async with object_content_database.session() as session, session.begin():
-            row = await session.get(ObjectContents, completed.content_id)
-            assert row is not None
-            row.multipart_upload_id = upload_id
-            row.multipart_initiated_at = await session.scalar(select(func.now()))
+            descriptor = await session.get(ObjectStoreObjects, completed.content_id)
+            assert descriptor is not None
+            descriptor.multipart_upload_id = upload_id
+            descriptor.multipart_initiated_at = await session.scalar(select(func.now()))
 
     try:
         async with object_content_database.session() as session, session.begin():
-            row = await session.get(ObjectContents, incomplete.content_id)
-            assert row is not None
-            row.multipart_upload_id = incomplete_upload_id
-            row.multipart_initiated_at = datetime.now(UTC)
+            descriptor = await session.get(ObjectStoreObjects, incomplete.content_id)
+            assert descriptor is not None
+            descriptor.multipart_upload_id = incomplete_upload_id
+            descriptor.multipart_initiated_at = datetime.now(UTC)
 
         async with capture_content(
             _source(completed.payload),
@@ -676,7 +757,7 @@ async def test_reconciler_converges_multipart_crashes_before_and_after_completio
                 },
             )
 
-        result = await ObjectContentReconciler(
+        result = await _reconciler(
             settings,
             real_object_store.store,
             object_content_database,
@@ -686,15 +767,23 @@ async def test_reconciler_converges_multipart_crashes_before_and_after_completio
         async with object_content_database.session() as session, session.begin():
             completed_row = await session.get(ObjectContents, completed.content_id)
             incomplete_row = await session.get(ObjectContents, incomplete.content_id)
+            completed_descriptor = await session.get(
+                ObjectStoreObjects, completed.content_id
+            )
+            incomplete_descriptor = await session.get(
+                ObjectStoreObjects, incomplete.content_id
+            )
             assert completed_row is not None
             assert incomplete_row is not None
+            assert completed_descriptor is not None
+            assert incomplete_descriptor is not None
             assert completed_row.state == ContentState.AVAILABLE.value
-            assert completed_row.multipart_upload_id is None
+            assert completed_descriptor.multipart_upload_id is None
             assert incomplete_row.state == ContentState.FAILED.value
             assert (
                 incomplete_row.failure_code == ContentFailureCode.UPLOAD_REJECTED.value
             )
-            assert incomplete_row.multipart_upload_id is None
+            assert incomplete_descriptor.multipart_upload_id is None
     finally:
         await real_object_store.store.abort_multipart(
             incomplete.object_key,
@@ -721,9 +810,11 @@ async def test_multipart_abort_rechecks_and_fences_a_stale_uploader(
         now = await session.scalar(select(func.now()))
         assert now is not None
         content = await session.get(ObjectContents, pending.content_id)
+        descriptor = await session.get(ObjectStoreObjects, pending.content_id)
         assert content is not None
-        content.multipart_upload_id = upload_id
-        content.multipart_initiated_at = now - timedelta(minutes=5)
+        assert descriptor is not None
+        descriptor.multipart_upload_id = upload_id
+        descriptor.multipart_initiated_at = now - timedelta(minutes=5)
         content.lease_owner = uploader
         content.lease_until = now - timedelta(seconds=1)
         session.add(
@@ -857,11 +948,13 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
         now = await session.scalar(select(func.now()))
         assert now is not None
         content = await session.get(ObjectContents, failed.content_id)
+        descriptor = await session.get(ObjectStoreObjects, failed.content_id)
         assert content is not None
+        assert descriptor is not None
         content.state = ContentState.FAILED.value
         content.failure_code = ContentFailureCode.UPLOAD_REJECTED.value
-        content.multipart_upload_id = upload_id
-        content.multipart_initiated_at = now - timedelta(minutes=5)
+        descriptor.multipart_upload_id = upload_id
+        descriptor.multipart_initiated_at = now - timedelta(minutes=5)
         content.lease_owner = None
         content.lease_until = None
         session.add(
@@ -876,7 +969,7 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
         )
 
     running = asyncio.create_task(
-        ObjectContentReconciler(
+        _reconciler(
             settings,
             delayed_store,
             object_content_database,
@@ -895,10 +988,12 @@ async def test_slow_abort_renews_only_the_lease_confirmed_for_failed_content(
                 (failed.object_key, upload_id),
             )
             content = await session.get(ObjectContents, failed.content_id)
+            descriptor = await session.get(ObjectStoreObjects, failed.content_id)
             assert candidate is None
             assert content is not None
+            assert descriptor is not None
             assert content.state == ContentState.FAILED.value
-            assert content.multipart_upload_id is None
+            assert descriptor.multipart_upload_id is None
     finally:
         delayed_client.release_abort.set()
         if not running.done():
@@ -935,7 +1030,7 @@ async def test_two_complete_cycles_and_grace_delete_object_and_multipart_orphans
         ChecksumType="COMPOSITE",
     )
     upload_id = created["UploadId"]
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         settings,
         real_object_store.store,
         object_content_database,
@@ -978,30 +1073,28 @@ async def test_reintroduced_bytes_for_a_tombstone_use_guarded_orphan_deletion(
 ) -> None:
     settings = real_object_store.settings
     payload = b"bytes-reintroduced-by-an-older-object-snapshot"
-    digest = sha256(payload).digest()
-    object_key = new_object_key(settings)
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+        payload=payload,
+    )
+    object_key = pending.object_key
+    reconciler = _reconciler(
+        settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    promoted = await reconciler.run_once()
+    assert promoted.content_processed == 1
     async with object_content_database.session() as session, session.begin():
-        tenant_id = (await session.scalars(select(Tenants.id))).one()
-        user_id = (await session.scalars(select(Users.id))).one()
-        now = await session.scalar(select(func.now()))
-        assert now is not None
-        tombstone = ObjectContents(
-            tenant_id=tenant_id,
-            created_by_user_id=user_id,
-            object_key=object_key,
-            state=ContentState.TOMBSTONED.value,
-            access_class="private_resource",
-            sha256=digest,
-            size_bytes=len(payload),
-            declared_media_type="application/octet-stream",
-            verified_media_type="application/octet-stream",
-            idempotency_key=uuid4().hex,
-            request_fingerprint=digest,
-            reference_count=0,
-            delete_requested_at=now,
-            remote_deleted_at=now,
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
         )
-        session.add(tombstone)
+    deleted = await reconciler.run_once()
+    assert deleted.content_processed == 1
 
     async with capture_content(
         _source(payload),
@@ -1013,11 +1106,6 @@ async def test_reintroduced_bytes_for_a_tombstone_use_guarded_orphan_deletion(
     ) as captured:
         await real_object_store.store.upload(object_key, captured)
 
-    reconciler = ObjectContentReconciler(
-        settings,
-        real_object_store.store,
-        object_content_database,
-    )
     first = await reconciler.run_once()
     assert first.orphan_objects_deleted == 0
     async with object_content_database.session() as session, session.begin():
@@ -1033,7 +1121,12 @@ async def test_reintroduced_bytes_for_a_tombstone_use_guarded_orphan_deletion(
     async with object_content_database.session() as session, session.begin():
         restored_tombstone = (
             await session.scalars(
-                select(ObjectContents).where(ObjectContents.object_key == object_key)
+                select(ObjectContents)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
+                .where(ObjectStoreObjects.object_key == object_key)
             )
         ).one()
         assert restored_tombstone.state == ContentState.TOMBSTONED.value
@@ -1049,7 +1142,7 @@ async def test_reference_drift_fails_closed_and_is_reported_by_health(
         real_object_store,
         upload_remote=True,
     )
-    reconciler = ObjectContentReconciler(
+    reconciler = _reconciler(
         real_object_store.settings,
         real_object_store.store,
         object_content_database,
@@ -1073,6 +1166,7 @@ async def test_reference_drift_fails_closed_and_is_reported_by_health(
                 ),
                 {"content_id": pending.content_id},
             )
+            await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         finally:
             await session.execute(
                 text(

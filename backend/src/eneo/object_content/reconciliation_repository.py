@@ -23,11 +23,13 @@ from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
     InfoBlobContentReferences,
+    InlineContentPayloads,
     ObjectContentHolds,
     ObjectContentMultipartCandidates,
     ObjectContentOrphanCandidates,
     ObjectContentReconciliationState,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.object_content.content import (
     ContentFailureCode,
@@ -35,6 +37,7 @@ from eneo.object_content.content import (
     ObjectContentBusyError,
     ObjectContentConfigurationError,
     ObjectContentStateError,
+    StorageKind,
 )
 from eneo.object_content.s3_object_store import (
     MultipartUpload,
@@ -90,6 +93,7 @@ class MultipartAbortLease:
 
 @dataclass(frozen=True, slots=True)
 class ContentStateFacts:
+    storage_kind: StorageKind
     state: ContentState
     count: int
     size_bytes: int
@@ -219,6 +223,42 @@ class ObjectContentReconciliationRepository:
         await self._session.flush()
         return len(unowned_pending) + len(deletions)
 
+    async def tombstone_inline_deletions(self, *, limit: int) -> int:
+        rows = (
+            await self._session.execute(
+                select(ObjectContents, InlineContentPayloads)
+                .join(
+                    InlineContentPayloads,
+                    InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .where(
+                    ObjectContents.storage_kind == StorageKind.POSTGRES_INLINE.value,
+                    ObjectContents.state == ContentState.DELETE_PENDING.value,
+                    ObjectContents.reference_count == 0,
+                    _no_concrete_references(),
+                )
+                .order_by(ObjectContents.updated_at, ObjectContents.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        if not rows:
+            return 0
+
+        now = await self._database_now()
+        for content, payload in rows:
+            await self._session.delete(payload)
+            content.state = ContentState.TOMBSTONED.value
+            content.payload_deleted_at = now
+            content.tombstone_purge_after = None
+            content.failure_code = None
+            content.failure_detail = None
+            content.next_attempt_at = None
+            content.lease_owner = None
+            content.lease_until = None
+        await self._session.flush()
+        return len(rows)
+
     async def claim_content_work(
         self,
         *,
@@ -257,9 +297,14 @@ class ObjectContentReconciliationRepository:
             _no_concrete_references(),
         )
         rows = (
-            await self._session.scalars(
-                select(ObjectContents)
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
+                    ObjectContents.storage_kind == StorageKind.OBJECT_STORE.value,
                     or_(pending_due, delete_due),
                     lease_available,
                     or_(
@@ -280,7 +325,7 @@ class ObjectContentReconciliationRepository:
             )
         ).all()
         work: list[ReconciliationWork] = []
-        for row in rows:
+        for row, descriptor in rows:
             row.lease_owner = lease_owner
             row.lease_until = now + timedelta(seconds=lease_seconds)
             row.attempt_count += 1
@@ -290,13 +335,13 @@ class ObjectContentReconciliationRepository:
             work.append(
                 ReconciliationWork(
                     content_id=row.id,
-                    object_key=row.object_key,
+                    object_key=descriptor.object_key,
                     state=ContentState(row.state),
                     sha256=row.sha256,
                     size_bytes=row.size_bytes,
                     media_type=row.verified_media_type,
                     attempt_count=row.attempt_count,
-                    multipart_upload_id=row.multipart_upload_id,
+                    multipart_upload_id=descriptor.multipart_upload_id,
                 )
             )
         await self._session.flush()
@@ -377,35 +422,40 @@ class ObjectContentReconciliationRepository:
 
         now = await self._database_now()
         keys = tuple(item.key for item in objects)
-        known_rows: Sequence[ObjectContents]
         if keys:
             known_rows = (
-                await self._session.scalars(
-                    select(ObjectContents)
-                    .where(ObjectContents.object_key.in_(keys))
+                await self._session.execute(
+                    select(ObjectContents, ObjectStoreObjects)
+                    .join(
+                        ObjectStoreObjects,
+                        ObjectStoreObjects.content_id == ObjectContents.id,
+                    )
+                    .where(ObjectStoreObjects.object_key.in_(keys))
                     .order_by(ObjectContents.id)
                     .with_for_update()
                 )
             ).all()
+            known_by_key = {
+                descriptor.object_key: (row, descriptor)
+                for row, descriptor in known_rows
+            }
         else:
-            known_rows = ()
-        known_by_key: dict[str, ObjectContents] = {
-            row.object_key: row for row in known_rows
-        }
+            known_by_key = {}
         for item in objects:
-            row = known_by_key.get(item.key)
-            if row is None:
+            known = known_by_key.get(item.key)
+            if known is None:
                 continue
-            row.remote_observed_at = now
+            row, descriptor = known
+            descriptor.remote_observed_at = now
             if row.size_bytes != item.size_bytes:
                 if row.state == ContentState.AVAILABLE.value:
                     row.state = ContentState.FAILED.value
-                row.failure_code = ContentFailureCode.REMOTE_CORRUPT.value
+                row.failure_code = ContentFailureCode.BACKEND_CORRUPT.value
                 row.failure_detail = "object inventory length differs from PostgreSQL"
 
         live_known_keys = tuple(
             key
-            for key, row in known_by_key.items()
+            for key, (row, _descriptor) in known_by_key.items()
             if row.state != ContentState.TOMBSTONED.value
         )
         if live_known_keys:
@@ -418,8 +468,8 @@ class ObjectContentReconciliationRepository:
         unexpected_objects = [
             item
             for item in objects
-            if (row := known_by_key.get(item.key)) is None
-            or row.state == ContentState.TOMBSTONED.value
+            if (known := known_by_key.get(item.key)) is None
+            or known[0].state == ContentState.TOMBSTONED.value
         ]
         if unexpected_objects:
             eligible_after = now + timedelta(seconds=orphan_grace_seconds)
@@ -480,9 +530,14 @@ class ObjectContentReconciliationRepository:
         if cutoff is None:
             return 0
         rows = (
-            await self._session.scalars(
-                select(ObjectContents)
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
+                    ObjectContents.storage_kind == StorageKind.OBJECT_STORE.value,
                     or_(
                         ObjectContents.state == ContentState.AVAILABLE.value,
                         and_(
@@ -490,14 +545,14 @@ class ObjectContentReconciliationRepository:
                             or_(
                                 ObjectContents.failure_code.is_(None),
                                 ObjectContents.failure_code
-                                != ContentFailureCode.REMOTE_MISSING.value,
+                                != ContentFailureCode.BACKEND_MISSING.value,
                             ),
                         ),
                     ),
                     ObjectContents.available_at < cutoff,
                     or_(
-                        ObjectContents.remote_observed_at.is_(None),
-                        ObjectContents.remote_observed_at < cutoff,
+                        ObjectStoreObjects.remote_observed_at.is_(None),
+                        ObjectStoreObjects.remote_observed_at < cutoff,
                     ),
                 )
                 .order_by(ObjectContents.available_at, ObjectContents.id)
@@ -505,10 +560,10 @@ class ObjectContentReconciliationRepository:
                 .with_for_update(skip_locked=True)
             )
         ).all()
-        for row in rows:
+        for row, _descriptor in rows:
             if row.state == ContentState.AVAILABLE.value:
                 row.state = ContentState.FAILED.value
-            row.failure_code = ContentFailureCode.REMOTE_MISSING.value
+            row.failure_code = ContentFailureCode.BACKEND_MISSING.value
             row.failure_detail = "complete object inventory did not observe the object"
         await self._session.flush()
         return len(rows)
@@ -522,8 +577,14 @@ class ObjectContentReconciliationRepository:
     ) -> tuple[OrphanDeleteLease, ...]:
         now = await self._database_now()
         live_row_exists = exists(
-            select(ObjectContents.id).where(
-                ObjectContents.object_key == ObjectContentOrphanCandidates.object_key,
+            select(ObjectStoreObjects.content_id)
+            .join(
+                ObjectContents,
+                ObjectContents.id == ObjectStoreObjects.content_id,
+            )
+            .where(
+                ObjectStoreObjects.object_key
+                == ObjectContentOrphanCandidates.object_key,
                 ObjectContents.state != ContentState.TOMBSTONED.value,
             )
         )
@@ -575,8 +636,13 @@ class ObjectContentReconciliationRepository:
         live_content_exists = await self._session.scalar(
             select(
                 exists(
-                    select(ObjectContents.id).where(
-                        ObjectContents.object_key == object_key,
+                    select(ObjectStoreObjects.content_id)
+                    .join(
+                        ObjectContents,
+                        ObjectContents.id == ObjectStoreObjects.content_id,
+                    )
+                    .where(
+                        ObjectStoreObjects.object_key == object_key,
                         ObjectContents.state != ContentState.TOMBSTONED.value,
                     )
                 )
@@ -606,8 +672,13 @@ class ObjectContentReconciliationRepository:
         live_content_exists = await self._session.scalar(
             select(
                 exists(
-                    select(ObjectContents.id).where(
-                        ObjectContents.object_key == object_key,
+                    select(ObjectStoreObjects.content_id)
+                    .join(
+                        ObjectContents,
+                        ObjectContents.id == ObjectStoreObjects.content_id,
+                    )
+                    .where(
+                        ObjectStoreObjects.object_key == object_key,
                         ObjectContents.state != ContentState.TOMBSTONED.value,
                     )
                 )
@@ -748,10 +819,15 @@ class ObjectContentReconciliationRepository:
     ) -> tuple[MultipartAbortLease, ...]:
         now = await self._database_now()
         active_upload = exists(
-            select(ObjectContents.id).where(
-                ObjectContents.object_key
+            select(ObjectStoreObjects.content_id)
+            .join(
+                ObjectContents,
+                ObjectContents.id == ObjectStoreObjects.content_id,
+            )
+            .where(
+                ObjectStoreObjects.object_key
                 == ObjectContentMultipartCandidates.object_key,
-                ObjectContents.multipart_upload_id
+                ObjectStoreObjects.multipart_upload_id
                 == ObjectContentMultipartCandidates.upload_id,
                 ObjectContents.state == ContentState.PENDING.value,
                 ObjectContents.lease_until > now,
@@ -809,16 +885,21 @@ class ObjectContentReconciliationRepository:
         if candidate is None:
             return False
 
-        content = (
-            await self._session.scalars(
-                select(ObjectContents)
+        found = (
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
-                    ObjectContents.object_key == lease.object_key,
-                    ObjectContents.multipart_upload_id == lease.upload_id,
+                    ObjectStoreObjects.object_key == lease.object_key,
+                    ObjectStoreObjects.multipart_upload_id == lease.upload_id,
                 )
                 .with_for_update()
             )
         ).one_or_none()
+        content = None if found is None else found[0]
         if content is None or content.state != ContentState.PENDING.value:
             return True
 
@@ -867,19 +948,24 @@ class ObjectContentReconciliationRepository:
                 ObjectContentMultipartCandidates.lease_owner == lease_owner,
             )
         )
-        row = (
-            await self._session.scalars(
-                select(ObjectContents)
+        found = (
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
-                    ObjectContents.object_key == lease.object_key,
-                    ObjectContents.multipart_upload_id == lease.upload_id,
+                    ObjectStoreObjects.object_key == lease.object_key,
+                    ObjectStoreObjects.multipart_upload_id == lease.upload_id,
                 )
                 .with_for_update()
             )
         ).one_or_none()
-        if row is not None:
-            row.multipart_upload_id = None
-            row.multipart_initiated_at = None
+        if found is not None:
+            row, descriptor = found
+            descriptor.multipart_upload_id = None
+            descriptor.multipart_initiated_at = None
             if row.lease_owner == lease_owner:
                 row.lease_owner = None
                 row.lease_until = None
@@ -908,16 +994,21 @@ class ObjectContentReconciliationRepository:
         if candidate is None:
             raise ObjectContentBusyError("The multipart-abort lease changed")
 
-        content = (
-            await self._session.scalars(
-                select(ObjectContents)
+        found = (
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
-                    ObjectContents.object_key == lease.object_key,
-                    ObjectContents.multipart_upload_id == lease.upload_id,
+                    ObjectStoreObjects.object_key == lease.object_key,
+                    ObjectStoreObjects.multipart_upload_id == lease.upload_id,
                 )
                 .with_for_update()
             )
         ).one_or_none()
+        content = None if found is None else found[0]
         if (
             content is not None
             and content.state == ContentState.PENDING.value
@@ -951,16 +1042,21 @@ class ObjectContentReconciliationRepository:
         if row is not None:
             row.lease_owner = None
             row.lease_until = None
-        content = (
-            await self._session.scalars(
-                select(ObjectContents)
+        found = (
+            await self._session.execute(
+                select(ObjectContents, ObjectStoreObjects)
+                .join(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
                 .where(
-                    ObjectContents.object_key == lease.object_key,
-                    ObjectContents.multipart_upload_id == lease.upload_id,
+                    ObjectStoreObjects.object_key == lease.object_key,
+                    ObjectStoreObjects.multipart_upload_id == lease.upload_id,
                 )
                 .with_for_update()
             )
         ).one_or_none()
+        content = None if found is None else found[0]
         if content is not None and content.lease_owner == lease_owner:
             content.lease_owner = None
             content.lease_until = None
@@ -969,28 +1065,30 @@ class ObjectContentReconciliationRepository:
     async def health_facts(self) -> ObjectContentHealthFacts:
         grouped = await self._session.execute(
             select(
+                ObjectContents.storage_kind,
                 ObjectContents.state,
                 func.count(),
                 func.coalesce(func.sum(ObjectContents.size_bytes), 0),
                 func.min(ObjectContents.created_at),
-            ).group_by(ObjectContents.state)
+            ).group_by(ObjectContents.storage_kind, ObjectContents.state)
         )
         states = tuple(
             ContentStateFacts(
+                storage_kind=StorageKind(storage_kind),
                 state=ContentState(state),
                 count=int(count),
                 size_bytes=int(size_bytes),
                 oldest_created_at=oldest,
             )
-            for state, count, size_bytes, oldest in grouped.all()
+            for storage_kind, state, count, size_bytes, oldest in grouped.all()
         )
         integrity_failures = await self._session.scalar(
             select(func.count()).where(
                 ObjectContents.failure_code.in_(
                     (
                         ContentFailureCode.VERIFICATION_MISMATCH.value,
-                        ContentFailureCode.REMOTE_MISSING.value,
-                        ContentFailureCode.REMOTE_CORRUPT.value,
+                        ContentFailureCode.BACKEND_MISSING.value,
+                        ContentFailureCode.BACKEND_CORRUPT.value,
                     )
                 )
             )
@@ -1060,13 +1158,17 @@ class ObjectContentReconciliationRepository:
             )
 
         state = await self._state_for_update()
-        has_content = bool(
+        has_object_store_content = bool(
             await self._session.scalar(
-                select(exists().where(ObjectContents.id.is_not(None)))
+                select(
+                    exists().where(
+                        ObjectContents.storage_kind == StorageKind.OBJECT_STORE.value
+                    )
+                )
             )
         )
         if state.store_binding_id is None:
-            if has_content:
+            if has_object_store_content:
                 raise ObjectContentConfigurationError(
                     "Object-content storage binding is missing for existing records"
                 )

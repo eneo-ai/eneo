@@ -5,6 +5,7 @@ from eneo.object_content.runtime import ObjectContentRuntime, object_content_run
 
 class ObjectContentReconciliationSummary(TypedDict):
     lifecycle_advanced: int
+    inline_deleted: int
     content_processed: int
     references_audited: int
     reference_drifts: int
@@ -20,6 +21,7 @@ async def reconcile_object_content_task(
     result = await runtime.reconcile_once()
     return {
         "lifecycle_advanced": result.lifecycle_advanced,
+        "inline_deleted": result.inline_deleted,
         "content_processed": result.content_processed,
         "references_audited": result.references_audited,
         "reference_drifts": result.reference_drifts,

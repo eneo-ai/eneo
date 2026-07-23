@@ -15,12 +15,14 @@ from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
     InfoBlobContentReferences,
+    InlineContentPayloads,
     ObjectContentAuditEvents,
     ObjectContentHolds,
     ObjectContentMultipartCandidates,
     ObjectContentOrphanCandidates,
     ObjectContentReconciliationState,
     ObjectContents,
+    ObjectStoreObjects,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
@@ -107,6 +109,8 @@ def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
 
     models = (
         ObjectContents,
+        InlineContentPayloads,
+        ObjectStoreObjects,
         ObjectContentHolds,
         FileContentReferences,
         InfoBlobContentReferences,

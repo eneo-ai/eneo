@@ -7,7 +7,9 @@ Welcome to the Eneo technical documentation! This section covers the core concep
 New to Eneo? Start here:
 
 ### [Getting Started](/docs/getting-started)
+
 Quick start guide to set up your Eneo instance:
+
 - Installation and setup
 - First-time configuration
 - Creating your first AI assistant
@@ -16,7 +18,9 @@ Quick start guide to set up your Eneo instance:
 ## Technical Documentation
 
 ### [Architecture](/docs/architecture)
+
 Understand how Eneo is built:
+
 - System architecture overview
 - Technology stack (FastAPI, Next.js, PostgreSQL)
 - Database schema and migrations
@@ -24,34 +28,44 @@ Understand how Eneo is built:
 - Real-time communication (SSE, WebSockets)
 
 ### [Object Content Architecture](/docs/object-content-architecture)
+
 Understand how Eneo stores and protects durable file bytes:
-- PostgreSQL control plane and S3-compatible byte plane
+
+- PostgreSQL control plane with bounded inline or optional object-store bytes
 - Integrity, lifecycle, retention, and reconciliation
 - Database/bucket binding and failure behavior
 - SeaweedFS image build, provenance, and SBOM attestations
 
 ### [Audit Logging](/docs/audit-logging)
+
 Audit trails for compliance and security:
+
 - How audit logs are created and stored
 - Retention policies and conversation retention hierarchy
 - Viewing, exporting, and configuring audit logs
 - Adding audit logging to new features
 
 ### [Token Counting](/docs/token-counting)
+
 How Eneo tracks token usage for LLM requests:
+
 - Accurate counts from major providers (OpenAI, Anthropic, Azure)
 - Estimation for self-hosted models
 - How token data flows to Insights dashboards
 
 ### [Release SBOMs](/docs/release-sboms)
+
 Downloadable SBOMs and attestations for released artifacts:
+
 - CycloneDX and SPDX files for security tooling
 - Frontend source dependency inventory from the release lockfile
 - Human-readable package lists for quick review
 - Image digests, checksums, and provenance verification
 
 ### [API Reference](/docs/api)
+
 Complete API documentation for developers:
+
 - REST API endpoints
 - Authentication and API keys
 - Request/response formats
@@ -68,6 +82,7 @@ Complete API documentation for developers:
 ## Development
 
 For development setup and contributing guidelines, visit:
+
 - [GitHub Repository](https://github.com/eneo-ai/eneo)
 - [Contributing Guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
 - [Security for Contributors](/contributing/security)

@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
@@ -30,6 +31,19 @@ class ObjectContents(BasePublic):
             "tenant_id",
             "idempotency_key",
             name="uq_object_contents_tenant_id_idempotency_key",
+        ),
+        UniqueConstraint(
+            "id",
+            "storage_kind",
+            name="uq_object_contents_id_storage_kind",
+        ),
+        CheckConstraint(
+            "storage_kind IN ('postgres_inline', 'object_store')",
+            name="ck_object_contents_storage_kind",
+        ),
+        CheckConstraint(
+            "storage_kind <> 'postgres_inline' OR state <> 'pending'",
+            name="ck_object_contents_inline_state",
         ),
         CheckConstraint(
             "state IN ('pending', 'available', 'retained', 'failed', "
@@ -67,8 +81,8 @@ class ObjectContents(BasePublic):
             name="ck_object_contents_delete_intent",
         ),
         CheckConstraint(
-            "state <> 'tombstoned' OR remote_deleted_at IS NOT NULL",
-            name="ck_object_contents_remote_deleted_at",
+            "(state = 'tombstoned') = (payload_deleted_at IS NOT NULL)",
+            name="ck_object_contents_payload_deleted_at",
         ),
         CheckConstraint(
             "state <> 'failed' OR failure_code IS NOT NULL",
@@ -77,7 +91,7 @@ class ObjectContents(BasePublic):
         CheckConstraint(
             "failure_code IS NULL OR failure_code IN ("
             "'owner_detached', 'upload_retryable', 'upload_rejected', "
-            "'verification_mismatch', 'remote_missing', 'remote_corrupt', "
+            "'verification_mismatch', 'backend_missing', 'backend_corrupt', "
             "'reference_drift', 'delete_retryable')",
             name="ck_object_contents_failure_code_value",
         ),
@@ -86,16 +100,13 @@ class ObjectContents(BasePublic):
             name="ck_object_contents_lease_pair",
         ),
         CheckConstraint(
-            "(multipart_upload_id IS NULL) = (multipart_initiated_at IS NULL)",
-            name="ck_object_contents_multipart_pair",
-        ),
-        CheckConstraint(
             "failure_detail IS NULL OR char_length(failure_detail) <= 512",
             name="ck_object_contents_failure_detail_length",
         ),
-        CheckConstraint(
-            "multipart_upload_id IS NULL OR char_length(multipart_upload_id) <= 1024",
-            name="ck_object_contents_multipart_upload_id_length",
+        Index(
+            "ix_object_contents_object_store_state",
+            "state",
+            postgresql_where=text("storage_kind = 'object_store'"),
         ),
     )
 
@@ -105,7 +116,7 @@ class ObjectContents(BasePublic):
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )
-    object_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    storage_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     access_class: Mapped[str] = mapped_column(String(32), nullable=False)
     sha256: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
@@ -128,7 +139,7 @@ class ObjectContents(BasePublic):
         TIMESTAMP(timezone=True)
     )
     available_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
-    remote_deleted_at: Mapped[Optional[datetime]] = mapped_column(
+    payload_deleted_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
     tombstone_purge_after: Mapped[Optional[datetime]] = mapped_column(
@@ -146,11 +157,77 @@ class ObjectContents(BasePublic):
     reference_audited_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
+    lease_owner: Mapped[Optional[str]] = mapped_column(String(128))
+    lease_until: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class InlineContentPayloads(BaseCrossReference):
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "content_id",
+            name="pk_inline_content_payloads",
+        ),
+        CheckConstraint(
+            "storage_kind = 'postgres_inline'",
+            name="ck_inline_content_payloads_storage_kind",
+        ),
+        ForeignKeyConstraint(
+            ["content_id", "storage_kind"],
+            ["object_contents.id", "object_contents.storage_kind"],
+            name="fk_inline_content_payloads_content_kind",
+            ondelete="CASCADE",
+        ),
+    )
+
+    content_id: Mapped[UUID] = mapped_column(nullable=False)
+    storage_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'postgres_inline'"),
+    )
+    payload: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
+
+
+class ObjectStoreObjects(BaseCrossReference):
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "content_id",
+            name="pk_object_store_objects",
+        ),
+        CheckConstraint(
+            "storage_kind = 'object_store'",
+            name="ck_object_store_objects_storage_kind",
+        ),
+        CheckConstraint(
+            "(multipart_upload_id IS NULL) = (multipart_initiated_at IS NULL)",
+            name="ck_object_store_objects_multipart_pair",
+        ),
+        CheckConstraint(
+            "multipart_upload_id IS NULL OR char_length(multipart_upload_id) <= 1024",
+            name="ck_object_store_objects_multipart_upload_id_length",
+        ),
+        ForeignKeyConstraint(
+            ["content_id", "storage_kind"],
+            ["object_contents.id", "object_contents.storage_kind"],
+            name="fk_object_store_objects_content_kind",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "object_key",
+            name="uq_object_store_objects_object_key",
+        ),
+    )
+
+    content_id: Mapped[UUID] = mapped_column(nullable=False)
+    storage_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'object_store'"),
+    )
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
     remote_observed_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
-    lease_owner: Mapped[Optional[str]] = mapped_column(String(128))
-    lease_until: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     multipart_upload_id: Mapped[Optional[str]] = mapped_column(Text)
     multipart_initiated_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
@@ -446,10 +523,9 @@ Index(
     ObjectContents.id,
 )
 Index(
-    "ix_object_contents_remote_inventory",
-    ObjectContents.state,
-    ObjectContents.remote_observed_at,
-    ObjectContents.available_at,
+    "ix_object_store_objects_remote_inventory",
+    ObjectStoreObjects.remote_observed_at,
+    ObjectStoreObjects.content_id,
 )
 Index("ix_object_content_holds_content", ObjectContentHolds.content_id)
 Index("ix_file_content_references_content", FileContentReferences.content_id)

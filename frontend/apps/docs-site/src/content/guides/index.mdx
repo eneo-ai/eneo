@@ -1,8 +1,21 @@
 # Guides
 
-Welcome to the Eneo guides section! These practical guides help you implement specific features and use cases that complement the technical documentation in the GitHub repository.
+Use these guides to deploy, configure, and operate Eneo. Start with the task you
+need to finish; architecture pages are linked where the underlying design
+matters.
 
-## Available Guides
+## Start here
+
+| If you need to…                   | Start with                                               |
+| --------------------------------- | -------------------------------------------------------- |
+| Deploy or upgrade Eneo            | [Deploy Eneo](/guides/deployment)                        |
+| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage) |
+| Configure login and access        | [Authentication & OIDC](/guides/authentication)          |
+| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)        |
+| Add documents to a knowledge base | [Document Processing](/guides/document-processing)       |
+| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration) |
+
+## All guides
 
 ### [Authentication & OIDC](/guides/authentication)
 
@@ -40,13 +53,15 @@ Connect Eneo to different AI providers and configure them for your organization:
 - Local models (Ollama, LM Studio)
 
 ### [MCP Servers](/guides/mcp-servers)
+
 Connect assistants to external tools while keeping discovery and execution under admin control:
+
 - Configure Streamable HTTP servers and authentication
 - Approve tool definitions before they reach the model
 - Forward user identity for user-specific catalogs
 - Preserve stateful MCP sessions across conversation turns
 
-### [Deployment](/guides/deployment)
+### [Deploy Eneo](/guides/deployment)
 
 Deploy Eneo in production environments:
 
@@ -56,8 +71,11 @@ Deploy Eneo in production environments:
 - SSL/TLS certificates with Let's Encrypt
 - Environment configuration best practices
 
-### [Object Content Storage](/guides/object-content-storage)
-Configure the private byte store used by Eneo:
+### [Choose Content Storage](/guides/object-content-storage)
+
+Choose and operate Eneo's durable byte backend:
+
+- Use bounded PostgreSQL-inline storage by default
 - Run the bundled SeaweedFS service
 - Connect MinIO or another S3-compatible endpoint
 - Verify image provenance and readiness
@@ -83,11 +101,11 @@ Connect Eneo to Microsoft SharePoint and OneDrive for seamless document import:
 - Personal spaces OAuth flow
 - Troubleshooting and maintenance
 
-## Need More Help?
+## Need more help?
 
 If you can't find what you're looking for:
 
-- Check the [technical documentation](https://github.com/eneo-ai/eneo/tree/main/docs) on GitHub
+- Browse the [architecture and technical documentation](/docs)
 - Visit our [community forum](https://forum.eneo.ai) (requires government/municipality email)
 - Submit an issue on [GitHub](https://github.com/eneo-ai/eneo/issues)
 - Contact us at digitalisering@sundsvall.se (for public sector organizations)

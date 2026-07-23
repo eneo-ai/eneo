@@ -23,6 +23,7 @@ from eneo.database.tables.object_content_table import (
     FileContentReferences,
     ObjectContentReconciliationState,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -33,6 +34,7 @@ from eneo.object_content.content import (
     ContentState,
     ObjectContentConfigurationError,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.reconciliation_repository import (
@@ -105,7 +107,12 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
     marker_key = f"v1/.eneo-bindings/{settings.deployment_id.hex}"
     client = _raw_client(real_object_store)
     store = S3ObjectStore(settings)
-    service = ObjectContentService(settings, store, object_content_database)
+    service = ObjectContentService(
+        settings,
+        object_content_database,
+        object_store_settings=settings,
+        object_store=store,
+    )
     original_preflight = store._require_empty_content_namespace
     preflight_calls = 0
 
@@ -126,7 +133,7 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
         await _clear_deployment_namespace(real_object_store, client)
 
         with pytest.raises(ObjectContentUnavailableError):
-            await service.check_ready()
+            await service.check_object_store_ready()
 
         async with object_content_database.session() as session, session.begin():
             state = await session.get(ObjectContentReconciliationState, 1)
@@ -134,7 +141,7 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
             assert state.store_binding_create_started_at is None
             state.store_binding_claim_until = datetime.now(UTC) - timedelta(seconds=1)
 
-        await service.check_ready()
+        await service.check_object_store_ready()
 
         async with object_content_database.session() as session, session.begin():
             state = await session.get(ObjectContentReconciliationState, 1)
@@ -147,7 +154,7 @@ async def test_binding_preflight_outage_does_not_persist_ambiguous_creation(
 
 
 @pytest.mark.asyncio
-async def test_disabled_runtime_rejects_active_postgres_content(
+async def test_inline_runtime_rejects_stranded_object_store_content(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,27 +164,58 @@ async def test_disabled_runtime_rejects_active_postgres_content(
 
     async with object_content_database.session() as session, session.begin():
         tenant_id = (await session.execute(select(Tenants.id).limit(1))).scalar_one()
-        session.add(
-            ObjectContents(
-                tenant_id=tenant_id,
-                created_by_user_id=None,
-                object_key="v1/disabled-safety-test",
-                state="failed",
-                access_class="private_resource",
-                sha256=b"\0" * 32,
-                size_bytes=0,
-                declared_media_type="application/octet-stream",
-                verified_media_type="application/octet-stream",
-                idempotency_key="disabled-safety-test",
-                request_fingerprint=b"\0" * 32,
-                failure_code="upload_rejected",
+        user_id = (await session.execute(select(Users.id).limit(1))).scalar_one()
+        owner = Files(
+            name="stranded-object-store-content.bin",
+            text=None,
+            blob=None,
+            checksum=sha256(b"").hexdigest(),
+            size=0,
+            mimetype="application/octet-stream",
+            file_type="binary",
+            transcription=None,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            parent_file_id=None,
+        )
+        content = ObjectContents(
+            tenant_id=tenant_id,
+            created_by_user_id=user_id,
+            storage_kind=StorageKind.OBJECT_STORE.value,
+            state=ContentState.PENDING.value,
+            access_class="private_resource",
+            sha256=sha256(b"").digest(),
+            size_bytes=0,
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            idempotency_key="stranded-object-store-content",
+            request_fingerprint=b"\0" * 32,
+        )
+        session.add_all((owner, content))
+        await session.flush()
+        session.add_all(
+            (
+                ObjectStoreObjects(
+                    content_id=content.id,
+                    storage_kind=StorageKind.OBJECT_STORE.value,
+                    object_key="v1/stranded-object-store-content",
+                ),
+                FileContentReferences(
+                    file_id=owner.id,
+                    content_id=content.id,
+                    variant="original",
+                    ordinal=0,
+                ),
             )
         )
 
     runtime = ObjectContentRuntime(object_content_database)
     runtime.start()
     try:
-        with pytest.raises(ObjectContentUnavailableError, match="active records"):
+        with pytest.raises(
+            ObjectContentConfigurationError,
+            match="required by active content",
+        ):
             await runtime.validate_configuration()
 
         readiness = await runtime.readiness()
@@ -300,11 +338,25 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
         )
         async with object_content_database.session() as session, session.begin():
             tenant_id = (await session.scalars(select(Tenants.id))).one()
+            user_id = (await session.scalars(select(Users.id))).one()
+            owner = Files(
+                name="paired-object-content.bin",
+                text=None,
+                blob=None,
+                checksum=digest.hex(),
+                size=len(payload),
+                mimetype="application/octet-stream",
+                file_type="binary",
+                transcription=None,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                parent_file_id=None,
+            )
             content = ObjectContents(
                 tenant_id=tenant_id,
-                created_by_user_id=None,
-                object_key=object_key,
-                state=ContentState.AVAILABLE.value,
+                created_by_user_id=user_id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                state=ContentState.PENDING.value,
                 access_class="private_resource",
                 sha256=digest,
                 size_bytes=len(payload),
@@ -312,11 +364,27 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
                 verified_media_type="application/octet-stream",
                 idempotency_key=uuid4().hex,
                 request_fingerprint=digest,
-                reference_count=1,
-                available_at=datetime.now(UTC),
             )
-            session.add(content)
+            session.add_all((owner, content))
             await session.flush()
+            session.add_all(
+                (
+                    ObjectStoreObjects(
+                        content_id=content.id,
+                        storage_kind=StorageKind.OBJECT_STORE.value,
+                        object_key=object_key,
+                    ),
+                    FileContentReferences(
+                        file_id=owner.id,
+                        content_id=content.id,
+                        variant="original",
+                        ordinal=0,
+                    ),
+                )
+            )
+            await session.flush()
+            content.state = ContentState.AVAILABLE.value
+            content.available_at = datetime.now(UTC)
             content_id = content.id
 
         await runtime_a.stop()
@@ -439,6 +507,7 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
                     producer_receipt=f"file:{owner.id}:original:0",
                 ),
                 content=captured,
+                storage_kind=StorageKind.OBJECT_STORE,
             )
             session.add(
                 FileContentReferences(
@@ -448,7 +517,9 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
                     ordinal=0,
                 )
             )
-            uploaded_key = prepared.object_key
+            descriptor = await session.get(ObjectStoreObjects, prepared.id)
+            assert descriptor is not None
+            uploaded_key = descriptor.object_key
 
         await winner.service.store_and_verify(
             content_id=prepared.id,

@@ -549,14 +549,23 @@ def get_application():
             and backend_status == "HEALTHY"
             and object_content.ready
         ):
-            overall_status = "HEALTHY"
+            overall_status = (
+                "DEGRADED"
+                if object_content.code is ObjectContentReadinessCode.STORE_DEGRADED
+                else "HEALTHY"
+            )
             status_code = 200
         else:
             overall_status = "UNHEALTHY"
             status_code = 503
 
-        if object_content.code is ObjectContentReadinessCode.DISABLED:
-            object_content_status = "DISABLED"
+        if (
+            object_content.code
+            is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+        ):
+            object_content_status = "NOT_CONFIGURED"
+        elif object_content.code is ObjectContentReadinessCode.STORE_DEGRADED:
+            object_content_status = "DEGRADED"
         elif object_content.ready:
             object_content_status = "HEALTHY"
         else:

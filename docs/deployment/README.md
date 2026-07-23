@@ -7,13 +7,14 @@ Quick deployment reference for Eneo using Docker Compose.
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
-- `.env.template` - Compose-level object-content image, endpoint, and secret inputs
+- `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
+- `.env.template` - Optional object-store profile, endpoint, and secret inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
 - `env_backend.template` - Backend configuration (API keys, OIDC, multi-tenancy)
 - `env_frontend.template` - Frontend configuration (URLs, OIDC)
 - `env_db.template` - Database credentials
 - `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
-- `OBJECT_CONTENT.md` - Object-store contract, security, capacity, backup, restore, and recovery
+- `OBJECT_CONTENT.md` - Offline object-content operations reference
 
 ## Quick Start
 
@@ -41,10 +42,9 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #        DEFAULT_USER_EMAIL=user@example.com
 #        DEFAULT_USER_PASSWORD=Password1!
 
-# 4b. Configure .env:
-#    - Pin ENEO_SEAWEEDFS_IMAGE to the release's verified manifest digest
-#    - Generate OBJECT_CONTENT_ACCESS_KEY_ID and OBJECT_CONTENT_SECRET_ACCESS_KEY
-#    - Generate OBJECT_CONTENT_DEPLOYMENT_ID once with uuidgen
+# 4b. Optional object storage:
+#    - The default deployment uses bounded PostgreSQL-inline content
+#    - Follow https://docs.eneo.ai/guides/object-content-storage before enabling it
 
 # 5. Configure env_frontend.env:
 #    - JWT_SECRET=<same as backend>
@@ -65,12 +65,15 @@ docker logs eneo_db_init
 # 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
 ```
 
-The reference stack enables the bundled private object-content service. A
-custom rollout may omit all object-content application settings only while
-PostgreSQL has no active object-content rows; partial settings fail startup.
-Once a feature adopts durable file bytes, use the bundled service or an external
-endpoint that passes the same S3-compatible contract. See
-[Durable object content](OBJECT_CONTENT.md) before first use or restore.
+The default stack does not require a separate object store. Eneo can keep
+bounded durable content in PostgreSQL until an administrator explicitly chooses
+the bundled SeaweedFS profile or an external compatible endpoint. Each content
+record has one byte authority; Eneo never silently copies or falls back between
+backends. Use the [Choose Content Storage
+guide](https://docs.eneo.ai/guides/object-content-storage) before enabling the
+profile or restoring a deployment that already owns object-store content. The
+local [operations reference](OBJECT_CONTENT.md) remains available for offline
+installations.
 
 ## Network Isolation
 
@@ -80,19 +83,45 @@ The stack uses four Docker networks:
 |---|---|---|
 | `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
 | `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
-| `object_content_net` (`internal: true`) | object-content, backend, worker | Private S3-compatible byte plane; no public route |
+| `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 
 The backend is the only service on all four networks. PostgreSQL, Redis, and
-object content are not reachable from the frontend or Traefik containers and
-have no outbound internet access.
+the optional object-content service are not reachable from the frontend or
+Traefik containers and have no outbound internet access.
 
 ### Upgrading an existing installation
 
-Installations created from an earlier version of this file had every service on `proxy_tier`. The new topology is applied by recreating the containers:
+Installations created from an earlier version of this file had every service on
+`proxy_tier`. Choose the Compose invocation that matches the deployment
+**before the first recreate**, and keep that same invocation in the deployment
+and rollback runbooks:
 
 ```bash
+# PostgreSQL-inline or an external S3-compatible endpoint:
 docker compose up -d
+```
+
+If the retained `.env` points to `http://object-content:8333`, the installation
+uses Eneo's bundled store. Preserve both its overlay and profile on every
+Compose command:
+
+```bash
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  config --quiet
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  pull
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  up -d
 ```
 
 Containers are recreated with new network membership; the Compose-managed PostgreSQL and Redis volumes are untouched (normally `eneo_eneo_postgres_data` and `eneo_eneo_redis_data` as Docker volumes). Expected downtime is a few seconds.
@@ -108,7 +137,17 @@ docker exec eneo_frontend getent hosts db
 # Should succeed:
 docker exec eneo_backend python -c "import socket; socket.getaddrinfo('db', 5432)"
 curl -fsS https://your-domain.com/version
+
+# Required when an object-store endpoint is configured:
+curl -fsS https://your-domain.com/api/readyz \
+  | jq -e '.detail.object_content.code == "ready"'
 ```
+
+An HTTP 200 alone is not sufficient for an object-store deployment: it can
+also describe the intentionally degraded state in which inline content remains
+available. A bundled deployment must additionally show `object-content` in
+`docker compose ps`; backend, worker, and the store must share
+`object_content_net`.
 
 ## Troubleshooting
 

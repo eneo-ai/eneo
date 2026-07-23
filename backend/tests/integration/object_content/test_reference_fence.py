@@ -16,6 +16,7 @@ from eneo.database.tables.object_content_table import (
     IconContentReferences,
     InfoBlobContentReferences,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -24,6 +25,7 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentIntent,
     ObjectContentIdempotencyConflictError,
+    StorageKind,
     content_request_fingerprint,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
@@ -63,7 +65,7 @@ def _pending_content(
     return ObjectContents(
         tenant_id=tenant_id,
         created_by_user_id=user_id,
-        object_key=f"v1/a2d539affef042aaa7f814376947be2c/{idempotency_key}",
+        storage_kind=StorageKind.OBJECT_STORE.value,
         state="pending",
         access_class=access_class,
         sha256=digest,
@@ -73,6 +75,14 @@ def _pending_content(
         idempotency_key=idempotency_key,
         request_fingerprint=digest,
     )
+
+
+def _descriptor(content_id: UUID, key_suffix: str) -> ObjectStoreObjects:
+    descriptor = ObjectStoreObjects()
+    descriptor.content_id = content_id
+    descriptor.storage_kind = StorageKind.OBJECT_STORE.value
+    descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{key_suffix}"
+    return descriptor
 
 
 def _captured_content(payload: bytes = b"x") -> CapturedContent:
@@ -108,6 +118,7 @@ async def test_pending_content_accepts_its_first_reference_in_creation_transacti
         )
         session.add_all([first_file, initial_content])
         await session.flush()
+        session.add(_descriptor(initial_content.id, "initial-content"))
         session.add(
             FileContentReferences(
                 file_id=first_file.id,
@@ -149,6 +160,7 @@ async def test_info_blob_pending_content_accepts_its_first_reference_at_creation
         )
         session.add_all([owner, content])
         await session.flush()
+        session.add(_descriptor(content.id, "info-blob-owned-content"))
         session.add(
             InfoBlobContentReferences(
                 info_blob_id=owner.id,
@@ -179,6 +191,7 @@ async def test_icon_pending_content_accepts_its_first_reference_at_creation(
         )
         session.add_all([owner, content])
         await session.flush()
+        session.add(_descriptor(content.id, "icon-owned-content"))
         session.add(
             IconContentReferences(
                 icon_id=owner.id,
@@ -194,16 +207,16 @@ async def test_ownerless_pending_content_cannot_commit(
 ) -> None:
     tenant_id, user_id = await _owner_ids(object_content_database)
 
-    with pytest.raises(DBAPIError, match="pending content requires an initial owner"):
+    with pytest.raises(DBAPIError, match="requires an initial owner"):
         async with object_content_database.session() as session, session.begin():
-            session.add(
-                _pending_content(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    idempotency_key="ownerless-content",
-                )
+            content = _pending_content(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                idempotency_key="ownerless-content",
             )
+            session.add(content)
             await session.flush()
+            session.add(_descriptor(content.id, "ownerless-content"))
 
 
 @pytest.mark.asyncio
@@ -219,7 +232,11 @@ async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
         idempotency_key="repository-idempotency",
         producer_receipt="file:repository-idempotency:original:0",
     )
-    fingerprint = content_request_fingerprint(intent, content)
+    fingerprint = content_request_fingerprint(
+        intent,
+        content,
+        StorageKind.OBJECT_STORE,
+    )
 
     async with object_content_database.session() as session, session.begin():
         owner = _file(
@@ -229,7 +246,7 @@ async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
         )
         session.add(owner)
         await session.flush()
-        prepared = await ObjectContentRepository(session).prepare(
+        prepared = await ObjectContentRepository(session).prepare_object_store(
             intent=intent,
             content=content,
             object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
@@ -247,7 +264,7 @@ async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
         assert prepared.created is True
 
     async with object_content_database.session() as session, session.begin():
-        replay = await ObjectContentRepository(session).prepare(
+        replay = await ObjectContentRepository(session).prepare_object_store(
             intent=intent,
             content=content,
             object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
@@ -255,17 +272,18 @@ async def test_prepare_is_idempotent_and_rejects_fingerprint_substitution(
         )
         assert replay.created is False
         assert replay.id == prepared.id
-        assert replay.object_key == prepared.object_key
+        assert replay.storage_kind is StorageKind.OBJECT_STORE
 
     changed_intent = replace(intent, producer_receipt="file:other:original:0")
     with pytest.raises(ObjectContentIdempotencyConflictError):
         async with object_content_database.session() as session, session.begin():
-            await ObjectContentRepository(session).prepare(
+            await ObjectContentRepository(session).prepare_object_store(
                 intent=changed_intent,
                 content=content,
                 object_key=f"v1/a2d539affef042aaa7f814376947be2c/{uuid4().hex}",
                 request_fingerprint=content_request_fingerprint(
                     changed_intent,
                     content,
+                    StorageKind.OBJECT_STORE,
                 ),
             )

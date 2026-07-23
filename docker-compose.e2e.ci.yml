@@ -94,9 +94,9 @@ services:
       UPLOAD_MAX_FILE_SIZE: "10485760"
       TRANSCRIPTION_MAX_FILE_SIZE: "10485760"
       MAX_IN_QUESTION: "1"
-      # Browser E2E intentionally exercises the healthy disabled byte-plane
-      # state. Real persistence/integrity/recovery uses the dedicated pinned
-      # SeaweedFS + PostgreSQL 13 backend suite.
+      # Browser E2E exercises healthy PostgreSQL-inline mode without a remote
+      # byte plane. Real S3 persistence/integrity/recovery uses the dedicated
+      # pinned SeaweedFS + PostgreSQL 13 backend suite.
       # Seeded login identity. init_db only seeds when ALL five are set.
       DEFAULT_TENANT_NAME: E2ETenant
       DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
