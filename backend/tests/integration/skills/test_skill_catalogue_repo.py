@@ -1,16 +1,20 @@
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.app_table import AppRuns
+from eneo.database.tables.governance_policy_table import GovernancePolicies
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
+    SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
     SkillExecutionReference,
@@ -610,3 +614,138 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
         assert republished.previous_is_active is False
         assert republished.skill.publication_state is SkillPublicationState.PUBLISHED
         assert republished.skill.is_active is True
+
+
+async def test_binding_activation_mode_round_trips_for_assistant_and_policy_only(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    app_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        organization = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert organization is not None
+        model = await completion_model_factory(session, "activation-mode-model")
+        space = await space_factory(session, "Activation mode space", [model.id])
+        session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+        assistant = await assistant_factory(
+            session,
+            "Activation mode Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        app = await app_factory(
+            session,
+            "Activation mode App",
+            model.id,
+            space_id=space.id,
+        )
+        policy = GovernancePolicies(
+            tenant_id=admin_user.tenant_id,
+            scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
+        )
+        session.add(policy)
+        await session.flush()
+
+        repo = container.skill_repo()
+        local = await repo.create(
+            space_id=space.id,
+            slug=f"activation-mode-{uuid4().hex[:8]}",
+            display_name="Activation mode",
+            description="Round-trips the closed binding mode",
+            instructions="Use the activation-mode instructions.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        published = await repo.create(
+            space_id=organization.id,
+            slug=f"activation-mode-org-{uuid4().hex[:8]}",
+            display_name="Activation mode org",
+            description="Round-trips the closed policy binding mode",
+            instructions="Use the approved activation-mode instructions.",
+            content_digest="b" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=published.id,
+            expected_revision_id=published.current_revision.id,
+        )
+
+        resolved = await repo.resolve_local_references_for_binding_update(
+            space_id=space.id,
+            references=[
+                SkillBindingReference(
+                    skill_id=local.id,
+                    skill_revision_id=local.current_revision.id,
+                )
+            ],
+        )
+        assert [binding.activation_mode for binding in resolved] == [
+            SkillActivationMode.ALWAYS
+        ]
+
+        on_demand = [
+            replace(binding, activation_mode=SkillActivationMode.ON_DEMAND)
+            for binding in resolved
+        ]
+        await repo.replace_assistant_bindings(
+            assistant_id=assistant.id,
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            bindings=on_demand,
+        )
+        assistant_bindings = await repo.list_assistant_bindings(
+            assistant_id=assistant.id
+        )
+        assert [binding.activation_mode for binding in assistant_bindings] == [
+            SkillActivationMode.ON_DEMAND
+        ]
+
+        approved = await repo.resolve_published_references_for_binding_update(
+            tenant_id=admin_user.tenant_id,
+            references=[
+                SkillBindingReference(
+                    skill_id=published.id,
+                    skill_revision_id=published.current_revision.id,
+                )
+            ],
+        )
+        await repo.replace_policy_bindings(
+            policy_id=policy.id,
+            tenant_id=admin_user.tenant_id,
+            skill_space_id=organization.id,
+            bindings=[
+                replace(binding, activation_mode=SkillActivationMode.ON_DEMAND)
+                for binding in approved
+            ],
+        )
+        policy_bindings = await repo.list_policy_bindings(policy_id=policy.id)
+        assert [binding.activation_mode for binding in policy_bindings] == [
+            SkillActivationMode.ON_DEMAND
+        ]
+
+        # Apps stay eager: the table has no mode column, so even an internal
+        # ON_DEMAND value cannot persist and reads come back as ALWAYS.
+        await repo.replace_app_bindings(
+            app_id=app.id,
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            bindings=on_demand,
+        )
+        app_bindings = await repo.list_app_bindings(app_id=app.id)
+        assert [binding.activation_mode for binding in app_bindings] == [
+            SkillActivationMode.ALWAYS
+        ]
+        execution_plan_bindings = await repo.list_app_bindings_for_execution_plan(
+            app_id=app.id
+        )
+        assert [binding.activation_mode for binding in execution_plan_bindings] == [
+            SkillActivationMode.ALWAYS
+        ]
