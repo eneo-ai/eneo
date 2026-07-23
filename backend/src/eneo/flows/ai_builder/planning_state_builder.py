@@ -62,7 +62,6 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
-    BASIC_CASE_METADATA,
     DETAILED_CASE_METADATA,
     NO_EXTRA_RUNTIME_METADATA,
     extract_runtime_input_field_hints,
@@ -108,59 +107,8 @@ class _PolicyDefaultRule:
     has_explicit_text: Callable[[str], bool]
 
 
-@dataclass(frozen=True, slots=True)
-class _ModelValueAcceptancePolicy:
-    requires_text_evidence: Callable[[str], bool]
-    dependent_model_values: tuple[tuple[str, str], ...] = ()
-
-
 def _never_explicit_text(_: str) -> bool:
     return False
-
-
-def _text_evidences_stop_after_primary_operation(text: str) -> bool:
-    return infer_post_processing_goal(text) == "stop_after_primary_operation"
-
-
-def _text_evidences_structure_key_information(text: str) -> bool:
-    return infer_post_processing_goal(text) == "structure_key_information"
-
-
-def _text_evidences_positive_runtime_metadata(text: str) -> bool:
-    return infer_runtime_metadata_slot(text) in {
-        BASIC_CASE_METADATA,
-        DETAILED_CASE_METADATA,
-    }
-
-
-_MODEL_VALUE_ACCEPTANCE_POLICIES: dict[tuple[str, str], _ModelValueAcceptancePolicy] = {
-    # Register model values that need explicit user-text evidence before they
-    # can become settled requirements; list values to drop with them as dependents.
-    (
-        "post_processing_goal",
-        "stop_after_primary_operation",
-    ): _ModelValueAcceptancePolicy(
-        requires_text_evidence=_text_evidences_stop_after_primary_operation,
-    ),
-    (
-        "post_processing_goal",
-        "structure_key_information",
-    ): _ModelValueAcceptancePolicy(
-        requires_text_evidence=_text_evidences_structure_key_information,
-    ),
-    (
-        "runtime_metadata_fields",
-        "basic_case_metadata",
-    ): _ModelValueAcceptancePolicy(
-        requires_text_evidence=_text_evidences_positive_runtime_metadata,
-    ),
-    (
-        "runtime_metadata_fields",
-        "detailed_case_metadata",
-    ): _ModelValueAcceptancePolicy(
-        requires_text_evidence=_text_evidences_positive_runtime_metadata,
-    ),
-}
 
 
 _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
@@ -664,10 +612,6 @@ def merge_llm_resolved_slots(
         raise ValueError("prompt_hash must be non-empty")
 
     apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
-    blocked_model_values = _blocked_model_values(
-        classification_result=classification_result,
-        freeform_text=freeform_text,
-    )
     _merge_model_result_obligations(
         state,
         classification_result=classification_result,
@@ -689,9 +633,6 @@ def merge_llm_resolved_slots(
             continue
         if classified_slot.slot_name in model_blocked_slots:
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
-            continue
-        if (classified_slot.slot_name, classified_slot.value) in blocked_model_values:
-            _clear_model_slot(state, classified_slot.slot_name)
             continue
         if not classified_slot.evidence:
             continue
@@ -881,24 +822,6 @@ def _merge_model_result_obligations(
         existing.add(obligation)
 
 
-def _blocked_model_values(
-    *,
-    classification_result: SlotClassificationResult,
-    freeform_text: str,
-) -> frozenset[tuple[str, str]]:
-    blocked: set[tuple[str, str]] = set()
-    for classified_slot in classification_result.slots:
-        key = (classified_slot.slot_name, classified_slot.value)
-        policy = _MODEL_VALUE_ACCEPTANCE_POLICIES.get(key)
-        if policy is None:
-            continue
-        if policy.requires_text_evidence(freeform_text):
-            continue
-        blocked.add(key)
-        blocked.update(policy.dependent_model_values)
-    return frozenset(blocked)
-
-
 def apply_model_blocked_slots(
     state: PlanningState,
     *,
@@ -917,12 +840,6 @@ def _clear_nonprotected_model_slot(state: PlanningState, slot_name: str) -> None
         existing_slot is not None
         and existing_slot.source not in _MODEL_PROTECTED_SOURCES
     ):
-        state.resolved_slots.pop(slot_name, None)
-
-
-def _clear_model_slot(state: PlanningState, slot_name: str) -> None:
-    existing_slot = state.resolved_slots.get(slot_name)
-    if existing_slot is not None and existing_slot.source == "model":
         state.resolved_slots.pop(slot_name, None)
 
 
@@ -1082,8 +999,6 @@ def _model_slot_can_replace(
     if existing_slot.source == "policy_default":
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
-        if existing_slot.confidence == "high":
-            return model_confidence == "high"
         return model_confidence in {"high", "medium"}
     if existing_slot.source == "model":
         return model_confidence in {"high", "medium"}

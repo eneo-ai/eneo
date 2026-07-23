@@ -37,12 +37,12 @@ def normalize_discovery_text(value: str) -> str:
     tokens = [
         split_token
         for token in collapsed.split()
-        for split_token in _split_swedish_artifact_compound(token)
+        for split_token in _normalize_swedish_artifact_token(token)
     ]
     return " ".join(tokens)
 
 
-def _split_swedish_artifact_compound(token: str) -> tuple[str, ...]:
+def _normalize_swedish_artifact_token(token: str) -> tuple[str, ...]:
     for prefix in _SWEDISH_ARTIFACT_COMPOUND_PREFIXES:
         if not token.startswith(prefix):
             continue
@@ -59,24 +59,45 @@ def _split_swedish_artifact_compound(token: str) -> tuple[str, ...]:
 def contains_phrase(text: str, phrase: str) -> bool:
     if not text or not phrase:
         return False
-    normalized_phrase = normalize_discovery_text(phrase)
-    if not normalized_phrase:
+    normalized_text = normalize_discovery_text(text)
+    if not normalized_text:
         return False
-    return f" {normalized_phrase} " in f" {text} "
+    return _contains_normalized_phrase(normalized_text, phrase)
+
+
+def _contains_normalized_phrase(normalized_text: str, phrase: str) -> bool:
+    normalized_phrase = normalize_discovery_text(phrase)
+    return (
+        bool(normalized_phrase) and f" {normalized_phrase} " in f" {normalized_text} "
+    )
 
 
 def contains_any_phrase(text: str, phrases: Iterable[str]) -> bool:
-    return any(contains_phrase(text, phrase) for phrase in phrases)
+    normalized_text = normalize_discovery_text(text)
+    return bool(normalized_text) and any(
+        _contains_normalized_phrase(normalized_text, phrase) for phrase in phrases
+    )
 
 
 def contains_token_prefix(text: str, prefix: str) -> bool:
     if not text or not prefix:
         return False
-    normalized_prefix = normalize_discovery_text(prefix)
-    if not normalized_prefix:
+    normalized_text = normalize_discovery_text(text)
+    if not normalized_text:
         return False
-    return any(token.startswith(normalized_prefix) for token in text.split())
+    return _contains_normalized_token_prefix(normalized_text, prefix)
+
+
+def _contains_normalized_token_prefix(normalized_text: str, prefix: str) -> bool:
+    normalized_prefix = normalize_discovery_text(prefix)
+    return bool(normalized_prefix) and any(
+        token.startswith(normalized_prefix) for token in normalized_text.split()
+    )
 
 
 def contains_any_token_prefix(text: str, prefixes: Iterable[str]) -> bool:
-    return any(contains_token_prefix(text, prefix) for prefix in prefixes)
+    normalized_text = normalize_discovery_text(text)
+    return bool(normalized_text) and any(
+        _contains_normalized_token_prefix(normalized_text, prefix)
+        for prefix in prefixes
+    )

@@ -54,14 +54,12 @@ from eneo.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
-    _MODEL_VALUE_ACCEPTANCE_POLICIES,
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
 )
-from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 
 def _state(
@@ -175,13 +173,6 @@ def _slot_classification_metadata(
     result = metadata_with_slot_classification(None, metadata)
     assert result is not None
     return result
-
-
-def test_model_value_acceptance_policies_reference_legal_slot_values() -> None:
-    for (slot_name, value), policy in _MODEL_VALUE_ACCEPTANCE_POLICIES.items():
-        assert value in legal_slot_values(slot_name)
-        for dependent_slot_name, dependent_value in policy.dependent_model_values:
-            assert dependent_value in legal_slot_values(dependent_slot_name)
 
 
 class TestPersistedNone:
@@ -1393,7 +1384,7 @@ class TestPolicyDefaults:
 
 
 class TestRuntimeMetadataClassificationBoundaries:
-    def test_classifier_cannot_override_explicit_negated_runtime_field_request(
+    def test_explicit_uncertainty_block_clears_runtime_metadata_guess(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1425,14 +1416,12 @@ class TestRuntimeMetadataClassificationBoundaries:
             ),
             prompt_hash="f" * 64,
             freeform_text="",
+            model_blocked_slots=frozenset({"runtime_metadata_fields"}),
         )
 
-        slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "heuristic"
-        assert slot.confidence == "high"
+        assert "runtime_metadata_fields" not in state.resolved_slots
 
-    def test_classifier_source_derived_report_fields_do_not_become_runtime_metadata(
+    def test_classifier_runtime_metadata_uses_typed_evidence_not_raw_text_recheck(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1466,9 +1455,11 @@ class TestRuntimeMetadataClassificationBoundaries:
             freeform_text="",
         )
 
-        assert "runtime_metadata_fields" not in state.resolved_slots
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
 
-    def test_classifier_source_derived_document_sections_do_not_become_runtime_metadata(
+    def test_classifier_runtime_metadata_acceptance_does_not_require_phrase_duplication(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1506,7 +1497,9 @@ class TestRuntimeMetadataClassificationBoundaries:
             freeform_text="",
         )
 
-        assert "runtime_metadata_fields" not in state.resolved_slots
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
         assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
 
@@ -1905,7 +1898,7 @@ class TestModelSlotMerge:
             "no_extra_metadata"
         )
 
-    def test_model_raw_post_processing_goal_needs_explicit_text_evidence(
+    def test_model_post_processing_goal_uses_typed_evidence_without_raw_text_match(
         self,
     ) -> None:
         state = _state()
@@ -1930,7 +1923,9 @@ class TestModelSlotMerge:
             freeform_text="Jag vill ha ett transkriberingsflöde.",
         )
 
-        assert "post_processing_goal" not in state.resolved_slots
+        slot = state.resolved_slots["post_processing_goal"]
+        assert slot.value == "stop_after_primary_operation"
+        assert slot.source == "model"
         assert "structured_analysis_need" not in state.resolved_slots
 
     def test_model_raw_post_processing_goal_commits_when_explicit(
@@ -1957,7 +1952,7 @@ class TestModelSlotMerge:
         assert slot.value == "stop_after_primary_operation"
         assert slot.source == "model"
 
-    def test_replayed_model_raw_post_processing_goal_is_rechecked(
+    def test_replayed_model_post_processing_goal_uses_persisted_typed_evidence(
         self,
     ) -> None:
         state = build_planning_state_from_conversation(
@@ -1981,10 +1976,12 @@ class TestModelSlotMerge:
             ]
         )
 
-        assert "post_processing_goal" not in state.resolved_slots
+        slot = state.resolved_slots["post_processing_goal"]
+        assert slot.value == "stop_after_primary_operation"
+        assert slot.source == "model"
         assert "structured_analysis_need" not in state.resolved_slots
 
-    def test_replay_drops_newly_blocked_model_value(self) -> None:
+    def test_replay_accepts_typed_model_value_without_raw_phrase(self) -> None:
         state = build_planning_state_from_conversation(
             [
                 ConversationMessage(
@@ -2005,9 +2002,11 @@ class TestModelSlotMerge:
             ]
         )
 
-        assert "post_processing_goal" not in state.resolved_slots
+        slot = state.resolved_slots["post_processing_goal"]
+        assert slot.value == "structure_key_information"
+        assert slot.source == "model"
 
-    def test_model_raw_post_processing_goal_rejects_empty_evidence_text(
+    def test_model_post_processing_goal_accepts_empty_freeform_text_with_typed_evidence(
         self,
     ) -> None:
         state = _state()
@@ -2027,7 +2026,9 @@ class TestModelSlotMerge:
             freeform_text="",
         )
 
-        assert "post_processing_goal" not in state.resolved_slots
+        slot = state.resolved_slots["post_processing_goal"]
+        assert slot.value == "stop_after_primary_operation"
+        assert slot.source == "model"
 
     def test_medium_model_output_does_not_replace_requirements_summary(self) -> None:
         state = _state()
@@ -2123,7 +2124,7 @@ class TestModelSlotMerge:
             "quote:user_message:test-source:runtime_metadata_fields evidence",
         ]
 
-    def test_high_model_runtime_metadata_without_text_evidence_keeps_policy_default(
+    def test_high_model_runtime_metadata_without_raw_text_match_replaces_policy_default(
         self,
     ) -> None:
         state = _state()
@@ -2154,8 +2155,8 @@ class TestModelSlotMerge:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "no_extra_metadata"
-        assert slot.source == "policy_default"
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "model"
 
     def test_medium_model_output_does_not_replace_policy_default(self) -> None:
         state = _state()
@@ -2186,7 +2187,7 @@ class TestModelSlotMerge:
         assert slot.value == "no_extra_metadata"
         assert slot.source == "policy_default"
 
-    def test_medium_model_output_does_not_downgrade_high_runtime_field_heuristic(
+    def test_medium_model_output_replaces_conflicting_high_runtime_field_heuristic(
         self,
     ) -> None:
         state = _state()
@@ -2218,9 +2219,9 @@ class TestModelSlotMerge:
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
-        assert slot.value == "detailed_case_metadata"
-        assert slot.source == "heuristic"
-        assert slot.confidence == "high"
+        assert slot.value == "basic_case_metadata"
+        assert slot.source == "model"
+        assert slot.confidence == "medium"
 
     def test_medium_model_output_replaces_heuristic_and_fills_missing_slot(
         self,

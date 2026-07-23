@@ -394,7 +394,7 @@ def compute_question_budget(text: str) -> int:
 
 
 def has_explicit_step_plan(text: str) -> bool:
-    return mentions_any(
+    return contains_any_phrase(
         text.casefold(),
         (
             "steg 1",
@@ -443,11 +443,11 @@ def is_detailed_flow_spec(text: str) -> bool:
 
 
 def implies_single_case(text: str) -> bool:
-    if mentions_any(
+    if contains_any_phrase(
         text, ("flera ärenden", "multiple cases", "several cases", "compare")
     ):
         return False
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "ett ärende",
@@ -460,7 +460,7 @@ def implies_single_case(text: str) -> bool:
 
 
 def implies_single_primary_document(text: str) -> bool:
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "flera dokument",
@@ -471,7 +471,7 @@ def implies_single_primary_document(text: str) -> bool:
         ),
     ):
         return False
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "underlag som pdf",
@@ -486,7 +486,7 @@ def implies_single_primary_document(text: str) -> bool:
 
 
 def implies_structured_report_pdf(text: str) -> bool:
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "risker",
@@ -500,7 +500,7 @@ def implies_structured_report_pdf(text: str) -> bool:
 
 
 def looks_like_case_document_family(text: str) -> bool:
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "underlag",
@@ -513,7 +513,3 @@ def looks_like_case_document_family(text: str) -> bool:
             "remiss",
         ),
     )
-
-
-def mentions_any(text: str, needles: tuple[str, ...]) -> bool:
-    return any(needle in text for needle in needles)

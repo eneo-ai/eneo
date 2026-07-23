@@ -6,6 +6,11 @@ import pathlib
 import pytest
 
 import eneo.flows.ai_builder.ai_builder_discovery as discovery
+from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    final_output_scope_is_vague,
+    reader_and_style_is_vague,
+    ultra_vague_terminal_output_choice_is_vague,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
@@ -140,3 +145,47 @@ def test_final_output_mode_builder_prefers_output_vague_message(
     assert issue.message == (
         "The final output format is still too vague to design the flow confidently."
     )
+
+
+def test_swedish_inflected_summary_request_reaches_terminal_output_clarification() -> (
+    None
+):
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content="Sammanfatta uppladdade dokument.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+    )
+
+    assert ultra_vague_terminal_output_choice_is_vague(profile) is True
+
+
+def test_swedish_inflected_report_reaches_reader_clarification() -> None:
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content="Skapa rapporten som docx.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+    )
+
+    assert reader_and_style_is_vague(profile) is True
+
+
+def test_swedish_inflected_analysis_reaches_output_scope_clarification() -> None:
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content="Skapa analysen som docx.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+    )
+
+    assert final_output_scope_is_vague(profile) is True

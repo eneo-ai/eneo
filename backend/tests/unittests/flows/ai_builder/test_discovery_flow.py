@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -36,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
     resolve_requirements_state,
@@ -1806,7 +1808,7 @@ class TestExtendedClarificationHints:
         assert analysis.selected_question_ids[0] == "post_processing_goal"
 
     @pytest.mark.asyncio
-    async def test_model_owned_goal_does_not_suppress_vague_outcome_question(
+    async def test_model_owned_goal_suppresses_duplicate_outcome_question(
         self,
     ) -> None:
         conversation = [
@@ -1860,10 +1862,10 @@ class TestExtendedClarificationHints:
         )
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "post_processing_goal"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
-        assert analysis.selected_question_ids[0] == "post_processing_goal"
+        assert analysis.next_issue.issue_id == "terminal_output"
+        assert "post_processing_goal" not in {
+            issue.issue_id for issue in analysis.issues
+        }
 
     @pytest.mark.asyncio
     async def test_vague_transcription_asks_output_or_outcome_before_confirmation(
@@ -2261,7 +2263,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
 
     @pytest.mark.asyncio
-    async def test_classifier_raw_outcome_does_not_skip_bare_transcription_followup(
+    async def test_classifier_outcome_drives_discovery_without_raw_text_veto(
         self,
     ) -> None:
         conversation = [
@@ -2318,7 +2320,9 @@ class TestExtendedClarificationHints:
                 tenant_id=uuid4(),
             )
 
-        assert "post_processing_goal" not in context.planning_state.resolved_slots
+        goal = context.planning_state.resolved_slots["post_processing_goal"]
+        assert goal.value == "stop_after_primary_operation"
+        assert goal.source == "model"
         assert "structured_analysis_need" not in context.planning_state.resolved_slots
 
         analysis = analyze_discovery(
@@ -2327,10 +2331,9 @@ class TestExtendedClarificationHints:
             slot_classification_result=context.slot_classification_result,
         )
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "post_processing_goal"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+        assert "post_processing_goal" not in {
+            issue.issue_id for issue in analysis.issues
+        }
 
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,
@@ -3226,7 +3229,11 @@ class TestPlannerDiscoveryQuestionDispatch:
                 telemetry=ServerDecisionTelemetry(
                     request_id="req-test",
                     litellm_model="server",
-                    used_auxiliary_llm=False,
+                    usage_tracker=ProposalTurnTelemetry(
+                        request_id="req-test",
+                        model="server",
+                        target_kind=TargetKind.CREATE,
+                    ),
                 ),
                 planning_state=PlanningState.empty(),
             )

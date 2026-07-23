@@ -13,11 +13,14 @@ from eneo.flows.ai_builder.ai_builder_discovery_families import (
 from eneo.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
     expresses_task_intent,
-    mentions_any,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_post_processing_goal,
     infer_structured_io_contract,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_phrase,
+    contains_any_token_prefix,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -110,16 +113,16 @@ def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
     answers = profile.answers
     if "processing_scope" in answers:
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         ("one case at a time", "en fil per körning", "ett ärende", "single case"),
     ):
         return False
     if implies_single_case(text):
         return False
-    if mentions_any(text, ("multiple cases", "flera ärenden", "several cases")):
+    if contains_any_phrase(text, ("multiple cases", "flera ärenden", "several cases")):
         return False
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "case material",
@@ -163,18 +166,35 @@ def terminal_output_is_vague(profile: DiscoveryProfile) -> bool:
         return True
     if "terminal_output" not in profile.answers and expresses_task_intent(text):
         return True
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "report",
+            "reports",
             "rapport",
+            "rapporten",
+            "rapporter",
+            "rapporterna",
             "summary",
+            "summaries",
             "sammanfattning",
+            "sammanfattningen",
+            "sammanfattningar",
             "output",
+            "outputs",
             "resultat",
+            "resultatet",
+            "resultaten",
             "slutresultat",
+            "slutresultatet",
+            "slutresultaten",
             "generate",
+            "generates",
+            "generated",
+            "generating",
             "generera",
+            "genererar",
+            "genererade",
         ),
     )
 
@@ -192,7 +212,7 @@ def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bo
         return False
     if len(profile.text.split()) > 7:
         return False
-    if mentions_any(
+    if contains_any_phrase(
         profile.text,
         (
             "pdf",
@@ -207,7 +227,7 @@ def ultra_vague_terminal_output_choice_is_vague(profile: DiscoveryProfile) -> bo
         ),
     ):
         return False
-    if not mentions_any(
+    if not contains_any_token_prefix(
         profile.text,
         (
             "sammanfatt",
@@ -228,9 +248,9 @@ def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "post_processing_goal"):
         return False
     resolved_goal = _resolved_slot(profile, "post_processing_goal")
-    if resolved_goal is not None and resolved_goal.source != "model":
+    if resolved_goal is not None:
         return False
-    if resolved_goal is None and "post_processing_goal" in profile.answers:
+    if "post_processing_goal" in profile.answers:
         return False
     if _explicit_post_processing_goal_present(profile.text):
         return False
@@ -276,7 +296,7 @@ def _json_to_json_semantic_flow(profile: DiscoveryProfile) -> bool:
 
 
 def _outcome_wording_is_vague(profile: DiscoveryProfile) -> bool:
-    return mentions_any(
+    return contains_any_phrase(
         profile.text,
         (
             "något användbart",
@@ -304,7 +324,7 @@ def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
         return docx_mode_slot is None or docx_mode_slot.source == "policy_default"
     if intent.docx_output_mode is not None:
         return False
-    return mentions_any(
+    return contains_any_phrase(
         profile.text,
         (
             "docx",
@@ -331,10 +351,12 @@ def has_same_run_comparison_contradiction(
     text: str,
     answers: dict[str, set[str]],
 ) -> bool:
-    if not mentions_any(text, ("compare", "jämför", "jämföra", "jämförelse")):
+    if not contains_any_token_prefix(
+        text, ("compare", "jämför", "jämföra", "jämförelse")
+    ):
         return False
 
-    says_single_file = mentions_any(
+    says_single_file = contains_any_phrase(
         text,
         (
             "one file per run",
@@ -345,7 +367,7 @@ def has_same_run_comparison_contradiction(
             "1 pdf laddas upp vid varje körning",
         ),
     )
-    says_same_run_compare = mentions_any(
+    says_same_run_compare = contains_any_phrase(
         text,
         (
             "same run",
@@ -357,7 +379,7 @@ def has_same_run_comparison_contradiction(
     )
 
     answer_texts = " ".join(value for values in answers.values() for value in values)
-    if mentions_any(
+    if contains_any_phrase(
         answer_texts,
         (
             "same_run_multiple_documents",
@@ -371,7 +393,7 @@ def has_same_run_comparison_contradiction(
     ):
         return False
 
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "ladda upp flera pdf",
@@ -408,7 +430,7 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "processing_scope" in answers and "single_case" in answers["processing_scope"]:
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "one document",
@@ -469,7 +491,7 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         and not profile.comparison_requested
     ):
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             *_DOCUMENT_PACKAGE_PHRASES,
@@ -504,9 +526,18 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         and not profile.comparison_requested
     ):
         return False
-    return mentions_any(
+    return contains_any_phrase(
         text,
-        ("pdf", "document", "documents", "dokument", "files", "filer"),
+        (
+            "pdf",
+            "document",
+            "documents",
+            "dokument",
+            "dokumentet",
+            "dokumenten",
+            "files",
+            "filer",
+        ),
     )
 
 
@@ -519,7 +550,7 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
     text = profile.text
     if any(key in answers for key in ("output_reader", "output_style", "output_tone")):
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "chef",
@@ -534,7 +565,7 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    if profile.edit_mode and not mentions_any(
+    if profile.edit_mode and not contains_any_phrase(
         text,
         (
             "målgrupp",
@@ -548,7 +579,18 @@ def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    return mentions_any(text, ("report", "rapport", "memo"))
+    return contains_any_phrase(
+        text,
+        (
+            "report",
+            "reports",
+            "rapport",
+            "rapporten",
+            "rapporter",
+            "rapporterna",
+            "memo",
+        ),
+    )
 
 
 def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
@@ -568,7 +610,7 @@ def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
         )
     ):
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "summary only",
@@ -582,7 +624,7 @@ def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    if profile.edit_mode and not mentions_any(
+    if profile.edit_mode and not contains_any_phrase(
         text,
         (
             "kortare",
@@ -600,14 +642,23 @@ def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
         ),
     ):
         return False
-    return mentions_any(
+    return contains_any_phrase(
         text,
         (
             "report",
+            "reports",
             "rapport",
+            "rapporten",
+            "rapporter",
+            "rapporterna",
             "memo",
             "analys",
+            "analysen",
+            "analyser",
+            "analysera",
+            "analyserar",
             "analysis",
+            "analyses",
             "översikt",
             "overview",
             "brief",
@@ -629,7 +680,7 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
     output_choice = profile.output_intent.terminal_output
     if output_choice != "pdf_document":
         return False
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             "kort sammanfattning",

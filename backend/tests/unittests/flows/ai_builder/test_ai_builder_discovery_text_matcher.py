@@ -1,6 +1,8 @@
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_phrase,
+    contains_phrase,
     normalize_discovery_text,
 )
 
@@ -33,3 +35,33 @@ def test_normalize_discovery_text_keeps_unrelated_swedish_words_intact() -> None
     assert normalize_discovery_text("dokumentation och rapportering") == (
         "dokumentation och rapportering"
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("Create a REPORT, please.", "report"),
+        ("Ladda upp WORDDOKUMENTET.", "word dokument"),
+        ("Skapa PDFRAPPORTERNA!", "pdf rapport"),
+    ],
+)
+def test_contains_phrase_normalizes_text_and_supported_swedish_compounds(
+    text: str,
+    phrase: str,
+) -> None:
+    assert contains_phrase(text, phrase)
+
+
+@pytest.mark.parametrize(
+    ("text", "phrases"),
+    [
+        ("This is reporting metadata.", ("report",)),
+        ("Dokumentation krävs.", ("dokument",)),
+        ("Jämförelsevis enkelt.", ("jämförelse", "jämför")),
+    ],
+)
+def test_contains_any_phrase_rejects_substring_false_positives(
+    text: str,
+    phrases: tuple[str, ...],
+) -> None:
+    assert not contains_any_phrase(text, phrases)

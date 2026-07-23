@@ -65,6 +65,19 @@ def _make_flow(*steps: FlowStep, metadata_json: dict | None = None) -> Flow:
     )
 
 
+def test_comparison_request_recognizes_swedish_compound_inflection() -> None:
+    profile = build_discovery_profile(
+        [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett jämförelseflöde.",
+            )
+        ]
+    )
+
+    assert profile.comparison_requested is True
+
+
 def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities() -> (
     None
 ):

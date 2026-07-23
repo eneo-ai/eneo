@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import (
     ReferenceSourceResolution,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_phrase,
     contains_any_token_prefix,
     normalize_discovery_text,
 )
@@ -165,8 +166,6 @@ _COMPARISON_REQUEST_MARKERS = (
     "compare",
     "comparison",
     "jämför",
-    "jämföra",
-    "jämförelse",
     "contradiction",
     "motsägelser",
     "skillnader",
@@ -337,7 +336,7 @@ def build_discovery_profile(
         reference_source=reference_source,
         document_like_input=input_intent.document_runtime_input_requested
         or "documents" in default_input_modes,
-        case_like_flow=mentions_any(
+        case_like_flow=contains_any_phrase(
             text,
             (
                 "case material",
@@ -370,7 +369,7 @@ def _comparison_requested(
     answers: dict[str, set[str]],
     planning_state: PlanningState,
 ) -> bool:
-    if mentions_any(text, _COMPARISON_REQUEST_MARKERS):
+    if contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS):
         return True
     if "compare_or_validate" in answers.get("post_processing_goal", set()):
         return True
@@ -414,12 +413,12 @@ def resolve_reference_source(
             reason="comparison_scope_answer_unclear",
         )
 
-    if mentions_any(text, _SAME_RUN_REFERENCE_MARKERS):
+    if contains_any_phrase(text, _SAME_RUN_REFERENCE_MARKERS):
         return ReferenceSourceResolution(
             status="same_run_sources",
             reason="same_run_reference_text",
         )
-    if mentions_any(text, _EXISTING_REFERENCE_MARKERS):
+    if contains_any_phrase(text, _EXISTING_REFERENCE_MARKERS):
         return ReferenceSourceResolution(
             status="existing_flow_or_knowledge",
             reason="existing_reference_text",
@@ -460,7 +459,9 @@ def expresses_task_intent(text: str) -> bool:
     normalized = normalize_discovery_text(text)
     # A bare question mark usually means the user is asking about the builder,
     # not asking the builder to create or change a flow.
-    if "?" in raw_text and not mentions_any(normalized, _QUESTION_ACTION_MARKERS):
+    if "?" in raw_text and not contains_any_phrase(
+        normalized, _QUESTION_ACTION_MARKERS
+    ):
         return False
     return contains_any_token_prefix(
         normalized,
@@ -488,9 +489,9 @@ def should_prefer_structured_intermediate(
     flow_defaults: dict[str, set[str]],
     answers: dict[str, set[str]],
 ) -> bool:
-    if mentions_any(text, _STRUCTURED_INTERMEDIATE_OPTOUT_HINTS):
+    if contains_any_phrase(text, _STRUCTURED_INTERMEDIATE_OPTOUT_HINTS):
         return False
-    if mentions_any(text, _STRUCTURED_INTERMEDIATE_FORCE_HINTS):
+    if contains_any_phrase(text, _STRUCTURED_INTERMEDIATE_FORCE_HINTS):
         return True
 
     document_like_input = (
@@ -511,7 +512,7 @@ def should_prefer_structured_intermediate(
     structured_deliverable = (
         output_intent.terminal_output in {"pdf_document", "docx_document"}
         or output_intent.content_shape == "structured_report"
-        or mentions_any(text, _STRUCTURED_REPORT_HINTS)
+        or contains_any_token_prefix(text, _STRUCTURED_REPORT_HINTS)
     )
     if not structured_deliverable:
         return False
@@ -519,15 +520,13 @@ def should_prefer_structured_intermediate(
     task_verb_count = count_distinct_task_verbs(text)
     if task_verb_count >= 3:
         return True
-    return task_verb_count >= 2 and mentions_any(text, _ANALYSIS_STAGE_HINTS)
-
-
-def mentions_any(text: str, needles: tuple[str, ...]) -> bool:
-    return any(needle in text for needle in needles)
+    return task_verb_count >= 2 and contains_any_token_prefix(
+        text, _ANALYSIS_STAGE_HINTS
+    )
 
 
 def infer_discovery_language(text: str) -> DiscoveryLanguage:
-    if mentions_any(
+    if contains_any_phrase(
         text,
         (
             " jag ",
