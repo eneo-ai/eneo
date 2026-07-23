@@ -159,15 +159,21 @@
             </Button>
           </div>
         {:else}
-          <div class="border-border overflow-x-auto border-y">
-            <Table.Root class="min-w-[860px]">
+          <div class="border-border @container border-y">
+            <Table.Root class="w-full table-fixed">
               <Table.Header>
                 <Table.Row>
-                  <Table.Head>{m.name()}</Table.Head>
-                  <Table.Head>{m.description()}</Table.Head>
-                  <Table.Head>{m.status()}</Table.Head>
-                  <Table.Head>{m.skills_library_revision_column()}</Table.Head>
-                  <Table.Head>{m.skills_library_updated_column()}</Table.Head>
+                  <Table.Head class="w-auto @4xl:w-[22%]">{m.name()}</Table.Head>
+                  <Table.Head class="hidden w-[30%] @4xl:table-cell">
+                    {m.description()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-32 @md:table-cell">{m.status()}</Table.Head>
+                  <Table.Head class="hidden w-24 @4xl:table-cell">
+                    {m.skills_library_revision_column()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-32 @4xl:table-cell">
+                    {m.skills_library_updated_column()}
+                  </Table.Head>
                   {#if canDelete}
                     <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
                   {/if}
@@ -176,31 +182,63 @@
               <Table.Body>
                 {#each skillCatalog.items as skill (skill.id)}
                   <Table.Row class="[&>td]:align-top">
-                    <Table.Cell class="w-[24%] font-medium">
+                    <Table.Cell class="min-w-0 font-medium @4xl:w-[22%]">
                       <a
                         href={resolve(`/spaces/${spaceRouteId}/skills/${skill.id}`)}
-                        class="text-foreground hover:text-accent-default focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        class="text-foreground hover:text-accent-default focus-visible:ring-ring line-clamp-2 break-words whitespace-normal rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
                       >
                         {skill.display_name}
                       </a>
-                      <p class="text-muted-foreground mt-0.5 text-xs">{skill.slug}</p>
+                      <p class="text-muted-foreground mt-0.5 break-all whitespace-normal text-xs">
+                        {skill.slug}
+                      </p>
+                      <div class="mt-2 @md:hidden">
+                        <Badge variant={skill.is_active ? "secondary" : "outline"}>
+                          {skill.is_active
+                            ? m.skills_available_status()
+                            : m.skills_unavailable_status()}
+                        </Badge>
+                      </div>
+                      <p
+                        class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
+                      >
+                        {skill.description}
+                      </p>
+                      <dl
+                        class="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal"
+                      >
+                        <div class="flex gap-1 @4xl:hidden">
+                          <dt>{m.skills_library_revision_column()}:</dt>
+                          <dd>
+                            {m.skills_revision_label({
+                              revision: String(skill.current_revision_number)
+                            })}
+                          </dd>
+                        </div>
+                        <div class="flex gap-1 @4xl:hidden">
+                          <dt>{m.skills_library_updated_column()}:</dt>
+                          <dd>{formatUpdatedAt(skill.updated_at)}</dd>
+                        </div>
+                      </dl>
                     </Table.Cell>
-                    <Table.Cell class="text-muted-foreground w-[40%] max-w-lg whitespace-normal">
+                    <Table.Cell
+                      class="text-muted-foreground hidden w-[30%] max-w-lg whitespace-normal @4xl:table-cell"
+                    >
                       <p class="line-clamp-2">{skill.description}</p>
                     </Table.Cell>
-                    <Table.Cell>
+                    <Table.Cell class="hidden @md:table-cell">
                       <Badge variant={skill.is_active ? "secondary" : "outline"}>
                         {skill.is_active
                           ? m.skills_available_status()
                           : m.skills_unavailable_status()}
                       </Badge>
                     </Table.Cell>
-                    <Table.Cell class="text-muted-foreground text-sm">
+                    <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                       {m.skills_revision_label({
                         revision: String(skill.current_revision_number)
                       })}
                     </Table.Cell>
-                    <Table.Cell class="text-muted-foreground text-sm">
+                    <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                       {formatUpdatedAt(skill.updated_at)}
                     </Table.Cell>
                     {#if canDelete}

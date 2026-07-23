@@ -275,7 +275,7 @@ tasks:
     assignee: Worker
     status: active
     reasoning_hint: high
-    objective: "Add the tenant-scoped adoption projection required to complete O1 without deriving counts in the UI."
+    objective: "Add the tenant-scoped adoption projection required to complete O1, finish the accepted responsive catalogue polish, and document the governed user flow without deriving counts in the UI."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/572"
     inputs:
       - "Merged O1 publication and exact-binding contracts"
@@ -288,7 +288,12 @@ tasks:
       - "Count distinct Spaces across the union of Assistant and App bindings so a shared Space is counted once."
       - "Keep the projection paginated and avoid N+1 queries and join cross-products."
       - "Do not change publication, exact pins, parent saves, runtime composition, App-run lifecycle, deletion, organisation settings, or permissions."
+      - "Reuse the existing Skill pages, Eneo design system, and Skills guide; do not add a dashboard, documentation tree, or frontend abstraction."
+      - "Keep the guide concise and local-catalogue focused; the external Marketplace is outside the current product scope."
     allowed_files:
+      - ".gitignore"
+      - "backend/alembic/versions/202607231330_add_skill_adoption_cursor_indexes.py"
+      - "backend/src/eneo/database/tables/skill_table.py"
       - "backend/src/eneo/skills/domain/skill.py"
       - "backend/src/eneo/skills/domain/skill_repo.py"
       - "backend/src/eneo/skills/infrastructure/skill_repo_impl.py"
@@ -300,10 +305,19 @@ tasks:
       - "backend/tests/unittests/skills/test_organization_skill_service.py"
       - "backend/tests/unittests/skills/test_organization_skill_presentation_contract.py"
       - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "frontend/apps/docs-site/src/content/guides/index.mdx"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
       - "frontend/apps/web/messages/en.json"
       - "frontend/apps/web/messages/sv.json"
       - "frontend/apps/web/src/lib/features/skills/SkillAdoptionProjection.svelte"
       - "frontend/apps/web/src/lib/features/skills/SkillAdoptionProjection.svelte.test.ts"
+      - "frontend/apps/web/src/lib/features/skills/SkillRevisionHistory.svelte"
+      - "frontend/apps/web/src/lib/features/skills/SkillRevisionHistory.svelte.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/page.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/+page.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/organization-skills-page.svelte.test.ts"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/page.test.ts"
       - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/+page.ts"
       - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/+page.svelte"
       - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/[skillId]/organization-skill-detail.svelte.test.ts"
@@ -319,10 +333,12 @@ tasks:
       - "Generated contracts and accessible detail-page states"
       - "Stable cursor pagination, full-result totals, duplicate prevention, and bounded query-plan evidence"
       - "Focused organisation catalogue regressions plus backend and frontend quality checks"
+      - "No ordinary desktop horizontal scrollbar, with readable responsive catalogue, revision, and adoption states"
+      - "Docs-site build plus a concise Skills guide covering permissions, organisation flow, Spaces, Personal Chat, adoption, governance, and FAQ"
     stop_if:
       - "The design requires runtime activation evidence owned by Task #553."
       - "The implementation creates a fleet-wide Skill dashboard instead of deepening the existing detail owner."
-      - "Correct tenant isolation or bounded aggregation requires a schema migration or files outside allowed_files."
+      - "Correct tenant isolation or bounded aggregation requires schema changes beyond the reviewed cursor indexes."
       - "Counts must be calculated in Svelte/TypeScript or through one request per Skill, revision, or resource."
       - "The projection cannot distinguish unpublished state from behind-published-revision drift without inventing semantics."
     receipt: null

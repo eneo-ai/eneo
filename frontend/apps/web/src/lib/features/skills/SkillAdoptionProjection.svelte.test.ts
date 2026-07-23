@@ -5,6 +5,16 @@ import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import SkillAdoptionProjection from "./SkillAdoptionProjection.svelte";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function adoptionPage({
   items = [
     {
@@ -85,9 +95,9 @@ describe("Skill adoption projection", () => {
       .element(page.getByRole("heading", { name: m.organization_skills_adoption_heading() }))
       .toBeVisible();
     await expect.element(page.getByText("HR Assistant")).toBeVisible();
-    await expect.element(page.getByText("People and culture")).toBeVisible();
+    await expect.element(page.getByText("People and culture").last()).toBeVisible();
     await expect
-      .element(page.getByText(m.organization_skills_adoption_drift_behind()).first())
+      .element(page.getByText(m.organization_skills_adoption_drift_behind()).last())
       .toBeVisible();
     await expect
       .element(
@@ -105,13 +115,7 @@ describe("Skill adoption projection", () => {
         })
       )
       .toBeVisible();
-    await expect
-      .element(
-        page.getByRole("group", {
-          name: m.organization_skills_adoption_revision_breakdown_heading()
-        })
-      )
-      .toBeVisible();
+    await expect.element(page.getByRole("table").first()).toBeVisible();
   });
 
   test("distinguishes an empty structural projection from runtime usage", async () => {
@@ -153,7 +157,7 @@ describe("Skill adoption projection", () => {
     });
 
     await expect
-      .element(page.getByText(m.organization_skills_adoption_drift_unpublished()))
+      .element(page.getByText(m.organization_skills_adoption_drift_unpublished()).last())
       .toBeVisible();
   });
 
@@ -239,7 +243,7 @@ describe("Skill adoption projection", () => {
     await expect.element(page.getByText("HR Assistant")).toBeVisible();
     await expect.element(page.getByText("Onboarding App")).toBeVisible();
     await expect
-      .element(page.getByText(m.organization_skills_adoption_drift_current()))
+      .element(page.getByText(m.organization_skills_adoption_drift_current()).last())
       .toBeVisible();
     await expect
       .element(
@@ -251,5 +255,128 @@ describe("Skill adoption projection", () => {
         )
       )
       .toBeInTheDocument();
+  });
+
+  test("ignores a continuation response from before the projection refresh", async () => {
+    const staleContinuation = deferred<SkillAdoptionProjectionPagePublic>();
+    const getOrganizationSkillAdoption = vi
+      .fn()
+      .mockReturnValueOnce(staleContinuation.promise)
+      .mockResolvedValueOnce(adoptionPage({ items: [], includeSummary: false }));
+    const refreshedPage = adoptionPage({
+      items: [
+        {
+          kind: "assistant",
+          resource_id: "assistant-refreshed",
+          name: "Refreshed Assistant",
+          space_id: "space-refreshed",
+          space_name: "Refreshed Space",
+          revision_id: "revision-2",
+          revision_number: 2,
+          drift: "current"
+        }
+      ],
+      nextCursor: "refreshed-next"
+    });
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: adoptionPage({ nextCursor: "stale-next" }),
+      getOrganizationSkillAdoption
+    });
+
+    await page.getByRole("button", { name: m.organization_skills_adoption_load_more() }).click();
+    await vi.waitFor(() =>
+      expect(getOrganizationSkillAdoption).toHaveBeenCalledWith("skill-1", {
+        limit: 25,
+        cursor: "stale-next"
+      })
+    );
+
+    await rendered.rerender({
+      skillId: "skill-1",
+      initialPage: refreshedPage,
+      getOrganizationSkillAdoption
+    });
+    await expect.element(page.getByText("Refreshed Assistant")).toBeVisible();
+
+    staleContinuation.resolve(
+      adoptionPage({
+        items: [
+          {
+            kind: "app",
+            resource_id: "app-stale",
+            name: "Stale App",
+            space_id: "space-stale",
+            space_name: "Stale Space",
+            revision_id: "revision-1",
+            revision_number: 1,
+            drift: "behind"
+          }
+        ],
+        nextCursor: "stale-tail",
+        includeSummary: false
+      })
+    );
+
+    await expect.element(page.getByText("Stale App")).not.toBeInTheDocument();
+    await expect.element(page.getByText("HR Assistant")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_drift_current()).last())
+      .toBeVisible();
+
+    await page.getByRole("button", { name: m.organization_skills_adoption_load_more() }).click();
+    await vi.waitFor(() =>
+      expect(getOrganizationSkillAdoption).toHaveBeenLastCalledWith("skill-1", {
+        limit: 25,
+        cursor: "refreshed-next"
+      })
+    );
+  });
+
+  test("ignores an initial retry failure after navigating to another Skill", async () => {
+    const staleRetry = deferred<SkillAdoptionProjectionPagePublic>();
+    const getOrganizationSkillAdoption = vi.fn().mockReturnValueOnce(staleRetry.promise);
+    const currentPage = adoptionPage({
+      items: [
+        {
+          kind: "app",
+          resource_id: "app-current",
+          name: "Current App",
+          space_id: "space-current",
+          space_name: "Current Space",
+          revision_id: "revision-3",
+          revision_number: 3,
+          drift: "current"
+        }
+      ]
+    });
+    const rendered = render(SkillAdoptionProjection, {
+      skillId: "skill-1",
+      initialPage: null,
+      initialError: true,
+      getOrganizationSkillAdoption
+    });
+
+    await page.getByRole("button", { name: m.retry() }).click();
+    await vi.waitFor(() =>
+      expect(getOrganizationSkillAdoption).toHaveBeenCalledWith("skill-1", {
+        limit: 25,
+        cursor: null
+      })
+    );
+
+    await rendered.rerender({
+      skillId: "skill-2",
+      initialPage: currentPage,
+      getOrganizationSkillAdoption
+    });
+    await expect.element(page.getByText("Current App")).toBeVisible();
+
+    staleRetry.reject(new Error("Stale retry failed"));
+
+    await expect.element(page.getByText("Current App")).toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_adoption_error()))
+      .not.toBeInTheDocument();
   });
 });

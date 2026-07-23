@@ -229,10 +229,7 @@
       <p class="text-muted-foreground mt-1 text-sm">{formatCreatedAt(revision.created_at)}</p>
     </header>
     <dl class="flex flex-col gap-4">
-      <div
-        data-changed={fieldChanged(revision, comparison, "display_name")}
-        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
-      >
+      <div class="flex flex-col gap-1">
         <dt
           class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
         >
@@ -243,10 +240,7 @@
         </dt>
         <dd class="text-sm">{revision.display_name}</dd>
       </div>
-      <div
-        data-changed={fieldChanged(revision, comparison, "description")}
-        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
-      >
+      <div class="flex flex-col gap-1">
         <dt
           class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
         >
@@ -257,10 +251,7 @@
         </dt>
         <dd class="text-sm">{revision.description}</dd>
       </div>
-      <div
-        data-changed={fieldChanged(revision, comparison, "instructions")}
-        class="data-[changed=true]:border-accent-default flex flex-col gap-1 data-[changed=true]:border-l-2 data-[changed=true]:pl-3"
-      >
+      <div class="flex flex-col gap-1">
         <dt
           class="text-muted-foreground flex items-baseline justify-between gap-3 text-xs font-medium"
         >
@@ -277,68 +268,72 @@
   </section>
 {/snippet}
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
-<div
-  class="border-border focus-visible:ring-ring overflow-x-auto border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-  role="region"
-  aria-label={m.skills_library_history_heading()}
-  tabindex="0"
->
-  <div style="min-width: 40rem">
-    <Table.Root>
-      <Table.Header>
+<div class="border-border @container border-y">
+  <Table.Root class="w-full table-fixed">
+    <Table.Header>
+      <Table.Row>
+        <Table.Head class="w-auto @lg:w-[45%] @3xl:w-[30%]">
+          {m.skills_library_revision_column()}
+        </Table.Head>
+        <Table.Head class="hidden @lg:table-cell">{m.name()}</Table.Head>
+        <Table.Head class="hidden w-48 @3xl:table-cell">
+          {m.skills_library_created_column()}
+        </Table.Head>
+        <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
+      </Table.Row>
+    </Table.Header>
+    <Table.Body>
+      {#each revisions as revision (revision.id)}
+        {@const isCurrent = revision.id === comparisonCurrentRevision.id}
         <Table.Row>
-          <Table.Head>{m.skills_library_revision_column()}</Table.Head>
-          <Table.Head>{m.name()}</Table.Head>
-          <Table.Head>{m.skills_library_created_column()}</Table.Head>
-          <Table.Head class="w-16 text-right">{m.actions()}</Table.Head>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {#each revisions as revision (revision.id)}
-          {@const isCurrent = revision.id === comparisonCurrentRevision.id}
-          <Table.Row>
-            <Table.Cell>
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium">
-                  {m.skills_revision_label({ revision: String(revision.revision_number) })}
-                </span>
-                {#if isCurrent}
-                  <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
-                {/if}
-              </div>
-            </Table.Cell>
-            <Table.Cell>{revision.display_name}</Table.Cell>
-            <Table.Cell class="text-muted-foreground text-sm">
+          <Table.Cell>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-medium">
+                {m.skills_revision_label({ revision: String(revision.revision_number) })}
+              </span>
+              {#if isCurrent}
+                <Badge variant="secondary">{m.skills_library_current_revision()}</Badge>
+              {/if}
+            </div>
+            <p class="text-foreground mt-1 line-clamp-2 break-words @lg:hidden">
+              {revision.display_name}
+            </p>
+            <p class="text-muted-foreground mt-1 text-xs @3xl:hidden">
               {formatCreatedAt(revision.created_at)}
-            </Table.Cell>
-            <Table.Cell class="text-right">
-              <div class="flex items-center justify-end gap-1">
-                <Button
-                  id={viewTriggerId(revision.id)}
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-11 md:size-7"
-                  disabled={viewingRevisionId !== null}
-                  title={m.view()}
-                  aria-label={m.skills_library_view_revision_aria({
-                    revision: String(revision.revision_number)
-                  })}
-                  onclick={() => void viewRevision(revision, viewTriggerId(revision.id))}
-                >
-                  {#if viewingRevisionId === revision.id}
-                    <LoaderCircle class="animate-spin" aria-hidden="true" />
-                  {:else}
-                    <Eye aria-hidden="true" />
-                  {/if}
-                </Button>
-              </div>
-            </Table.Cell>
-          </Table.Row>
-        {/each}
-      </Table.Body>
-    </Table.Root>
-  </div>
+            </p>
+          </Table.Cell>
+          <Table.Cell class="hidden break-words whitespace-normal @lg:table-cell">
+            {revision.display_name}
+          </Table.Cell>
+          <Table.Cell class="text-muted-foreground hidden text-sm @3xl:table-cell">
+            {formatCreatedAt(revision.created_at)}
+          </Table.Cell>
+          <Table.Cell class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              <Button
+                id={viewTriggerId(revision.id)}
+                variant="ghost"
+                size="icon-sm"
+                class="size-11 md:size-7"
+                disabled={viewingRevisionId !== null}
+                title={m.view()}
+                aria-label={m.skills_library_view_revision_aria({
+                  revision: String(revision.revision_number)
+                })}
+                onclick={() => void viewRevision(revision, viewTriggerId(revision.id))}
+              >
+                {#if viewingRevisionId === revision.id}
+                  <LoaderCircle class="animate-spin" aria-hidden="true" />
+                {:else}
+                  <Eye aria-hidden="true" />
+                {/if}
+              </Button>
+            </div>
+          </Table.Cell>
+        </Table.Row>
+      {/each}
+    </Table.Body>
+  </Table.Root>
   {#if nextCursor !== null || loadError || previewError}
     <div class="border-border flex flex-col items-center gap-3 border-t px-6 py-4">
       {#if loadError}
@@ -366,7 +361,7 @@
   onOpenChange={(open) => !open && (viewedRevision = null)}
 >
   <Dialog.Content
-    class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-4xl"
+    class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl has-[.skill-revision-comparison]:sm:max-w-4xl"
     closeLabel={m.close()}
     onCloseAutoFocus={handlePreviewCloseAutoFocus}
   >
@@ -403,7 +398,9 @@
         {#if viewedRevision.id === comparisonCurrentRevision.id}
           <div class="p-6">{@render revisionPreview(viewedRevision, null, true)}</div>
         {:else}
-          <div class="divide-border grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
+          <div
+            class="skill-revision-comparison divide-border grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0"
+          >
             <div class="p-6">
               {@render revisionPreview(viewedRevision, comparisonCurrentRevision)}
             </div>

@@ -33,27 +33,45 @@
     getOrganizationSkillAdoption
   }: Props = $props();
 
-  let sourcePage = $state.raw(untrack(() => initialPage));
+  let observedSkillId = untrack(() => skillId);
+  let observedInitialPage = untrack(() => initialPage);
+  // A local request may outlive a reactive parent refresh even when the current route often remounts.
+  let projectionGeneration = 0;
   let page = $state.raw<SkillAdoptionProjectionPagePublic | null>(untrack(() => initialPage));
-  let summary = $state.raw(untrack(() => initialPage?.summary ?? null));
   let items = $state<AdoptionResource[]>(untrack(() => [...(initialPage?.items ?? [])]));
   let nextCursor = $state<string | null>(untrack(() => initialPage?.next_cursor ?? null));
   let loadingInitial = $state(untrack(() => initialLoading));
   let initialLoadError = $state(untrack(() => initialError));
   let loadingMore = $state(false);
   let loadMoreError = $state<string | null>(null);
+  let summary = $derived(page?.summary ?? null);
   let resourceTotal = $derived(summary === null ? 0 : summary.assistant_count + summary.app_count);
 
   $effect(() => {
-    if (initialPage === null || initialPage === sourcePage) return;
-    sourcePage = initialPage;
-    page = initialPage;
-    summary = initialPage.summary;
-    items = [...initialPage.items];
-    nextCursor = initialPage.next_cursor ?? null;
+    const nextSkillId = skillId;
+    const nextInitialPage = initialPage;
+    if (nextSkillId === observedSkillId && nextInitialPage === observedInitialPage) return;
+
+    observedSkillId = nextSkillId;
+    observedInitialPage = nextInitialPage;
+    projectionGeneration += 1;
+    loadingMore = false;
+    loadMoreError = null;
+
+    if (nextInitialPage === null) {
+      page = null;
+      items = [];
+      nextCursor = null;
+      loadingInitial = initialLoading;
+      initialLoadError = initialError;
+      return;
+    }
+
+    page = nextInitialPage;
+    items = [...nextInitialPage.items];
+    nextCursor = nextInitialPage.next_cursor ?? null;
     loadingInitial = false;
     initialLoadError = false;
-    loadMoreError = null;
   });
 
   function resourceKindLabel(kind: AdoptionResource["kind"]): string {
@@ -84,43 +102,58 @@
     }
   }
 
+  function isCurrentProjection(generation: number, requestSkillId: string): boolean {
+    return generation === projectionGeneration && requestSkillId === skillId;
+  }
+
   async function retryInitialLoad() {
     if (loadingInitial) return;
+    const generation = projectionGeneration;
+    const requestSkillId = skillId;
     loadingInitial = true;
     initialLoadError = false;
     try {
-      const loadedPage = await getOrganizationSkillAdoption(skillId, {
+      const loadedPage = await getOrganizationSkillAdoption(requestSkillId, {
         limit: 25,
         cursor: null
       });
-      sourcePage = loadedPage;
+      if (!isCurrentProjection(generation, requestSkillId)) return;
       page = loadedPage;
-      summary = loadedPage.summary;
       items = [...loadedPage.items];
       nextCursor = loadedPage.next_cursor ?? null;
     } catch {
+      if (!isCurrentProjection(generation, requestSkillId)) return;
       initialLoadError = true;
     } finally {
-      loadingInitial = false;
+      if (isCurrentProjection(generation, requestSkillId)) {
+        loadingInitial = false;
+      }
     }
   }
 
   async function loadMore() {
     if (page === null || nextCursor === null || loadingMore) return;
+    const generation = projectionGeneration;
+    const requestSkillId = skillId;
     const cursor = nextCursor;
+    const limit = page.limit;
     loadingMore = true;
     loadMoreError = null;
     try {
-      const loadedPage = await getOrganizationSkillAdoption(skillId, {
-        limit: page.limit,
+      const loadedPage = await getOrganizationSkillAdoption(requestSkillId, {
+        limit,
         cursor
       });
+      if (!isCurrentProjection(generation, requestSkillId)) return;
       items = [...items, ...loadedPage.items];
       nextCursor = loadedPage.next_cursor ?? null;
     } catch (error) {
+      if (!isCurrentProjection(generation, requestSkillId)) return;
       loadMoreError = getErrorMessage(error) || m.organization_skills_adoption_load_more_error();
     } finally {
-      loadingMore = false;
+      if (isCurrentProjection(generation, requestSkillId)) {
+        loadingMore = false;
+      }
     }
   }
 </script>
@@ -247,60 +280,53 @@
           <p class="text-muted-foreground mt-1 text-xs leading-5">
             {m.organization_skills_adoption_revision_breakdown_description()}
           </p>
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
-          <div
-            class="border-border focus-visible:ring-ring mt-3 overflow-x-auto border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-            role="group"
-            aria-labelledby="organization-skill-revision-breakdown-heading"
-            tabindex="0"
-          >
-            <div class="min-w-[32rem]">
-              <Table.Root>
-                <Table.Header>
+          <div class="border-border @container mt-3 border-y">
+            <Table.Root class="w-full table-fixed">
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head class="w-auto">
+                    {m.organization_skills_adoption_revision_column()}
+                  </Table.Head>
+                  <Table.Head class="w-20 text-right">
+                    {m.organization_skills_adoption_assistants_label()}
+                  </Table.Head>
+                  <Table.Head class="w-16 text-right">
+                    {m.organization_skills_adoption_apps_label()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-36 text-right @md:table-cell">
+                    {m.organization_skills_adoption_personal_chat_heading()}
+                  </Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each summary.revision_counts as revision (revision.revision_id)}
                   <Table.Row>
-                    <Table.Head>
-                      {m.organization_skills_adoption_revision_column()}
-                    </Table.Head>
-                    <Table.Head class="text-right">
-                      {m.organization_skills_adoption_assistants_label()}
-                    </Table.Head>
-                    <Table.Head class="text-right">
-                      {m.organization_skills_adoption_apps_label()}
-                    </Table.Head>
-                    <Table.Head class="text-right">
-                      <span class="sr-only">
-                        {m.organization_skills_adoption_personal_chat_column()}
-                      </span>
-                      <span aria-hidden="true"
-                        >{m.organization_skills_adoption_personal_chat_heading()}</span
-                      >
-                    </Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {#each summary.revision_counts as revision (revision.revision_id)}
-                    <Table.Row>
-                      <Table.Cell class="font-medium">
-                        {m.organization_skills_version({
-                          version: String(revision.revision_number)
-                        })}
-                      </Table.Cell>
-                      <Table.Cell class="text-right tabular-nums">
-                        {revision.assistant_count}
-                      </Table.Cell>
-                      <Table.Cell class="text-right tabular-nums">
-                        {revision.app_count}
-                      </Table.Cell>
-                      <Table.Cell class="text-right">
+                    <Table.Cell class="font-medium">
+                      {m.organization_skills_version({
+                        version: String(revision.revision_number)
+                      })}
+                      <p class="text-muted-foreground mt-1 text-xs font-normal @md:hidden">
+                        {m.organization_skills_adoption_personal_chat_heading()}:
                         {revision.personal_chat_pinned
                           ? m.organization_skills_adoption_pinned()
                           : m.organization_skills_adoption_not_pinned()}
-                      </Table.Cell>
-                    </Table.Row>
-                  {/each}
-                </Table.Body>
-              </Table.Root>
-            </div>
+                      </p>
+                    </Table.Cell>
+                    <Table.Cell class="text-right tabular-nums">
+                      {revision.assistant_count}
+                    </Table.Cell>
+                    <Table.Cell class="text-right tabular-nums">
+                      {revision.app_count}
+                    </Table.Cell>
+                    <Table.Cell class="hidden text-right @md:table-cell">
+                      {revision.personal_chat_pinned
+                        ? m.organization_skills_adoption_pinned()
+                        : m.organization_skills_adoption_not_pinned()}
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
           </div>
         </section>
       </div>
@@ -320,55 +346,76 @@
             {m.organization_skills_adoption_resources_empty()}
           </p>
         {:else}
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex (overflow region must be keyboard-scrollable) -->
-          <div
-            class="border-border focus-visible:ring-ring mt-4 overflow-x-auto border-y outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-            role="region"
-            aria-label={m.organization_skills_adoption_table_scroll_region_label({
-              count: String(items.length)
-            })}
-            tabindex="0"
-          >
-            <div class="min-w-[44rem]">
-              <Table.Root>
-                <Table.Header>
+          <div class="border-border @container mt-4 border-y">
+            <Table.Root class="w-full table-fixed">
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head class="w-auto @4xl:w-[28%]">
+                    {m.organization_skills_adoption_resource_column()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-28 @4xl:table-cell">
+                    {m.organization_skills_adoption_resource_type_column()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-[28%] @4xl:table-cell">
+                    {m.organization_skills_adoption_space_column()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-28 @4xl:table-cell">
+                    {m.organization_skills_adoption_pinned_revision_column()}
+                  </Table.Head>
+                  <Table.Head class="hidden w-36 @md:table-cell">
+                    {m.organization_skills_adoption_status_column()}
+                  </Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each items as resource (`${resource.kind}:${resource.resource_id}`)}
                   <Table.Row>
-                    <Table.Head>{m.organization_skills_adoption_resource_column()}</Table.Head>
-                    <Table.Head>
-                      {m.organization_skills_adoption_resource_type_column()}
-                    </Table.Head>
-                    <Table.Head>{m.organization_skills_adoption_space_column()}</Table.Head>
-                    <Table.Head>
-                      {m.organization_skills_adoption_pinned_revision_column()}
-                    </Table.Head>
-                    <Table.Head>{m.organization_skills_adoption_status_column()}</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {#each items as resource (`${resource.kind}:${resource.resource_id}`)}
-                    <Table.Row>
-                      <Table.Cell class="max-w-64 whitespace-normal">
-                        <span class="line-clamp-2 font-medium">{resource.name}</span>
-                      </Table.Cell>
-                      <Table.Cell>{resourceKindLabel(resource.kind)}</Table.Cell>
-                      <Table.Cell class="max-w-56 whitespace-normal">
-                        <span class="line-clamp-2">{resource.space_name}</span>
-                      </Table.Cell>
-                      <Table.Cell>
-                        {m.organization_skills_version({
-                          version: String(resource.revision_number)
-                        })}
-                      </Table.Cell>
-                      <Table.Cell>
+                    <Table.Cell class="min-w-0 max-w-64 whitespace-normal">
+                      <span class="line-clamp-2 font-medium">{resource.name}</span>
+                      <div class="mt-2 @md:hidden">
                         <Badge variant={driftVariant(resource.drift)}>
                           {driftLabel(resource.drift)}
                         </Badge>
-                      </Table.Cell>
-                    </Table.Row>
-                  {/each}
-                </Table.Body>
-              </Table.Root>
-            </div>
+                      </div>
+                      <dl class="text-muted-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <div class="flex gap-1 @4xl:hidden">
+                          <dt>{m.organization_skills_adoption_resource_type_column()}:</dt>
+                          <dd>{resourceKindLabel(resource.kind)}</dd>
+                        </div>
+                        <div class="flex min-w-0 gap-1 @4xl:hidden">
+                          <dt>{m.organization_skills_adoption_space_column()}:</dt>
+                          <dd class="line-clamp-1">{resource.space_name}</dd>
+                        </div>
+                        <div class="flex gap-1 @4xl:hidden">
+                          <dt>{m.organization_skills_adoption_pinned_revision_column()}:</dt>
+                          <dd>
+                            {m.organization_skills_version({
+                              version: String(resource.revision_number)
+                            })}
+                          </dd>
+                        </div>
+                      </dl>
+                    </Table.Cell>
+                    <Table.Cell class="hidden @4xl:table-cell">
+                      {resourceKindLabel(resource.kind)}
+                    </Table.Cell>
+                    <Table.Cell class="hidden max-w-56 whitespace-normal @4xl:table-cell">
+                      <span class="line-clamp-2">{resource.space_name}</span>
+                    </Table.Cell>
+                    <Table.Cell class="hidden @4xl:table-cell">
+                      {m.organization_skills_version({
+                        version: String(resource.revision_number)
+                      })}
+                    </Table.Cell>
+                    <Table.Cell class="hidden @md:table-cell">
+                      <Badge variant={driftVariant(resource.drift)}>
+                        {driftLabel(resource.drift)}
+                      </Badge>
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
           </div>
         {/if}
 

@@ -35,6 +35,7 @@ REVIEW_*.md
 REVIEW_PLAN.md
 REVIEW_REPORT.md
 chat-*.png
+frontend/apps/web/src/**/__screenshots__/
 notes/
 
 # claude

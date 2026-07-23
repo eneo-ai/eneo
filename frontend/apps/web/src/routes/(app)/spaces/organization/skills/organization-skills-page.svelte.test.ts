@@ -138,7 +138,7 @@ describe("organisation Skill catalogue page", () => {
     await expect.element(page.getByText(unpublished.display_name)).toBeVisible();
   });
 
-  test("keeps the catalogue table keyboard-scrollable", async () => {
+  test("keeps the catalogue table out of a second keyboard navigation region", async () => {
     const draft = skill("draft", "draft");
 
     render(OrganizationSkillsPage, {
@@ -161,12 +161,9 @@ describe("organisation Skill catalogue page", () => {
       } as never
     });
 
-    const region = page.getByRole("region", {
-      name: m.organization_skills_table_scroll_region_label({ count: "1" })
-    });
-    await expect.element(region).toBeVisible();
-    expect(region.element().getAttribute("tabindex")).toBe("0");
-    await expect.element(region.getByRole("table")).toBeVisible();
+    const table = page.getByRole("table");
+    await expect.element(table).toBeVisible();
+    expect(table.element().closest('[role="region"]')).toBeNull();
   });
 
   test("keeps one action surface while catalogue fields adapt responsively", () => {
