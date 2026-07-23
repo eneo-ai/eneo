@@ -41,13 +41,8 @@ async def _owner_ids(database: DatabaseSessionManager) -> tuple[UUID, UUID]:
 def _file(*, tenant_id: UUID, user_id: UUID, name: str) -> Files:
     return Files(
         name=name,
-        text=None,
-        blob=None,
-        checksum=sha256(name.encode()).hexdigest(),
-        size=1,
         mimetype="text/plain",
         file_type="text",
-        transcription=None,
         tenant_id=tenant_id,
         user_id=user_id,
         parent_file_id=None,
@@ -178,9 +173,6 @@ async def test_icon_pending_content_accepts_its_first_reference_at_creation(
 
     async with object_content_database.session() as session, session.begin():
         owner = Icons(
-            blob=b"x",
-            mimetype="image/png",
-            size=1,
             tenant_id=tenant_id,
         )
         content = _pending_content(

@@ -1,5 +1,4 @@
 from collections.abc import AsyncIterator
-from hashlib import sha256
 
 import pytest
 from sqlalchemy import delete, select
@@ -55,13 +54,8 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
             user_id = (await session.scalars(select(Users.id))).one()
             owner = Files(
                 name="inline.txt",
-                text=None,
-                blob=None,
-                checksum=sha256(payload).hexdigest(),
-                size=len(payload),
                 mimetype="text/plain",
                 file_type="text",
-                transcription=None,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 parent_file_id=None,

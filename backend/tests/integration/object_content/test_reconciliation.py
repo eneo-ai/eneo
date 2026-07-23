@@ -191,13 +191,8 @@ async def _create_pending(
         digest = sha256(resolved_payload).digest()
         owner = Files(
             name=f"{token}.txt",
-            text=None,
-            blob=None,
-            checksum=digest.hex(),
-            size=len(resolved_payload),
             mimetype="application/octet-stream",
             file_type="text",
-            transcription=None,
             tenant_id=tenant_id,
             user_id=user_id,
             parent_file_id=None,

@@ -50,13 +50,8 @@ async def _owner_ids(database: DatabaseSessionManager) -> tuple[UUID, UUID]:
 def _file(*, tenant_id: UUID, user_id: UUID, name: str) -> Files:
     return Files(
         name=name,
-        text=None,
-        blob=None,
-        checksum=sha256(name.encode()).hexdigest(),
-        size=1,
         mimetype="text/plain",
         file_type="text",
-        transcription=None,
         tenant_id=tenant_id,
         user_id=user_id,
         parent_file_id=None,

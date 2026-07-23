@@ -169,19 +169,34 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
     session.in_transaction.return_value = False
     session.begin.return_value = _begin()
 
-    repo = SimpleNamespace(
-        session=session, add=AsyncMock(return_value=SimpleNamespace())
-    )
+    repo = SimpleNamespace(session=session)
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,
         protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+    file_id = uuid4()
+    service._persist_prepared_file = AsyncMock(return_value=file_id)
+    service.get_file_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            model_dump=lambda: {
+                "id": file_id,
+                "name": "generated_image.jpeg",
+                "checksum": "unused-by-transaction-test",
+                "size": len(b"image-bytes"),
+                "mimetype": "image/jpeg",
+                "file_type": "image",
+                "user_id": service.user.id,
+                "tenant_id": service.user.tenant_id,
+            }
+        )
     )
 
     await service.save_image_from_bytes(b"image-bytes")
 
     assert entered == 1
-    repo.add.assert_awaited_once()
+    service._persist_prepared_file.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -190,16 +205,31 @@ async def test_file_service_save_image_reuses_existing_transaction():
     session.in_transaction.return_value = True
     session.begin = MagicMock()
 
-    repo = SimpleNamespace(
-        session=session, add=AsyncMock(return_value=SimpleNamespace())
-    )
+    repo = SimpleNamespace(session=session)
     service = FileService(
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
         repo=repo,
         protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+    file_id = uuid4()
+    service._persist_prepared_file = AsyncMock(return_value=file_id)
+    service.get_file_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            model_dump=lambda: {
+                "id": file_id,
+                "name": "generated_image.jpeg",
+                "checksum": "unused-by-transaction-test",
+                "size": len(b"image-bytes"),
+                "mimetype": "image/jpeg",
+                "file_type": "image",
+                "user_id": service.user.id,
+                "tenant_id": service.user.tenant_id,
+            }
+        )
     )
 
     await service.save_image_from_bytes(b"image-bytes")
 
     session.begin.assert_not_called()
-    repo.add.assert_awaited_once()
+    service._persist_prepared_file.assert_awaited_once()

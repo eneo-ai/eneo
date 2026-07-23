@@ -14,11 +14,12 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import UploadFile
 
-from eneo.files.file_models import FileCreate, FileType
 from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -230,21 +231,14 @@ async def _create_user(db_container, *, tenant_id: UUID):
 async def _create_user_owned_file(
     db_container,
     *,
-    user_id: UUID,
-    tenant_id: UUID,
+    user,
 ) -> str:
-    async with db_container() as container:
-        repo = container.file_repo()
-        file = await repo.add(
-            FileCreate(
-                name=f"owned-{uuid4().hex[:8]}.txt",
-                checksum=uuid4().hex,
-                size=13,
-                mimetype="text/plain",
-                file_type=FileType.TEXT,
-                text="owned content",
-                user_id=user_id,
-                tenant_id=tenant_id,
+    async with db_container(user=user) as container:
+        file = await container.file_service().save_file(
+            UploadFile(
+                file=BytesIO(b"owned content"),
+                filename=f"owned-{uuid4().hex[:8]}.txt",
+                headers={"content-type": "text/plain"},
             )
         )
     return str(file.id)
@@ -879,8 +873,7 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
     other_user = await _create_user(db_container, tenant_id=default_user.tenant_id)
     file_id = await _create_user_owned_file(
         db_container,
-        user_id=other_user.id,
-        tenant_id=default_user.tenant_id,
+        user=other_user,
     )
     space = await _create_space(api_client, token=bearer_token)
     key = await _create_api_key(
