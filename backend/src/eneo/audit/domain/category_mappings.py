@@ -46,7 +46,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
     ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
     ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
-    # User Actions (42 actions)
+    # User Actions (44 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -67,6 +67,8 @@ CATEGORY_MAPPINGS = {
     ActionType.SKILL_REVISION_CREATED.value: "user_actions",
     ActionType.SKILL_REVISION_RESTORED.value: "user_actions",
     ActionType.SKILL_STATUS_CHANGED.value: "user_actions",
+    ActionType.SKILL_PUBLISHED.value: "user_actions",
+    ActionType.SKILL_UNPUBLISHED.value: "user_actions",
     ActionType.SKILL_DELETED.value: "user_actions",
     ActionType.COLLECTION_CREATED.value: "user_actions",
     ActionType.COLLECTION_UPDATED.value: "user_actions",

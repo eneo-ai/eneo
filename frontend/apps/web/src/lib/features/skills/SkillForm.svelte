@@ -68,6 +68,7 @@
   let advancedOpen = $state(false);
   let submitAttempted = $state(false);
   let isSubmitting = $state(false);
+  let hasSubmitted = $state(false);
   let formError = $state<string | null>(null);
   let displayNameInput = $state<HTMLInputElement | null>(null);
   let descriptionInput = $state<HTMLTextAreaElement | null>(null);
@@ -168,6 +169,7 @@
         slug: submittedSlug,
         slugCustomized
       };
+      hasSubmitted = true;
       submitAttempted = false;
     } catch (error) {
       formError = getErrorMessage(error);
@@ -188,7 +190,12 @@
   }
 </script>
 
-<form class="flex flex-col gap-5" onsubmit={handleSubmit} aria-busy={isSubmitting} novalidate>
+<form
+  class="flex w-full max-w-[80ch] flex-col gap-5"
+  onsubmit={handleSubmit}
+  aria-busy={isSubmitting}
+  novalidate
+>
   <Field.Group>
     <Field.Field data-invalid={displayNameInvalid || undefined}>
       <Field.Label for={displayNameId}>{m.skills_display_name_label()}</Field.Label>
@@ -203,7 +210,7 @@
         maxlength={200}
         required
       />
-      <Field.Description id={`${displayNameId}-description`}>
+      <Field.Description class="max-w-[65ch]" id={`${displayNameId}-description`}>
         {m.skills_display_name_description()}
       </Field.Description>
       {#if displayNameInvalid}
@@ -224,7 +231,7 @@
         maxlength={1024}
         required
       />
-      <Field.Description id={`${descriptionId}-description`}>
+      <Field.Description class="max-w-[65ch]" id={`${descriptionId}-description`}>
         {m.skills_description_description()}
       </Field.Description>
       {#if descriptionInvalid}
@@ -242,10 +249,10 @@
         aria-describedby={`${instructionsId}-description`}
         disabled={isSubmitting}
         class="max-h-[min(50dvh,32rem)] overflow-y-auto"
-        rows={12}
+        rows={isCreateMode ? 8 : 12}
         required
       />
-      <Field.Description id={`${instructionsId}-description`}>
+      <Field.Description class="max-w-[65ch]" id={`${instructionsId}-description`}>
         {m.skills_instructions_description()}
       </Field.Description>
       {#if instructionsInvalid}
@@ -274,7 +281,7 @@
     </div>
 
     {#if advancedOpen}
-      <div id={advancedId}>
+      <div id={advancedId} class="border-border border-t pt-5">
         <Field.Field data-invalid={slugInvalid || undefined}>
           <Field.Label for={slugId}>{m.skills_slug_label()}</Field.Label>
           <Input
@@ -289,7 +296,7 @@
             maxlength={64}
             required
           />
-          <Field.Description id={`${slugId}-description`}>
+          <Field.Description class="max-w-[65ch]" id={`${slugId}-description`}>
             {m.skills_slug_description()}
           </Field.Description>
           {#if slugInvalid}
@@ -310,14 +317,21 @@
     </Alert.Root>
   {/if}
 
-  <div class="flex justify-end gap-2">
-    {#if props.showDiscardAction && dirty}
-      <Button type="button" variant="destructive" disabled={isSubmitting} onclick={discardChanges}>
-        {m.discard_all_changes()}
+  <div
+    class="border-border bg-background sticky bottom-0 z-10 -mx-1 flex min-h-14 flex-wrap items-center justify-between gap-3 border-t px-1 pt-3 pb-1"
+  >
+    <p class="text-muted-foreground text-sm" role="status" aria-live="polite">
+      {dirty ? m.skills_form_unsaved_status() : hasSubmitted ? m.skills_form_saved_status() : ""}
+    </p>
+    <div class="ml-auto flex flex-wrap justify-end gap-2">
+      {#if props.showDiscardAction && dirty}
+        <Button type="button" variant="outline" disabled={isSubmitting} onclick={discardChanges}>
+          {m.discard_all_changes()}
+        </Button>
+      {/if}
+      <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
+        {isSubmitting ? resolvedSubmittingLabel : resolvedSubmitLabel}
       </Button>
-    {/if}
-    <Button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
-      {isSubmitting ? resolvedSubmittingLabel : resolvedSubmitLabel}
-    </Button>
+    </div>
   </div>
 </form>

@@ -55,8 +55,8 @@
     ></Page.Title>
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto w-full max-w-3xl px-6 py-6">
-      <p class="text-muted-foreground mb-6 text-sm">
+    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
+      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
         {m.skills_library_new_intro()}
       </p>
       <SkillForm

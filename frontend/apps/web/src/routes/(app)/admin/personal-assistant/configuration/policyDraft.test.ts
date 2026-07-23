@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
+import { emptySkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { PolicyDraft } from "./policyDraft.svelte";
 
 vi.mock("$app/navigation", () => ({
@@ -7,31 +7,6 @@ vi.mock("$app/navigation", () => ({
 }));
 
 describe("PolicyDraft", () => {
-  it("allows binding existing Skills with use permission without authoring permission", () => {
-    const draft = new PolicyDraft();
-    draft.sync({
-      eneo: { governancePolicy: { update: vi.fn() } } as never,
-      policy: {
-        models_restriction: { enabled: false, models: [], provider_ids: [] },
-        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
-        prompt_enforcement: { enabled: false, prompt_library_id: null },
-        skills: { bindings: [] }
-      },
-      models: { completionModels: [] },
-      modelProviders: [],
-      mcpSettings: { items: [] },
-      promptLibrary: { items: [] },
-      organizationSpace: {
-        id: "organization-space",
-        skill_permissions: ["read"]
-      },
-      skills: emptySkillCatalogPage()
-    });
-
-    expect(draft.canUseSkills).toBe(true);
-    expect(draft.canCreateSkills).toBe(false);
-  });
-
   it("does not submit hidden MCP grants when only the prompt changes", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();
@@ -56,11 +31,7 @@ describe("PolicyDraft", () => {
           { id: "prompt-2", name: "Two" }
         ]
       },
-      organizationSpace: {
-        id: "organization-space",
-        skill_permissions: ["read", "create", "edit"]
-      },
-      skills: emptySkillCatalogPage()
+      skills: emptySkillBindingCatalogPage()
     });
 
     draft.selectedPromptId = "prompt-2";
@@ -80,28 +51,30 @@ describe("PolicyDraft", () => {
     const first = {
       skill_id: "skill-1",
       skill_revision_id: "revision-1",
-      current_revision_id: "revision-1",
+      attachable_revision_id: "revision-1",
       slug: "first",
       revision_number: 1,
-      current_revision_number: 1,
+      attachable_revision_number: 1,
       display_name: "First",
       description: "First description",
       content_digest: "digest-1",
       position: 0,
-      is_active: true
+      is_active: true,
+      source: "organization" as const
     };
     const second = {
       skill_id: "skill-2",
       skill_revision_id: "revision-2",
-      current_revision_id: "revision-2",
+      attachable_revision_id: "revision-2",
       slug: "second",
       revision_number: 2,
-      current_revision_number: 2,
+      attachable_revision_number: 2,
       display_name: "Second",
       description: "Second description",
       content_digest: "digest-2",
       position: 1,
-      is_active: true
+      is_active: true,
+      source: "organization" as const
     };
     const draft = new PolicyDraft();
     draft.sync({
@@ -116,11 +89,7 @@ describe("PolicyDraft", () => {
       modelProviders: [],
       mcpSettings: { items: [] },
       promptLibrary: { items: [] },
-      organizationSpace: {
-        id: "organization-space",
-        skill_permissions: ["read", "create", "edit"]
-      },
-      skills: emptySkillCatalogPage()
+      skills: emptySkillBindingCatalogPage()
     });
 
     draft.skillBindings = [
@@ -140,5 +109,42 @@ describe("PolicyDraft", () => {
         ]
       }
     });
+  });
+
+  it("seeds the bounded Skill catalogue supplied by the page loader", () => {
+    const approved = {
+      id: "skill-1",
+      slug: "leave",
+      revision_id: "revision-2",
+      revision_number: 2,
+      display_name: "Leave",
+      description: "Approved leave guidance",
+      content_digest: "digest-2",
+      first_published_at: "2026-07-20T12:00:00Z",
+      source: "organization" as const
+    };
+    const skills = {
+      items: [approved],
+      count: 1,
+      limit: 25,
+      next_cursor: null
+    };
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update: vi.fn(async () => {}) } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills
+    });
+
+    expect(draft.skillCatalogPage).toEqual(skills);
   });
 });

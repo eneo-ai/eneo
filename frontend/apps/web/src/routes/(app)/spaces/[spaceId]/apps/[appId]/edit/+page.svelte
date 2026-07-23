@@ -25,6 +25,10 @@
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { untrack } from "svelte";
 
@@ -286,24 +290,37 @@
         </Settings.Row>
 
         {#if $currentSpace.hasPermission("read", "skill")}
-          <Settings.Row
-            title={m.skills()}
-            description={m.skills_editor_description()}
-            hasChanges={$currentChanges.diff.skill_bindings !== undefined}
-            revertFn={() => discardChanges("skill_bindings")}
-            fullWidth
-          >
-            <SkillBindingsEditor
-              bind:bindings={$update.skill_bindings}
-              initialSkillPage={data.skills}
-              bindingSummaries={data.skillBindings}
-              canEditBindings={data.app.permissions?.includes("edit") ?? false}
-              canCreateSkills={$currentSpace.hasPermission("create", "skill")}
-              onListSkills={(params) =>
-                data.eneo.skills.list({ spaceId: data.currentSpace.id, ...params })}
-              onCreateSkill={createSkill}
-            />
-          </Settings.Row>
+          <div id="skills" class="scroll-mt-20">
+            <Settings.Row
+              title={m.skills()}
+              description={m.skills_editor_description()}
+              hasChanges={$currentChanges.diff.skill_bindings !== undefined}
+              revertFn={() => discardChanges("skill_bindings")}
+            >
+              <SkillBindingsEditor
+                bind:bindings={$update.skill_bindings}
+                initialCatalogPage={data.skills}
+                bindingSummaries={data.skillBindings}
+                canEditBindings={data.app.permissions?.includes("edit") ?? false}
+                canCreateSkills={$currentSpace.organization !== true &&
+                  $currentSpace.hasPermission("create", "skill")}
+                onListCatalog={(params) =>
+                  loadSkillBindingCatalogPage({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    organizationSpace: data.currentSpace.organization === true,
+                    ...params
+                  })}
+                onGetSkillPreview={(target) =>
+                  loadSkillBindingPreview({
+                    eneo: data.eneo,
+                    spaceId: data.currentSpace.id,
+                    target
+                  })}
+                onCreateSkill={createSkill}
+              />
+            </Settings.Row>
+          </div>
         {/if}
 
         <Settings.Row

@@ -3,10 +3,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from eneo.main.models import PaginatedResponse
 from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
+    SkillBindingSource,
+    SkillPublicationState,
 )
 
 
@@ -22,6 +25,10 @@ class SkillCreateRequest(SkillContentInput):
 
 class SkillRevisionCreateRequest(SkillContentInput):
     pass
+
+
+class SkillPublishRequest(BaseModel):
+    expected_revision_id: UUID
 
 
 class SkillRevisionRestoreRequest(BaseModel):
@@ -78,6 +85,54 @@ class SkillPublic(SkillSparse):
     current_revision: SkillRevisionPublic
 
 
+class OrganizationSkillSummaryPublic(SkillSparse):
+    published_revision_number: int | None
+    first_published_at: datetime | None
+    publication_state: SkillPublicationState
+
+
+class OrganizationSkillPublic(OrganizationSkillSummaryPublic):
+    current_revision: SkillRevisionPublic
+
+
+class OrganizationSkillSummaryPagePublic(
+    PaginatedResponse[OrganizationSkillSummaryPublic]
+):
+    limit: int
+    next_cursor: str | None = None
+
+
+class PublishedSkillSummaryPublic(BaseModel):
+    id: UUID
+    slug: str
+    revision_id: UUID
+    revision_number: int
+    display_name: str
+    description: str
+    content_digest: str
+    first_published_at: datetime
+
+
+class PublishedSkillRevisionPublic(BaseModel):
+    id: UUID
+    skill_id: UUID
+    revision_number: int
+    display_name: str
+    description: str
+    instructions: str
+    content_digest: str
+    created_at: datetime
+
+
+class PublishedSkillPublic(PublishedSkillSummaryPublic):
+    revision: PublishedSkillRevisionPublic
+
+
+class PublishedSkillSummaryPagePublic(PaginatedResponse[PublishedSkillSummaryPublic]):
+    limit: int
+    next_cursor: str | None = None
+
+
 class SkillBindingReferenceInput(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
@@ -86,12 +141,13 @@ class SkillBindingReferenceInput(BaseModel):
 class SkillBindingSummary(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
-    current_revision_id: UUID
+    attachable_revision_id: UUID | None
     slug: str
     revision_number: int
-    current_revision_number: int
+    attachable_revision_number: int | None
     display_name: str
     description: str
     content_digest: str
     position: int
     is_active: bool
+    source: SkillBindingSource

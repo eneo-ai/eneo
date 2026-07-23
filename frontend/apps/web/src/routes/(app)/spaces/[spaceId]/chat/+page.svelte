@@ -45,6 +45,12 @@
     });
   }
 
+  function partnerEditHref() {
+    return localizeHref(
+      `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
+    );
+  }
+
   $effect(() => {
     chat.init(data);
 
@@ -131,11 +137,7 @@
 
       <Page.Flex>
         {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
-          <Button
-            href={localizeHref(
-              `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
-            )}>{m.edit()}</Button
-          >
+          <Button href={partnerEditHref()}>{m.edit()}</Button>
         {/if}
         <Button variant="primary" on:click={startNewConversation} class="!line-clamp-1"
           >{m.new_conversation()}

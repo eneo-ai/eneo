@@ -14,6 +14,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingSource,
     SkillCatalogEntry,
     SkillCatalogPage,
     SkillRevision,
@@ -34,10 +35,12 @@ from eneo.skills.presentation.skill_router import router
 
 
 def _binding(*, position: int) -> ResolvedSkillBinding:
+    current_revision_id = uuid4()
     return ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
-        current_revision_id=uuid4(),
+        current_revision_id=current_revision_id,
+        skill_space_id=uuid4(),
         slug=f"skill-{position}",
         revision_number=position + 1,
         current_revision_number=position + 1,
@@ -46,7 +49,10 @@ def _binding(*, position: int) -> ResolvedSkillBinding:
         instructions="Instructions are not audit evidence",
         content_digest=str(position + 1) * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
         is_active=True,
+        attachable_revision_id=current_revision_id,
+        attachable_revision_number=position + 1,
     )
 
 
@@ -151,13 +157,14 @@ def test_skill_binding_reference_input_maps_to_named_domain_reference():
     ]
 
 
-def test_binding_summary_carries_current_revision_without_catalog_lookup():
+def test_binding_summary_carries_attachable_revision_without_catalog_lookup():
     binding = _binding(position=0)
 
     summary = SkillAssembler.binding_to_summary(binding)
 
-    assert summary.current_revision_id == binding.current_revision_id
-    assert summary.current_revision_number == binding.current_revision_number
+    assert summary.attachable_revision_id == binding.attachable_revision_id
+    assert summary.attachable_revision_number == binding.attachable_revision_number
+    assert summary.source is SkillBindingSource.SPACE
 
 
 def test_parent_binding_projection_routes_are_get_only():
@@ -326,6 +333,7 @@ async def test_revision_noop_result_does_not_emit_created_audit():
         get_skill=AsyncMock(return_value=skill),
         create_revision=AsyncMock(
             return_value=SkillRevisionChange(
+                skill=skill,
                 revision=skill.current_revision,
                 created=False,
                 previous_revision_number=skill.current_revision_number,
@@ -365,6 +373,7 @@ async def test_revision_created_audit_uses_locked_mutation_outcome():
         current_revision=replace(after.current_revision, skill_id=before.id),
     )
     change = SkillRevisionChange(
+        skill=after,
         revision=after.current_revision,
         created=True,
         previous_revision_number=1,
@@ -415,9 +424,9 @@ async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies
         created_at=datetime.now(timezone.utc),
     )
     outcome = SkillRevisionRestore(
-        skill=skill,
         source_revision=source,
         change=SkillRevisionChange(
+            skill=replace(skill, current_revision=restored, current_revision_number=5),
             revision=restored,
             created=True,
             previous_revision_number=4,
@@ -465,9 +474,9 @@ async def test_restore_creates_a_distinct_audit_event_without_instruction_bodies
 async def test_restore_noop_does_not_emit_a_restored_audit_event():
     skill = _skill(revision_number=4)
     outcome = SkillRevisionRestore(
-        skill=skill,
         source_revision=skill.current_revision,
         change=SkillRevisionChange(
+            skill=skill,
             revision=skill.current_revision,
             created=False,
             previous_revision_number=4,

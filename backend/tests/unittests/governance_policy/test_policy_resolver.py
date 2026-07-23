@@ -12,7 +12,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     select_effective_completion_model,
 )
-from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingSource
 
 
 def _mk_assistant(is_default: bool = True):
@@ -92,6 +92,7 @@ def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug="payroll",
         revision_number=2,
         current_revision_number=2,
@@ -100,6 +101,7 @@ def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt
         instructions="Use the payroll handbook.",
         content_digest="a" * 64,
         position=0,
+        source=SkillBindingSource.ORGANIZATION,
     )
 
     cfg = resolve(

@@ -5,6 +5,10 @@
 /** @typedef {import('../types/resources').SkillRevisionSummaryPage} SkillRevisionSummaryPage */
 /** @typedef {import('../types/resources').SkillSparse} SkillSparse */
 /** @typedef {import('../types/resources').SkillBindingSummary} SkillBindingSummary */
+/** @typedef {import('../types/resources').OrganizationSkillPublic} OrganizationSkillPublic */
+/** @typedef {import('../types/resources').OrganizationSkillSummaryPagePublic} OrganizationSkillSummaryPagePublic */
+/** @typedef {import('../types/resources').PublishedSkillPublic} PublishedSkillPublic */
+/** @typedef {import('../types/resources').PublishedSkillSummaryPagePublic} PublishedSkillSummaryPagePublic */
 
 /**
  * Skills require session authentication; API keys cannot use this surface.
@@ -156,6 +160,185 @@ export function initSkills(client) {
         method: "delete",
         params: { path: { space_id: spaceId, skill_id: skillId } }
       });
+    },
+
+    catalogue: {
+      /**
+       * List approved Skills in the current tenant.
+       * @param {{limit?: number, cursor?: string | null, search?: string | null}} [params]
+       * @returns {Promise<PublishedSkillSummaryPagePublic>}
+       * @throws {EneoError}
+       */
+      list: async ({ limit, cursor, search } = {}) => {
+        return await client.fetch("/api/v1/skills/catalogue/", {
+          method: "get",
+          params: { query: { limit, cursor, search } }
+        });
+      },
+
+      /**
+       * Open the exact approved revision of a catalogue Skill.
+       * @param {{skillId: string}} params
+       * @returns {Promise<PublishedSkillPublic>}
+       * @throws {EneoError}
+       */
+      get: async ({ skillId }) => {
+        return await client.fetch("/api/v1/skills/catalogue/{skill_id}/", {
+          method: "get",
+          params: { path: { skill_id: skillId } }
+        });
+      }
+    },
+
+    organization: {
+      /**
+       * List organisation Skill drafts and publication status.
+       * @param {{limit?: number, cursor?: string | null, search?: string | null}} [params]
+       * @returns {Promise<OrganizationSkillSummaryPagePublic>}
+       * @throws {EneoError}
+       */
+      list: async ({ limit, cursor, search } = {}) => {
+        return await client.fetch("/api/v1/skills/organization/", {
+          method: "get",
+          params: { query: { limit, cursor, search } }
+        });
+      },
+
+      /**
+       * Get an organisation Skill and its current draft revision.
+       * @param {{skillId: string}} params
+       * @returns {Promise<OrganizationSkillPublic>}
+       * @throws {EneoError}
+       */
+      get: async ({ skillId }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/", {
+          method: "get",
+          params: { path: { skill_id: skillId } }
+        });
+      },
+
+      /**
+       * Create an organisation Skill draft.
+       * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/">} skill
+       * @returns {Promise<OrganizationSkillPublic>}
+       * @throws {EneoError}
+       */
+      create: async (skill) => {
+        return await client.fetch("/api/v1/skills/organization/", {
+          method: "post",
+          requestBody: { "application/json": skill }
+        });
+      },
+
+      /**
+       * List immutable revisions for an organisation Skill.
+       * @param {{skillId: string, limit?: number, cursor?: string | null}} params
+       * @returns {Promise<SkillRevisionSummaryPage>}
+       * @throws {EneoError}
+       */
+      listRevisionSummaries: async ({ skillId, limit, cursor }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/revisions/", {
+          method: "get",
+          params: {
+            path: { skill_id: skillId },
+            query: { limit, cursor }
+          }
+        });
+      },
+
+      /**
+       * Get one immutable organisation Skill revision.
+       * @param {{skillId: string, revisionId: string}} params
+       * @returns {Promise<SkillRevisionPublic>}
+       * @throws {EneoError}
+       */
+      getRevision: async ({ skillId, revisionId }) => {
+        return await client.fetch(
+          "/api/v1/skills/organization/{skill_id}/revisions/{revision_id}/",
+          {
+            method: "get",
+            params: {
+              path: { skill_id: skillId, revision_id: revisionId }
+            }
+          }
+        );
+      },
+
+      /**
+       * Create the next immutable organisation Skill revision.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/revisions/">} params
+       * @returns {Promise<SkillRevisionPublic>}
+       * @throws {EneoError}
+       */
+      createRevision: async ({ skillId, ...revision }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/revisions/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": revision }
+        });
+      },
+
+      /**
+       * Restore historical content as the next immutable revision.
+       * @param {{skillId: string, sourceRevisionId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/">} params
+       * @returns {Promise<SkillRevisionRestorePublic>}
+       * @throws {EneoError}
+       */
+      restoreRevision: async ({ skillId, sourceRevisionId, ...restore }) => {
+        return await client.fetch(
+          "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
+          {
+            method: "post",
+            params: {
+              path: {
+                skill_id: skillId,
+                source_revision_id: sourceRevisionId
+              }
+            },
+            requestBody: { "application/json": restore }
+          }
+        );
+      },
+
+      /**
+       * Publish the exact organisation Skill revision just reviewed.
+       * @param {{skillId: string} & import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/{skill_id}/publish/">} params
+       * @returns {Promise<OrganizationSkillPublic>}
+       * @throws {EneoError}
+       */
+      publish: async ({ skillId, ...request }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/publish/", {
+          method: "post",
+          params: { path: { skill_id: skillId } },
+          requestBody: { "application/json": request }
+        });
+      },
+
+      /**
+       * Remove an organisation Skill from new catalogue use.
+       * @param {{skillId: string}} params
+       * @returns {Promise<OrganizationSkillPublic>}
+       * @throws {EneoError}
+       */
+      unpublish: async ({ skillId }) => {
+        return await client.fetch("/api/v1/skills/organization/{skill_id}/unpublish/", {
+          method: "post",
+          params: { path: { skill_id: skillId } }
+        });
+      },
+
+      /**
+       * Delete an eligible organisation Skill draft.
+       * @param {{skillId: string}} params
+       * @returns {Promise<void>}
+       * @throws {EneoError}
+       */
+      delete: async ({ skillId }) => {
+        await client.fetch("/api/v1/skills/organization/{skill_id}/", {
+          method: "delete",
+          params: { path: { skill_id: skillId } }
+        });
+      }
     },
 
     /**

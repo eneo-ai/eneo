@@ -6,6 +6,10 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
+  import {
+    loadSkillBindingCatalogPage,
+    loadSkillBindingPreview
+  } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
@@ -70,13 +74,22 @@
       />
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}
-        initialSkillPage={draft.skillCatalog}
+        initialCatalogPage={draft.skillCatalogPage}
         bindingSummaries={draft.skillBindingSummaries}
         summary={draft.skillsSummary}
-        canUseSkills={draft.canUseSkills}
-        canCreateSkills={draft.canCreateSkills}
-        onListSkills={draft.listSkills}
-        onCreateSkill={draft.createSkill}
+        onListCatalog={(params) =>
+          loadSkillBindingCatalogPage({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            organizationSpace: true,
+            ...params
+          })}
+        onGetSkillPreview={(target) =>
+          loadSkillBindingPreview({
+            eneo: data.eneo,
+            spaceId: data.organizationSpace.id,
+            target
+          })}
       />
     </div>
   </Settings.Page>

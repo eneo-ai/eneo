@@ -10,6 +10,7 @@ from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
+    SkillBindingSource,
     SkillComposition,
     SkillExecutionReference,
 )
@@ -806,6 +807,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug="payroll",
         revision_number=4,
         current_revision_number=4,
@@ -813,6 +815,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
         instructions="Use the approved payroll rules.",
         content_digest="b" * 64,
         position=0,
+        source=SkillBindingSource.ORGANIZATION,
     )
     skill_service = _empty_skill_service()
     effective_config = SimpleNamespace(

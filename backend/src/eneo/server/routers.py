@@ -92,6 +92,9 @@ from eneo.settings.settings_router import (
 from eneo.settings.settings_router import (
     settings_admin_router,
 )
+from eneo.skills.presentation.organization_skill_router import (
+    router as organization_skill_router,
+)
 from eneo.skills.presentation.skill_router import router as skill_router
 from eneo.spaces.api.space_router import router as space_router
 from eneo.storage.presentation.storage_router import router as storage_router
@@ -513,6 +516,7 @@ router.include_router(
         ),
     ],
 )
+router.include_router(organization_skill_router)
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )

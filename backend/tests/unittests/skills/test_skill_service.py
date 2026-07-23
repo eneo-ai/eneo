@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,6 +8,7 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
+    NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -15,10 +17,12 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillBindingReference,
+    SkillBindingSource,
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
+    SkillSlugConflictError,
 )
 
 
@@ -26,6 +30,7 @@ def _binding(
     *,
     skill_id=None,
     revision_id=None,
+    skill_space_id=None,
     position: int = 0,
     active: bool = True,
 ) -> ResolvedSkillBinding:
@@ -35,6 +40,7 @@ def _binding(
         skill_id=resolved_skill_id,
         skill_revision_id=resolved_revision_id,
         current_revision_id=resolved_revision_id,
+        skill_space_id=skill_space_id or uuid4(),
         slug="payroll",
         revision_number=1,
         current_revision_number=1,
@@ -43,6 +49,7 @@ def _binding(
         instructions="Use the payroll handbook.",
         content_digest="a" * 64,
         position=position,
+        source=SkillBindingSource.SPACE,
         is_active=active,
     )
 
@@ -116,7 +123,11 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
     user = SimpleNamespace(
         id=uuid4(),
         tenant_id=space.tenant_id,
-        permissions=permissions or {Permission.SKILLS, Permission.ASSISTANTS},
+        permissions=(
+            permissions
+            if permissions is not None
+            else {Permission.SKILLS, Permission.ASSISTANTS}
+        ),
         active_api_key=active_api_key,
     )
     repo = repo or AsyncMock()
@@ -128,6 +139,102 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
         space_service=space_service,
         actor_manager=actor_manager,
     )
+
+
+async def test_skill_slug_collision_is_reported_without_leaking_persistence_details():
+    space = _space()
+    repo = AsyncMock()
+    repo.create.side_effect = SkillSlugConflictError
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NameCollisionException, match="slug 'payroll'"):
+        await service.create_skill(
+            space_id=space.id,
+            slug="payroll",
+            display_name="Payroll",
+            description="Answers payroll questions",
+            instructions="Use approved guidance.",
+        )
+
+
+async def test_organisation_skill_availability_uses_publication_not_status_toggle():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="controlled by publication"):
+        await service.set_active(skill_id=skill.id, is_active=False)
+
+    repo.set_active.assert_not_awaited()
+
+
+async def test_generic_space_create_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    repo = AsyncMock()
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.create_skill(
+            space_id=space.id,
+            slug="payroll",
+            display_name="Payroll",
+            description="Answers payroll questions",
+            instructions="Use approved guidance.",
+        )
+
+    repo.create.assert_not_awaited()
+
+
+async def test_generic_space_revision_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.create_revision(
+            skill_id=skill.id,
+            display_name="Payroll",
+            description="Answers payroll questions",
+            instructions="Use approved guidance.",
+        )
+
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_generic_space_restore_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.restore_revision(
+            space_id=space.id,
+            skill_id=skill.id,
+            source_revision_id=uuid4(),
+            reviewed_current_revision_id=uuid4(),
+        )
+
+    repo.get_revision.assert_not_awaited()
+    repo.create_revision.assert_not_awaited()
+
+
+async def test_generic_space_delete_rejects_organisation_skills_before_write():
+    space = _space(organization=True)
+    skill = SimpleNamespace(id=uuid4(), space_id=space.id)
+    repo = AsyncMock()
+    repo.get.return_value = skill
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(BadRequestException, match="organisation Skill workflow"):
+        await service.delete_skill(skill_id=skill.id)
+
+    repo.delete.assert_not_awaited()
 
 
 def _space(*, personal=False, organization=False, default_assistant=False):
@@ -382,6 +489,7 @@ async def test_editor_restores_exact_historical_content_as_a_new_revision():
     restored = _revision(skill_id=skill_id, revision_number=5)
     skill = SimpleNamespace(id=skill_id, space_id=space.id)
     change = SkillRevisionChange(
+        skill=skill,
         revision=restored,
         created=True,
         previous_revision_number=4,
@@ -400,7 +508,7 @@ async def test_editor_restores_exact_historical_content_as_a_new_revision():
         reviewed_current_revision_id=reviewed_current_revision_id,
     )
 
-    assert outcome.skill is skill
+    assert outcome.change.skill is skill
     assert outcome.source_revision is source
     assert outcome.change is change
     repo.get_revision.assert_awaited_once_with(
@@ -481,10 +589,10 @@ async def test_missing_or_cross_skill_restore_source_is_not_found():
 
 async def test_same_space_skill_can_be_reused_by_multiple_parents():
     space = _space()
-    binding = _binding()
+    binding = _binding(skill_space_id=space.id)
     repo = AsyncMock()
     repo.list_assistant_bindings.return_value = []
-    repo.resolve_references_for_binding_update.return_value = [binding]
+    repo.resolve_local_references_for_binding_update.return_value = [binding]
     service = _service(space=space, repo=repo)
 
     first = await service.replace_assistant_bindings(
@@ -501,6 +609,109 @@ async def test_same_space_skill_can_be_reused_by_multiple_parents():
     assert first == [binding]
     assert second == [binding]
     assert repo.replace_assistant_bindings.await_count == 2
+
+
+@pytest.mark.parametrize(
+    ("replace_method", "parent_id_name", "parent_attribute", "list_method"),
+    [
+        (
+            "replace_assistant_bindings",
+            "assistant_id",
+            "assistant",
+            "list_assistant_bindings",
+        ),
+        ("replace_app_bindings", "app_id", "app", "list_app_bindings"),
+    ],
+)
+async def test_resource_binding_resolves_local_and_published_catalogue_skills(
+    replace_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+    list_method: str,
+):
+    space = _space()
+    local = _binding(skill_space_id=space.id)
+    published = _binding()
+    repo = AsyncMock()
+    getattr(repo, list_method).return_value = []
+    repo.resolve_local_references_for_binding_update.return_value = [local]
+    repo.resolve_published_references_for_binding_update.return_value = [published]
+    service = _service(space=space, repo=repo)
+
+    result = await getattr(service, replace_method)(
+        space_id=space.id,
+        **{parent_id_name: getattr(space, parent_attribute).id},
+        references=[_binding_reference(local), _binding_reference(published)],
+    )
+
+    assert result == [local, replace(published, position=1)]
+    repo.resolve_local_references_for_binding_update.assert_awaited_once_with(
+        space_id=space.id,
+        references=[_binding_reference(local), _binding_reference(published)],
+    )
+    repo.resolve_published_references_for_binding_update.assert_awaited_once_with(
+        tenant_id=space.tenant_id,
+        references=[_binding_reference(published)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("replace_method", "parent_id_name", "parent_attribute", "list_method"),
+    [
+        (
+            "replace_assistant_bindings",
+            "assistant_id",
+            "assistant",
+            "list_assistant_bindings",
+        ),
+        ("replace_app_bindings", "app_id", "app", "list_app_bindings"),
+    ],
+)
+async def test_organization_space_resource_rejects_unpublished_skill_revision(
+    replace_method: str,
+    parent_id_name: str,
+    parent_attribute: str,
+    list_method: str,
+):
+    space = _space(organization=True)
+    draft = _binding(skill_space_id=space.id)
+    repo = AsyncMock()
+    getattr(repo, list_method).return_value = []
+    repo.resolve_published_references_for_binding_update.return_value = []
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(NotFoundException, match="unavailable"):
+        await getattr(service, replace_method)(
+            space_id=space.id,
+            **{parent_id_name: getattr(space, parent_attribute).id},
+            references=[_binding_reference(draft)],
+        )
+
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
+
+
+async def test_existing_unpublished_catalogue_binding_can_remain_on_resource():
+    space = _space()
+    existing = _binding(active=False)
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [existing]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        references=[_binding_reference(existing)],
+    )
+
+    assert result == [existing]
+    repo.resolve_bound_references_for_binding_update.assert_awaited_once_with(
+        tenant_id=space.tenant_id,
+        parent_space_id=space.id,
+        references=[_binding_reference(existing)],
+    )
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
+    repo.resolve_published_references_for_binding_update.assert_not_awaited()
 
 
 async def test_assistant_binding_update_rejects_a_concurrent_space_move():
@@ -524,10 +735,11 @@ async def test_missing_or_cross_space_revision_fails_before_replacing_bindings()
     space = _space()
     repo = AsyncMock()
     repo.list_app_bindings.return_value = []
-    repo.resolve_references_for_binding_update.return_value = []
+    repo.resolve_local_references_for_binding_update.return_value = []
+    repo.resolve_published_references_for_binding_update.return_value = []
     service = _service(space=space, repo=repo)
 
-    with pytest.raises(NotFoundException, match="do not exist in this Space"):
+    with pytest.raises(NotFoundException, match="unavailable"):
         await service.replace_app_bindings(
             space_id=space.id,
             app_id=space.app.id,
@@ -547,7 +759,7 @@ async def test_inactive_skill_cannot_receive_a_new_binding():
     inactive = _binding(active=False)
     repo = AsyncMock()
     repo.list_assistant_bindings.return_value = []
-    repo.resolve_references_for_binding_update.return_value = [inactive]
+    repo.resolve_local_references_for_binding_update.return_value = [inactive]
     service = _service(space=space, repo=repo)
 
     with pytest.raises(BadRequestException, match="Inactive Skills"):
@@ -563,7 +775,7 @@ async def test_existing_inactive_exact_revision_binding_can_be_reordered():
     inactive = _binding(active=False)
     repo = AsyncMock()
     repo.list_assistant_bindings.return_value = [inactive]
-    repo.resolve_references_for_binding_update.return_value = [inactive]
+    repo.resolve_bound_references_for_binding_update.return_value = [inactive]
     service = _service(space=space, repo=repo)
 
     result = await service.replace_assistant_bindings(
@@ -580,7 +792,6 @@ async def test_explicit_empty_reference_list_clears_all_app_bindings():
     space = _space()
     repo = AsyncMock()
     repo.list_app_bindings.return_value = [_binding()]
-    repo.resolve_references_for_binding_update.return_value = []
     service = _service(space=space, repo=repo)
 
     result = await service.replace_app_bindings(
@@ -592,6 +803,7 @@ async def test_explicit_empty_reference_list_clears_all_app_bindings():
     assert result == []
     repo.replace_app_bindings.assert_awaited_once_with(
         app_id=space.app.id,
+        tenant_id=space.tenant_id,
         space_id=space.id,
         bindings=[],
     )
@@ -798,12 +1010,12 @@ async def test_api_key_cannot_replace_governance_skill_bindings():
     repo.list_policy_bindings.assert_not_awaited()
 
 
-async def test_tenant_admin_with_skill_use_can_replace_governance_bindings():
+async def test_governance_binding_accepts_only_exact_published_new_revision():
     space = _space(organization=True)
-    binding = _binding()
+    published = _binding()
     repo = AsyncMock()
     repo.list_policy_bindings.return_value = []
-    repo.resolve_references_for_binding_update.return_value = [binding]
+    repo.resolve_published_references_for_binding_update.return_value = [published]
     actor = MagicMock(
         can_read_skills=MagicMock(return_value=True),
         can_edit_skills=MagicMock(return_value=False),
@@ -814,45 +1026,93 @@ async def test_tenant_admin_with_skill_use_can_replace_governance_bindings():
         repo=repo,
         permissions={Permission.ADMIN, Permission.SKILLS},
     )
-    policy_id = uuid4()
 
     result = await service.replace_governance_bindings(
-        policy_id=policy_id,
+        policy_id=uuid4(),
         organization_space_id=space.id,
-        references=[_binding_reference(binding)],
+        references=[_binding_reference(published)],
     )
 
-    assert result == [binding]
-    repo.replace_policy_bindings.assert_awaited_once_with(
-        policy_id=policy_id,
+    assert result == [published]
+    repo.resolve_published_references_for_binding_update.assert_awaited_once_with(
         tenant_id=space.tenant_id,
-        skill_space_id=space.id,
-        bindings=[binding],
+        references=[_binding_reference(published)],
     )
+    repo.resolve_bound_references_for_binding_update.assert_not_awaited()
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
 
 
-async def test_tenant_admin_without_skill_use_cannot_replace_governance_bindings():
+async def test_governance_binding_rejects_unpublished_or_unapproved_new_revision():
     space = _space(organization=True)
+    draft = _binding()
     repo = AsyncMock()
-    actor = MagicMock(
-        can_read_skills=MagicMock(return_value=False),
-        can_edit_skills=MagicMock(return_value=True),
-    )
+    repo.list_policy_bindings.return_value = []
+    repo.resolve_published_references_for_binding_update.return_value = []
     service = _service(
         space=space,
-        actor=actor,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    with pytest.raises(
+        BadRequestException, match="published organisation Skill versions"
+    ):
+        await service.replace_governance_bindings(
+            policy_id=uuid4(),
+            organization_space_id=space.id,
+            references=[_binding_reference(draft)],
+        )
+
+    repo.replace_policy_bindings.assert_not_awaited()
+
+
+async def test_existing_unpublished_governance_binding_can_remain():
+    space = _space(organization=True)
+    existing = _binding(active=False)
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [existing]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        references=[_binding_reference(existing)],
+    )
+
+    assert result == [existing]
+    repo.resolve_bound_references_for_binding_update.assert_awaited_once_with(
+        tenant_id=space.tenant_id,
+        parent_space_id=space.id,
+        references=[_binding_reference(existing)],
+    )
+    repo.resolve_published_references_for_binding_update.assert_not_awaited()
+    repo.replace_policy_bindings.assert_awaited_once()
+
+
+async def test_tenant_admin_without_space_skill_use_can_replace_governance_bindings():
+    space = _space(organization=True)
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = []
+    service = _service(
+        space=space,
         repo=repo,
         permissions={Permission.ADMIN},
     )
 
-    with pytest.raises(UnauthorizedException, match="configure organisation Skills"):
-        await service.replace_governance_bindings(
-            policy_id=uuid4(),
-            organization_space_id=space.id,
-            references=[],
-        )
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        references=[],
+    )
 
-    repo.list_policy_bindings.assert_not_awaited()
+    assert result == []
+    repo.list_policy_bindings.assert_awaited_once()
+    repo.replace_policy_bindings.assert_awaited_once()
 
 
 async def test_skill_user_without_tenant_admin_cannot_replace_governance_bindings():
@@ -899,7 +1159,8 @@ async def test_binding_abuse_guardrail_comes_from_deployment_settings():
             references=references,
         )
 
-    repo.resolve_references_for_binding_update.assert_not_awaited()
+    repo.resolve_bound_references_for_binding_update.assert_not_awaited()
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
 
 
 async def test_governance_bindings_require_organization_space_in_same_tenant():

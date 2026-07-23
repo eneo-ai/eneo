@@ -14,12 +14,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Thread
+from threading import Event, Thread
+from time import monotonic, sleep
 from uuid import uuid4
 
 import psycopg2
 import pytest
 from psycopg2.extensions import connection as PgConnection
+from sqlalchemy.exc import DBAPIError
 
 from alembic import command
 from alembic.config import Config
@@ -30,7 +32,9 @@ PRE_SKILLS_REVISION = "202607221000"
 SKILLS_SCHEMA_REVISION = "202607221200"
 SKILLS_PERMISSION_REVISION = "202607221300"
 SKILLS_PROVENANCE_INDEX_REVISION = "202607221400"
-SKILLS_HEAD_REVISION = SKILLS_PROVENANCE_INDEX_REVISION
+PRE_RESOURCE_BINDING_SCOPE_REVISION = "202607221500"
+PRE_PERMISSION_CONVERGENCE_REVISION = "202607221600"
+SKILLS_HEAD_REVISION = "202607221700"
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,7 @@ def _insert_role(
     tenant_id: str,
     label: str,
     permissions: list[str],
+    predefined_source: str | None = None,
 ) -> str:
     role_id = str(uuid4())
     with connection.cursor() as cursor:
@@ -154,9 +159,15 @@ def _insert_role(
                 id, name, permissions, tenant_id, predefined_source,
                 created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, NULL, now(), now())
+            VALUES (%s, %s, %s, %s, %s, now(), now())
             """,
-            (role_id, f"Skills {label} {uuid4().hex[:6]}", permissions, tenant_id),
+            (
+                role_id,
+                f"Skills {label} {uuid4().hex[:6]}",
+                permissions,
+                tenant_id,
+                predefined_source,
+            ),
         )
     return role_id
 
@@ -175,6 +186,89 @@ def _current_revision(connection: PgConnection) -> str:
         row = cursor.fetchone()
     assert row is not None
     return str(row[0])
+
+
+def test_permission_convergence_changes_only_predefined_roles(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_PERMISSION_CONVERGENCE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "permission-convergence")
+    role_ids = {
+        "owner": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="owner-before-convergence",
+            permissions=["admin", "skills"],
+            predefined_source="Owner",
+        ),
+        "user": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="user-before-convergence",
+            permissions=["assistants", "skills"],
+            predefined_source="User",
+        ),
+        "ai_configurator": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="ai-configurator-before-convergence",
+            permissions=["AI", "skills", "skills_management"],
+            predefined_source="AI Configurator",
+        ),
+        "custom_manager": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="custom-manager-before-convergence",
+            permissions=["assistants", "skills", "skills_management"],
+        ),
+        "custom_plain": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="custom-plain-before-convergence",
+            permissions=["assistants"],
+        ),
+    }
+
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+    assert _current_revision(connection) == SKILLS_HEAD_REVISION
+    assert _permissions(connection, role_ids["owner"]) == [
+        "admin",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["user"]) == ["assistants"]
+    assert _permissions(connection, role_ids["ai_configurator"]) == ["AI"]
+    assert _permissions(connection, role_ids["custom_manager"]) == [
+        "assistants",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_plain"]) == ["assistants"]
+
+    command.downgrade(config, PRE_PERMISSION_CONVERGENCE_REVISION)
+
+    assert _permissions(connection, role_ids["owner"]) == [
+        "admin",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["user"]) == ["assistants", "skills"]
+    assert _permissions(connection, role_ids["ai_configurator"]) == [
+        "AI",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_manager"]) == [
+        "assistants",
+        "skills",
+        "skills_management",
+    ]
+    assert _permissions(connection, role_ids["custom_plain"]) == ["assistants"]
 
 
 def _insert_assistant(connection: PgConnection, *, user_id: str, space_id: str) -> str:
@@ -412,6 +506,261 @@ def _assert_constraint(
     assert error.value.diag.constraint_name in expected_names
 
 
+def _insert_populated_resource_bindings(
+    connection: PgConnection,
+    *,
+    tenant_id: str,
+    user_id: str,
+    space_id: str,
+    skill_id: str,
+    skill_revision_id: str,
+    row_count: int,
+) -> tuple[str, str]:
+    seed = uuid4().hex
+    resource_name = f"Migration lock probe {seed}"
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO assistants (
+                id, user_id, space_id, name, logging_enabled, is_default,
+                published, type, insight_enabled, created_at, updated_at
+            )
+            SELECT
+                md5(%s || '-assistant-' || ordinal::text)::uuid,
+                %s, %s, %s, false, false, false, 'assistant', false,
+                now(), now()
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, user_id, space_id, resource_name, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, skill_id, skill_revision_id, space_id, position
+            )
+            SELECT
+                md5(%s || '-assistant-' || ordinal::text)::uuid,
+                %s, %s, %s, 0
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, skill_id, skill_revision_id, space_id, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO apps (
+                id, tenant_id, user_id, space_id, name, published,
+                created_at, updated_at
+            )
+            SELECT
+                md5(%s || '-app-' || ordinal::text)::uuid,
+                %s, %s, %s, %s, false, now(), now()
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, tenant_id, user_id, space_id, resource_name, row_count),
+        )
+        cursor.execute(
+            """
+            INSERT INTO app_skill_bindings (
+                app_id, skill_id, skill_revision_id, space_id, position
+            )
+            SELECT
+                md5(%s || '-app-' || ordinal::text)::uuid,
+                %s, %s, %s, 0
+            FROM generate_series(1, %s) AS ordinal
+            """,
+            (seed, skill_id, skill_revision_id, space_id, row_count),
+        )
+        cursor.execute(
+            "SELECT id FROM assistants WHERE name = %s ORDER BY id LIMIT 1",
+            (resource_name,),
+        )
+        assistant_id = cursor.fetchone()
+        cursor.execute(
+            "SELECT id FROM apps WHERE name = %s ORDER BY id LIMIT 1",
+            (resource_name,),
+        )
+        app_id = cursor.fetchone()
+
+    assert assistant_id is not None
+    assert app_id is not None
+    return str(assistant_id[0]), str(app_id[0])
+
+
+def test_resource_binding_migration_never_queues_exclusive_table_locks(
+    pre_skills_database: MigrationDatabase,
+    test_settings,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "online-binding-contract")
+    user_id = _insert_user(connection, tenant_id, "online-binding-contract")
+    space_id = _insert_space(connection, tenant_id, "online-binding-contract")
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=space_id,
+        created_by_user_id=user_id,
+        label="online-binding-contract",
+    )
+    assistant_id, app_id = _insert_populated_resource_bindings(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=space_id,
+        skill_id=skill_id,
+        skill_revision_id=revision_id,
+        row_count=50_000,
+    )
+
+    stop_writer = Event()
+    writer_ready = Event()
+    writer_iterations = [0]
+    writer_errors: list[BaseException] = []
+    migration_errors: list[BaseException] = []
+    probe_errors: list[BaseException] = []
+
+    def keep_reader_and_writer_active() -> None:
+        writer_connection = psycopg2.connect(
+            host=test_settings.postgres_host,
+            port=test_settings.postgres_port,
+            dbname=test_settings.postgres_db,
+            user=test_settings.postgres_user,
+            password=test_settings.postgres_password,
+        )
+        writer_connection.autocommit = True
+        try:
+            with writer_connection.cursor() as cursor:
+                cursor.execute("SET statement_timeout = '2s'")
+                writer_ready.set()
+                while not stop_writer.is_set():
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM assistant_skill_bindings
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    cursor.execute(
+                        """
+                        UPDATE assistant_skill_bindings
+                        SET updated_at = clock_timestamp()
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM app_skill_bindings
+                        WHERE app_id = %s AND skill_id = %s
+                        """,
+                        (app_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    cursor.execute(
+                        """
+                        UPDATE app_skill_bindings
+                        SET updated_at = clock_timestamp()
+                        WHERE app_id = %s AND skill_id = %s
+                        """,
+                        (app_id, skill_id),
+                    )
+                    writer_iterations[0] += 1
+                    sleep(0.002)
+        except BaseException as error:
+            writer_errors.append(error)
+        finally:
+            writer_connection.close()
+
+    def run_scope_migration() -> None:
+        try:
+            command.upgrade(
+                _alembic_config(config.get_main_option("sqlalchemy.url")),
+                PRE_PERMISSION_CONVERGENCE_REVISION,
+            )
+        except BaseException as error:
+            migration_errors.append(error)
+
+    writer = Thread(target=keep_reader_and_writer_active, daemon=True)
+    writer.start()
+    assert writer_ready.wait(timeout=5)
+    writer_start_deadline = monotonic() + 5
+    while (
+        writer_iterations[0] < 2
+        and not writer_errors
+        and monotonic() < writer_start_deadline
+    ):
+        sleep(0.002)
+    assert not writer_errors
+    assert writer_iterations[0] >= 2
+
+    blocker = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    probe = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    probe.autocommit = True
+    with blocker.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE assistant_skill_bindings
+            SET updated_at = updated_at
+            WHERE assistant_id = %s AND skill_id = %s
+            """,
+            (assistant_id, skill_id),
+        )
+
+    migration = Thread(target=run_scope_migration, daemon=True)
+    migration.start()
+
+    try:
+        # Keep issuing ordinary reads while the existing write transaction
+        # prevents the metadata phase from acquiring its exclusive lock. A
+        # queued DDL request would put these later compatible reads behind it.
+        probe_deadline = monotonic() + 1.0
+        with probe.cursor() as cursor:
+            cursor.execute("SET statement_timeout = '100ms'")
+            while monotonic() < probe_deadline and not probe_errors:
+                try:
+                    cursor.execute(
+                        """
+                        SELECT updated_at
+                        FROM assistant_skill_bindings
+                        WHERE assistant_id = %s AND skill_id = %s
+                        """,
+                        (assistant_id, skill_id),
+                    )
+                    cursor.fetchone()
+                    sleep(0.01)
+                except BaseException as error:
+                    probe_errors.append(error)
+    finally:
+        blocker.rollback()
+        blocker.close()
+        probe.close()
+        migration.join(timeout=10)
+        stop_writer.set()
+        writer.join(timeout=5)
+
+    assert not migration_errors
+    assert not writer_errors
+    assert not probe_errors
+    assert writer_iterations[0] > 2
+    assert not migration.is_alive()
+
+
 def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     pre_skills_database: MigrationDatabase,
 ):
@@ -428,6 +777,27 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     )
 
     role_ids = {
+        "owner": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="owner",
+            permissions=["admin"],
+            predefined_source="Owner",
+        ),
+        "user": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="user",
+            permissions=["assistants", "apps"],
+            predefined_source="User",
+        ),
+        "ai_configurator": _insert_role(
+            connection,
+            tenant_id=tenant_id,
+            label="ai-configurator",
+            permissions=["AI", "assistants", "apps"],
+            predefined_source="AI Configurator",
+        ),
         "assistants": _insert_role(
             connection,
             tenant_id=tenant_id,
@@ -495,18 +865,29 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
     command.upgrade(config, SKILLS_HEAD_REVISION)
 
     assert _current_revision(connection) == SKILLS_HEAD_REVISION
-    for qualifying_role in ("assistants", "apps", "admin", "ai", "already_granted"):
-        permissions = _permissions(connection, role_ids[qualifying_role])
+    owner_permissions = _permissions(connection, role_ids["owner"])
+    assert owner_permissions.count("skills") == 1
+    assert owner_permissions.count("skills_management") == 1
+
+    for role_name in ("user", "ai_configurator", "unrelated"):
+        permissions = _permissions(connection, role_ids[role_name])
+        assert "skills" not in permissions
+        assert "skills_management" not in permissions
+
+    for role_name in ("assistants", "apps"):
+        permissions = _permissions(connection, role_ids[role_name])
         assert permissions.count("skills") == 1
-    for qualifying_role in ("admin", "ai", "already_managed"):
-        permissions = _permissions(connection, role_ids[qualifying_role])
+        assert "skills_management" not in permissions
+
+    for role_name in ("admin", "ai"):
+        permissions = _permissions(connection, role_ids[role_name])
+        assert permissions.count("skills") == 1
         assert permissions.count("skills_management") == 1
-    for use_only_role in ("assistants", "apps", "already_granted"):
-        assert "skills_management" not in _permissions(
-            connection, role_ids[use_only_role]
-        )
-    assert "skills" not in _permissions(connection, role_ids["unrelated"])
-    assert "skills_management" not in _permissions(connection, role_ids["unrelated"])
+
+    assert _permissions(connection, role_ids["already_granted"]).count("skills") == 1
+    already_managed_permissions = _permissions(connection, role_ids["already_managed"])
+    assert already_managed_permissions.count("skills") == 1
+    assert already_managed_permissions.count("skills_management") == 1
 
     expected_indexes = {
         "uq_assistants_space_id_id",
@@ -514,7 +895,9 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
         "uq_spaces_tenant_id_id",
         "uq_governance_policies_tenant_id_id",
         "ix_assistant_skill_bindings_skill_id",
+        "ix_assistant_skill_bindings_tenant_skill_space",
         "ix_app_skill_bindings_skill_id",
+        "ix_app_skill_bindings_tenant_skill_space",
         "ix_app_runs_skill_provenance_gin",
         "ix_governance_policy_skill_bindings_skill_id",
         "ix_governance_policy_skill_bindings_tenant_space",
@@ -549,12 +932,67 @@ def test_upgrade_recovers_indexes_and_round_trips_role_backfill(
         "(tenant_id, skill_space_id)"
         in indexes["ix_governance_policy_skill_bindings_tenant_space"][2]
     )
+    assert (
+        "(tenant_id, skill_space_id)"
+        in indexes["ix_assistant_skill_bindings_tenant_skill_space"][2]
+    )
+    assert (
+        "(tenant_id, skill_space_id)"
+        in indexes["ix_app_skill_bindings_tenant_skill_space"][2]
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'skills'
+              AND column_name = ANY(%s)
+            ORDER BY column_name
+            """,
+            (["first_published_at", "published_revision_number"],),
+        )
+        publication_columns = cursor.fetchall()
+
+    assert publication_columns == [
+        ("first_published_at", "YES"),
+        ("published_revision_number", "YES"),
+    ]
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT table_name, column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = ANY(%s)
+              AND column_name = ANY(%s)
+            ORDER BY table_name, column_name
+            """,
+            (
+                ["assistant_skill_bindings", "app_skill_bindings"],
+                ["skill_space_id", "tenant_id"],
+            ),
+        )
+        binding_scope_columns = cursor.fetchall()
+
+    assert binding_scope_columns == [
+        ("app_skill_bindings", "skill_space_id", "NO"),
+        ("app_skill_bindings", "tenant_id", "NO"),
+        ("assistant_skill_bindings", "skill_space_id", "NO"),
+        ("assistant_skill_bindings", "tenant_id", "NO"),
+    ]
 
     command.downgrade(config, SKILLS_SCHEMA_REVISION)
     assert _current_revision(connection) == SKILLS_SCHEMA_REVISION
-    for role_id in role_ids.values():
-        assert "skills" not in _permissions(connection, role_id)
-        assert "skills_management" not in _permissions(connection, role_id)
+    owner_permissions = _permissions(connection, role_ids["owner"])
+    assert "skills" not in owner_permissions
+    assert "skills_management" not in owner_permissions
+    # The already-shipped 1300 downgrade removes the two permissions globally;
+    # it did not persist enough provenance to reconstruct earlier custom grants.
+    assert "skills" not in _permissions(connection, role_ids["already_granted"])
+    already_managed_permissions = _permissions(connection, role_ids["already_managed"])
+    assert "skills" not in already_managed_permissions
+    assert "skills_management" not in already_managed_permissions
 
     command.downgrade(config, PRE_SKILLS_REVISION)
     assert _current_revision(connection) == PRE_SKILLS_REVISION
@@ -814,52 +1252,131 @@ def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(
     )
     _assert_constraint(
         connection,
-        expected="ck_assistant_skill_bindings_position_nonnegative",
+        expected="ck_skills_published_requires_first_published_at",
         statement="""
-            INSERT INTO assistant_skill_bindings (
-                assistant_id, skill_id, skill_revision_id, space_id, position
-            )
-            VALUES (%s, %s, %s, %s, -1)
+            UPDATE skills
+            SET published_revision_number = 1
+            WHERE id = %s
         """,
-        parameters=(assistant_id, primary_skill, primary_revision, space_a),
+        parameters=(primary_skill,),
     )
     _assert_constraint(
         connection,
-        expected="fk_assistant_skill_bindings_skill",
+        expected="ck_skills_published_active",
+        statement="""
+            UPDATE skills
+            SET published_revision_number = 1,
+                first_published_at = now(),
+                is_active = false
+            WHERE id = %s
+        """,
+        parameters=(primary_skill,),
+    )
+    _assert_constraint(
+        connection,
+        expected="fk_skills_published_revision",
+        statement="""
+            UPDATE skills
+            SET published_revision_number = 99,
+                first_published_at = now()
+            WHERE id = %s
+        """,
+        parameters=(primary_skill,),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_assistant_skill_bindings_position_nonnegative",
         statement="""
             INSERT INTO assistant_skill_bindings (
-                assistant_id, skill_id, skill_revision_id, space_id, position
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, -1)
         """,
         parameters=(
             assistant_id,
-            sibling_skill,
-            sibling_revision,
+            tenant_a,
             space_a,
+            space_a,
+            primary_skill,
+            primary_revision,
         ),
     )
     _assert_constraint(
         connection,
-        expected="fk_app_skill_bindings_skill",
+        expected="fk_assistant_skill_bindings_skill_space",
+        statement="""
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+        """,
+        parameters=(
+            assistant_id,
+            tenant_a,
+            space_a,
+            organization_space_b,
+            foreign_skill,
+            foreign_revision,
+        ),
+    )
+    _assert_constraint(
+        connection,
+        expected="fk_app_skill_bindings_skill_space",
         statement="""
             INSERT INTO app_skill_bindings (
-                app_id, skill_id, skill_revision_id, space_id, position
+                app_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
         """,
-        parameters=(app_id, sibling_skill, sibling_revision, space_a),
+        parameters=(
+            app_id,
+            tenant_a,
+            space_a,
+            organization_space_b,
+            foreign_skill,
+            foreign_revision,
+        ),
+    )
+    _assert_constraint(
+        connection,
+        expected="fk_assistant_skill_bindings_parent_space",
+        statement="""
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+        """,
+        parameters=(
+            assistant_id,
+            tenant_b,
+            space_a,
+            organization_space_b,
+            foreign_skill,
+            foreign_revision,
+        ),
     )
     _assert_constraint(
         connection,
         expected="fk_assistant_skill_bindings_revision",
         statement="""
             INSERT INTO assistant_skill_bindings (
-                assistant_id, skill_id, skill_revision_id, space_id, position
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
         """,
-        parameters=(assistant_id, primary_skill, peer_revision, space_a),
+        parameters=(
+            assistant_id,
+            tenant_a,
+            space_a,
+            space_a,
+            primary_skill,
+            peer_revision,
+        ),
     )
     _assert_constraint(
         connection,
@@ -884,11 +1401,61 @@ def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(
         cursor.execute(
             """
             INSERT INTO assistant_skill_bindings (
-                assistant_id, skill_id, skill_revision_id, space_id, position
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
             """,
-            (assistant_id, primary_skill, primary_revision, space_a),
+            (
+                assistant_id,
+                tenant_a,
+                space_a,
+                organization_space_a,
+                governance_skill,
+                governance_revision,
+            ),
+        )
+        cursor.execute(
+            "DELETE FROM assistant_skill_bindings WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+        cursor.execute(
+            """
+            INSERT INTO app_skill_bindings (
+                app_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+            """,
+            (
+                app_id,
+                tenant_a,
+                space_a,
+                sibling_space_a,
+                sibling_skill,
+                sibling_revision,
+            ),
+        )
+        cursor.execute(
+            "DELETE FROM app_skill_bindings WHERE app_id = %s",
+            (app_id,),
+        )
+        cursor.execute(
+            """
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+            """,
+            (
+                assistant_id,
+                tenant_a,
+                space_a,
+                space_a,
+                primary_skill,
+                primary_revision,
+            ),
         )
 
     _assert_constraint(
@@ -896,11 +1463,19 @@ def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(
         expected="uq_assistant_skill_bindings_assistant_id_position",
         statement="""
             INSERT INTO assistant_skill_bindings (
-                assistant_id, skill_id, skill_revision_id, space_id, position
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
         """,
-        parameters=(assistant_id, peer_skill, peer_revision, space_a),
+        parameters=(
+            assistant_id,
+            tenant_a,
+            space_a,
+            space_a,
+            peer_skill,
+            peer_revision,
+        ),
     )
     _assert_constraint(
         connection,
@@ -916,11 +1491,19 @@ def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(
         cursor.execute(
             """
             INSERT INTO app_skill_bindings (
-                app_id, skill_id, skill_revision_id, space_id, position
+                app_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
             )
-            VALUES (%s, %s, %s, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
             """,
-            (app_id, peer_skill, peer_revision, space_a),
+            (
+                app_id,
+                tenant_a,
+                space_a,
+                space_a,
+                peer_skill,
+                peer_revision,
+            ),
         )
         cursor.execute(
             """
@@ -965,3 +1548,183 @@ def test_database_enforces_skill_scope_revision_and_lifecycle_invariants(
 
     assert binding_counts == (0, 0, 0)
     assert deleted_skill_count == (0,)
+
+
+def test_binding_scope_downgrade_fails_without_losing_cross_space_bindings(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+    tenant_id = _insert_tenant(connection, "downgrade")
+    user_id = _insert_user(connection, tenant_id, "downgrade")
+    organization_space_id = _insert_space(connection, tenant_id, "organization")
+    resource_space_id = _insert_space(
+        connection,
+        tenant_id,
+        "resource",
+        tenant_space_id=organization_space_id,
+    )
+    assistant_id = _insert_assistant(
+        connection,
+        user_id=user_id,
+        space_id=resource_space_id,
+    )
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=organization_space_id,
+        created_by_user_id=user_id,
+        label="downgrade",
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO assistant_skill_bindings (
+                assistant_id, tenant_id, space_id, skill_space_id,
+                skill_id, skill_revision_id, position
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
+            """,
+            (
+                assistant_id,
+                tenant_id,
+                resource_space_id,
+                organization_space_id,
+                skill_id,
+                revision_id,
+            ),
+        )
+
+    with pytest.raises(DBAPIError, match="Cannot downgrade Skill bindings"):
+        command.downgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+
+    assert _current_revision(connection) == SKILLS_HEAD_REVISION
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT count(*)
+            FROM assistant_skill_bindings
+            WHERE assistant_id = %s
+            """,
+            (assistant_id,),
+        )
+        binding_count = cursor.fetchone()
+        cursor.execute(
+            "DELETE FROM assistant_skill_bindings WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+
+    assert binding_count == (1,)
+    command.downgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+    assert _current_revision(connection) == PRE_RESOURCE_BINDING_SCOPE_REVISION
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+
+def test_binding_scope_upgrade_keeps_legacy_binding_writes_compatible(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, PRE_RESOURCE_BINDING_SCOPE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "rolling")
+    user_id = _insert_user(connection, tenant_id, "rolling")
+    space_id = _insert_space(connection, tenant_id, "rolling")
+    assistant_id = _insert_assistant(
+        connection,
+        user_id=user_id,
+        space_id=space_id,
+    )
+    app_id = _insert_app(
+        connection,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=space_id,
+    )
+    skill_id, revision_id = _insert_skill(
+        connection,
+        space_id=space_id,
+        created_by_user_id=user_id,
+        label="rolling",
+    )
+
+    def insert_legacy_bindings() -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO assistant_skill_bindings (
+                    assistant_id, space_id, skill_id, skill_revision_id, position
+                )
+                VALUES (%s, %s, %s, %s, 0)
+                """,
+                (assistant_id, space_id, skill_id, revision_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO app_skill_bindings (
+                    app_id, space_id, skill_id, skill_revision_id, position
+                )
+                VALUES (%s, %s, %s, %s, 0)
+                """,
+                (app_id, space_id, skill_id, revision_id),
+            )
+
+    insert_legacy_bindings()
+    command.upgrade(config, SKILLS_HEAD_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM assistant_skill_bindings
+            WHERE assistant_id = %s
+            """,
+            (assistant_id,),
+        )
+        upgraded_assistant_scope = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM app_skill_bindings
+            WHERE app_id = %s
+            """,
+            (app_id,),
+        )
+        upgraded_app_scope = cursor.fetchone()
+        cursor.execute(
+            "DELETE FROM assistant_skill_bindings WHERE assistant_id = %s",
+            (assistant_id,),
+        )
+        cursor.execute(
+            "DELETE FROM app_skill_bindings WHERE app_id = %s",
+            (app_id,),
+        )
+
+    assert upgraded_assistant_scope == (tenant_id, space_id)
+    assert upgraded_app_scope == (tenant_id, space_id)
+
+    insert_legacy_bindings()
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM assistant_skill_bindings
+            WHERE assistant_id = %s
+            """,
+            (assistant_id,),
+        )
+        rolling_assistant_scope = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT tenant_id, skill_space_id
+            FROM app_skill_bindings
+            WHERE app_id = %s
+            """,
+            (app_id,),
+        )
+        rolling_app_scope = cursor.fetchone()
+
+    assert rolling_assistant_scope == (tenant_id, space_id)
+    assert rolling_app_scope == (tenant_id, space_id)

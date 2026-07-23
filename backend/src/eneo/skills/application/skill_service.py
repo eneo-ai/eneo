@@ -2,8 +2,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
-
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -16,6 +14,9 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_PAGE_LIMIT,
     MAX_SKILL_CATALOG_QUERY_LENGTH,
+    NormalizedSkillContent,
+    PublishedSkillDeactivationError,
+    PublishedSkillDeletionError,
     ResolvedSkillBinding,
     Skill,
     SkillBindingReference,
@@ -29,10 +30,10 @@ from eneo.skills.domain.skill import (
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
+    SkillSlugConflictError,
     SkillStatusChange,
     compose_skill_instructions,
-    create_content_digest,
-    normalize_skill_content,
+    parse_skill_revision_cursor,
     validate_skill_slug,
 )
 from eneo.skills.domain.skill_repo import SkillRepo
@@ -42,9 +43,6 @@ if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
     from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
-
-
-_SKILL_SLUG_CONSTRAINT = "uq_skills_space_id_slug"
 
 
 class SkillService:
@@ -63,6 +61,20 @@ class SkillService:
 
     async def _space(self, space_id: UUID) -> "Space":
         return await self.space_service.get_space(space_id)
+
+    @staticmethod
+    def _tenant_id(space: "Space") -> UUID:
+        if space.tenant_id is None:
+            raise RuntimeError("Persisted Space is missing its tenant")
+        return space.tenant_id
+
+    @staticmethod
+    def _require_space_skill_mutation(space: "Space") -> None:
+        if space.is_organization():
+            raise BadRequestException(
+                "Organisation Skills must be managed through the organisation "
+                "Skill workflow"
+            )
 
     async def list_skills(
         self,
@@ -142,19 +154,32 @@ class SkillService:
         instructions: str,
     ) -> Skill:
         space = await self._space(space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_create_skills():
             raise UnauthorizedException(
                 "You do not have permission to create Skills in this Space"
             )
-        normalized_slug = validate_skill_slug(slug)
-        name, description, instructions = normalize_skill_content(
+        return await self._create_skill_record(
+            space_id=space_id,
+            slug=slug,
             display_name=display_name,
             description=description,
             instructions=instructions,
         )
-        digest = create_content_digest(
-            display_name=name,
+
+    async def _create_skill_record(
+        self,
+        *,
+        space_id: UUID,
+        slug: str,
+        display_name: str,
+        description: str,
+        instructions: str,
+    ) -> Skill:
+        normalized_slug = validate_skill_slug(slug)
+        content = NormalizedSkillContent.create(
+            display_name=display_name,
             description=description,
             instructions=instructions,
         )
@@ -162,18 +187,16 @@ class SkillService:
             return await self.repo.create(
                 space_id=space_id,
                 slug=normalized_slug,
-                display_name=name,
-                description=description,
-                instructions=instructions,
-                content_digest=digest,
+                display_name=content.display_name,
+                description=content.description,
+                instructions=content.instructions,
+                content_digest=content.content_digest,
                 created_by_user_id=self.user.id,
             )
-        except IntegrityError as error:
-            if _SKILL_SLUG_CONSTRAINT in str(error.orig):
-                raise NameCollisionException(
-                    f"A Skill with slug '{normalized_slug}' already exists in this Space"
-                ) from error
-            raise
+        except SkillSlugConflictError as error:
+            raise NameCollisionException(
+                f"A Skill with slug '{normalized_slug}' already exists in this Space"
+            ) from error
 
     async def create_revision(
         self,
@@ -185,27 +208,38 @@ class SkillService:
     ) -> SkillRevisionChange:
         skill = await self.get_skill(skill_id=skill_id)
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_skills():
             raise UnauthorizedException(
                 "You do not have permission to revise this Skill"
             )
-        name, description, instructions = normalize_skill_content(
+        return await self._create_revision_record(
+            skill_id=skill.id,
             display_name=display_name,
             description=description,
             instructions=instructions,
         )
-        digest = create_content_digest(
-            display_name=name,
+
+    async def _create_revision_record(
+        self,
+        *,
+        skill_id: UUID,
+        display_name: str,
+        description: str,
+        instructions: str,
+    ) -> SkillRevisionChange:
+        content = NormalizedSkillContent.create(
+            display_name=display_name,
             description=description,
             instructions=instructions,
         )
         change = await self.repo.create_revision(
-            skill_id=skill.id,
-            display_name=name,
-            description=description,
-            instructions=instructions,
-            content_digest=digest,
+            skill_id=skill_id,
+            display_name=content.display_name,
+            description=content.description,
+            instructions=content.instructions,
+            content_digest=content.content_digest,
             created_by_user_id=self.user.id,
         )
         if change is None:
@@ -223,14 +257,7 @@ class SkillService:
         skill = await self.get_skill(skill_id=skill_id)
         if skill.space_id != space_id:
             raise NotFoundException()
-        before_revision_number = None
-        if cursor is not None:
-            try:
-                before_revision_number = int(cursor)
-            except ValueError as error:
-                raise BadRequestException("Invalid Skill revision cursor") from error
-            if before_revision_number < 1:
-                raise BadRequestException("Invalid Skill revision cursor")
+        before_revision_number = parse_skill_revision_cursor(cursor)
         revisions = await self.repo.list_revision_summaries(
             skill_id=skill.id,
             limit=limit + 1,
@@ -277,6 +304,7 @@ class SkillService:
         if skill.space_id != space_id:
             raise NotFoundException()
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_skills():
             raise UnauthorizedException(
@@ -306,7 +334,6 @@ class SkillService:
         if change is None:
             raise NotFoundException()
         return SkillRevisionRestore(
-            skill=skill,
             source_revision=source_revision,
             change=change,
         )
@@ -314,12 +341,21 @@ class SkillService:
     async def set_active(self, *, skill_id: UUID, is_active: bool) -> SkillStatusChange:
         skill = await self.get_skill(skill_id=skill_id)
         space = await self._space(skill.space_id)
+        if space.is_organization():
+            raise BadRequestException(
+                "Organisation Skill availability is controlled by publication"
+            )
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_skills():
             raise UnauthorizedException(
                 "You do not have permission to change this Skill"
             )
-        change = await self.repo.set_active(skill_id=skill.id, is_active=is_active)
+        try:
+            change = await self.repo.set_active(skill_id=skill.id, is_active=is_active)
+        except PublishedSkillDeactivationError as error:
+            raise BadRequestException(
+                "Unpublish this Skill before deactivating it."
+            ) from error
         if change is None:
             raise NotFoundException()
         return change
@@ -327,6 +363,7 @@ class SkillService:
     async def delete_skill(self, *, skill_id: UUID) -> Skill:
         skill = await self.get_skill(skill_id=skill_id)
         space = await self._space(skill.space_id)
+        self._require_space_skill_mutation(space)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_delete_skills():
             raise UnauthorizedException(
@@ -334,6 +371,11 @@ class SkillService:
             )
         try:
             deleted = await self.repo.delete(skill_id=skill.id)
+        except PublishedSkillDeletionError as error:
+            raise NameCollisionException(
+                "Previously published Skills are retained for audit history "
+                "and cannot be deleted."
+            ) from error
         except SkillHasActiveAppRunsError as error:
             raise NameCollisionException(
                 "This Skill is required by a queued or running App run. "
@@ -342,11 +384,6 @@ class SkillService:
         except SkillHasBindingsError as error:
             raise NameCollisionException(
                 "This Skill is still attached. Remove every binding before deleting it."
-            ) from error
-        except IntegrityError as error:
-            raise NameCollisionException(
-                "This Skill became attached while it was being deleted. "
-                "Remove every binding and try again."
             ) from error
         if deleted is None:
             raise NotFoundException()
@@ -364,41 +401,150 @@ class SkillService:
         if len(set(references)) != len(references):
             raise BadRequestException("Duplicate Skill revision binding")
 
-    async def _resolve_references(
+    @staticmethod
+    def _binding_reference(binding: ResolvedSkillBinding) -> SkillBindingReference:
+        return SkillBindingReference(
+            skill_id=binding.skill_id,
+            skill_revision_id=binding.skill_revision_id,
+        )
+
+    async def _resolve_retained_references(
+        self,
+        *,
+        tenant_id: UUID,
+        parent_space_id: UUID,
+        references: list[SkillBindingReference],
+        existing: list[ResolvedSkillBinding],
+    ) -> tuple[
+        dict[SkillBindingReference, ResolvedSkillBinding], list[SkillBindingReference]
+    ]:
+        existing_references = {self._binding_reference(binding) for binding in existing}
+        retained_references = [
+            reference for reference in references if reference in existing_references
+        ]
+        retained = (
+            await self.repo.resolve_bound_references_for_binding_update(
+                tenant_id=tenant_id,
+                parent_space_id=parent_space_id,
+                references=retained_references,
+            )
+            if retained_references
+            else []
+        )
+        if len(retained) != len(retained_references):
+            raise BadRequestException(
+                "One or more existing Skill bindings are no longer available"
+            )
+        return (
+            {self._binding_reference(binding): binding for binding in retained},
+            [
+                reference
+                for reference in references
+                if reference not in existing_references
+            ],
+        )
+
+    @classmethod
+    def _order_resolved_bindings(
+        cls,
+        *,
+        references: list[SkillBindingReference],
+        resolved_groups: tuple[list[ResolvedSkillBinding], ...],
+        missing_error: Exception,
+    ) -> list[ResolvedSkillBinding]:
+        resolved_by_reference = {
+            cls._binding_reference(binding): binding
+            for group in resolved_groups
+            for binding in group
+        }
+        if any(reference not in resolved_by_reference for reference in references):
+            raise missing_error
+        return [
+            replace(resolved_by_reference[reference], position=position)
+            for position, reference in enumerate(references)
+        ]
+
+    async def _resolve_resource_references(
         self,
         *,
         space_id: UUID,
+        tenant_id: UUID,
+        organization_space: bool,
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
         self._validate_reference_count(references)
-        resolved = await self.repo.resolve_references_for_binding_update(
-            space_id=space_id, references=references
+        retained_by_reference, new_references = await self._resolve_retained_references(
+            tenant_id=tenant_id,
+            parent_space_id=space_id,
+            references=references,
+            existing=existing,
         )
-        if len(resolved) != len(references):
-            raise NotFoundException(
-                "One or more Skill revisions do not exist in this Space"
+        local = (
+            []
+            if organization_space or not new_references
+            else await self.repo.resolve_local_references_for_binding_update(
+                space_id=space_id,
+                references=new_references,
             )
-        existing_pairs = {
-            SkillBindingReference(
-                skill_id=binding.skill_id,
-                skill_revision_id=binding.skill_revision_id,
-            )
-            for binding in existing
-        }
-        inactive_new = [
-            binding
-            for binding in resolved
-            if not binding.is_active
-            and SkillBindingReference(
-                skill_id=binding.skill_id,
-                skill_revision_id=binding.skill_revision_id,
-            )
-            not in existing_pairs
-        ]
-        if inactive_new:
+        )
+        if any(not binding.is_active for binding in local):
             raise BadRequestException("Inactive Skills cannot receive new bindings")
-        return resolved
+        local_references = {self._binding_reference(binding) for binding in local}
+        catalogue_references = [
+            reference
+            for reference in new_references
+            if reference not in local_references
+        ]
+        published = (
+            await self.repo.resolve_published_references_for_binding_update(
+                tenant_id=tenant_id,
+                references=catalogue_references,
+            )
+            if catalogue_references
+            else []
+        )
+        return self._order_resolved_bindings(
+            references=references,
+            resolved_groups=(
+                list(retained_by_reference.values()),
+                local,
+                published,
+            ),
+            missing_error=NotFoundException(
+                "One or more Skill revisions are unavailable for this resource"
+            ),
+        )
+
+    async def _resolve_governance_references(
+        self,
+        *,
+        organization_space_id: UUID,
+        references: list[SkillBindingReference],
+        existing: list[ResolvedSkillBinding],
+    ) -> list[ResolvedSkillBinding]:
+        self._validate_reference_count(references)
+        retained_by_reference, new_references = await self._resolve_retained_references(
+            tenant_id=self.user.tenant_id,
+            parent_space_id=organization_space_id,
+            references=references,
+            existing=existing,
+        )
+        published = (
+            await self.repo.resolve_published_references_for_binding_update(
+                tenant_id=self.user.tenant_id,
+                references=new_references,
+            )
+            if new_references
+            else []
+        )
+        return self._order_resolved_bindings(
+            references=references,
+            resolved_groups=(list(retained_by_reference.values()), published),
+            missing_error=BadRequestException(
+                "Personal Chat can only use published organisation Skill versions"
+            ),
+        )
 
     async def list_assistant_bindings(
         self, *, space_id: UUID, assistant_id: UUID
@@ -453,11 +599,17 @@ class SkillService:
         if locked_space_id != space_id:
             raise NotFoundException()
         existing = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
-        resolved = await self._resolve_references(
-            space_id=space_id, references=references, existing=existing
+        tenant_id = self._tenant_id(space)
+        resolved = await self._resolve_resource_references(
+            space_id=space_id,
+            tenant_id=tenant_id,
+            organization_space=space.is_organization(),
+            references=references,
+            existing=existing,
         )
         await self.repo.replace_assistant_bindings(
             assistant_id=assistant_id,
+            tenant_id=tenant_id,
             space_id=space_id,
             bindings=resolved,
         )
@@ -498,11 +650,17 @@ class SkillService:
         if not await self.repo.lock_app_for_binding_update(app_id=app_id):
             raise NotFoundException()
         existing = await self.repo.list_app_bindings(app_id=app_id)
-        resolved = await self._resolve_references(
-            space_id=space_id, references=references, existing=existing
+        tenant_id = self._tenant_id(space)
+        resolved = await self._resolve_resource_references(
+            space_id=space_id,
+            tenant_id=tenant_id,
+            organization_space=space.is_organization(),
+            references=references,
+            existing=existing,
         )
         await self.repo.replace_app_bindings(
             app_id=app_id,
+            tenant_id=tenant_id,
             space_id=space_id,
             bindings=resolved,
         )
@@ -523,14 +681,9 @@ class SkillService:
             raise BadRequestException(
                 "Governance Skills must belong to this tenant's organisation Space"
             )
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_read_skills():
-            raise UnauthorizedException(
-                "You do not have permission to configure organisation Skills"
-            )
         existing = await self.repo.list_policy_bindings(policy_id=policy_id)
-        resolved = await self._resolve_references(
-            space_id=organization_space_id,
+        resolved = await self._resolve_governance_references(
+            organization_space_id=organization_space_id,
             references=references,
             existing=existing,
         )
@@ -567,6 +720,7 @@ class SkillService:
     async def compose_for_execution_snapshot(
         self,
         *,
+        tenant_id: UUID,
         space_id: UUID,
         provenance: tuple[SkillExecutionReference, ...],
         base_instructions: str,
@@ -593,8 +747,9 @@ class SkillService:
             )
             for reference in ordered
         ]
-        resolved = await self.repo.resolve_references(
-            space_id=space_id,
+        resolved = await self.repo.resolve_references_for_execution_snapshot(
+            tenant_id=tenant_id,
+            parent_space_id=space_id,
             references=references,
         )
         if len(resolved) != len(ordered):

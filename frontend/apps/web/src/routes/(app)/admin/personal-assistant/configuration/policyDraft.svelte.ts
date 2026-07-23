@@ -19,21 +19,10 @@
  */
 
 import { invalidate } from "$app/navigation";
-import {
-  emptySkillCatalogPage,
-  type ListSkills,
-  type SkillCatalogPage
-} from "$lib/features/skills/skillCatalog";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type {
-  Eneo,
-  ResourcePermission,
-  SkillBindingReferenceInput,
-  SkillBindingSummary,
-  SkillPublic
-} from "@eneo/eneo-js";
-import type { SkillFormValue } from "$lib/features/skills/skillBindings";
+import type { Eneo, SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
+import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
@@ -104,17 +93,10 @@ export type PolicyPageData = {
   modelProviders?: ModelProvider[] | null;
   mcpSettings?: { items?: McpServer[] | null } | null;
   promptLibrary: { items: PromptOption[] };
-  organizationSpace: {
-    id: string;
-    skill_permissions: ResourcePermission[];
-  };
-  skills: SkillCatalogPage;
+  skills: SkillBindingCatalogPage;
 };
 
 export type BadgeVariant = "default" | "outline" | "destructive";
-
-const READ_SKILL_PERMISSION: ResourcePermission = "read";
-const CREATE_SKILL_PERMISSION: ResourcePermission = "create";
 
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
@@ -134,12 +116,14 @@ export class PolicyDraft {
   #allModels = $state<CompletionModel[]>([]);
   #allProviders = $state<ModelProvider[]>([]);
   #allMcpServers = $state<McpServer[]>([]);
-  #organizationSpaceId = $state("");
   promptOptions = $state<PromptOption[]>([]);
-  skillCatalog = $state<SkillCatalogPage>(emptySkillCatalogPage());
+  skillCatalogPage = $state<SkillBindingCatalogPage>({
+    items: [],
+    count: 0,
+    limit: 25,
+    next_cursor: null
+  });
   skillBindingSummaries = $state<SkillBindingSummary[]>([]);
-  canUseSkills = $state(false);
-  canCreateSkills = $state(false);
 
   // ---- Editable state ------------------------------------------------------
   modelsEnabled = $state(false);
@@ -171,13 +155,8 @@ export class PolicyDraft {
     this.#allModels = selectableModels;
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
-    this.#organizationSpaceId = data.organizationSpace.id;
     this.promptOptions = data.promptLibrary.items;
-    this.skillCatalog = data.skills;
-    const canReadSkills = data.organizationSpace.skill_permissions.includes(READ_SKILL_PERMISSION);
-    this.canUseSkills = canReadSkills;
-    this.canCreateSkills =
-      canReadSkills && data.organizationSpace.skill_permissions.includes(CREATE_SKILL_PERMISSION);
+    this.skillCatalogPage = data.skills;
     this.#seed(data.policy, selectableModels);
   }
 
@@ -468,20 +447,6 @@ export class PolicyDraft {
     } else {
       this.providerSelections.delete(pid);
     }
-  };
-
-  createSkill = async (value: SkillFormValue): Promise<SkillPublic> => {
-    return this.#eneo.skills.create({
-      spaceId: this.#organizationSpaceId,
-      ...value
-    });
-  };
-
-  listSkills: ListSkills = async (params) => {
-    return this.#eneo.skills.list({
-      spaceId: this.#organizationSpaceId,
-      ...params
-    });
   };
 
   // ---- Confirm + save ------------------------------------------------------

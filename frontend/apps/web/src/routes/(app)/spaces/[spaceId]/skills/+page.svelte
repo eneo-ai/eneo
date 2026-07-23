@@ -6,7 +6,6 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Card from "$lib/components/ui/card/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
@@ -83,7 +82,7 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.skills()}></Page.Title>
-    {#if canCreate}
+    {#if canCreate && data.skills.items.length > 0}
       <Button href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
         <Plus data-icon="inline-start" aria-hidden="true" />
         {m.skills_library_create()}
@@ -91,27 +90,32 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto w-full max-w-[1100px] px-6 py-6">
-      <p class="text-muted-foreground mb-6 max-w-3xl text-sm">
+    <div class="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 sm:py-8">
+      <p class="text-muted-foreground mb-6 max-w-[65ch] text-sm leading-6">
         {m.skills_library_intro()}
       </p>
 
       {#if skillCatalog.items.length === 0 && !skillCatalog.query && !skillCatalog.loading && !skillCatalog.error}
-        <div
-          class="border-border bg-muted/25 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-16"
-        >
-          <h2 class="text-foreground mb-2 text-lg font-medium">
-            {m.skills_library_empty_title()}
-          </h2>
-          <p class="text-muted-foreground mb-6 max-w-md text-center text-sm">
-            {m.skills_library_empty_description()}
-          </p>
-          {#if canCreate}
-            <Button href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
-              <Plus data-icon="inline-start" aria-hidden="true" />
-              {m.skills_library_create_first()}
-            </Button>
-          {/if}
+        <div class="border-border max-w-3xl border-y py-8">
+          <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div class="max-w-lg">
+              <h2 class="text-foreground text-base font-medium">
+                {m.skills_library_empty_title()}
+              </h2>
+              <p class="text-muted-foreground mt-1.5 text-sm leading-6">
+                {m.skills_library_empty_description()}
+              </p>
+            </div>
+            {#if canCreate}
+              <Button
+                class="shrink-0 sm:mt-0.5"
+                href={resolve(`/spaces/${spaceRouteId}/skills/new`)}
+              >
+                <Plus data-icon="inline-start" aria-hidden="true" />
+                {m.skills_library_create_first()}
+              </Button>
+            {/if}
+          </div>
         </div>
       {:else}
         <InputGroup.Root class="mb-3 max-w-sm">
@@ -143,12 +147,20 @@
             {m.loading()}
           </p>
         {:else if skillCatalog.items.length === 0}
-          <p class="text-muted-foreground py-12 text-center text-sm">
-            {m.skills_library_no_results()}
-          </p>
+          <div class="border-border max-w-3xl border-y py-10 text-center">
+            <p class="text-foreground text-sm font-medium">{m.skills_library_no_results()}</p>
+            <Button
+              class="mt-3"
+              type="button"
+              variant="ghost"
+              onclick={() => skillCatalog.setQuery("")}
+            >
+              {m.clear()}
+            </Button>
+          </div>
         {:else}
-          <Card.Root>
-            <Table.Root>
+          <div class="border-border overflow-x-auto border-y">
+            <Table.Root class="min-w-[860px]">
               <Table.Header>
                 <Table.Row>
                   <Table.Head>{m.name()}</Table.Head>
@@ -163,8 +175,8 @@
               </Table.Header>
               <Table.Body>
                 {#each skillCatalog.items as skill (skill.id)}
-                  <Table.Row>
-                    <Table.Cell class="font-medium">
+                  <Table.Row class="[&>td]:align-top">
+                    <Table.Cell class="w-[24%] font-medium">
                       <a
                         href={resolve(`/spaces/${spaceRouteId}/skills/${skill.id}`)}
                         class="text-foreground hover:text-accent-default focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
@@ -173,12 +185,14 @@
                       </a>
                       <p class="text-muted-foreground mt-0.5 text-xs">{skill.slug}</p>
                     </Table.Cell>
-                    <Table.Cell class="text-muted-foreground max-w-lg">
+                    <Table.Cell class="text-muted-foreground w-[40%] max-w-lg whitespace-normal">
                       <p class="line-clamp-2">{skill.description}</p>
                     </Table.Cell>
                     <Table.Cell>
                       <Badge variant={skill.is_active ? "secondary" : "outline"}>
-                        {skill.is_active ? m.skills_active_status() : m.skills_inactive_status()}
+                        {skill.is_active
+                          ? m.skills_available_status()
+                          : m.skills_unavailable_status()}
                       </Badge>
                     </Table.Cell>
                     <Table.Cell class="text-muted-foreground text-sm">
@@ -194,6 +208,7 @@
                         <Button
                           variant="ghost"
                           size="icon-sm"
+                          class="size-11 md:size-7"
                           title={m.delete()}
                           aria-label={m.skills_library_delete_aria({ name: skill.display_name })}
                           onclick={() => (deleteTarget = skill)}
@@ -206,7 +221,7 @@
                 {/each}
               </Table.Body>
             </Table.Root>
-          </Card.Root>
+          </div>
           {#if skillCatalog.loading}
             <p class="text-muted-foreground mt-3 text-center text-sm" role="status">
               {m.loading()}

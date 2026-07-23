@@ -1,0 +1,361 @@
+version: 2
+
+goal:
+  title: "Enterprise Skills rollout"
+  slug: "enterprise-skills-rollout"
+  kind: specific
+  tranche: "Land PRs #559 and #560 on merged S1 with CI, review, Fable, and PM gates."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f654f-1989-7692-b9fd-0a4a94dd83f1"
+  previous_thread_id: null
+  rotation_count: 0
+  completed_write_tasks_in_thread: 2
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "8ef9639049e652427f7dc2c7e34d76d98c34eff4"
+
+active_task: T003
+
+tasks:
+  - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Land PR #552 safely and prepare, but do not publish, the #559 replay while external gates run."
+    inputs:
+      - "PR #552 at ad0bf1b8bc884b55ca832b39332457665de6af3d"
+      - "docs/enterprise-skills-roadmap.md"
+      - ".codex/artifacts/claude-peer-loop-eneo-skills-implementation-order-and-architecture-verification-20260722T124707Z.md"
+    constraints:
+      - "Merge only after required CI, a clean fresh /review, Opus high, and PM audit."
+      - "Keep #559 publication blocked until #552 is squash-merged into develop."
+      - "Use force-with-lease for rewritten PR branches."
+      - "Do not include unrelated worktree changes."
+    expected_output:
+      - "Merged #552 revision and closed-task verification"
+      - "Exact validation receipt"
+      - "Prepared #559 replay evidence"
+    receipt:
+      merged_pr: 552
+      source_head: "66a5770f82650abeb128d631adc9e74495c5402a"
+      merge_commit: "a29e946434c9660389dc2ee683b106dd1a265c72"
+      merged_at: "2026-07-22T15:38:18Z"
+      github_checks: "16 passed; Script tests correctly skipped by change scope"
+      review: "Review 7 confirmed F9-F11 resolved and no current findings; the user accepted its one truncated non-code ADR diff"
+      review_url: "https://github.com/eneo-ai/eneo/pull/552#issuecomment-5047940555"
+      opus_gate: "green; GREEN_LIGHT yes; MIN_SCORE 8"
+      opus_artifact: ".codex/artifacts/claude-peer-loop-pr-552-final-merge-gate-20260722T153137Z.md"
+      verification:
+        - "backend: 3716 non-integration tests passed"
+        - "backend: 1070 integration tests passed, 67 skipped, 1 xfailed"
+        - "backend: Ruff, format, Pyright, route metadata, schema drift, and one Alembic head passed"
+        - "frontend: 47 files and 252 unit/component tests passed; check, lint, build, SDK, i18n, and E2E passed"
+        - "prepared #559 replay: 80 Skill units, restore integration, frontend restore/history, SDK, check, i18n, and hooks passed"
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Replay, verify, review, gate, and merge PR #559 on the squash-merged #552 foundation."
+    inputs:
+      - "develop at a29e946434c9660389dc2ee683b106dd1a265c72"
+      - "local verified replay commit f88a32b40 on the exact #552 source tree"
+      - "PR #559 remote head c0d7a8ff869c16952d0c37a30f14137d2711affe"
+    allowed_files:
+      - ".github/workflows/ci.yml"
+      - "backend/src/eneo/audit/domain/action_types.py"
+      - "backend/src/eneo/audit/domain/category_mappings.py"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/integration/skills/"
+      - "backend/tests/unittests/skills/"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/components/toast/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/admin/audit-logs/audit-action-labels.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/personal-assistant/configuration/"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/assistants/[assistantId]/edit/"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/[skillId]/"
+      - "frontend/packages/eneo-js/"
+    verify:
+      - "Focused Skill service, presentation, concurrency, SDK, and revision-history tests"
+      - "Backend Ruff and Pyright"
+      - "Frontend check and unit tests"
+      - "Required GitHub CI, fresh /review, skeptical verification in the existing Fable high session, and PM audit"
+    stop_if:
+      - "Reconciliation requires behavior outside the accepted revision-history contract."
+      - "A required check or review remains red after the demonstrated cause is addressed."
+      - "The merge base differs from the verified #552 squash result."
+    receipt:
+      result: done
+      summary: "Replayed revision restore on the merged S1 foundation, preserved dirty-editor recovery, passed local and GitHub gates, and squash-merged PR #559."
+      changed_files:
+        - "backend/src/eneo/skills/"
+        - "backend/tests/integration/skills/"
+        - "backend/tests/unittests/skills/"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/skills/[skillId]/"
+        - "frontend/packages/eneo-js/"
+      commands:
+        - cmd: "backend non-integration suite"
+          status: pass
+        - cmd: "focused PostgreSQL Skill integration suite"
+          status: pass
+        - cmd: "backend Ruff, format, Pyright, route metadata, schema drift, and hooks"
+          status: pass
+        - cmd: "frontend unit/component suite, check, and lint"
+          status: pass
+      merged_pr: 559
+      source_head: "583cd6a1d873342168760ca9f07fc055a3e95d1e"
+      merge_commit: "8ef9639049e652427f7dc2c7e34d76d98c34eff4"
+      merged_at: "2026-07-22T16:37:09Z"
+      github_checks: "All required checks passed, including 23-minute backend integration tests, frontend, E2E, schema drift, Docker builds, and coverage diff"
+      review: "Review 5 inspected all 29 changed paths, closed F3, and found no current findings"
+      review_url: "https://github.com/eneo-ai/eneo/pull/559#issuecomment-5048633917"
+      opus_gate: "green; GREEN_LIGHT yes; MIN_SCORE 8"
+      opus_artifact: ".codex/artifacts/claude-peer-loop-pr-559-final-merge-gate-20260722T162258Z.md"
+      verification:
+        - "backend: 3722 non-integration tests passed"
+        - "backend: 18 focused Skill integration tests passed against PostgreSQL"
+        - "backend: Ruff, format, Pyright, route metadata, schema drift, and hooks passed"
+        - "frontend: 48 files and 258 unit/component tests passed; check and lint passed"
+        - "restore conflict behavior: stale reviewed revision returns 409, writes no revision, reloads the latest comparison, and preserves dirty editor content"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Rebase and complete PR #560 as the O1 authority and catalogue UX correction, then verify, review, gate, and merge it."
+    allowed_files:
+      - "backend/alembic/versions/202607221300_backfill_skills_permission.py"
+      - "backend/alembic/versions/202607221500_add_skill_publication_lifecycle.py"
+      - "backend/alembic/versions/202607221600_deepen_resource_skill_bindings.py"
+      - "backend/alembic/versions/202607221700_converge_default_skill_permissions.py"
+      - "backend/src/eneo/apps/apps/app_service.py"
+      - "backend/src/eneo/audit/"
+      - "backend/src/eneo/database/tables/skill_table.py"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/src/eneo/server/dependencies/predefined_roles.yml"
+      - "backend/src/eneo/server/routers.py"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/integration/governance_policy/test_governance_policy_routes.py"
+      - "backend/tests/integration/migrations/test_skills_schema_round_trip.py"
+      - "backend/tests/integration/skills/"
+      - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "backend/tests/unit/test_audit_category_mappings.py"
+      - "backend/tests/unit/test_audit_config_service.py"
+      - "backend/tests/unittests/apps/"
+      - "backend/tests/unittests/assistants/"
+      - "backend/tests/unittests/governance_policy/"
+      - "backend/tests/unittests/roles/test_permissions.py"
+      - "backend/tests/unittests/skills/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/apps/docs-site/src/content/guides/"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/components/toast/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/lib/features/spaces/components/SpaceSelector.svelte"
+      - "frontend/apps/web/src/routes/(app)/+layout.svelte"
+      - "frontend/apps/web/src/routes/(app)/admin/"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/web/tests/skills-catalogue.spec.ts"
+      - "frontend/apps/web/tests/pr560-visual-evidence.spec.ts"
+      - "frontend/packages/eneo-js/"
+      - "frontend/packages/ui/package.json"
+    verify:
+      - "Admin-only organisation lifecycle behavior tests"
+      - "Use-only exact published-revision preview and attach tests"
+      - "Assistant/App access-direction and runtime-only tests"
+      - "Frontend unit, check, and persona browser smoke"
+      - "Backend focused tests and task check"
+      - "Required GitHub CI, fresh /review, same-session Fable high verification, and PM audit"
+      - "Rendered desktop and responsive flows reviewed for accessibility and product fit"
+      - "Fable high reviews the stable full PR, roadmap alignment, access model, architecture, and merge worthiness"
+      - "User approves the visible catalogue and binding UX before merge"
+    stop_if:
+      - "Implementation introduces a second organisation editor or preview API."
+      - "Permission semantics conflict with the accepted Fable roadmap."
+      - "The merge base differs from the verified #559 squash result."
+      - "The implementation is not yet stable enough to render and inspect as one coherent flow."
+    receipt: null
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit the O1 foundation, order the required O1 completion and general-availability gates, and activate the next bounded gate."
+    inputs:
+      - "T001-T003 receipts"
+      - "docs/enterprise-skills-roadmap.md"
+    constraints:
+      - "Do not implement."
+      - "Reject dashboard-first, external Marketplace, or speculative ACL work."
+      - "Prioritize T005-T007 before O2, package dependency integration, or S2 unless the PM records an explicit release sequence that keeps every O1 gate before general availability."
+    expected_output:
+      - "Decision"
+      - "Next bounded Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+    receipt: null
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add the tenant-scoped adoption projection required to complete O1 without deriving counts in the UI."
+    inputs:
+      - "Merged O1 publication and exact-binding contracts"
+      - "docs/enterprise-skills-roadmap.md#configuration-and-adoption-statistics"
+    constraints:
+      - "Reuse the Skill detail owner; do not add a second admin dashboard."
+      - "Return structural binding facts only; do not claim model use or outcome attribution."
+      - "Keep the projection paginated and avoid N+1 queries and join cross-products."
+    verify:
+      - "Tenant isolation and exact-revision adoption counts"
+      - "Assistant, App, Personal Chat, distinct-Space, and update-drift coverage"
+      - "Generated contracts and accessible detail-page states"
+    stop_if:
+      - "The design requires runtime activation evidence owned by Task #553."
+      - "The implementation creates a fleet-wide Skill dashboard instead of deepening the existing detail owner."
+    receipt: null
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add the organisation-wide emergency Skill execution block before O1 becomes generally available."
+    inputs:
+      - "Merged O1 exact pins and publication lifecycle"
+      - "docs/enterprise-skills-roadmap.md#emergency-execution-block"
+    constraints:
+      - "Retain exact pins and history; block execution rather than rewriting resources."
+      - "Use the existing organisation-settings and audit owners."
+      - "Do not pull selective activation, token policy, or activation tools out of Task #553."
+    verify:
+      - "Personal Chat and Assistant composition exclude blocked identities"
+      - "Queued App runs fail closed before provider execution"
+      - "Actor, reason, time, affected-resource, unblock, and concurrency behavior"
+    stop_if:
+      - "The implementation mutates or silently advances retained bindings."
+    receipt: null
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Close the O1 deletion and retained-provenance contract before general availability."
+    inputs:
+      - "Merged Skill deletion, binding, audit, and queued App-run contracts"
+      - "docs/enterprise-skills-roadmap.md"
+    constraints:
+      - "Keep instruction bodies out of retained runtime evidence."
+      - "Serialize deletion with canonical binding and App-run owners."
+      - "Document an explicit retention and terminal-run recovery contract."
+    verify:
+      - "Bound and nonterminal-run deletion conflicts"
+      - "Terminal-run recovery and bounded ID/digest provenance"
+      - "Deletion and queue concurrency behavior"
+    stop_if:
+      - "Closing the contract requires duplicating App-run lifecycle state."
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract."
+    constraints:
+      - "Do not broaden this into a generic error framework."
+      - "Preserve current HTTP semantics and dirty-editor recovery."
+    verify:
+      - "Generated conflict payloads"
+      - "Publish, revision, restore, and delete conflict behavior"
+      - "English and Swedish recovery copy"
+    stop_if:
+      - "The cleanup changes accepted lifecycle behavior."
+    receipt: null
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add an explicit catalogue source filter when evidence shows builders need it at 200+ available Skills."
+    inputs:
+      - "O1 picker telemetry or usability evidence"
+      - "Tagged space and organisation catalogue source contract"
+    constraints:
+      - "Keep server-owned pagination and search."
+      - "Do not preload or advertise every organisation Skill to the model."
+      - "Do not implement without evidence that search plus source labels are insufficient."
+    verify:
+      - "Source-filter pagination and cursor behavior"
+      - "Keyboard, responsive, loading, empty, and error states"
+    stop_if:
+      - "There is no measured or observed need beyond the existing source labels and search."
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether the full accepted Enterprise Skills roadmap is complete without avoidable technical debt."
+    inputs:
+      - "All completed task receipts"
+      - "Current roadmap"
+      - "Latest verification and merged revisions"
+    constraints:
+      - "Do not implement."
+      - "Reject completion while any required Worker task remains queued or active."
+    expected_output:
+      - "complete | not_complete"
+      - "Missing evidence"
+      - "Next task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "main worktree contains unrelated user-owned changes; roadmap files are isolated"
+  last_verification:
+    result: pass
+    task: T001
+    commands:
+      - "backend: 3709 non-integration tests passed"
+      - "backend: 63 focused Skill/session tests passed"
+      - "backend: Ruff check and format passed"
+      - "backend: Pyright 0 errors, 0 warnings"
+      - "frontend: 45 files, 244 unit tests passed"

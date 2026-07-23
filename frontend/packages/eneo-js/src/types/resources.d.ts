@@ -14,6 +14,15 @@ export type SkillRevisionSummaryPage =
   components["schemas"]["CursorPaginatedResponse_SkillRevisionSummaryPublic_"];
 export type SkillBindingSummary = components["schemas"]["SkillBindingSummary"];
 export type SkillBindingReferenceInput = components["schemas"]["SkillBindingReferenceInput"];
+export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
+export type OrganizationSkillSummaryPublic =
+  components["schemas"]["OrganizationSkillSummaryPublic"];
+export type OrganizationSkillSummaryPagePublic =
+  components["schemas"]["OrganizationSkillSummaryPagePublic"];
+export type PublishedSkillPublic = components["schemas"]["PublishedSkillPublic"];
+export type PublishedSkillSummaryPublic = components["schemas"]["PublishedSkillSummaryPublic"];
+export type PublishedSkillSummaryPagePublic =
+  components["schemas"]["PublishedSkillSummaryPagePublic"];
 export type AssistantResponse = Omit<
   components["schemas"]["AskResponse"],
   "session_id" | "references" | "tools"

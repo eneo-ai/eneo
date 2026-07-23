@@ -253,6 +253,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_skill_status_changed,
     description: m.audit_action_skill_status_changed_description
   },
+  skill_published: {
+    name: m.audit_action_skill_published,
+    description: m.audit_action_skill_published_description
+  },
+  skill_unpublished: {
+    name: m.audit_action_skill_unpublished,
+    description: m.audit_action_skill_unpublished_description
+  },
   skill_deleted: {
     name: m.audit_action_skill_deleted,
     description: m.audit_action_skill_deleted_description

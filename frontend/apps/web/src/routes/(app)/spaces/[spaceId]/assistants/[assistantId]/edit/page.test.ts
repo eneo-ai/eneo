@@ -1,5 +1,6 @@
 import type { ResourcePermission } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
+import { emptySkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/skills/skillCatalog";
 import { load } from "./+page";
 
@@ -8,6 +9,9 @@ const READ_SKILL_PERMISSION: ResourcePermission = "read";
 describe("Assistant edit loader", () => {
   test("loads Skill bindings for a reader of a non-default Assistant", async () => {
     const bindings = [{ skill_id: "skill-1" }];
+    const skills = emptySkillBindingCatalogPage();
+    const listSkills = vi.fn().mockResolvedValue(emptySkillCatalogPage());
+    const listCatalogue = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
     const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
     const event = {
       depends: vi.fn(),
@@ -15,6 +19,7 @@ describe("Assistant edit loader", () => {
       parent: vi.fn().mockResolvedValue({
         currentSpace: {
           id: "space-1",
+          organization: false,
           default_assistant: { id: "default-assistant" },
           skill_permissions: [READ_SKILL_PERMISSION]
         },
@@ -27,7 +32,8 @@ describe("Assistant edit loader", () => {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
           skills: {
-            list: vi.fn().mockResolvedValue(emptySkillCatalogPage()),
+            list: listSkills,
+            catalogue: { list: listCatalogue },
             listAssistantBindings
           }
         }
@@ -41,6 +47,13 @@ describe("Assistant edit loader", () => {
       assistantId: "assistant-1"
     });
     expect(result.skillBindings).toEqual(bindings);
+    expect(result.skills).toEqual(skills);
+    expect(listSkills).toHaveBeenCalledWith({
+      spaceId: "space-1",
+      limit: SKILL_CATALOG_PAGE_SIZE,
+      cursor: null,
+      query: null
+    });
   });
 
   test("keeps direct Skills disabled for the personal default Assistant", async () => {
@@ -72,16 +85,26 @@ describe("Assistant edit loader", () => {
     const result = await load(event as never);
 
     expect(result.supportsDirectSkills).toBe(false);
-    expect(result.skills).toEqual(emptySkillCatalogPage());
+    expect(result.skills).toEqual(emptySkillBindingCatalogPage());
     expect(result.skillBindings).toEqual([]);
     expect(list).not.toHaveBeenCalled();
     expect(listAssistantBindings).not.toHaveBeenCalled();
   });
 
   test("loads direct Skills for a shared default Assistant", async () => {
-    const skills = { ...emptySkillCatalogPage(), items: [{ id: "skill-1" }], total_count: 1 };
+    const localSkills = {
+      ...emptySkillCatalogPage(),
+      items: [{ id: "skill-1" }],
+      total_count: 1
+    };
+    const skills = {
+      ...emptySkillBindingCatalogPage(),
+      items: localSkills.items.map((skill) => ({ ...skill, source: "space" as const })),
+      count: 1
+    };
     const bindings = [{ skill_id: "skill-1" }];
-    const list = vi.fn().mockResolvedValue(skills);
+    const list = vi.fn().mockResolvedValue(localSkills);
+    const listCatalogue = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
     const listAssistantBindings = vi.fn().mockResolvedValue(bindings);
     const event = {
       depends: vi.fn(),
@@ -101,7 +124,11 @@ describe("Assistant edit loader", () => {
           helpAssistants: {
             runs: { availability: vi.fn().mockResolvedValue(null) }
           },
-          skills: { list, listAssistantBindings }
+          skills: {
+            list,
+            catalogue: { list: listCatalogue },
+            listAssistantBindings
+          }
         }
       })
     };
@@ -113,7 +140,9 @@ describe("Assistant edit loader", () => {
     expect(result.skillBindings).toEqual(bindings);
     expect(list).toHaveBeenCalledWith({
       spaceId: "shared-space",
-      limit: SKILL_CATALOG_PAGE_SIZE
+      limit: SKILL_CATALOG_PAGE_SIZE,
+      cursor: null,
+      query: null
     });
     expect(listAssistantBindings).toHaveBeenCalledWith({
       spaceId: "shared-space",

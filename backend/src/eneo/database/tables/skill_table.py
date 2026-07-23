@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
@@ -22,6 +23,8 @@ class Skills(BasePublic):
     slug: Mapped[str] = mapped_column(String(64))
     is_active: Mapped[bool] = mapped_column(server_default="true")
     current_revision_number: Mapped[int] = mapped_column(server_default="1")
+    published_revision_number: Mapped[int | None] = mapped_column(nullable=True)
+    first_published_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_by_user_id: Mapped[UUID] = mapped_column(
         ForeignKey(Users.id, ondelete="RESTRICT")
     )
@@ -41,10 +44,27 @@ class Skills(BasePublic):
             "current_revision_number >= 1",
             name="ck_skills_current_revision_number_positive",
         ),
+        CheckConstraint(
+            ("published_revision_number IS NULL OR first_published_at IS NOT NULL"),
+            name="ck_skills_published_requires_first_published_at",
+        ),
+        CheckConstraint(
+            "published_revision_number IS NULL OR is_active",
+            name="ck_skills_published_active",
+        ),
         ForeignKeyConstraint(
             ["id", "current_revision_number"],
             ["skill_revisions.skill_id", "skill_revisions.revision_number"],
             name="fk_skills_current_revision",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["id", "published_revision_number"],
+            ["skill_revisions.skill_id", "skill_revisions.revision_number"],
+            name="fk_skills_published_revision",
             ondelete="NO ACTION",
             deferrable=True,
             initially="DEFERRED",
@@ -94,9 +114,11 @@ class SkillRevisions(BasePublic):
 
 class AssistantSkillBindings(BaseCrossReference):
     assistant_id: Mapped[UUID] = mapped_column()
+    tenant_id: Mapped[UUID] = mapped_column()
+    space_id: Mapped[UUID] = mapped_column()
+    skill_space_id: Mapped[UUID] = mapped_column()
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
-    space_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
 
     __table_args__ = (
@@ -121,7 +143,19 @@ class AssistantSkillBindings(BaseCrossReference):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["space_id", "skill_id"],
+            ["tenant_id", "space_id"],
+            ["spaces.tenant_id", "spaces.id"],
+            name="fk_assistant_skill_bindings_parent_space",
+            ondelete="NO ACTION",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_space_id"],
+            ["spaces.tenant_id", "spaces.id"],
+            name="fk_assistant_skill_bindings_skill_space",
+            ondelete="NO ACTION",
+        ),
+        ForeignKeyConstraint(
+            ["skill_space_id", "skill_id"],
             ["skills.space_id", "skills.id"],
             name="fk_assistant_skill_bindings_skill",
             ondelete="NO ACTION",
@@ -138,14 +172,21 @@ class AssistantSkillBindings(BaseCrossReference):
             "ix_assistant_skill_bindings_skill_id",
             "skill_id",
         ),
+        Index(
+            "ix_assistant_skill_bindings_tenant_skill_space",
+            "tenant_id",
+            "skill_space_id",
+        ),
     )
 
 
 class AppSkillBindings(BaseCrossReference):
     app_id: Mapped[UUID] = mapped_column()
+    tenant_id: Mapped[UUID] = mapped_column()
+    space_id: Mapped[UUID] = mapped_column()
+    skill_space_id: Mapped[UUID] = mapped_column()
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
-    space_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
 
     __table_args__ = (
@@ -170,7 +211,19 @@ class AppSkillBindings(BaseCrossReference):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["space_id", "skill_id"],
+            ["tenant_id", "space_id"],
+            ["spaces.tenant_id", "spaces.id"],
+            name="fk_app_skill_bindings_parent_space",
+            ondelete="NO ACTION",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_space_id"],
+            ["spaces.tenant_id", "spaces.id"],
+            name="fk_app_skill_bindings_skill_space",
+            ondelete="NO ACTION",
+        ),
+        ForeignKeyConstraint(
+            ["skill_space_id", "skill_id"],
             ["skills.space_id", "skills.id"],
             name="fk_app_skill_bindings_skill",
             ondelete="NO ACTION",
@@ -186,6 +239,11 @@ class AppSkillBindings(BaseCrossReference):
         Index(
             "ix_app_skill_bindings_skill_id",
             "skill_id",
+        ),
+        Index(
+            "ix_app_skill_bindings_tenant_skill_space",
+            "tenant_id",
+            "skill_space_id",
         ),
     )
 

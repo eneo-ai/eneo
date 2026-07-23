@@ -1,33 +1,33 @@
 <script lang="ts">
-  import type { SkillBindingReferenceInput, SkillBindingSummary, SkillPublic } from "@eneo/eneo-js";
+  import type { SkillBindingReferenceInput, SkillBindingSummary } from "@eneo/eneo-js";
   import { BookOpenCheck, Info } from "lucide-svelte";
-  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { resolve } from "$app/paths";
+  import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
-  import type { SkillFormValue } from "$lib/features/skills/skillBindings";
-  import type { ListSkills, SkillCatalogPage } from "$lib/features/skills/skillCatalog";
+  import type {
+    GetSkillBindingPreview,
+    ListSkillBindingCatalog,
+    SkillBindingCatalogPage
+  } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
   import PolicySection from "./PolicySection.svelte";
 
   type Props = {
     skillBindings: SkillBindingReferenceInput[];
-    initialSkillPage: SkillCatalogPage;
+    initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
     summary: string;
-    canUseSkills: boolean;
-    canCreateSkills: boolean;
-    onListSkills: ListSkills;
-    onCreateSkill: (value: SkillFormValue) => Promise<SkillPublic>;
+    onListCatalog: ListSkillBindingCatalog;
+    onGetSkillPreview: GetSkillBindingPreview;
   };
 
   let {
     skillBindings = $bindable(),
-    initialSkillPage,
+    initialCatalogPage,
     bindingSummaries,
     summary,
-    canUseSkills,
-    canCreateSkills,
-    onListSkills,
-    onCreateSkill
+    onListCatalog,
+    onGetSkillPreview
   }: Props = $props();
 </script>
 
@@ -42,19 +42,35 @@
     <BookOpenCheck class="size-5" />
   {/snippet}
 
-  <Alert.Root>
-    <Info aria-hidden="true" />
-    <Alert.Title>{m.governance_skills_scope_title()}</Alert.Title>
-    <Alert.Description>{m.governance_skills_scope_description()}</Alert.Description>
-  </Alert.Root>
+  <div class="space-y-5">
+    <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div class="flex items-start gap-3" role="note">
+        <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div class="min-w-0">
+          <p class="text-sm font-medium">{m.governance_skills_scope_title()}</p>
+          <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
+            {m.governance_skills_scope_description()}
+          </p>
+        </div>
+      </div>
 
-  <SkillBindingsEditor
-    bind:bindings={skillBindings}
-    {initialSkillPage}
-    {bindingSummaries}
-    canEditBindings={canUseSkills}
-    {canCreateSkills}
-    {onListSkills}
-    {onCreateSkill}
-  />
+      <Button
+        href={resolve("/spaces/organization/skills")}
+        variant="outline"
+        class="shrink-0 self-start"
+      >
+        {m.governance_manage_skills_action()}
+      </Button>
+    </div>
+
+    <SkillBindingsEditor
+      bind:bindings={skillBindings}
+      {initialCatalogPage}
+      {bindingSummaries}
+      canEditBindings={true}
+      canCreateSkills={false}
+      {onListCatalog}
+      {onGetSkillPreview}
+    />
+  </div>
 </PolicySection>

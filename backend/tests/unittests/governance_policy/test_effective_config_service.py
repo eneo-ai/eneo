@@ -11,7 +11,7 @@ from eneo.governance_policy.domain.governance_policy import (
     PolicyMcpServer,
     PolicyScope,
 )
-from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingSource
 
 
 async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
@@ -128,6 +128,7 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug="payroll",
         revision_number=3,
         current_revision_number=3,
@@ -136,6 +137,7 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
         instructions="Use the payroll handbook.",
         content_digest="a" * 64,
         position=0,
+        source=SkillBindingSource.ORGANIZATION,
     )
     skill_repo = AsyncMock(list_policy_bindings=AsyncMock(return_value=[binding]))
     service = EffectiveConfigService(
@@ -166,6 +168,7 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
         current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
         slug="payroll",
         revision_number=1,
         current_revision_number=1,
@@ -174,6 +177,7 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
         instructions="Use the payroll handbook.",
         content_digest="a" * 64,
         position=0,
+        source=SkillBindingSource.ORGANIZATION,
     )
     active_calls = 0
     peak_active_calls = 0

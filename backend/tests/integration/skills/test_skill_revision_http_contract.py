@@ -1,3 +1,4 @@
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -68,6 +69,70 @@ async def test_identical_revision_returns_ok_and_changed_revision_returns_create
     )
     assert changed_history.status_code == 200, changed_history.text
     assert changed_history.json()["total_count"] == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_organization_identical_revision_is_a_noop_http_contract(
+    client, admin_token
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    original = {
+        "display_name": "Procurement guidance",
+        "description": "Answers approved procurement questions.",
+        "instructions": "Use approved procurement sources.",
+    }
+
+    with patch(
+        "eneo.audit.application.audit_service.job_manager.enqueue",
+        new_callable=AsyncMock,
+    ) as enqueue_audit:
+        create_response = await client.post(
+            "/api/v1/skills/organization/",
+            json={"slug": f"procurement-{uuid4().hex[:8]}", **original},
+            headers=headers,
+        )
+        assert create_response.status_code == 201, create_response.text
+        skill = create_response.json()
+        skill_id = skill["id"]
+        original_revision_id = skill["current_revision"]["id"]
+        audit_count_after_create = enqueue_audit.await_count
+
+        unchanged_response = await client.post(
+            f"/api/v1/skills/organization/{skill_id}/revisions/",
+            json=original,
+            headers=headers,
+        )
+        assert unchanged_response.status_code == 200, unchanged_response.text
+        assert unchanged_response.json()["id"] == original_revision_id
+        assert enqueue_audit.await_count == audit_count_after_create
+
+        unchanged_history = await client.get(
+            f"/api/v1/skills/organization/{skill_id}/revisions/",
+            headers=headers,
+        )
+        assert unchanged_history.status_code == 200, unchanged_history.text
+        assert unchanged_history.json()["total_count"] == 1
+
+        changed_response = await client.post(
+            f"/api/v1/skills/organization/{skill_id}/revisions/",
+            json={
+                **original,
+                "instructions": "Use approved and current procurement sources.",
+            },
+            headers=headers,
+        )
+        assert changed_response.status_code == 201, changed_response.text
+        assert changed_response.json()["revision_number"] == 2
+        assert changed_response.json()["id"] != original_revision_id
+        assert enqueue_audit.await_count == audit_count_after_create + 1
+
+        changed_history = await client.get(
+            f"/api/v1/skills/organization/{skill_id}/revisions/",
+            headers=headers,
+        )
+        assert changed_history.status_code == 200, changed_history.text
+        assert changed_history.json()["total_count"] == 2
 
 
 @pytest.mark.integration

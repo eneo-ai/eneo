@@ -17,8 +17,8 @@ from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_PAGE_LIMIT,
     MAX_SKILL_CATALOG_QUERY_LENGTH,
     MAX_SKILL_SLUG_LENGTH,
-    Skill,
 )
+from eneo.skills.presentation.skill_audit import audit_skill_created, skill_audit_extra
 from eneo.skills.presentation.skill_models import (
     SkillActiveUpdateRequest,
     SkillBindingSummary,
@@ -41,40 +41,6 @@ router = APIRouter(
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
 _DEFAULT_REVISION_PAGE_LIMIT = 25
 _MAX_REVISION_PAGE_LIMIT = 100
-
-
-def _skill_audit_extra(skill: Skill) -> dict[str, object]:
-    revision = skill.current_revision
-    return {
-        "slug": skill.slug,
-        "is_active": skill.is_active,
-        "current_revision_number": revision.revision_number,
-        "current_revision_id": str(revision.id),
-        "content_digest": revision.content_digest,
-        "instruction_length": len(revision.instructions),
-    }
-
-
-async def _audit_skill_created(
-    *,
-    container: Container,
-    skill: Skill,
-) -> None:
-    user = container.user()
-    extra = _skill_audit_extra(skill)
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.SKILL_CREATED,
-        entity_type=EntityType.SKILL,
-        entity_id=skill.id,
-        description=f"Created Skill '{skill.current_revision.display_name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=skill,
-            extra=extra,
-        ),
-    )
 
 
 @router.get(
@@ -136,7 +102,7 @@ async def create_skill(
         description=payload.description,
         instructions=payload.instructions,
     )
-    await _audit_skill_created(container=container, skill=skill)
+    await audit_skill_created(container=container, skill=skill)
     return container.skill_assembler().to_public(skill)
 
 
@@ -246,6 +212,7 @@ async def create_skill_revision(
     if not change.created:
         response.status_code = 200
     else:
+        skill = change.skill
         user = container.user()
         await container.audit_service().log_async(
             tenant_id=user.tenant_id,
@@ -300,7 +267,7 @@ async def restore_skill_revision(
     change = outcome.change
     revision = change.revision
     if change.created:
-        skill = outcome.skill
+        skill = change.skill
         user = container.user()
         await container.audit_service().log_async(
             tenant_id=user.tenant_id,
@@ -378,7 +345,7 @@ async def set_skill_active(
                         "new": skill.is_active,
                     }
                 },
-                extra=_skill_audit_extra(skill),
+                extra=skill_audit_extra(skill),
             ),
         )
     return container.skill_assembler().to_public(skill)
@@ -408,7 +375,7 @@ async def delete_skill(
         metadata=AuditMetadata.standard(
             actor=user,
             target=skill,
-            extra=_skill_audit_extra(skill),
+            extra=skill_audit_extra(skill),
         ),
     )
 

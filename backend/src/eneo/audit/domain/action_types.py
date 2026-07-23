@@ -56,6 +56,8 @@ class ActionType(str, Enum):
     SKILL_REVISION_CREATED = "skill_revision_created"
     SKILL_REVISION_RESTORED = "skill_revision_restored"
     SKILL_STATUS_CHANGED = "skill_status_changed"
+    SKILL_PUBLISHED = "skill_published"
+    SKILL_UNPUBLISHED = "skill_unpublished"
     SKILL_DELETED = "skill_deleted"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
