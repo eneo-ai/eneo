@@ -1,112 +1,115 @@
 # Choose Content Storage
 
-Eneo works without a separate object store. The default deployment keeps
-bounded durable bytes in PostgreSQL. Choose the bundled SeaweedFS service or an
-external S3-compatible endpoint only when you need a separate byte plane.
+import { Callout, Steps, Tabs } from "nextra/components";
 
-import { Callout, Steps } from "nextra/components";
-
-<Callout type="warning">
-  If object-store content exists, PostgreSQL and that endpoint form one recovery
-  unit. Back up and restore them together. Inline-only content is included in
-  the PostgreSQL backup.
+<Callout type="info">
+  **Short answer:** Eneo works without S3-compatible storage. New File and Icon
+  content uses bounded PostgreSQL storage by default. Add a private compatible
+  endpoint only when your capacity or availability needs justify operating it.
 </Callout>
 
-## Quick answer
+## Start here
 
-- **Start with PostgreSQL inline** if you want the fewest moving parts.
-- **Choose bundled SeaweedFS** for a private, single-node reference store
-  managed with the Eneo Compose stack.
-- **Choose an external endpoint** when your organization already operates
-  MinIO or another compatible service, or needs multi-node availability.
+| I want to…                                      | Go to                                              |
+| ----------------------------------------------- | -------------------------------------------------- |
+| Run the simplest supported deployment           | [PostgreSQL only](#set-up-your-choice)             |
+| Use the bundled private reference store         | [Bundled SeaweedFS](#set-up-your-choice)           |
+| Connect MinIO or another compatible service     | [External endpoint](#set-up-your-choice)           |
+| Understand ownership and RAG                    | [How content flows](#how-content-flows)            |
+| Plan backup, recovery, and failure handling      | [Operate it safely](#operate-it-safely)            |
+| Review lifecycle and integrity implementation   | [Architecture](/docs/object-content-architecture)  |
 
-Enabling object storage does not upload data to Amazon, and this foundation does
-not move existing File, InfoBlob, Icon, or Flow bytes. Producer cutovers happen
-separately with copy-and-verify migrations.
+## How content flows
 
-## What Eneo stores where
-
-PostgreSQL always stores content identity, permissions, lifecycle state,
-retention, size, media type, and the canonical SHA-256 digest. Each record then
-uses exactly one byte backend: a bounded PostgreSQL payload row or one private
-S3-compatible endpoint. Eneo does not switch backends as a failure fallback.
+File and Icon own the product meaning: filename, purpose, authorization, and
+which variant is needed. The shared object-content module owns durable bytes,
+SHA-256, exact size and media type, placement, lifecycle, and deletion.
 
 ```mermaid
 flowchart LR
-  producer["File or artifact producer"] --> lifecycle["Object-content lifecycle"]
-  lifecycle --> control["PostgreSQL: identity, digest, references, retention"]
-  lifecycle --> inline["PostgreSQL inline: bounded bytes"]
-  lifecycle --> remote["Optional compatible endpoint: bytes"]
-  lifecycle --> search["Extraction and indexing: searchable facts and vectors"]
+  upload["File or Icon"] --> owner["Product owner\nname · purpose · access"]
+  owner --> control["PostgreSQL control\nidentity · digest · references · lifecycle"]
+  control --> bytes{"One byte authority"}
+  bytes --> inline["PostgreSQL inline\ndefault"]
+  bytes --> remote["Private S3-compatible endpoint\noptional"]
+  owner --> knowledge["Extraction and indexing\nsearchable text · vectors"]
 ```
 
-Original bytes and vectors have different jobs. The byte backend preserves the
-source or generated artifact. Extraction creates bounded searchable facts and
-vectors for retrieval; it does not replace the original bytes.
+Each content item uses **one** byte authority. Eneo never dual-writes or silently
+falls back between PostgreSQL, object storage, or a filesystem.
 
-## Choose a storage path
+Object storage and RAG solve different problems:
 
-| Model                           | Best fit                                                                                                | You operate                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| PostgreSQL inline (default)     | Natural rollout, bounded content, and installations that do not need separate object-storage operations | PostgreSQL capacity, backups, and the documented inline ceiling  |
-| Bundled SeaweedFS profile       | Single-node deployments that want a separate private byte plane                                         | The `object-content` service and its durable volume              |
-| External S3-compatible endpoint | Existing storage platforms, multi-node availability, or organization-managed object backups             | Endpoint, bucket, identity, TLS, capacity, and recovery controls |
+- durable content preserves the exact upload and named variants such as
+  extracted text, transcription, model input, or preview;
+- knowledge ingestion turns a chosen variant into searchable facts and vectors
+  in PostgreSQL/pgvector;
+- vectors do not replace the source file, and the source file does not replace
+  the vector index.
 
-Object-store choices use one S3-compatible contract. Eneo does not select an
-Amazon service implicitly, and MinIO does not require a provider-specific
-integration.
+### What is adopted now?
 
-Choose based on measured operations, not organization size alone:
+| Product content | Current behavior |
+| --------------- | ---------------- |
+| New File and Icon bytes | Use the shared lifecycle and PostgreSQL-inline byte backend |
+| Existing File and Icon bytes | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
+| InfoBlob knowledge generations and Flow artifacts | Remain separate follow-up work |
+| Admin-selected placement and inline ↔ object-store migration | Remain a separate, verified migration workflow |
 
-- PostgreSQL inline increases database size, WAL, and backup duration, but keeps
-  recovery simple.
-- Object storage separates byte capacity, but adds endpoint health, credentials,
-  monitoring, and paired backup/restore.
-- The bundled SeaweedFS service is single-node. Use an external service when
-  your availability target requires storage redundancy.
+Enabling an endpoint makes the optional byte plane available; it does not move
+existing content or change producer placement by itself.
 
-## Use the default PostgreSQL-inline backend
+## Choose the right deployment
 
-Leave every remote-only `OBJECT_CONTENT_*` variable absent and run the normal
-deployment:
+| Choice | Start here when… | Additional responsibility |
+| ------ | ---------------- | ------------------------- |
+| **PostgreSQL inline** (default) | You want the fewest moving parts | Monitor database growth, WAL, and backup time |
+| **Bundled SeaweedFS** | A single-node private reference store is enough | Operate its volume and pair its backup with PostgreSQL |
+| **External compatible endpoint** | You already operate storage or need multi-node availability | Own endpoint security, TLS, capacity, credentials, and recovery |
+
+Start inline unless measured volume, backup duration, database growth, or
+availability requirements say otherwise. “Enterprise” does not automatically
+mean “more services.”
+
+## Set up your choice
+
+<Tabs items={["PostgreSQL only", "Bundled SeaweedFS", "External / MinIO"]}>
+  <Tabs.Tab>
+
+Leave remote-only `OBJECT_CONTENT_*` settings absent and run Eneo normally:
 
 ```bash
 docker compose up -d
-curl --fail https://eneo.example.eu/api/readyz
+curl -fsS https://eneo.example.eu/api/readyz \
+  | jq -e '.detail.object_content.code == "object_store_not_configured"'
 ```
 
-The health projection reports `object_store_not_configured`; this is healthy.
-Core lifecycle, reference audit, retention, and deletion work still runs. Set
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
-deployment ceiling. It limits new inline writes, not reads of existing rows or
-the administrator's product upload policy.
+`object_store_not_configured` is healthy in this mode. PostgreSQL contains both
+the control records and bounded payload bytes, so the normal PostgreSQL backup
+is the complete content backup.
 
-## Use the bundled SeaweedFS service
+Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
+deployment ceiling. It is an operational safety bound, not a hidden product
+upload policy.
 
-The reference stack keeps SeaweedFS on the private `object_content_net`. Only
-the backend and worker can reach it; Traefik and the frontend cannot.
+  </Tabs.Tab>
+  <Tabs.Tab>
+
+The optional Compose profile runs Eneo's private, single-node SeaweedFS
+reference service. It is not exposed through Traefik.
 
 <Steps>
 
-### Copy the deployment configuration
-
-Follow the [deployment guide](/guides/deployment) to copy the Compose and
-environment templates. Uncomment the complete object-store block in `.env`;
-leave it commented for the default inline deployment.
-
 ### Pin the release image
 
-Download `IMAGE-DIGESTS.txt` from the Eneo GitHub Release you plan to run. Copy
-the digest reference from the single `seaweedfs manifest` row:
+Download `IMAGE-DIGESTS.txt` from the matching Eneo release and set the manifest
+digest:
 
 ```dotenv
 ENEO_SEAWEEDFS_IMAGE=ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>
 ```
 
-Use the manifest digest, not the `linux/amd64` or `linux/arm64` platform row.
-The manifest selects the correct image for the host architecture.
-
-Verify Eneo's build provenance before deployment:
+Verify Eneo's build provenance:
 
 ```bash
 gh attestation verify \
@@ -115,138 +118,80 @@ gh attestation verify \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-See [Release SBOMs](/docs/release-sboms) for platform SBOM verification and the
-full release asset inventory.
+### Configure the private endpoint
 
-### Generate credentials and the deployment ID
-
-Generate separate high-entropy credentials and one UUID:
-
-```bash
-openssl rand -hex 32
-openssl rand -hex 48
-uuidgen
-```
-
-Store the results in the protected deployment `.env`:
+Generate strong credentials and one stable UUID (`uuidgen`), then protect the
+deployment `.env` with mode `0600`:
 
 ```dotenv
-OBJECT_CONTENT_ACCESS_KEY_ID=<generated access key>
-OBJECT_CONTENT_SECRET_ACCESS_KEY=<generated secret key>
-OBJECT_CONTENT_DEPLOYMENT_ID=<generated UUID>
 OBJECT_CONTENT_ENDPOINT_URL=http://object-content:8333
 OBJECT_CONTENT_REGION=local
 OBJECT_CONTENT_BUCKET=eneo-object-content
+OBJECT_CONTENT_ACCESS_KEY_ID=<generated access key>
+OBJECT_CONTENT_SECRET_ACCESS_KEY=<generated secret key>
+OBJECT_CONTENT_DEPLOYMENT_ID=<stable UUID>
 OBJECT_CONTENT_ALLOW_INSECURE_HTTP=true
 ```
 
-Keep the UUID unchanged through upgrades and restores. It scopes opaque object
-keys and binds this PostgreSQL database to its byte store. Changing it does not
-migrate existing content.
+The HTTP exception is only for the private internal Compose network.
 
-### Start and verify the stack
+### Start and verify
 
 ```bash
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.object-content.yml \
-  --profile object-content config --quiet
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
   --profile object-content up -d
-docker compose ps
+
 curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-The explicit code check matters because HTTP 200 can also represent degraded
-remote storage while inline content remains available. If readiness reports
-`configuration_required`, stop writers and check the endpoint, bucket,
-deployment ID, and restored backup pair before retrying. Do not create a new
-bucket marker by hand.
-
 </Steps>
 
-`OBJECT_CONTENT_ALLOW_INSECURE_HTTP=true` is appropriate only for this private
-Compose network. Do not publish port 8333 through the reverse proxy.
+Use an external service instead when your availability target requires storage
+redundancy. See [Release SBOMs](/docs/release-sboms) for image and SBOM
+verification.
 
-## Use MinIO or another compatible endpoint
+  </Tabs.Tab>
+  <Tabs.Tab>
 
-Operate the external service according to its current security, licensing,
-availability, and backup guidance. Eneo needs one private bucket and one
-non-admin application identity. The endpoint must support SigV4 plus the S3
-operations Eneo uses: paginated object and multipart listing, single and
-multipart writes, `HEAD`, streaming reads, one byte range, abort, and deletion.
+Eneo connects only to the endpoint you configure. It does not require or select
+an Amazon service. MinIO uses the same provider-neutral application path as
+other compatible endpoints.
 
-### MinIO example
-
-Create a dedicated bucket:
+For MinIO, create one private bucket:
 
 ```bash
 mc mb eneo-minio/eneo-object-content
 ```
 
-Save this least-privilege policy as `eneo-object-content-policy.json`:
+Create a non-admin application identity with bucket-scoped permissions for:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:ListBucketMultipartUploads"],
-      "Resource": ["arn:aws:s3:::eneo-object-content"]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:AbortMultipartUpload",
-        "s3:ListMultipartUploadParts"
-      ],
-      "Resource": ["arn:aws:s3:::eneo-object-content/*"]
-    }
-  ]
-}
-```
+- bucket and multipart listing;
+- `GetObject`, `PutObject`, and `DeleteObject`;
+- multipart upload, ordered part listing, completion, and abort.
 
-MinIO uses `arn:aws:s3` strings as local IAM-compatible policy syntax. These
-identifiers do not connect MinIO or Eneo to AWS. If you change the bucket name,
-change both policy resources.
+MinIO policy files use `arn:aws:s3` syntax locally; those strings do not connect
+Eneo or MinIO to AWS.
 
-Create a service identity through your MinIO console, identity provider, or
-secret-safe automation. Then attach the policy without putting the secret key
-on the command line:
-
-```bash
-mc admin policy create eneo-minio eneo-object-content \
-  ./eneo-object-content-policy.json
-mc admin policy attach eneo-minio eneo-object-content \
-  --user '<service-identity>'
-```
-
-Configure Eneo with the S3 API endpoint and application credentials:
+Configure backend and worker with the same secret-safe values:
 
 ```dotenv
 OBJECT_CONTENT_ENDPOINT_URL=https://minio.storage.example.eu:9000
-OBJECT_CONTENT_REGION=<MinIO signing scope>
+OBJECT_CONTENT_REGION=<signing scope required by the endpoint>
 OBJECT_CONTENT_BUCKET=eneo-object-content
 OBJECT_CONTENT_ACCESS_KEY_ID=<application access key>
 OBJECT_CONTENT_SECRET_ACCESS_KEY=<application secret key>
-OBJECT_CONTENT_DEPLOYMENT_ID=<stable deployment UUID>
+OBJECT_CONTENT_DEPLOYMENT_ID=<stable UUID>
 OBJECT_CONTENT_ALLOW_INSECURE_HTTP=false
 ```
 
-Keep `OBJECT_CONTENT_ADDRESSING_STYLE=path` in `env_backend.env` unless the
-endpoint has wildcard DNS and TLS for virtual-host bucket names. For a private
-CA, mount the certificate read-only into both backend and worker and set
-`OBJECT_CONTENT_CA_BUNDLE` to its in-container path.
+Keep `OBJECT_CONTENT_ADDRESSING_STYLE=path` unless the endpoint has wildcard
+DNS and TLS for virtual-host bucket names. Mount a private CA read-only into
+both backend and worker and set `OBJECT_CONTENT_CA_BUNDLE` when required.
 
-Do not enable the `object-content` profile. Start the normal stack and verify
-readiness:
+Do **not** enable the bundled profile. Start the normal stack and verify:
 
 ```bash
 docker compose up -d
@@ -254,169 +199,82 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
-Before production traffic, test the exact endpoint version and configuration in
-staging. Cover single and multipart upload, ordered part listing, full and range
-read, deletion visibility, and a paired restore.
+Before production, test the exact service version and configuration: single and
+multipart write, `HEAD`, full and single-range read, deletion, pagination, TLS,
+and paired restore.
 
-## Back up and restore
+  </Tabs.Tab>
+</Tabs>
 
-For an inline-only deployment, the normal PostgreSQL backup contains both
-control data and payload bytes. Restore and verify PostgreSQL before reopening
-traffic.
+## Operate it safely
 
-If any `object_store` rows exist, PostgreSQL and the endpoint form one recovery
-unit:
+### Backup rule
 
-1. stop writers and remote reconciliation;
-2. record one recovery ID;
-3. back up PostgreSQL and the bucket under that ID;
-4. preserve `OBJECT_CONTENT_DEPLOYMENT_ID` and the internal bucket marker;
-5. restore both halves in isolation;
-6. verify checksums, binding, readiness, and a sample of full and range reads;
-7. reopen traffic only after reconciliation reports a consistent pair.
+- **Only inline rows:** PostgreSQL backup contains control and bytes.
+- **Any object-store rows:** PostgreSQL and the endpoint are one recovery unit.
 
-Never combine a newer database with an older bucket, or the reverse. If the two
-halves are skewed, keep writers stopped and restore a matching pair.
+For the second case, stop writers and reconciliation, give both backups one
+recovery ID, preserve `OBJECT_CONTENT_DEPLOYMENT_ID` and the bucket marker,
+restore both halves in isolation, verify checksums and sample reads, then reopen
+traffic. Never combine a newer database with an older bucket or the reverse.
 
-## Production checklist
+During the File/Icon normalization upgrade, keep backend and worker producers
+stopped until Alembic succeeds. Retry a stopped migration before accepting new
+uploads; intervening writes deliberately block an unsafe retry.
 
-- Keep the endpoint private. Expose neither its S3 API nor administrative UI
-  through Eneo's public reverse proxy.
-- Give Eneo one bucket-scoped application identity, not administrator
-  credentials.
-- Alert on bucket bytes, object count, free capacity, request errors and
-  latency, failed or pending content, delete backlog, reconciliation lag, and
-  old multipart uploads.
-- Size temporary storage for concurrent uploads and reads. Eneo verifies a full
-  object before returning a full or range response; larger objects spill from
-  bounded memory to temporary disk.
-- For inline-only deployments, verify normal PostgreSQL backup and restore.
-- When object-store rows exist, back up PostgreSQL and the endpoint under one
-  recovery ID while writers and remote reconciliation are stopped. Preserve
-  `OBJECT_CONTENT_DEPLOYMENT_ID` and the internal bucket marker.
-- Test restores in isolation before reopening traffic.
+### Failure rule
 
-## Configuration behavior
+| Situation | Eneo behavior |
+| --------- | ------------- |
+| No endpoint configured and no remote rows | Healthy inline operation |
+| Endpoint temporarily unavailable | Inline work continues; remote operations return a typed temporary failure |
+| Remote rows exist but configuration is missing | Fails closed with `configuration_required` |
+| Bucket does not match this PostgreSQL database | Fails closed; Eneo does not adopt or mutate it |
 
-| Configuration                                                 | Result                                                                                             |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Remote-only settings absent; no active object-store rows      | Healthy inline mode; health reports `object_store_not_configured`                                  |
-| Remote-only settings absent; active object-store rows exist   | `configuration_required`; existing remote bytes are not silently stranded                          |
-| Any remote-only value blank, partial, or invalid              | Startup fails with a configuration error                                                           |
-| Complete configuration and matching database/bucket pair      | Inline and object-store backends are available                                                     |
-| Complete configuration but a temporarily unavailable endpoint | Overall readiness stays degraded/200; remote operations return typed 503 and inline work continues |
-| Reachable bucket that does not match PostgreSQL               | `configuration_required`; Eneo does not adopt or mutate it                                         |
-
-Each record keeps its original byte authority. Once Eneo stores an active
-object-store record, that endpoint remains required for the record; Eneo does
-not fall back to inline PostgreSQL or a filesystem.
+Monitor PostgreSQL growth, endpoint capacity and latency, failed/pending
+content, delete backlog, reconciliation lag, temporary spool space, and stale
+multipart uploads. Keep endpoint APIs and consoles private.
 
 ## FAQ
 
-### Do I need S3-compatible storage to run Eneo?
+### Do we need S3-compatible storage to run Eneo?
 
-No. PostgreSQL-inline storage is the default and requires no endpoint, bucket,
-credentials, or additional container.
+No. PostgreSQL inline is the default and needs no endpoint, bucket, credentials,
+or extra container.
 
-### Which option should a municipality choose first?
+### Are files stored in both PostgreSQL and object storage?
 
-Start inline unless measured file volume, backup duration, database growth, or
-availability requirements justify a separate service. Moving to object storage
-adds useful capacity separation, but it also adds an operational dependency.
+No. PostgreSQL always holds identity and lifecycle facts. The bytes for each
+content item live either inline or in the configured endpoint.
 
-### Will enabling object storage move our existing files?
+### Will enabling the endpoint move existing files?
 
-No. This foundation does not migrate existing File, InfoBlob, Icon, or Flow
-bytes. Later producer-specific work will copy, verify, switch authority, and
-only then remove the old byte copy.
+No. Placement changes require an explicit copy, full verification, authority
+switch, and cleanup workflow.
 
-### Are bytes stored twice?
+### What happens when an endpoint is down?
 
-No. Each adopted content record has one byte authority. PostgreSQL always keeps
-identity, digest, size, references, retention, and lifecycle facts; the payload
-lives either inline or in the configured endpoint.
-
-### What happens if the endpoint is unavailable?
-
-Inline content and core readiness continue. Object-store reads and writes return
-a typed temporary failure, and readiness reports a degraded capability. Eneo
-does not copy the operation into PostgreSQL or a filesystem as a fallback.
-
-### Can I turn object storage off after using it?
-
-Not by deleting the configuration. Active object-store rows make missing
-configuration fail closed. A future migration-back operation must copy and
-verify those bytes before the endpoint can be removed.
-
-### Does the `region` setting choose where data is stored?
-
-No. It is the SigV4 signing scope required by the endpoint. Data residency is
-determined by where you run the endpoint, its replicas, and its backups. The
-bundled private service uses `local`; use the value required by your external
-operator.
-
-### Does object storage replace pgvector or RAG indexing?
-
-No. Object storage preserves original and derived byte streams. Extraction and
-indexing turn those bytes into searchable facts and vectors in the knowledge
-data plane. Deleting vectors does not delete the source bytes, and losing source
-bytes cannot be repaired from vectors.
-
-### Is content encrypted?
-
-Use HTTPS for external endpoints and storage- or volume-level encryption at
-rest according to your organization's controls. The private bundled endpoint
-uses an internal network; Eneo does not expose its S3 port publicly. Do not
-assume the signing region or S3 protocol provides encryption by itself.
+Content already owned by that endpoint is temporarily unavailable. Eneo does
+not create a second copy elsewhere as a fallback.
 
 ### Can we use a European or self-hosted service?
 
-Yes. Eneo connects only to the endpoint you configure. Use a European managed
-service or a self-hosted compatible endpoint that passes the required operation,
-integrity, TLS, and recovery tests.
+Yes. Data resides wherever you operate the configured endpoint and its backups.
+The `region` value is a signing scope, not a hosting decision.
 
-### Why does Eneo bundle SeaweedFS?
+### Does this replace pgvector or document processing?
 
-It gives installations that choose the optional Compose profile a small private
-S3-compatible service with a reproducible Eneo build for `linux/amd64` and
-`linux/arm64`. It is a single-node reference store, not a requirement or the
-default answer for multi-node availability.
+No. Object content preserves bytes; document processing produces searchable
+text and vectors. Both remain necessary for RAG.
 
-### Is MinIO supported?
+### Can we turn object storage off later?
 
-Yes, as an external S3-compatible endpoint. Eneo does not bundle or administer
-MinIO. Validate your exact MinIO build and configuration against the operations
-listed above.
+Only after every remote item has been copied back, verified, and switched by a
+supported migration. Removing configuration while remote rows exist fails
+closed.
 
-### Does Eneo require AWS S3?
+### Where are the deep technical and security details?
 
-No. Eneo always uses the endpoint you configure. SigV4 and IAM-style policy
-names describe protocol syntax; they do not select an AWS service.
-
-### Why does readiness say `configuration_required`?
-
-The configured bucket and PostgreSQL database do not present the same durable
-binding, or active object-store rows exist while remote configuration is absent.
-Restore the matching pair and original deployment ID. Do not replace the marker.
-
-### Can I rotate credentials?
-
-Yes. Update backend and worker together, and update the bundled store or
-external service identity in the same maintenance window. Verify readiness
-before resuming writes. Credential rotation must not change the deployment ID,
-bucket, or existing object keys.
-
-### Can I back up only PostgreSQL?
-
-Yes for a deployment containing only inline rows: PostgreSQL contains both
-control and payload. No after object-store rows exist: restore PostgreSQL and
-the endpoint from the same recovery point. See [Back up and
-restore](#back-up-and-restore).
-
-## Learn how it works
-
-- [Object content architecture](/docs/object-content-architecture) explains
-  lifecycle, integrity, reconciliation, binding, and failure behavior.
-- [Release SBOMs](/docs/release-sboms) explains image digests, SBOM assets, and
-  attestation verification.
-- [Deployment](/guides/deployment) covers the complete Eneo service stack.
+- [Object content architecture](/docs/object-content-architecture)
+- [Release SBOMs and attestations](/docs/release-sboms)
+- [Complete Eneo deployment](/guides/deployment)

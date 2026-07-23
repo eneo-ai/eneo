@@ -4,6 +4,19 @@ The primary, navigable operator guide is [Choose Content
 Storage](https://docs.eneo.ai/guides/object-content-storage). This file is the
 offline reference shipped beside the Compose templates.
 
+## TL;DR
+
+- Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
+  default.
+- File and Icon now use the shared content identity, typed variants, integrity,
+  and lifecycle owner. New writes in this slice remain PostgreSQL inline.
+- PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
+  and lifecycle. Exactly one selected backend owns each payload.
+- Enabling SeaweedFS, MinIO, or another endpoint does not move existing bytes.
+  Placement and migration are explicit later workflows.
+- Use the docs-site guide above to choose and configure a path. Continue here
+  only for the full offline operations and recovery reference.
+
 Eneo keeps one common content identity and lifecycle in PostgreSQL. Each content
 record then names exactly one byte authority:
 
@@ -23,9 +36,12 @@ availability requirements justify it. There is no production filesystem
 backend, automatic fallback, dual write, public object URL, provider registry,
 or provider-specific product branch.
 
-This slice establishes the shared storage foundation. Existing File, InfoBlob,
-Icon, and Flow byte producers are not migrated by this change; each producer
-will adopt the common service in a separate, copy-and-verify cutover.
+File and Icon are the first adopted product owners. Their legacy bytes are
+copied in bounded batches, verified against PostgreSQL-owned SHA-256 and size,
+switched to concrete typed references, and only then removed from the old
+columns. New File and Icon content remains PostgreSQL inline in this slice.
+InfoBlob generations, Flow artifacts, and administrator-selected placement are
+separate follow-up work.
 
 ## Choose the endpoint
 
@@ -414,6 +430,11 @@ image digests. Upgrade the byte plane without changing endpoint semantics,
 credentials, bucket, or deployment ID. Verify liveness, readiness, single and
 multipart upload, range read, delete visibility, and reconciliation before
 reopening traffic.
+
+For the File/Icon normalization upgrade, stop backend and worker producers
+before Alembic starts and do not restart them until the migration succeeds. If
+it stops, retry the migration before accepting new uploads; intervening writes
+make the retry fail closed rather than guess which authority is valid.
 
 Rollback means restoring the previous application/image version and the matching
 database/object backup pair. Do not roll back only Alembic or only the object
