@@ -29,16 +29,20 @@ from eneo.flows.http_transport.errors import (
 from eneo.flows.http_transport.normalizer import is_authored_config
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.secret_codec import (
+    authored_secret_fields,
     decrypt_authored_config,
     encrypt_authored_config,
     merge_secrets_on_update,
     redact_authored_config,
+    reject_unprotectable_authored_secrets,
 )
 from eneo.flows.http_transport.validator import validate_authored_config
 
 __all__ = [
     "AuthoredSecretEncryptionUnavailableError",
     "CustomHeader",
+    "authored_secret_fields",
+    "reject_unprotectable_authored_secrets",
     "EffectiveHttpRequest",
     "HttpAuth",
     "HttpAuthApiKey",

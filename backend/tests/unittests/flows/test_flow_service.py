@@ -1437,6 +1437,42 @@ async def test_create_flow_rejects_http_secret_when_encryption_inactive(user):
 
 
 @pytest.mark.asyncio
+async def test_create_flow_rejects_secret_disguised_with_encryption_prefix(user):
+    """The prefix is authored syntax, not proof that a value is ciphertext."""
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_InactiveEncryptionService(),
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://example.org/input",
+                "auth": {
+                    "mode": "bearer_token",
+                    "token": "enc:fernet:v1:not-really-encrypted",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_flow_persists_secret_free_http_config_when_encryption_inactive(
     user,
 ):

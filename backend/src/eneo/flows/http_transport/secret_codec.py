@@ -23,61 +23,72 @@ class SupportsEncryption(Protocol):
     def decrypt(self, ciphertext: str) -> str: ...
 
 
-def plaintext_secret_fields(
-    config: HttpAuthoredConfig,
-    encryption_service: SupportsEncryption | None,
-) -> tuple[str, ...]:
-    """Name the secret fields holding an unencrypted value.
+def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the declared secret fields holding a newly authored value.
 
-    A stored secret sentinel is not a value, and an already-encrypted value is
-    already protected; neither counts. Without an encryption service nothing can
-    be recognized as ciphertext, so every non-empty secret counts as plaintext.
+    A stored-secret sentinel is a reference to an existing row, not a value, so
+    it does not count. Everything else that is a non-empty string is new authored
+    input.
+
+    The encryption prefix is deliberately not consulted: it is authored syntax,
+    not proof of provenance. An author can type ``enc:fernet:v1:...`` into a
+    token field, and treating that as ciphertext would let an unprotected
+    credential through. Only the caller knows whether a value came from an
+    author or from storage.
     """
 
-    def _is_plaintext(value: SecretValue) -> bool:
-        if not isinstance(value, str) or not value:
-            return False
-        if encryption_service is None:
-            return True
-        return not encryption_service.is_encrypted(value)
+    def _is_authored_value(value: SecretValue) -> bool:
+        return isinstance(value, str) and bool(value)
 
     fields: list[str] = []
     match config.auth:
         case HttpAuthBearer(token=token):
-            if _is_plaintext(token):
+            if _is_authored_value(token):
                 fields.append("auth.token")
         case HttpAuthApiKey(key=key):
-            if _is_plaintext(key):
+            if _is_authored_value(key):
                 fields.append("auth.key")
         case HttpAuthBasicAuth(password=password):
-            if _is_plaintext(password):
+            if _is_authored_value(password):
                 fields.append("auth.password")
         case HttpAuthNone():
             pass
 
     fields.extend(
-        f"custom_headers[{header.name}]"
-        for header in config.custom_headers
-        if header.secret and _is_plaintext(header.value)
+        f"custom_headers[{index}].value"
+        for index, header in enumerate(config.custom_headers)
+        if header.secret and _is_authored_value(header.value)
     )
     return tuple(fields)
+
+
+def reject_unprotectable_authored_secrets(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> None:
+    """Refuse newly authored secrets that could only be stored unprotected.
+
+    Call this with author-supplied config, before stored-secret sentinels are
+    merged. Afterwards a secret may legitimately be ciphertext loaded from the
+    existing row, and the two are indistinguishable.
+
+    Raises:
+        AuthoredSecretEncryptionUnavailableError: encryption is unavailable and
+            the config carries at least one newly authored secret.
+    """
+    if encryption_service is not None and encryption_service.is_active():
+        return
+    unprotectable = authored_secret_fields(config)
+    if unprotectable:
+        raise AuthoredSecretEncryptionUnavailableError(unprotectable)
 
 
 def encrypt_authored_config(
     config: HttpAuthoredConfig,
     encryption_service: SupportsEncryption | None,
 ) -> HttpAuthoredConfig:
-    """Encrypt sensitive fields for database storage.
-
-    Raises:
-        AuthoredSecretEncryptionUnavailableError: the config carries a plaintext
-            secret and encryption is unavailable, so storing it would write the
-            credential to the database in the clear.
-    """
+    """Encrypt sensitive fields for database storage."""
     if encryption_service is None or not encryption_service.is_active():
-        unprotected = plaintext_secret_fields(config, encryption_service)
-        if unprotected:
-            raise AuthoredSecretEncryptionUnavailableError(unprotected)
         return config
 
     def _encrypt(value: SecretValue) -> SecretValue:

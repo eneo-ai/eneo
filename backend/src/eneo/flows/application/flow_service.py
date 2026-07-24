@@ -52,6 +52,7 @@ from eneo.flows.http_transport import (
     encrypt_authored_config,
     is_authored_config,
     merge_secrets_on_update,
+    reject_unprotectable_authored_secrets,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -112,6 +113,7 @@ class FlowService:
         owner_user_id: UUID | None = None,
     ) -> Flow:
         normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
+        self._reject_unprotectable_authored_secrets(steps)
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=steps,
@@ -215,6 +217,7 @@ class FlowService:
             )
 
         if steps is not None:
+            self._reject_unprotectable_authored_secrets(steps)
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
@@ -654,20 +657,41 @@ class FlowService:
             for step in steps
         ]
 
+    def _reject_unprotectable_authored_secrets(self, steps: list[FlowStep]) -> None:
+        """Refuse author-supplied HTTP credentials that could only be stored raw.
+
+        Runs on incoming authored steps, before stored-secret sentinels are
+        merged: only here is a secret value known to have come from the author
+        rather than from the existing row.
+        """
+        for step in steps:
+            for label, config in (
+                ("input_config", step.input_config),
+                ("output_config", step.output_config),
+            ):
+                if config is None or not is_authored_config(config):
+                    continue
+                try:
+                    reject_unprotectable_authored_secrets(
+                        HttpAuthoredConfig.model_validate(config),
+                        self.encryption_service,
+                    )
+                except AuthoredSecretEncryptionUnavailableError as exc:
+                    raise FlowStepValidationError(
+                        f"Step {step.step_order}: {label} carries HTTP credentials "
+                        f"({', '.join(exc.secret_fields)}) that cannot be stored "
+                        "while credential encryption is inactive. Configure "
+                        "ENCRYPTION_KEY, or remove the credentials, before saving "
+                        "this step.",
+                        step_order=step.step_order,
+                    ) from exc
+
     def _prepare_steps_for_persist(self, steps: list[FlowStep]) -> list[FlowStep]:
         return [
             step.model_copy(
                 update={
-                    "input_config": self._encrypt_config(
-                        step.input_config,
-                        step_order=step.step_order,
-                        label="input_config",
-                    ),
-                    "output_config": self._encrypt_config(
-                        step.output_config,
-                        step_order=step.step_order,
-                        label="output_config",
-                    ),
+                    "input_config": self._encrypt_config(step.input_config),
+                    "output_config": self._encrypt_config(step.output_config),
                 },
                 deep=True,
             )
@@ -675,28 +699,15 @@ class FlowService:
         ]
 
     def _encrypt_config(
-        self,
-        config: FlowPersistedJsonObject | None,
-        *,
-        step_order: int,
-        label: str,
+        self, config: FlowPersistedJsonObject | None
     ) -> FlowPersistedJsonObject | None:
         if config is None:
             return config
-        if not is_authored_config(config):
-            return config
-        authored = HttpAuthoredConfig.model_validate(config)
-        try:
+        if is_authored_config(config):
+            authored = HttpAuthoredConfig.model_validate(config)
             encrypted = encrypt_authored_config(authored, self.encryption_service)
-        except AuthoredSecretEncryptionUnavailableError as exc:
-            raise FlowStepValidationError(
-                f"Step {step_order}: {label} carries HTTP credentials "
-                f"({', '.join(exc.secret_fields)}) that cannot be stored while "
-                "credential encryption is inactive. Configure ENCRYPTION_KEY, or "
-                "remove the credentials, before saving this step.",
-                step_order=step_order,
-            ) from exc
-        return encrypted.model_dump(mode="json")
+            return encrypted.model_dump(mode="json")
+        return config
 
     def _merge_step_secrets(
         self,

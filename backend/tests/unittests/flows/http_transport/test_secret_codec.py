@@ -21,6 +21,7 @@ from eneo.flows.http_transport.secret_codec import (
     encrypt_authored_config,
     merge_secrets_on_update,
     redact_authored_config,
+    reject_unprotectable_authored_secrets,
 )
 
 
@@ -131,14 +132,23 @@ def test_encrypt_skips_already_encrypted_values() -> None:
     assert result.auth.token == "ENC:already"  # not double-encrypted
 
 
-def test_encrypt_with_none_service_rejects_plaintext_secret() -> None:
+def test_encrypt_with_none_service_returns_unchanged() -> None:
     cfg = _config(auth=HttpAuthBearer(token="my-token"))
 
-    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
-        encrypt_authored_config(cfg, None)
+    result = encrypt_authored_config(cfg, None)
 
-    assert excinfo.value.secret_fields == ("auth.token",)
-    assert "my-token" not in str(excinfo.value)
+    assert result.auth.token == "my-token"
+
+
+def test_encrypt_with_inactive_service_returns_unchanged() -> None:
+    cfg = _config(auth=HttpAuthBearer(token="my-token"))
+
+    result = encrypt_authored_config(cfg, _InactiveEncryption())
+
+    assert result.auth.token == "my-token"
+
+
+# --- reject_unprotectable_authored_secrets ---
 
 
 @pytest.mark.parametrize(
@@ -149,57 +159,72 @@ def test_encrypt_with_none_service_rejects_plaintext_secret() -> None:
         (HttpAuthBasicAuth(username="alice", password="my-pass"), "auth.password"),
     ],
 )
-def test_encrypt_with_inactive_service_rejects_each_auth_mode(
+def test_reject_covers_each_auth_mode_when_inactive(
     auth: HttpAuthBearer | HttpAuthApiKey | HttpAuthBasicAuth,
     expected_field: str,
 ) -> None:
     cfg = _config(auth=auth)
 
     with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
-        encrypt_authored_config(cfg, _InactiveEncryption())
+        reject_unprotectable_authored_secrets(cfg, _InactiveEncryption())
 
     assert excinfo.value.secret_fields == (expected_field,)
 
 
-def test_encrypt_with_inactive_service_rejects_secret_custom_header() -> None:
+def test_reject_when_no_encryption_service_at_all() -> None:
+    cfg = _config(auth=HttpAuthBearer(token="my-token"))
+
+    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
+        reject_unprotectable_authored_secrets(cfg, None)
+
+    assert excinfo.value.secret_fields == ("auth.token",)
+    assert "my-token" not in str(excinfo.value)
+
+
+def test_reject_does_not_trust_the_encryption_prefix_as_provenance() -> None:
+    """An author can type the prefix; it is syntax, not proof of ciphertext."""
+    cfg = _config(auth=HttpAuthBearer(token="enc:fernet:v1:not-really-encrypted"))
+
+    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
+        reject_unprotectable_authored_secrets(cfg, _InactiveEncryption())
+
+    assert excinfo.value.secret_fields == ("auth.token",)
+
+
+def test_reject_identifies_secret_headers_by_index_not_author_supplied_name() -> None:
     cfg = _config(
         custom_headers=[
-            CustomHeader(name="X-Secret", value="secret-val", secret=True),
             CustomHeader(name="X-Public", value="public-val", secret=False),
+            CustomHeader(name="X-Secret", value="secret-val", secret=True),
         ]
     )
 
     with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
-        encrypt_authored_config(cfg, _InactiveEncryption())
+        reject_unprotectable_authored_secrets(cfg, _InactiveEncryption())
 
-    assert excinfo.value.secret_fields == ("custom_headers[X-Secret]",)
+    assert excinfo.value.secret_fields == ("custom_headers[1].value",)
 
 
-def test_encrypt_with_inactive_service_allows_secret_free_config() -> None:
+def test_reject_allows_secret_free_config_when_inactive() -> None:
     cfg = _config(
         auth=HttpAuthNone(),
         custom_headers=[CustomHeader(name="X-Public", value="public", secret=False)],
     )
 
-    result = encrypt_authored_config(cfg, _InactiveEncryption())
-
-    assert result == cfg
+    reject_unprotectable_authored_secrets(cfg, _InactiveEncryption())
 
 
-def test_encrypt_with_inactive_service_allows_already_encrypted_secret() -> None:
-    cfg = _config(auth=HttpAuthBearer(token="ENC:stored"))
-
-    result = encrypt_authored_config(cfg, _InactiveEncryption())
-
-    assert result.auth.token == "ENC:stored"
-
-
-def test_encrypt_with_inactive_service_allows_unresolved_sentinel() -> None:
+def test_reject_allows_stored_secret_sentinel_when_inactive() -> None:
+    """A sentinel references an existing row; it is not a newly authored value."""
     cfg = _config(auth=HttpAuthBearer(token=SECRET_SENTINEL))
 
-    result = encrypt_authored_config(cfg, _InactiveEncryption())
+    reject_unprotectable_authored_secrets(cfg, _InactiveEncryption())
 
-    assert result.auth.token == SECRET_SENTINEL
+
+def test_reject_is_a_noop_when_encryption_is_active() -> None:
+    cfg = _config(auth=HttpAuthBearer(token="my-token"))
+
+    reject_unprotectable_authored_secrets(cfg, _FakeEncryption())
 
 
 # --- decrypt_authored_config ---
