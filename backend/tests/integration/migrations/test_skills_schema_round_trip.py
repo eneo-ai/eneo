@@ -38,6 +38,7 @@ SKILLS_HEAD_REVISION = "202607221700"
 PRE_SKILL_EXECUTION_BLOCK_REVISION = "202607231330"
 SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
 BINDING_ACTIVATION_MODE_REVISION = "202607240115"
+SKILL_RUNTIME_POLICY_REVISION = "202607240310"
 
 
 @dataclass(frozen=True)
@@ -1999,3 +2000,73 @@ def test_binding_activation_mode_migration_backfills_and_round_trips(
             (assistant_id,),
         )
         assert cursor.fetchone() == ("always",)
+
+
+def test_skill_runtime_policy_migration_backfills_tenants_and_round_trips(
+    pre_skills_database: MigrationDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, BINDING_ACTIVATION_MODE_REVISION)
+
+    tenant_id = _insert_tenant(connection, "runtime-policy")
+    monkeypatch.setenv("SKILL_MAX_BINDINGS", "37")
+    command.upgrade(config, SKILL_RUNTIME_POLICY_REVISION)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT selective_activation_enabled, max_attached_skills,
+                   context_share_percent, max_activations_per_turn
+            FROM skill_runtime_policies
+            WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        assert cursor.fetchone() == (False, 37, 10, 10)
+
+    _assert_constraint(
+        connection,
+        expected="ck_skill_runtime_policies_max_attached_skills",
+        statement="""
+            UPDATE skill_runtime_policies
+            SET max_attached_skills = 1001
+            WHERE tenant_id = %s
+        """,
+        parameters=(tenant_id,),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_skill_runtime_policies_context_share_percent",
+        statement="""
+            UPDATE skill_runtime_policies
+            SET context_share_percent = 101
+            WHERE tenant_id = %s
+        """,
+        parameters=(tenant_id,),
+    )
+    _assert_constraint(
+        connection,
+        expected="ck_skill_runtime_policies_max_activations_per_turn",
+        statement="""
+            UPDATE skill_runtime_policies
+            SET max_activations_per_turn = 11
+            WHERE tenant_id = %s
+        """,
+        parameters=(tenant_id,),
+    )
+
+    command.downgrade(config, BINDING_ACTIVATION_MODE_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('skill_runtime_policies')")
+        assert cursor.fetchone() == (None,)
+
+    command.upgrade(config, SKILL_RUNTIME_POLICY_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT max_attached_skills FROM skill_runtime_policies "
+            "WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        assert cursor.fetchone() == (37,)

@@ -393,3 +393,33 @@ class GovernancePolicySkillBindings(BaseCrossReference):
             "skill_space_id",
         ),
     )
+
+
+class SkillRuntimePolicies(BaseCrossReference):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "tenants.id",
+            name="fk_skill_runtime_policies_tenant",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    selective_activation_enabled: Mapped[bool] = mapped_column()
+    max_attached_skills: Mapped[int] = mapped_column()
+    context_share_percent: Mapped[int] = mapped_column()
+    max_activations_per_turn: Mapped[int] = mapped_column()
+
+    __table_args__ = (
+        CheckConstraint(
+            "max_attached_skills BETWEEN 1 AND 1000",
+            name="ck_skill_runtime_policies_max_attached_skills",
+        ),
+        CheckConstraint(
+            "context_share_percent BETWEEN 1 AND 100",
+            name="ck_skill_runtime_policies_context_share_percent",
+        ),
+        CheckConstraint(
+            "max_activations_per_turn BETWEEN 1 AND 10",
+            name="ck_skill_runtime_policies_max_activations_per_turn",
+        ),
+    )

@@ -18,7 +18,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import Status
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingReference
+from eneo.skills.domain.skill import SkillBindingReference, SkillRuntimePolicy
 
 
 @dataclass(frozen=True)
@@ -845,4 +845,64 @@ async def test_concurrent_delete_has_one_deleted_outcome(
     async with db_container() as container:
         assert (
             await container.skill_repo().get(skill_id=resources.first_skill_id) is None
+        )
+
+
+async def test_binding_write_waits_for_concurrent_policy_lowering(
+    skill_concurrency_resources: SkillConcurrencyResources,
+    db_container,
+    db_session,
+):
+    """A binding save must validate against the limit an admin just applied,
+    not the superseded one its snapshot could otherwise read."""
+    resources = skill_concurrency_resources
+    lowered = SkillRuntimePolicy(
+        selective_activation_enabled=False,
+        max_attached_skills=1,
+        context_share_percent=10,
+        max_activations_per_turn=10,
+    )
+    admin_locked = asyncio.Event()
+    release_admin = asyncio.Event()
+    writer_pid = asyncio.get_running_loop().create_future()
+
+    async def holding_admin_lowerer():
+        async with db_container() as container:
+            change = await container.skill_repo().update_runtime_policy(
+                tenant_id=resources.tenant_id,
+                policy=lowered,
+            )
+            admin_locked.set()
+            await release_admin.wait()
+            return change
+
+    async def blocked_binding_writer():
+        async with db_container() as container:
+            writer_pid.set_result(await _backend_pid(container))
+            return await container.skill_service().replace_assistant_bindings(
+                space_id=resources.space_id,
+                assistant_id=resources.assistant_id,
+                references=[resources.first_reference, resources.second_reference],
+            )
+
+    admin_task = asyncio.create_task(holding_admin_lowerer())
+    await _wait_for_held_write(admin_locked, admin_task)
+    writer_task = asyncio.create_task(blocked_binding_writer())
+    pid = await asyncio.wait_for(writer_pid, timeout=5)
+    try:
+        await _wait_until_database_lock(db_session, pid=pid)
+    finally:
+        release_admin.set()
+
+    change = await admin_task
+    assert change.new == lowered
+    with pytest.raises(BadRequestException, match="more than 1 Skills"):
+        await writer_task
+
+    async with db_container() as container:
+        assert (
+            await container.skill_repo().list_assistant_bindings(
+                assistant_id=resources.assistant_id
+            )
+            == []
         )

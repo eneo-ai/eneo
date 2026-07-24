@@ -26,6 +26,7 @@ from eneo.skills.domain.skill import (
     SkillExecutionReference,
     SkillPublicationState,
     SkillRevision,
+    SkillRuntimePolicy,
 )
 
 
@@ -504,3 +505,31 @@ async def test_execution_snapshot_rejects_invalid_persisted_order(invalid: str):
             base_instructions="Base",
         )
     repo.resolve_references_for_execution_snapshot.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("max_attached_skills", 0),
+        ("max_attached_skills", 1001),
+        ("context_share_percent", 0),
+        ("context_share_percent", 101),
+        ("max_activations_per_turn", 0),
+        ("max_activations_per_turn", 11),
+    ],
+)
+def test_runtime_policy_bounds_are_enforced_by_the_domain(field: str, value: int):
+    values = {
+        "selective_activation_enabled": False,
+        "max_attached_skills": 100,
+        "context_share_percent": 10,
+        "max_activations_per_turn": 10,
+        field: value,
+    }
+    with pytest.raises(BadRequestException, match="must be between"):
+        SkillRuntimePolicy(
+            selective_activation_enabled=bool(values["selective_activation_enabled"]),
+            max_attached_skills=int(values["max_attached_skills"]),
+            context_share_percent=int(values["context_share_percent"]),
+            max_activations_per_turn=int(values["max_activations_per_turn"]),
+        )

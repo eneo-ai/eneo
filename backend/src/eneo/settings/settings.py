@@ -7,8 +7,15 @@ from eneo.ai_models.completion_models.completion_model import CompletionModelPub
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from eneo.main.models import InDB
 from eneo.skills.domain.skill import (
+    MAX_SKILL_ACTIVATIONS_PER_TURN,
+    MAX_SKILL_ATTACHMENT_LIMIT,
+    MAX_SKILL_CONTEXT_SHARE_PERCENT,
     MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH,
+    MIN_SKILL_ACTIVATIONS_PER_TURN,
+    MIN_SKILL_ATTACHMENT_LIMIT,
+    MIN_SKILL_CONTEXT_SHARE_PERCENT,
     SkillExecutionBlock,
+    SkillRuntimePolicy,
 )
 
 
@@ -99,3 +106,63 @@ class SkillExecutionBlockState(BaseModel):
                 else None
             ),
         )
+
+
+class SkillRuntimePolicyPublic(BaseModel):
+    selective_activation_enabled: bool
+    max_attached_skills: int
+    context_share_percent: int
+    max_activations_per_turn: int
+
+    @classmethod
+    def from_domain(cls, policy: SkillRuntimePolicy) -> "SkillRuntimePolicyPublic":
+        return cls(
+            selective_activation_enabled=policy.selective_activation_enabled,
+            max_attached_skills=policy.max_attached_skills,
+            context_share_percent=policy.context_share_percent,
+            max_activations_per_turn=policy.max_activations_per_turn,
+        )
+
+
+class SkillRuntimePolicyUpdate(BaseModel):
+    """Full replacement of the one four-field tenant policy."""
+
+    selective_activation_enabled: bool
+    max_attached_skills: int = Field(
+        ge=MIN_SKILL_ATTACHMENT_LIMIT,
+        le=MAX_SKILL_ATTACHMENT_LIMIT,
+    )
+    context_share_percent: int = Field(
+        ge=MIN_SKILL_CONTEXT_SHARE_PERCENT,
+        le=MAX_SKILL_CONTEXT_SHARE_PERCENT,
+    )
+    max_activations_per_turn: int = Field(
+        ge=MIN_SKILL_ACTIVATIONS_PER_TURN,
+        le=MAX_SKILL_ACTIVATIONS_PER_TURN,
+    )
+
+    def to_domain(self) -> SkillRuntimePolicy:
+        return SkillRuntimePolicy(
+            selective_activation_enabled=self.selective_activation_enabled,
+            max_attached_skills=self.max_attached_skills,
+            context_share_percent=self.context_share_percent,
+            max_activations_per_turn=self.max_activations_per_turn,
+        )
+
+
+class SkillRuntimeModelProjection(BaseModel):
+    """Read-only policy allowance for one accessible completion model. The
+    exact LiteLLM-measured configuration fit belongs to save-time validation,
+    not this projection."""
+
+    completion_model_id: UUID
+    name: str
+    nickname: str | None
+    max_input_tokens: int
+    supports_tool_calling: bool
+    skill_context_token_allowance: int
+
+
+class SkillRuntimeModelProjections(BaseModel):
+    context_share_percent: int
+    models: list[SkillRuntimeModelProjection]

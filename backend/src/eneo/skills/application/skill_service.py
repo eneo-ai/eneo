@@ -2,7 +2,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -391,12 +390,23 @@ class SkillService:
             raise NotFoundException()
         return deleted
 
-    @staticmethod
-    def _validate_reference_count(references: list[SkillBindingReference]) -> None:
-        max_bindings = get_settings().skill_max_bindings
-        if len(references) > max_bindings:
+    async def _validate_reference_count(
+        self,
+        *,
+        tenant_id: UUID,
+        references: list[SkillBindingReference],
+    ) -> None:
+        # The stored organisation policy is the source of truth for the
+        # attachment guard; the SKILL_MAX_BINDINGS environment value only
+        # seeded it during migration. The shared lock serializes this write
+        # against a concurrent admin policy change so the guard never
+        # validates against a superseded limit.
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=tenant_id, shared_lock=True
+        )
+        if len(references) > policy.max_attached_skills:
             raise BadRequestException(
-                f"A resource cannot use more than {max_bindings} Skills"
+                f"A resource cannot use more than {policy.max_attached_skills} Skills"
             )
         if len({reference.skill_id for reference in references}) != len(references):
             raise BadRequestException("A Skill can only be attached once")
@@ -491,7 +501,7 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
-        self._validate_reference_count(references)
+        await self._validate_reference_count(tenant_id=tenant_id, references=references)
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=tenant_id,
             parent_space_id=space_id,
@@ -542,7 +552,9 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
-        self._validate_reference_count(references)
+        await self._validate_reference_count(
+            tenant_id=self.user.tenant_id, references=references
+        )
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=self.user.tenant_id,
             parent_space_id=organization_space_id,

@@ -107,6 +107,8 @@ The delivery graph was last verified on 2026-07-23:
 | [#574](https://github.com/eneo-ai/eneo/pull/574)         | O1 adoption and drift evidence                  | Merged as `dfe9dbe7`; required CI and final review passed.                                                          |
 | [#577](https://github.com/eneo-ai/eneo/pull/577)         | O1 emergency execution block                    | Merged as `b186f175`; required CI passed and the final review found no current findings.                            |
 | [#580](https://github.com/eneo-ai/eneo/pull/580)         | O1 deletion and retained-provenance closure     | Merged as `c642da49`; PostgreSQL behavior proof, documentation, required CI, and final full-coverage review passed. |
+| [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint         | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
+| [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode         | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
 | [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
 | [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                              |
 | [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge   | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
@@ -339,6 +341,15 @@ runtime-policy owner persists those organisation values and validates their
 product bounds; the current user-bound `SettingsRepository` and numeric feature
 flags are not suitable storage owners. Every change records the actor and old
 and new typed values through the existing audit owner.
+
+Selective activation seeds disabled: enabling it is an explicit administrator
+decision once the runtime exists. The attached-Skill limit carries an
+operational abuse ceiling of 1,000; the real cost guard remains the context
+percentage. Restoring defaults returns the product-standard seeds
+(disabled, 100 Skills, 10%, 10 activations) — not a deployment's migrated
+`SKILL_MAX_BINDINGS` environment seed. After the policy row exists, the
+attachment guard on Assistant, App, and Governance Policy binding writes reads
+the stored value; the environment variable is never consulted per request.
 
 The seeded values are never consulted as runtime constants after persistence.
 A count guard helps reviewability and abuse control; the context percentage
@@ -711,10 +722,13 @@ Implement #553 through these reviewable slices:
    Governance Policy bindings, backfill `always`, and prove byte-equivalent
    behavior. Do not accept `on_demand` from public writes yet.
 2. **Policy and projection:** add the typed Skill runtime policy behind the
-   existing Admin Settings route and return per-model token/capability
-   projections using the canonical LiteLLM counters. Do not use the current
-   user-bound settings row or numeric feature flags. Keep controls unavailable
-   to non-admin users.
+   existing Admin Settings route and return read-only per-model policy
+   allowances: input window, native tool-calling capability, and the token
+   allowance the stored share produces for each accessible model. The exact
+   LiteLLM-counted configuration fit belongs to save-time validation in
+   slice 5; slice 2 does not fabricate measured-looking samples. Do not use
+   the current user-bound settings row or numeric feature flags. Keep
+   controls unavailable to non-admin users.
 3. **Frozen plan and evidence:** make every existing eager turn consume one
    immutable plan; add typed, body-free activation evidence while behavior
    remains all-`always`.

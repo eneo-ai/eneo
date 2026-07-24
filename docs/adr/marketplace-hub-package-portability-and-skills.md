@@ -517,21 +517,24 @@ same context accounting as runtime and reject a configuration that cannot fit.
 Runtime repeats this check defensively. No path silently truncates Skill
 instructions.
 
-`SKILL_MAX_BINDINGS` is a configurable operational and abuse guardrail, with a
-default of 100 and a minimum of 1. It is not a claim that 100 Skills fit every
-model, and it is not a fixed package-interoperability limit. Operators may lower
-or raise it; context-fit validation remains authoritative. Packages in S2
-validate the destination's configured guardrail during planning.
+The attached-Skill guardrail is the stored tenant runtime policy's
+`max_attached_skills` value, seeded at 100 with a 1–1,000 operational range.
+The historical `SKILL_MAX_BINDINGS` environment value is consumed once by the
+policy migration as a seed and has no runtime effect afterwards. The limit is
+not a claim that 100 Skills fit every model, and it is not a fixed
+package-interoperability limit. Administrators may lower or raise the stored
+value; context-fit validation remains authoritative. Packages in S2 validate
+the destination's stored guardrail during planning.
 
 The fixed limits are limited to stable schema/interoperability constraints:
 
-| Field                      |                             Limit | Reason                                                    |
-| -------------------------- | --------------------------------: | --------------------------------------------------------- |
-| Slug                       |                     64 characters | Agent Skills name interoperability and stable coordinates |
-| Description                |                  1,024 characters | Agent Skills metadata interoperability                    |
-| Display name               |                    200 characters | Existing Eneo prompt-library convention                   |
-| Instructions               |          No character or line cap | Capacity is measured against the effective model context  |
-| Bindings per parent/policy | `SKILL_MAX_BINDINGS`, default 100 | Configurable abuse/operational guardrail                  |
+| Field                      |                                                    Limit | Reason                                                    |
+| -------------------------- | -------------------------------------------------------: | --------------------------------------------------------- |
+| Slug                       |                                            64 characters | Agent Skills name interoperability and stable coordinates |
+| Description                |                                         1,024 characters | Agent Skills metadata interoperability                    |
+| Display name               |                                           200 characters | Existing Eneo prompt-library convention                   |
+| Instructions               |                                 No character or line cap | Capacity is measured against the effective model context  |
+| Bindings per parent/policy | Stored tenant runtime policy, seeded 100 (range 1–1,000) | Administrator-managed abuse/operational guardrail         |
 
 ### Organizational Skills for personal chat
 
@@ -1134,8 +1137,8 @@ invariants are:
   bounded entry/archive bytes and install planning validates model context fit;
 - the digest is recomputed from normalized content and may repeat across different
   Skills; it never triggers automatic reuse or merge;
-- the destination's configured `SKILL_MAX_BINDINGS` guardrail is checked during
-  planning, not encoded as a universal package limit; and
+- the destination's stored runtime-policy attachment guardrail is checked
+  during planning, not encoded as a universal package limit; and
 - the package content checksum covers exact Skill content, digests, references,
   binding positions, activation modes, and the parent payload.
 
@@ -1851,9 +1854,10 @@ are not hidden work inside another delivery.
   source Space, and position are concrete, ordered, and deletion-safe. Ordinary
   sibling-Space, draft, stale-published, foreign-tenant, and semantic/automatic
   reuse or merge are rejected.
-- `SKILL_MAX_BINDINGS` defaults to 100, can be configured, and acts only as an
-  operational guardrail. The effective model context check is the capacity
-  authority and never truncates Skill text.
+- The stored tenant runtime policy owns the attached-Skill guardrail (seeded
+  at 100; the historical `SKILL_MAX_BINDINGS` environment value only seeds
+  its migration). The effective model context check is the capacity authority
+  and never truncates Skill text.
 - Skill-library and Assistant/App binding GET APIs require a session and existing
   Space/parent permissions. No dedicated Assistant/App binding PUT/POST route
   ships.
@@ -2056,7 +2060,7 @@ mock architecture.
 | Prompt/context growth causes provider failures       | Validate worst permitted combination with the effective model and shared context accounting. Reject before run; never truncate silently.                                                                                                                                         |
 | Duplicate Skill identities confuse authors           | Search/select existing local-Space and published organisation Skills and enforce unique slugs per owning Space. Keep digest non-unique and never merge by text similarity; explicit identities preserve ownership and revision history.                                          |
 | Author assumes library creation attached the Skill   | Distinguish the committed library action from the unsaved parent draft. Show attached state only after parent save succeeds; on discard/failure, explain that the valid unbound Skill remains available for reuse or explicit deletion. No hidden cleanup deletes it.            |
-| A binding cap is too low or implies false capacity   | Make `SKILL_MAX_BINDINGS` operator-configurable with default 100. Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                                         |
+| A binding cap is too low or implies false capacity   | The stored tenant runtime policy owns the cap (seeded 100, range 1–1,000, admin-managed). Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                 |
 | Knowledge import leaks or strands data               | Strict sharing policy, quarantine/scan, hidden staging, local policy, durable ingestion state, global reference fence, and cleanup_pending recovery. Disable asset-bearing publication/install while instruction-only packages remain available.                                 |
 | Hub or object-store compromise                       | Narrow roles/scopes, isolated workers, immutable release rows, append-only audit, authenticated metadata, exact digest verification, and restore drills. Revoke/yank affected releases; local content is not remotely changed. Signing requires its separate named trigger.      |
 | Hub outage                                           | Local content has no Hub runtime dependency. Marketplace reports outage/stale cache; offline package transfer remains separate.                                                                                                                                                  |

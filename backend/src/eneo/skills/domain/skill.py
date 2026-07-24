@@ -504,6 +504,77 @@ def normalize_skill_execution_block_reason(reason: str) -> str:
     return normalized
 
 
+MIN_SKILL_ATTACHMENT_LIMIT = 1
+# Operational abuse ceiling for one parent's ordered bindings; real cost is
+# governed by the context-share percentage and the selected model window.
+MAX_SKILL_ATTACHMENT_LIMIT = 1000
+MIN_SKILL_CONTEXT_SHARE_PERCENT = 1
+MAX_SKILL_CONTEXT_SHARE_PERCENT = 100
+MIN_SKILL_ACTIVATIONS_PER_TURN = 1
+# Fixed platform safety ceiling bounding prompt-injection fan-out; an
+# administrator may lower the stored value but never raise it past this.
+MAX_SKILL_ACTIVATIONS_PER_TURN = 10
+
+
+@dataclass(frozen=True)
+class SkillRuntimePolicy:
+    selective_activation_enabled: bool
+    max_attached_skills: int
+    context_share_percent: int
+    max_activations_per_turn: int
+
+    def __post_init__(self) -> None:
+        if not (
+            MIN_SKILL_ATTACHMENT_LIMIT
+            <= self.max_attached_skills
+            <= MAX_SKILL_ATTACHMENT_LIMIT
+        ):
+            raise BadRequestException(
+                "The attached-Skill limit must be between "
+                f"{MIN_SKILL_ATTACHMENT_LIMIT} and {MAX_SKILL_ATTACHMENT_LIMIT}"
+            )
+        if not (
+            MIN_SKILL_CONTEXT_SHARE_PERCENT
+            <= self.context_share_percent
+            <= MAX_SKILL_CONTEXT_SHARE_PERCENT
+        ):
+            raise BadRequestException(
+                "The Skill context share must be between "
+                f"{MIN_SKILL_CONTEXT_SHARE_PERCENT} and "
+                f"{MAX_SKILL_CONTEXT_SHARE_PERCENT} percent"
+            )
+        if not (
+            MIN_SKILL_ACTIVATIONS_PER_TURN
+            <= self.max_activations_per_turn
+            <= MAX_SKILL_ACTIVATIONS_PER_TURN
+        ):
+            raise BadRequestException(
+                "The per-turn activation limit must be between "
+                f"{MIN_SKILL_ACTIVATIONS_PER_TURN} and "
+                f"{MAX_SKILL_ACTIVATIONS_PER_TURN}"
+            )
+
+
+# Product-standard seeds. Reset restores these values, not a deployment's
+# migrated SKILL_MAX_BINDINGS environment seed.
+SKILL_RUNTIME_POLICY_DEFAULTS = SkillRuntimePolicy(
+    selective_activation_enabled=False,
+    max_attached_skills=100,
+    context_share_percent=10,
+    max_activations_per_turn=10,
+)
+
+
+@dataclass(frozen=True)
+class SkillRuntimePolicyChange:
+    old: SkillRuntimePolicy
+    new: SkillRuntimePolicy
+
+    @property
+    def changed(self) -> bool:
+        return self.old != self.new
+
+
 @dataclass(frozen=True)
 class SkillBindingReference:
     skill_id: UUID

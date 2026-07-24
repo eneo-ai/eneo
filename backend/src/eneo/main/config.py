@@ -378,10 +378,10 @@ class Settings(BaseSettings):
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
 
-    # Abuse guardrail for ordered Skill references on one Assistant, App, or
-    # governance policy. Actual usable content is constrained by the selected
-    # model's context window, not by a fixed instruction length.
-    skill_max_bindings: int = Field(default=100, ge=1)
+    # The Skill attachment guardrail lives in the stored tenant runtime
+    # policy (skill_runtime_policies). The historical SKILL_MAX_BINDINGS
+    # environment value is read once by migration 202607240310 as a seed and
+    # has no runtime effect.
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
