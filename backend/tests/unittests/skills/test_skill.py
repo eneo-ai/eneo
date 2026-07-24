@@ -18,6 +18,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     NormalizedSkillContent,
     Skill,
+    SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
     SkillExecutionBlock,
@@ -234,6 +235,20 @@ def test_zero_skills_returns_base_prompt_byte_for_byte():
     composition = compose_skill_instructions(base_instructions=base, bindings=[])
     assert composition.prompt == base
     assert composition.provenance == ()
+
+
+def test_activation_mode_is_dormant_in_composition():
+    always = [_binding(position=0, name="Payroll"), _binding(position=1, name="Leave")]
+    on_demand = [
+        replace(binding, activation_mode=SkillActivationMode.ON_DEMAND)
+        for binding in always
+    ]
+
+    assert compose_skill_instructions(
+        base_instructions="Base instructions", bindings=on_demand
+    ) == compose_skill_instructions(
+        base_instructions="Base instructions", bindings=always
+    )
 
 
 def test_composition_orders_skills_and_builds_matching_provenance():

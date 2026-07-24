@@ -194,6 +194,7 @@ class AssistantSkillBindings(BaseCrossReference):
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
+    activation_mode: Mapped[str] = mapped_column(Text, server_default="always")
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -209,6 +210,10 @@ class AssistantSkillBindings(BaseCrossReference):
         CheckConstraint(
             "position >= 0",
             name="ck_assistant_skill_bindings_position_nonnegative",
+        ),
+        CheckConstraint(
+            "activation_mode IN ('always', 'on_demand')",
+            name="ck_assistant_skill_bindings_activation_mode",
         ),
         ForeignKeyConstraint(
             ["space_id", "assistant_id"],
@@ -331,6 +336,7 @@ class GovernancePolicySkillBindings(BaseCrossReference):
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
+    activation_mode: Mapped[str] = mapped_column(Text, server_default="always")
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -346,6 +352,10 @@ class GovernancePolicySkillBindings(BaseCrossReference):
         CheckConstraint(
             "position >= 0",
             name="ck_governance_policy_skill_bindings_position_nonnegative",
+        ),
+        CheckConstraint(
+            "activation_mode IN ('always', 'on_demand')",
+            name="ck_governance_policy_skill_bindings_activation_mode",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "policy_id"],

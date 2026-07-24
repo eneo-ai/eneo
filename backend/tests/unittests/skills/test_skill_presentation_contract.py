@@ -14,6 +14,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
     SkillCatalogPage,
@@ -579,3 +580,27 @@ async def test_lost_delete_race_does_not_emit_a_second_delete_audit():
         )
 
     audit_service.log_async.assert_not_awaited()
+
+
+def test_public_binding_contracts_cannot_express_activation_mode():
+    """Slice 1 keeps the mode dormant: a client-supplied activation_mode is
+    dropped by the closed input model and no read model advertises one, so
+    the generated OpenAPI/SDK contracts stay unchanged."""
+    payload = {
+        "skill_id": str(uuid4()),
+        "skill_revision_id": str(uuid4()),
+        "activation_mode": "on_demand",
+    }
+    parsed = SkillBindingReferenceInput.model_validate(payload)
+    references = skill_binding_references_from_input([parsed])
+
+    assert not hasattr(parsed, "activation_mode")
+    assert references[0] == SkillBindingReference(
+        skill_id=parsed.skill_id,
+        skill_revision_id=parsed.skill_revision_id,
+    )
+    for public_model in (
+        skill_models.SkillBindingReferenceInput,
+        skill_models.SkillBindingSummary,
+    ):
+        assert "activation_mode" not in public_model.model_json_schema()["properties"]

@@ -247,6 +247,14 @@ class SkillBindingSource(str, Enum):
     ORGANIZATION = "organization"
 
 
+class SkillActivationMode(str, Enum):
+    """Closed Assistant/Governance Policy binding mode; Apps compose eagerly
+    and carry the fixed ALWAYS value without a persisted column."""
+
+    ALWAYS = "always"
+    ON_DEMAND = "on_demand"
+
+
 def derive_skill_publication_state(
     *,
     current_revision_number: int,
@@ -520,6 +528,7 @@ class ResolvedSkillBinding:
     is_active: bool = True
     attachable_revision_id: UUID | None = None
     attachable_revision_number: int | None = None
+    activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS
 
 
 @dataclass(frozen=True)

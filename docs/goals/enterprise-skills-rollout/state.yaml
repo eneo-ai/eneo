@@ -603,7 +603,11 @@ tasks:
       result: done
       summary: "Reconciled the remaining non-Marketplace roadmap into an implementation-ready #553-first sequence, corrected the copied discovery budget and loopback-MCP dependency, and synced the accepted contract to live Issue #553 without production edits."
       planning_pr: 581
-      planning_pr_status: "opened for CI and fresh review"
+      planning_pr_status: "squash-merged into develop"
+      planning_pr_source_head: "73beee9e9731a8444bea22d3718a61f0e279541a"
+      planning_pr_merge_commit: "677c54ca4aa0a244f51bbe77de8890ca23807536"
+      planning_pr_merged_at: "2026-07-23T22:43:40Z"
+      planning_pr_final_review: "Review 2 on 73beee9 confirmed F1 resolved with no current findings: https://github.com/eneo-ai/eneo/pull/581#issuecomment-5064240636"
       issue: "https://github.com/eneo-ai/eneo/issues/553"
       issue_updated_at: "2026-07-23T22:06:02Z"
       changed_files:
@@ -687,7 +691,37 @@ tasks:
       - "The slice requires provider-loop, token-policy, evidence, or frontend mode-control changes."
       - "A public generated input can accept on_demand before runtime exists."
       - "App bindings would gain a mode or require a compatibility branch."
-    receipt: null
+    receipt:
+      result: implemented
+      summary: "Added the dormant closed always|on_demand binding mode to Assistant and Governance Policy bindings with always backfill, retained-mode preservation on parent saves, byte-equivalent composition, and unchanged public contracts. PR #582 opened for CI and fresh review; merge pending."
+      pr: 582
+      pr_status: "opened for CI and fresh review"
+      base_commit: "677c54ca4aa0a244f51bbe77de8890ca23807536"
+      changed_files:
+        - "backend/alembic/versions/202607240115_add_skill_binding_activation_mode.py"
+        - "backend/src/eneo/database/tables/skill_table.py"
+        - "backend/src/eneo/skills/application/skill_service.py"
+        - "backend/src/eneo/skills/domain/skill.py"
+        - "backend/src/eneo/skills/infrastructure/skill_repo_impl.py"
+        - "backend/tests/integration/migrations/test_skills_schema_round_trip.py"
+        - "backend/tests/integration/skills/test_skill_catalogue_repo.py"
+        - "backend/tests/unittests/skills/"
+        - "docs/goals/enterprise-skills-rollout/state.yaml"
+      commands:
+        - cmd: "uv run pytest -n 2 -m 'not integration' tests/"
+          result: "pass: 3798 tests"
+        - cmd: "uv run pytest tests/integration/skills/"
+          result: "pass: 38 tests"
+        - cmd: "uv run pytest -m migration_isolation tests/integration/migrations/test_skills_schema_round_trip.py::test_binding_activation_mode_migration_backfills_and_round_trips -v"
+          result: "pass: PostgreSQL backfill, CHECK rejection, App-column absence, downgrade, re-upgrade"
+        - cmd: "uv run ruff check src/eneo; uv run ruff format --check src/eneo; uv run pyright; uv lock --check"
+          result: pass
+        - cmd: "app.openapi() dump + openapi-typescript regen of eneo-js schema.d.ts"
+          result: "pass: no activation_mode anywhere in the spec; zero generated-SDK drift"
+      review:
+        session: "eneo-t011-binding-modes"
+        iteration_1: ".codex/artifacts/codex-peer-loop-t011-dormant-skill-binding-activation-mode-plan-20260723T224841Z.md; changes_required, both P1 findings verified and applied"
+        iteration_2: ".codex/artifacts/codex-peer-loop-t011-dormant-skill-binding-activation-mode-implementation-20260723T234717Z.md; green, GREEN_LIGHT yes, score 8"
 
   - id: T999
     type: judge
