@@ -35,7 +35,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
 
-active_task: T011
+active_task: T012
 
 tasks:
   - id: T001
@@ -639,7 +639,7 @@ tasks:
   - id: T011
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement Task #553 slice 1 as a dormant, closed Assistant and Governance Policy binding-mode contract while preserving byte-equivalent all-always behavior."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
@@ -692,10 +692,14 @@ tasks:
       - "A public generated input can accept on_demand before runtime exists."
       - "App bindings would gain a mode or require a compatibility branch."
     receipt:
-      result: implemented
-      summary: "Added the dormant closed always|on_demand binding mode to Assistant and Governance Policy bindings with always backfill, retained-mode preservation on parent saves, byte-equivalent composition, and unchanged public contracts. PR #582 opened for CI and fresh review; merge pending."
-      pr: 582
-      pr_status: "opened for CI and fresh review"
+      result: done
+      summary: "Added the dormant closed always|on_demand binding mode to Assistant and Governance Policy bindings with always backfill, retained-mode preservation across parent saves and revision upgrades, byte-equivalent composition, and unchanged public contracts. Squash-merged PR #582."
+      merged_pr: 582
+      source_head: "abfefbf47488e495d4fd6774e9bd0e41e0214688"
+      merge_commit: "80b5f377d537f81d6da0bb4f600a464e59bf63b3"
+      merged_at: "2026-07-24T00:51:28Z"
+      github_checks: "All 15 reported checks passed on abfefbf; scope-skipped checks per change scope"
+      final_review: "Review 2 on abfefbf confirmed F1 (revision-upgrade mode reset) resolved with no current findings: https://github.com/eneo-ai/eneo/pull/582#issuecomment-5064865721"
       base_commit: "677c54ca4aa0a244f51bbe77de8890ca23807536"
       changed_files:
         - "backend/alembic/versions/202607240115_add_skill_binding_activation_mode.py"
@@ -722,6 +726,57 @@ tasks:
         session: "eneo-t011-binding-modes"
         iteration_1: ".codex/artifacts/codex-peer-loop-t011-dormant-skill-binding-activation-mode-plan-20260723T224841Z.md; changes_required, both P1 findings verified and applied"
         iteration_2: ".codex/artifacts/codex-peer-loop-t011-dormant-skill-binding-activation-mode-implementation-20260723T234717Z.md; green, GREEN_LIGHT yes, score 8"
+        iteration_3: "revision-upgrade retention fix verified in the same session; green, GREEN_LIGHT yes, score 9; P3 noted for slice 5: distinguish omitted from explicitly changed mode once public writes accept it"
+
+  - id: T012
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 2: the typed organisation Skill runtime policy with admin management, audit, and read-only per-model projections, without exposing binding modes or changing runtime behavior."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "develop at 80b5f377d537f81d6da0bb4f600a464e59bf63b3 (merged PR #582)"
+      - "docs/enterprise-skills-roadmap.md context policy and slice contract"
+      - "Issue #553 context policy section"
+      - "Current Admin Settings HTTP surface, eneo.skills owners, audit owner, and LiteLLM token owners"
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/src/eneo/settings/"
+      - "backend/src/eneo/skills/"
+      - "backend/src/eneo/audit/"
+      - "backend/src/eneo/server/routers.py"
+      - "backend/tests/integration/migrations/"
+      - "backend/tests/integration/skills/"
+      - "backend/tests/integration/settings/"
+      - "backend/tests/unittests/settings/"
+      - "backend/tests/unittests/skills/"
+      - "backend/tests/unit/"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+    constraints:
+      - "The typed policy owner lives in eneo.skills; reuse the Admin Settings HTTP surface but do not store policy in the user-bound SettingsRepository row or numeric feature flags."
+      - "Seed defaults once: selective-activation enablement, max 100 attached Skills, 10% total Skill context share, max 10 accepted activations per turn."
+      - "The activation ceiling is a hard platform bound of 10; an admin may lower it, never raise it."
+      - "Stored admin values become authoritative over runtime constants; changing them requires no code or deployment."
+      - "Audit every change with actor and typed old/new values."
+      - "Per-model token/capability projections are generated, read-only, and use the canonical LiteLLM token owners."
+      - "Non-admin callers cannot read or mutate privileged policy."
+      - "No visible binding mode, no admin UI control before runtime support, no parallel tokenizer table, character-count policy, curated model list, or generic settings framework."
+    verify:
+      - "Typed storage, seeded defaults, bounds, reset-to-defaults, and audit actor/old-new values behavior-tested"
+      - "Admin-only authorization on read and write; non-admin rejection tested"
+      - "Projection correctness against LiteLLM counters for representative models"
+      - "Migration round-trip if schema changes; Ruff, format, strict Pyright, focused suites"
+      - "Required GitHub CI, fresh /review, same-session Codex verification"
+    stop_if:
+      - "The design requires provider-loop, frozen-plan, or UI mode-control changes owned by later slices."
+      - "Policy storage cannot avoid the user-bound settings row without a generic settings framework."
+    receipt: null
 
   - id: T999
     type: judge
