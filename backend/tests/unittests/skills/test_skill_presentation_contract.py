@@ -14,6 +14,7 @@ from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     Skill,
+    SkillBindingProjection,
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
@@ -161,11 +162,17 @@ def test_skill_binding_reference_input_maps_to_named_domain_reference():
 def test_binding_summary_carries_attachable_revision_without_catalog_lookup():
     binding = _binding(position=0)
 
-    summary = SkillAssembler.binding_to_summary(binding)
+    summary = SkillAssembler.binding_to_summary(
+        SkillBindingProjection(
+            binding=binding,
+            execution_blocked=True,
+        )
+    )
 
     assert summary.attachable_revision_id == binding.attachable_revision_id
     assert summary.attachable_revision_number == binding.attachable_revision_number
     assert summary.source is SkillBindingSource.SPACE
+    assert summary.execution_blocked is True
 
 
 def test_parent_binding_projection_routes_are_get_only():

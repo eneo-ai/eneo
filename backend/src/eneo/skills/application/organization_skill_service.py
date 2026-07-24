@@ -10,6 +10,9 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     NormalizedSkillContent,
+    OrganizationSkillProjection,
+    OrganizationSkillSummaryProjection,
+    OrganizationSkillSummaryProjectionPage,
     PublishedSkill,
     PublishedSkillDeletionError,
     PublishedSkillSummaryPage,
@@ -25,7 +28,6 @@ from eneo.skills.domain.skill import (
     SkillRevisionPage,
     SkillRevisionRestore,
     SkillSlugConflictError,
-    SkillSummaryPage,
     parse_skill_revision_cursor,
     validate_skill_slug,
 )
@@ -104,7 +106,7 @@ class OrganizationSkillService:
         limit: int,
         cursor: str | None,
         search: str | None = None,
-    ) -> SkillSummaryPage:
+    ) -> OrganizationSkillSummaryProjectionPage:
         self._require_admin()
         normalized_search = search.strip() if search else None
         summaries = await self.repo.list_organization_for_tenant(
@@ -114,8 +116,22 @@ class OrganizationSkillService:
             search=normalized_search or None,
         )
         visible = summaries[:limit]
-        return SkillSummaryPage(
-            items=tuple(visible),
+        blocks = (
+            await self.repo.list_active_execution_blocks(
+                tenant_id=self.user.tenant_id,
+                skill_ids=[summary.id for summary in visible],
+            )
+            if visible
+            else {}
+        )
+        return OrganizationSkillSummaryProjectionPage(
+            items=tuple(
+                OrganizationSkillSummaryProjection(
+                    skill=summary,
+                    execution_blocked=summary.id in blocks,
+                )
+                for summary in visible
+            ),
             limit=limit,
             next_cursor=(
                 visible[-1].slug if len(summaries) > limit and visible else None
@@ -131,6 +147,28 @@ class OrganizationSkillService:
         if skill is None:
             raise NotFoundException()
         return skill
+
+    async def project_organization_skill(
+        self,
+        *,
+        skill: Skill,
+    ) -> OrganizationSkillProjection:
+        blocks = await self.repo.list_active_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            skill_ids=[skill.id],
+        )
+        return OrganizationSkillProjection(
+            skill=skill,
+            execution_blocked=skill.id in blocks,
+        )
+
+    async def get_organization_skill_projection(
+        self,
+        *,
+        skill_id: UUID,
+    ) -> OrganizationSkillProjection:
+        skill = await self.get_organization_skill(skill_id=skill_id)
+        return await self.project_organization_skill(skill=skill)
 
     async def get_adoption_projection(
         self,

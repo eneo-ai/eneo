@@ -134,7 +134,7 @@ async def get_governance_policy(container: _ContainerWithUser):
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
     policy = await service.get_policy()
-    skill_bindings = await service.get_skill_bindings(policy)
+    skill_bindings = await service.get_skill_binding_projections(policy)
     return assembler.to_public(policy, skill_bindings)
 
 
@@ -239,4 +239,5 @@ async def update_governance_policy(
                 extra={"scope": policy.scope.value},
             ),
         )
-    return assembler.to_public(policy, after_skills)
+    skill_projections = await service.get_skill_binding_projections(policy)
+    return assembler.to_public(policy, skill_projections)

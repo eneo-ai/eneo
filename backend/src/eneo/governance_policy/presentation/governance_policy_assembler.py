@@ -15,7 +15,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     PromptEnforcementPublic,
     SkillsPolicyPublic,
 )
-from eneo.skills.domain.skill import ResolvedSkillBinding
+from eneo.skills.domain.skill import SkillBindingProjection
 from eneo.skills.presentation.skill_assembler import SkillAssembler
 
 
@@ -23,7 +23,7 @@ class GovernancePolicyAssembler:
     @staticmethod
     def to_public(
         policy: GovernancePolicy,
-        skill_bindings: list[ResolvedSkillBinding] | None = None,
+        skill_bindings: list[SkillBindingProjection] | None = None,
     ) -> GovernancePolicyPublic:
         return GovernancePolicyPublic(
             models_restriction=ModelsRestrictionPublic(

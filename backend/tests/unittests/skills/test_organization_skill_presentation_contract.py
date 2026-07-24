@@ -9,6 +9,8 @@ from fastapi.routing import APIRoute
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.skills.domain.skill import (
+    OrganizationSkillProjection,
+    OrganizationSkillSummaryProjection,
     PublishedSkill,
     PublishedSkillSummary,
     Skill,
@@ -210,10 +212,16 @@ def test_management_summary_exposes_status_without_instruction_bodies():
         first_published_at=skill.first_published_at,
     )
 
-    public = SkillAssembler.organization_summary_to_public(summary)
+    public = SkillAssembler.organization_summary_to_public(
+        OrganizationSkillSummaryProjection(
+            skill=summary,
+            execution_blocked=True,
+        )
+    )
 
     assert public.publication_state is SkillPublicationState.PUBLISHED
     assert public.published_revision_number == 2
+    assert public.execution_blocked is True
     assert not hasattr(public, "instructions")
     assert not hasattr(public, "current_revision")
 
@@ -314,7 +322,13 @@ async def test_publish_audit_records_revision_identity_without_instruction_body(
                 previous_published_revision_number=None,
                 previous_is_active=True,
             )
-        )
+        ),
+        project_organization_skill=AsyncMock(
+            return_value=OrganizationSkillProjection(
+                skill=skill,
+                execution_blocked=False,
+            )
+        ),
     )
     audit_service = SimpleNamespace(log_async=AsyncMock())
     user = SimpleNamespace(

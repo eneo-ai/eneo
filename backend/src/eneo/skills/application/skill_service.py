@@ -18,6 +18,7 @@ from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     ResolvedSkillBinding,
     Skill,
+    SkillBindingProjection,
     SkillBindingReference,
     SkillCatalogPage,
     SkillComposition,
@@ -458,6 +459,23 @@ class SkillService:
             ],
         )
 
+    async def _reject_blocked_references(
+        self,
+        *,
+        tenant_id: UUID,
+        references: list[SkillBindingReference],
+    ) -> None:
+        if not references:
+            return
+        blocks = await self.repo.list_active_execution_blocks(
+            tenant_id=tenant_id,
+            skill_ids=[reference.skill_id for reference in references],
+        )
+        if blocks:
+            raise BadRequestException(
+                "Blocked organisation Skills cannot receive new or changed bindings"
+            )
+
     @classmethod
     def _order_resolved_bindings(
         cls,
@@ -509,6 +527,10 @@ class SkillService:
             parent_space_id=space_id,
             references=references,
             existing=existing,
+        )
+        await self._reject_blocked_references(
+            tenant_id=tenant_id,
+            references=new_references,
         )
         local = (
             []
@@ -563,6 +585,10 @@ class SkillService:
             references=references,
             existing=existing,
         )
+        await self._reject_blocked_references(
+            tenant_id=self.user.tenant_id,
+            references=new_references,
+        )
         published = (
             await self.repo.resolve_published_references_for_binding_update(
                 tenant_id=self.user.tenant_id,
@@ -602,6 +628,21 @@ class SkillService:
                 )
             return []
         return bindings
+
+    async def list_assistant_binding_projections(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+    ) -> list[SkillBindingProjection]:
+        bindings = await self.list_assistant_bindings(
+            space_id=space_id,
+            assistant_id=assistant_id,
+        )
+        return await self._project_bindings(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
 
     async def replace_assistant_bindings(
         self,
@@ -662,6 +703,21 @@ class SkillService:
                 "You do not have permission to read Skills in this Space"
             )
         return await self.repo.list_app_bindings(app_id=app_id)
+
+    async def list_app_binding_projections(
+        self,
+        *,
+        space_id: UUID,
+        app_id: UUID,
+    ) -> list[SkillBindingProjection]:
+        bindings = await self.list_app_bindings(
+            space_id=space_id,
+            app_id=app_id,
+        )
+        return await self._project_bindings(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
 
     async def replace_app_bindings(
         self,
@@ -735,16 +791,47 @@ class SkillService:
         validate_permission(self.user, Permission.ADMIN)
         return await self.repo.list_policy_bindings(policy_id=policy_id)
 
+    async def list_governance_binding_projections(
+        self,
+        *,
+        policy_id: UUID,
+    ) -> list[SkillBindingProjection]:
+        bindings = await self.list_governance_bindings(policy_id=policy_id)
+        return await self._project_bindings(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
+
     async def _active_execution_blocks(
         self,
         *,
         tenant_id: UUID,
         bindings: list[ResolvedSkillBinding],
     ) -> dict[UUID, SkillExecutionBlock]:
+        if not bindings:
+            return {}
         return await self.repo.list_active_execution_blocks(
             tenant_id=tenant_id,
             skill_ids=[binding.skill_id for binding in bindings],
         )
+
+    async def _project_bindings(
+        self,
+        *,
+        tenant_id: UUID,
+        bindings: list[ResolvedSkillBinding],
+    ) -> list[SkillBindingProjection]:
+        blocks = await self._active_execution_blocks(
+            tenant_id=tenant_id,
+            bindings=bindings,
+        )
+        return [
+            SkillBindingProjection(
+                binding=binding,
+                execution_blocked=binding.skill_id in blocks,
+            )
+            for binding in bindings
+        ]
 
     async def _resolve_execution_blocks(
         self,

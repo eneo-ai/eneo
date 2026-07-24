@@ -135,6 +135,8 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
     repo = repo or AsyncMock()
     repo.lock_assistant_space_for_update.return_value = space.id
     repo.lock_app_for_binding_update.return_value = True
+    if not isinstance(repo.list_active_execution_blocks.return_value, dict):
+        repo.list_active_execution_blocks.return_value = {}
     repo.get_or_seed_runtime_policy.return_value = SKILL_RUNTIME_POLICY_DEFAULTS
     return SkillService(
         user=user,
@@ -655,6 +657,165 @@ async def test_resource_binding_resolves_local_and_published_catalogue_skills(
     repo.resolve_published_references_for_binding_update.assert_awaited_once_with(
         tenant_id=space.tenant_id,
         references=[_binding_reference(published)],
+    )
+
+
+@pytest.mark.parametrize("owner", ["assistant", "app", "governance"])
+async def test_blocked_organization_skill_cannot_receive_new_binding(owner: str):
+    space = _space(organization=owner == "governance")
+    blocked = _binding()
+    repo = AsyncMock()
+    repo.list_active_execution_blocks.return_value = {blocked.skill_id: MagicMock()}
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Blocked organisation Skills cannot receive new or changed bindings",
+    ):
+        if owner == "assistant":
+            await service.replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=space.assistant.id,
+                references=[_binding_reference(blocked)],
+            )
+        elif owner == "app":
+            await service.replace_app_bindings(
+                space_id=space.id,
+                app_id=space.app.id,
+                references=[_binding_reference(blocked)],
+            )
+        else:
+            await service.replace_governance_bindings(
+                policy_id=uuid4(),
+                organization_space_id=space.id,
+                references=[_binding_reference(blocked)],
+            )
+
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
+    repo.resolve_published_references_for_binding_update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("owner", ["assistant", "app", "governance"])
+async def test_blocked_organization_skill_cannot_change_revision(owner: str):
+    space = _space(organization=owner == "governance")
+    existing = _binding()
+    changed = _binding(skill_id=existing.skill_id)
+    repo = AsyncMock()
+    repo.list_active_execution_blocks.return_value = {changed.skill_id: MagicMock()}
+    if owner == "assistant":
+        repo.list_assistant_bindings.return_value = [existing]
+    elif owner == "app":
+        repo.list_app_bindings.return_value = [existing]
+    else:
+        repo.list_policy_bindings.return_value = [existing]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Blocked organisation Skills cannot receive new or changed bindings",
+    ):
+        if owner == "assistant":
+            await service.replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=space.assistant.id,
+                references=[_binding_reference(changed)],
+            )
+        elif owner == "app":
+            await service.replace_app_bindings(
+                space_id=space.id,
+                app_id=space.app.id,
+                references=[_binding_reference(changed)],
+            )
+        else:
+            await service.replace_governance_bindings(
+                policy_id=uuid4(),
+                organization_space_id=space.id,
+                references=[_binding_reference(changed)],
+            )
+
+    repo.resolve_local_references_for_binding_update.assert_not_awaited()
+    repo.resolve_published_references_for_binding_update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("owner", ["assistant", "app", "governance"])
+async def test_blocked_retained_bindings_can_be_reordered(owner: str):
+    space = _space(organization=owner == "governance")
+    first = _binding(position=0)
+    second = _binding(position=1)
+    repo = AsyncMock()
+    repo.resolve_bound_references_for_binding_update.return_value = [second, first]
+    if owner == "assistant":
+        repo.list_assistant_bindings.return_value = [first, second]
+    elif owner == "app":
+        repo.list_app_bindings.return_value = [first, second]
+    else:
+        repo.list_policy_bindings.return_value = [first, second]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+    reversed_references = [_binding_reference(second), _binding_reference(first)]
+
+    if owner == "assistant":
+        result = await service.replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=space.assistant.id,
+            references=reversed_references,
+        )
+    elif owner == "app":
+        result = await service.replace_app_bindings(
+            space_id=space.id,
+            app_id=space.app.id,
+            references=reversed_references,
+        )
+    else:
+        result = await service.replace_governance_bindings(
+            policy_id=uuid4(),
+            organization_space_id=space.id,
+            references=reversed_references,
+        )
+
+    assert [binding.skill_id for binding in result] == [second.skill_id, first.skill_id]
+    assert [binding.position for binding in result] == [0, 1]
+    repo.list_active_execution_blocks.assert_not_awaited()
+
+
+async def test_assistant_binding_projection_derives_block_state_for_current_tenant():
+    space = _space()
+    blocked = _binding(position=0)
+    available = _binding(position=1)
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [blocked, available]
+    repo.list_active_execution_blocks.return_value = {
+        blocked.skill_id: MagicMock(skill_id=blocked.skill_id)
+    }
+    service = _service(space=space, repo=repo)
+
+    projections = await service.list_assistant_binding_projections(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+    )
+
+    assert [projection.binding for projection in projections] == [
+        blocked,
+        available,
+    ]
+    assert [projection.execution_blocked for projection in projections] == [
+        True,
+        False,
+    ]
+    repo.list_active_execution_blocks.assert_awaited_once_with(
+        tenant_id=space.tenant_id,
+        skill_ids=[blocked.skill_id, available.skill_id],
     )
 
 

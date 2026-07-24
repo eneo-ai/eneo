@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         PromptLibraryService,
     )
     from eneo.skills.application.skill_service import SkillService
-    from eneo.skills.domain.skill import ResolvedSkillBinding
+    from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingProjection
     from eneo.spaces.space_service import SpaceService
 
 
@@ -65,6 +65,16 @@ class GovernancePolicyService:
         if policy.id is None:
             return []
         return await self.skill_service.list_governance_bindings(policy_id=policy.id)
+
+    async def get_skill_binding_projections(
+        self,
+        policy: GovernancePolicy,
+    ) -> list["SkillBindingProjection"]:
+        if policy.id is None:
+            return []
+        return await self.skill_service.list_governance_binding_projections(
+            policy_id=policy.id
+        )
 
     async def get_policy(self) -> GovernancePolicy:
         """Get the tenant's policy, auto-creating an empty one if none exists.
