@@ -35,6 +35,7 @@ def _make_repo_mock() -> AsyncMock:
 import pytest
 from litellm.exceptions import BadRequestError, RateLimitError
 
+from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -167,6 +168,7 @@ def _make_user(
     user = MagicMock()
     user.id = user_id or uuid4()
     user.tenant_id = tenant_id or uuid4()
+    user.active_api_key = None
     return user
 
 
@@ -852,7 +854,93 @@ class TestSessionRecovery:
 
         assert result[0].draft_title == "Recovered Draft"
         assert result[0].space_id == session.space_id
+        repo.list_sessions_with_draft_titles.assert_awaited_once_with(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            actor_user_group_ids=user.user_groups_ids,
+            scoped_space_id=None,
+        )
         repo.get_plan.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_list_sessions_preserves_read_only_api_key_edit_constraint(self):
+        user = _make_user()
+        user.active_api_key = MagicMock(permission=ApiKeyPermission.READ)
+        repo = AsyncMock()
+        repo.list_sessions_with_draft_titles.return_value = []
+        service = _make_service(user=user, repo=repo)
+
+        assert await service.list_sessions() == []
+        repo.list_sessions_with_draft_titles.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("scope_type", "space_lookup"),
+        [
+            ("assistant", "get_space_by_assistant"),
+            ("app", "get_space_by_app"),
+        ],
+    )
+    async def test_list_sessions_preserves_resource_scope_constraint(
+        self,
+        scope_type: str,
+        space_lookup: str,
+    ):
+        user = _make_user()
+        resource_id = uuid4()
+        user.active_api_key = MagicMock(
+            permission=ApiKeyPermission.WRITE,
+            scope_type=ApiKeyScopeType(scope_type),
+            scope_id=resource_id,
+        )
+        repo = AsyncMock()
+        repo.list_sessions_with_draft_titles.return_value = []
+        space_service = _make_space_service()
+        scoped_space_id = uuid4()
+        lookup = getattr(space_service, space_lookup)
+        lookup.return_value.id = scoped_space_id
+        service = _make_service(user=user, repo=repo, space_service=space_service)
+
+        assert await service.list_sessions() == []
+
+        repo.list_sessions_with_draft_titles.assert_awaited_once_with(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            actor_user_group_ids=user.user_groups_ids,
+            scoped_space_id=scoped_space_id,
+        )
+        lookup.assert_awaited_once_with(resource_id)
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("scope_type", "scope_id"),
+        [
+            (ApiKeyScopeType.SPACE, uuid4()),
+            (ApiKeyScopeType.TENANT, None),
+        ],
+    )
+    async def test_list_sessions_preserves_space_and_tenant_scope_constraints(
+        self,
+        scope_type: ApiKeyScopeType,
+        scope_id: UUID | None,
+    ):
+        user = _make_user()
+        user.active_api_key = MagicMock(
+            permission=ApiKeyPermission.WRITE,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        repo = AsyncMock()
+        repo.list_sessions_with_draft_titles.return_value = []
+        service = _make_service(user=user, repo=repo)
+
+        assert await service.list_sessions() == []
+        repo.list_sessions_with_draft_titles.assert_awaited_once_with(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            actor_user_group_ids=user.user_groups_ids,
+            scoped_space_id=scope_id,
+        )
 
     @pytest.mark.anyio
     async def test_list_sessions_keeps_sessions_without_latest_plan_title(self):

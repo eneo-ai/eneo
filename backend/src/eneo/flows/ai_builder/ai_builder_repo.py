@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
@@ -12,12 +12,21 @@ import sqlalchemy as sa
 from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.actors.actors.space_actor import (
+    ORG_SPACE_PERMISSIONS,
+    SHARED_SPACE_PERMISSIONS,
+    SpaceAction,
+    SpaceResourceType,
+    SpaceRole,
+)
 from eneo.database.tables.flow_tables import (
     BuilderPlans,
     BuilderSessionFiles,
     BuilderSessions,
 )
+from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -116,6 +125,38 @@ def _terminal_turn_state_after_lock_clear() -> sa.ColumnElement[str | None]:
         select(state_mapping.c.terminal_state)
         .where(state_mapping.c.stored_state == BuilderSessions.latest_turn_state)
         .scalar_subquery()
+    )
+
+
+def _space_role_membership_exists(
+    *,
+    actor_user_id: UUID,
+    actor_user_group_ids: set[UUID],
+    roles: tuple[str, ...],
+) -> ColumnElement[bool]:
+    direct_role = sa.exists().where(
+        SpacesUsers.space_id == Spaces.id,
+        SpacesUsers.user_id == actor_user_id,
+        SpacesUsers.role.in_(roles),
+    )
+    if not actor_user_group_ids:
+        return direct_role
+
+    group_role = sa.exists().where(
+        SpacesUserGroups.space_id == Spaces.id,
+        SpacesUserGroups.user_group_id.in_(actor_user_group_ids),
+        SpacesUserGroups.role.in_(roles),
+    )
+    return sa.or_(direct_role, group_role)
+
+
+def _roles_allowing_flow_edit(
+    permissions: Mapping[SpaceRole, Mapping[SpaceResourceType, set[SpaceAction]]],
+) -> tuple[str, ...]:
+    return tuple(
+        role.value
+        for role, resources in permissions.items()
+        if SpaceAction.EDIT in resources.get(SpaceResourceType.FLOW, set())
     )
 
 
@@ -233,6 +274,8 @@ class AIBuilderRepository:
         *,
         tenant_id: UUID,
         actor_user_id: UUID,
+        actor_user_group_ids: set[UUID],
+        scoped_space_id: UUID | None,
         limit: int = 20,
     ) -> list[tuple[BuilderSession, str | None]]:
         async with self._transaction():
@@ -255,6 +298,16 @@ class AIBuilderRepository:
                 plan_flow_name,
                 first_user_message,
             ).label("draft_title")
+            editable_membership = _space_role_membership_exists(
+                actor_user_id=actor_user_id,
+                actor_user_group_ids=actor_user_group_ids,
+                roles=_roles_allowing_flow_edit(SHARED_SPACE_PERMISSIONS),
+            )
+            admin_membership = _space_role_membership_exists(
+                actor_user_id=actor_user_id,
+                actor_user_group_ids=actor_user_group_ids,
+                roles=_roles_allowing_flow_edit(ORG_SPACE_PERMISSIONS),
+            )
             stmt = (
                 select(
                     BuilderSessions,
@@ -269,12 +322,42 @@ class AIBuilderRepository:
                         BuilderPlans.tenant_id == BuilderSessions.tenant_id,
                     ),
                 )
+                .join(
+                    Spaces,
+                    sa.and_(
+                        Spaces.id == BuilderSessions.space_id,
+                        Spaces.tenant_id == BuilderSessions.tenant_id,
+                    ),
+                )
                 .where(
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
+                    Spaces.tenant_id == tenant_id,
+                    # Personal access is ownership-backed; shared and organization
+                    # access is membership-backed by their canonical ACL maps.
+                    sa.or_(
+                        Spaces.user_id == actor_user_id,
+                        sa.and_(
+                            Spaces.user_id.is_(None),
+                            Spaces.tenant_space_id.is_not(None),
+                            editable_membership,
+                        ),
+                        sa.and_(
+                            Spaces.user_id.is_(None),
+                            Spaces.tenant_space_id.is_(None),
+                            admin_membership,
+                        ),
+                    ),
+                    (
+                        BuilderSessions.space_id == scoped_space_id
+                        if scoped_space_id is not None
+                        else sa.true()
+                    ),
                 )
                 .order_by(
-                    BuilderSessions.updated_at.desc(), BuilderSessions.created_at.desc()
+                    BuilderSessions.updated_at.desc(),
+                    BuilderSessions.created_at.desc(),
+                    BuilderSessions.id.desc(),
                 )
                 .limit(limit)
             )

@@ -13,6 +13,7 @@ from uuid import UUID
 import litellm
 from pydantic import ValidationError
 
+from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse,
@@ -79,6 +80,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionTurnPreflight
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.main.exceptions import NotFoundException
 from eneo.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
 )
@@ -293,9 +295,42 @@ class AIBuilderService:
             raise
 
     async def list_sessions(self) -> list[SessionListItemResponse]:
+        active_api_key = self.user.active_api_key
+        scoped_space_id: UUID | None = None
+        if active_api_key is not None:
+            if active_api_key.permission not in {
+                ApiKeyPermission.WRITE,
+                ApiKeyPermission.ADMIN,
+            }:
+                return []
+
+            scope_type = active_api_key.scope_type
+            scope_id = active_api_key.scope_id
+            if scope_type != ApiKeyScopeType.TENANT and scope_id is None:
+                return []
+            if scope_type == ApiKeyScopeType.SPACE:
+                scoped_space_id = scope_id
+            elif scope_type in {ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP}:
+                if scope_id is None:
+                    return []
+                try:
+                    if scope_type == ApiKeyScopeType.ASSISTANT:
+                        space = await self.space_service.get_space_by_assistant(
+                            scope_id
+                        )
+                    else:
+                        space = await self.space_service.get_space_by_app(scope_id)
+                except NotFoundException:
+                    return []
+                scoped_space_id = space.id
+            elif scope_type != ApiKeyScopeType.TENANT:
+                return []
+
         sessions = await self.repo.list_sessions_with_draft_titles(
             tenant_id=self.user.tenant_id,
             actor_user_id=self.user.id,
+            actor_user_group_ids=self.user.user_groups_ids,
+            scoped_space_id=scoped_space_id,
         )
         return [
             (

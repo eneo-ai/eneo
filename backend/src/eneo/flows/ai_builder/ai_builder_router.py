@@ -107,7 +107,6 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
-    ai_builder_scoped_space_id,
     require_ai_builder_space_scope,
     require_flow_action,
 )
@@ -256,7 +255,6 @@ ContainerWithUserExplicitTransactionDep = Annotated[
 @dataclass(frozen=True)
 class AIBuilderAuthorization:
     space: "Space | None" = None
-    scoped_space_id: UUID | None = None
 
 
 async def _coerce_event_stream(
@@ -308,9 +306,7 @@ async def _authorize_ai_builder_request(
     scope_filter = get_scope_filter(request)
 
     if filter_mode == FlowAccessFilterMode.VISIBLE:
-        return AIBuilderAuthorization(
-            scoped_space_id=ai_builder_scoped_space_id(scope_filter)
-        )
+        return AIBuilderAuthorization()
 
     if space_id is None:
         if require_creator and session is not None:
@@ -709,7 +705,7 @@ async def list_sessions(
     request: Request,
     container: ContainerWithUserDep,
 ) -> SessionListResponse:
-    authorization = await _authorize_ai_builder_request(
+    await _authorize_ai_builder_request(
         request,
         container,
         action=FlowApiAction.BUILDER_SESSION_LIST,
@@ -717,32 +713,7 @@ async def list_sessions(
     )
     service = _get_ai_builder_service(container)
     sessions: list[SessionListItemResponse] = await service.list_sessions()
-    scoped_space_id = authorization.scoped_space_id
-
-    visible_sessions: list[SessionListItemResponse] = []
-    for session in sessions:
-        if scoped_space_id is not None and session.space_id != scoped_space_id:
-            continue
-        try:
-            space = await container.space_service().get_space(session.space_id)
-        except NotFoundException:
-            logger.warning(
-                "Skipping AI builder session because its space could not be loaded.",
-                extra={
-                    "session_id": str(session.session_id),
-                    "space_id": str(session.space_id),
-                },
-                exc_info=True,
-            )
-            continue
-
-        try:
-            _ensure_space_flow_edit_permission(container, space)
-        except UnauthorizedException:
-            continue
-        visible_sessions.append(session)
-
-    return SessionListResponse(sessions=visible_sessions)
+    return SessionListResponse(sessions=sessions)
 
 
 @router.post(

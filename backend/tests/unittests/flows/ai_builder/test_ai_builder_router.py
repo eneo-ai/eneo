@@ -92,7 +92,6 @@ from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.main.exceptions import (
     BadRequestException,
     ErrorCodes,
-    NotFoundException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
@@ -1269,105 +1268,30 @@ class TestGetSessionEndpoint:
 
 class TestListSessionsEndpoint:
     @pytest.mark.anyio
-    async def test_returns_visible_sessions(self):
-        container = _make_container()
-        service = container.ai_builder_service.return_value
-        session = SessionListItemResponse(
-            session_id=uuid4(),
-            space_id=uuid4(),
-            status=SessionStatus.CHATTING,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-            latest_plan_id=None,
-            draft_title="Draft",
-        )
-        service.list_sessions.return_value = [session]
-
-        result = await list_sessions(request=MagicMock(), container=container)
-
-        assert isinstance(result, SessionListResponse)
-        assert result.sessions == [session]
-        container.space_service.return_value.get_space.assert_awaited_once_with(
-            session.space_id
-        )
-
-    @pytest.mark.anyio
-    async def test_filters_sessions_for_scoped_api_key(self):
+    async def test_returns_repository_scoped_sessions_without_loading_spaces(self):
         container = _make_container()
         scoped_space_id = uuid4()
-        allowed_session = SessionListItemResponse(
+        service = container.ai_builder_service.return_value
+        session = SessionListItemResponse(
             session_id=uuid4(),
             space_id=scoped_space_id,
             status=SessionStatus.CHATTING,
             target_kind=TargetKind.CREATE,
             flow_id=None,
             latest_plan_id=None,
-            draft_title="Allowed draft",
+            draft_title="Draft",
         )
-        hidden_session = SessionListItemResponse(
-            session_id=uuid4(),
-            space_id=uuid4(),
-            status=SessionStatus.CHATTING,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-            latest_plan_id=None,
-            draft_title="Hidden draft",
-        )
-        service = container.ai_builder_service.return_value
-        service.list_sessions.return_value = [allowed_session, hidden_session]
+        service.list_sessions.return_value = [session]
 
         result = await list_sessions(
             request=_make_request(scoped_space_id=scoped_space_id),
             container=container,
         )
 
-        assert result.sessions == [allowed_session]
-        container.space_service.return_value.get_space.assert_awaited_once_with(
-            allowed_session.space_id
-        )
-
-    @pytest.mark.anyio
-    async def test_hides_sessions_when_space_lookup_is_not_found(self):
-        container = _make_container()
-        session = SessionListItemResponse(
-            session_id=uuid4(),
-            space_id=uuid4(),
-            status=SessionStatus.CHATTING,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-            latest_plan_id=None,
-            draft_title="Draft",
-        )
-        service = container.ai_builder_service.return_value
-        service.list_sessions.return_value = [session]
-        container.space_service.return_value.get_space.side_effect = NotFoundException(
-            "missing"
-        )
-
-        result = await list_sessions(request=MagicMock(), container=container)
-
-        assert result.sessions == []
-
-    @pytest.mark.anyio
-    async def test_list_sessions_propagates_unexpected_space_lookup_errors(self):
-        container = _make_container()
-        session = SessionListItemResponse(
-            session_id=uuid4(),
-            space_id=uuid4(),
-            status=SessionStatus.CHATTING,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-            latest_plan_id=None,
-            draft_title="Draft",
-        )
-        service = container.ai_builder_service.return_value
-        service.list_sessions.return_value = [session]
-        container.space_service.return_value.get_space.side_effect = RuntimeError(
-            "db down"
-        )
-
-        with pytest.raises(RuntimeError, match="db down"):
-            await list_sessions(request=MagicMock(), container=container)
+        assert isinstance(result, SessionListResponse)
+        assert result.sessions == [session]
+        service.list_sessions.assert_awaited_once_with()
+        container.space_service.return_value.get_space.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_rejects_list_sessions_without_required_permissions(self):

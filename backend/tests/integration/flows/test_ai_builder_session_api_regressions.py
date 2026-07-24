@@ -20,7 +20,7 @@ from litellm.exceptions import (
     Timeout,
 )
 from pydantic import ValidationError
-from sqlalchemy import insert, select, update
+from sqlalchemy import event, insert, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette import ServerSentEvent
@@ -57,8 +57,12 @@ from eneo.database.tables.spaces_table import (
     Spaces,
     SpacesCompletionModels,
     SpacesTranscriptionModels,
+    SpacesUserGroups,
+    SpacesUsers,
 )
 from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.user_groups_table import UserGroups
+from eneo.database.tables.users_table import usergroups_users_table
 from eneo.flows.ai_builder import ai_builder_error_contract as error_contract_module
 from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
@@ -1415,12 +1419,336 @@ async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_n
         sessions = await repo.list_sessions_with_draft_titles(
             tenant_id=tenant_id,
             actor_user_id=admin_user.id,
+            actor_user_group_ids=admin_user.user_groups_ids,
+            scoped_space_id=None,
         )
 
     assert [(session.id, title) for session, title in sessions] == [
         (empty_session_id, None),
         (planless_session_id, "Sammanfatta veckans inkomna rapporter"),
         (session_id, "Testplan"),
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_session_list_filters_access_before_limit_in_one_query(
+    client,
+    bearer_token,
+    db_container,
+    admin_user,
+):
+    tenant_id = admin_user.tenant_id
+    actor_user_id = admin_user.id
+    now = datetime.now(timezone.utc)
+
+    async with db_container() as container:
+        database_session = container.session()
+        personal_space_id = await database_session.scalar(
+            select(Spaces.id).where(
+                Spaces.tenant_id == tenant_id,
+                Spaces.user_id == actor_user_id,
+            )
+        )
+        if personal_space_id is None:
+            personal_space = Spaces(
+                tenant_id=tenant_id,
+                user_id=actor_user_id,
+                name="Builder list personal owner",
+            )
+            database_session.add(personal_space)
+            await database_session.flush()
+            personal_space_id = personal_space.id
+
+        organization_space_id = await database_session.scalar(
+            select(Spaces.id).where(
+                Spaces.tenant_id == tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization_space_id is not None
+        organization_membership = await database_session.scalar(
+            select(SpacesUsers).where(
+                SpacesUsers.space_id == organization_space_id,
+                SpacesUsers.user_id == actor_user_id,
+            )
+        )
+        if organization_membership is None:
+            organization_membership = SpacesUsers(
+                space_id=organization_space_id,
+                user_id=actor_user_id,
+                role="admin",
+            )
+            database_session.add(organization_membership)
+        else:
+            organization_membership.role = "admin"
+
+        editor_space = Spaces(
+            tenant_id=tenant_id,
+            tenant_space_id=organization_space_id,
+            name="Builder list editor",
+        )
+        admin_space = Spaces(
+            tenant_id=tenant_id,
+            tenant_space_id=organization_space_id,
+            name="Builder list admin",
+        )
+        viewer_space = Spaces(
+            tenant_id=tenant_id,
+            tenant_space_id=organization_space_id,
+            name="Builder list viewer",
+        )
+        group_space = Spaces(
+            tenant_id=tenant_id,
+            tenant_space_id=organization_space_id,
+            name="Builder list group editor",
+        )
+        overlap_space = Spaces(
+            tenant_id=tenant_id,
+            tenant_space_id=organization_space_id,
+            name="Builder list overlapping editor",
+        )
+        database_session.add_all(
+            [editor_space, admin_space, viewer_space, group_space, overlap_space]
+        )
+        await database_session.flush()
+        database_session.add_all(
+            [
+                SpacesUsers(
+                    space_id=editor_space.id,
+                    user_id=actor_user_id,
+                    role="editor",
+                ),
+                SpacesUsers(
+                    space_id=admin_space.id,
+                    user_id=actor_user_id,
+                    role="admin",
+                ),
+                SpacesUsers(
+                    space_id=viewer_space.id,
+                    user_id=actor_user_id,
+                    role="viewer",
+                ),
+            ]
+        )
+        editor_group = UserGroups(
+            name=f"builder-list-editors-{uuid4().hex}",
+            tenant_id=tenant_id,
+        )
+        database_session.add(editor_group)
+        await database_session.flush()
+        await database_session.execute(
+            insert(usergroups_users_table).values(
+                user_id=actor_user_id,
+                user_group_id=editor_group.id,
+            )
+        )
+        database_session.add(
+            SpacesUserGroups(
+                space_id=group_space.id,
+                user_group_id=editor_group.id,
+                role="editor",
+            )
+        )
+        database_session.add(
+            SpacesUserGroups(
+                space_id=overlap_space.id,
+                user_group_id=editor_group.id,
+                role="editor",
+            )
+        )
+        # Overlapping direct and group edit grants must still yield one session row.
+        database_session.add(
+            SpacesUsers(
+                space_id=overlap_space.id,
+                user_id=actor_user_id,
+                role="editor",
+            )
+        )
+
+        equal_created_at = now - timedelta(hours=3)
+        visible_session_ids = [
+            UUID("00000000-0000-0000-0000-000000000002"),
+            UUID("00000000-0000-0000-0000-000000000001"),
+        ]
+        visible_sessions = [
+            BuilderSessions(
+                id=visible_session_ids[0],
+                tenant_id=tenant_id,
+                space_id=editor_space.id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=equal_created_at,
+                updated_at=equal_created_at,
+            ),
+            BuilderSessions(
+                id=visible_session_ids[1],
+                tenant_id=tenant_id,
+                space_id=admin_space.id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=equal_created_at,
+                updated_at=equal_created_at,
+            ),
+            BuilderSessions(
+                tenant_id=tenant_id,
+                space_id=group_space.id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=now - timedelta(hours=4),
+                updated_at=now - timedelta(hours=4),
+            ),
+            BuilderSessions(
+                tenant_id=tenant_id,
+                space_id=overlap_space.id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=now - timedelta(hours=4, minutes=15),
+                updated_at=now - timedelta(hours=4, minutes=15),
+            ),
+            BuilderSessions(
+                tenant_id=tenant_id,
+                space_id=organization_space_id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=now - timedelta(hours=4, minutes=30),
+                updated_at=now - timedelta(hours=4, minutes=30),
+            ),
+            BuilderSessions(
+                tenant_id=tenant_id,
+                space_id=personal_space_id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=now - timedelta(hours=5),
+                updated_at=now - timedelta(hours=5),
+            ),
+        ]
+        database_session.add_all(visible_sessions)
+        database_session.add_all(
+            [
+                BuilderSessions(
+                    tenant_id=tenant_id,
+                    space_id=viewer_space.id,
+                    actor_user_id=actor_user_id,
+                    target_kind=TargetKind.CREATE.value,
+                    status=SessionStatus.CHATTING.value,
+                    created_at=now - timedelta(minutes=index),
+                    updated_at=now - timedelta(minutes=index),
+                )
+                for index in range(21)
+            ]
+        )
+        cross_tenant = Tenants(
+            name=f"builder-list-cross-tenant-{uuid4().hex}",
+            quota_limit=1_000_000,
+            state="active",
+        )
+        database_session.add(cross_tenant)
+        await database_session.flush()
+        cross_tenant_space = Spaces(
+            tenant_id=cross_tenant.id,
+            name="Builder list cross-tenant",
+        )
+        database_session.add(cross_tenant_space)
+        await database_session.flush()
+        database_session.add(
+            BuilderSessions(
+                tenant_id=tenant_id,
+                space_id=cross_tenant_space.id,
+                actor_user_id=actor_user_id,
+                target_kind=TargetKind.CREATE.value,
+                status=SessionStatus.CHATTING.value,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await database_session.flush()
+        expected_visible_session_ids = [
+            cast(UUID, session.id) for session in visible_sessions
+        ]
+        organization_session_id = expected_visible_session_ids[-2]
+
+        repo = AIBuilderRepository(database_session)
+        organization_rows = await repo.list_sessions_with_draft_titles(
+            tenant_id=tenant_id,
+            actor_user_id=actor_user_id,
+            actor_user_group_ids=set(),
+            scoped_space_id=organization_space_id,
+        )
+        assert [session.id for session, _title in organization_rows] == [
+            organization_session_id
+        ]
+
+        organization_membership.role = "editor"
+        await database_session.flush()
+        assert (
+            await repo.list_sessions_with_draft_titles(
+                tenant_id=tenant_id,
+                actor_user_id=actor_user_id,
+                actor_user_group_ids=set(),
+                scoped_space_id=organization_space_id,
+            )
+            == []
+        )
+        organization_membership.role = "admin"
+
+        bind = database_session.sync_session.bind
+        assert bind is not None
+
+    statements: list[str] = []
+
+    def record_statement(
+        _conn,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(bind, "before_cursor_execute", record_statement)
+    try:
+        response = await client.get(
+            "/api/v1/flows/ai-builder/sessions",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+    finally:
+        event.remove(bind, "before_cursor_execute", record_statement)
+
+    assert response.status_code == 200, response.text
+    returned_session_ids = [
+        UUID(item["session_id"]) for item in response.json()["sessions"]
+    ]
+    assert returned_session_ids == expected_visible_session_ids
+    assert returned_session_ids[:2] == visible_session_ids
+
+    normalized_selects = [
+        statement.lower().replace("\n", " ")
+        for statement in statements
+        if statement.lstrip().lower().startswith("select")
+    ]
+    assert (
+        len(
+            [
+                statement
+                for statement in normalized_selects
+                if "builder_sessions" in statement
+            ]
+        )
+        == 1
+    )
+    assert not [
+        statement
+        for statement in normalized_selects
+        if " from spaces" in statement and "builder_sessions" not in statement
     ]
 
 
