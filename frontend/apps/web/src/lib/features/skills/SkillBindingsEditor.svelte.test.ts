@@ -493,6 +493,12 @@ describe("SkillBindingsEditor", () => {
     await expect
       .element(page.getByText(m.skills_execution_blocked_binding_explanation(), { exact: true }))
       .toBeVisible();
+    expect(m.skills_execution_blocked_binding_explanation()).toContain(
+      "Appar stoppas innan någon modellförfrågan skickas"
+    );
+    expect(m.skills_execution_blocked_binding_explanation()).not.toContain(
+      "men Skillen används inte vid körning"
+    );
     await expect
       .element(page.getByText(m.skills_unavailable_status(), { exact: true }))
       .not.toBeInTheDocument();
@@ -513,6 +519,35 @@ describe("SkillBindingsEditor", () => {
     await expect
       .element(page.getByText(blockedChoice.display_name, { exact: true }))
       .not.toBeInTheDocument();
+  });
+
+  test("does not describe a blocked-only catalogue as already attached", async () => {
+    const blockedChoice: SkillBindingCandidate = {
+      id: "blocked-only-choice",
+      slug: "blocked-only-choice",
+      revision_id: "blocked-only-choice-revision-1",
+      revision_number: 1,
+      display_name: "Blocked-only catalogue Skill",
+      description: "This Skill cannot be attached during an incident.",
+      content_digest: "blocked-only-choice-digest",
+      first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: true,
+      source: "organization"
+    };
+
+    render(SkillBindingsEditor, {
+      bindings: [],
+      initialCatalogPage: makePage([blockedChoice]),
+      bindingSummaries: [],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await expect.element(page.getByText(m.skills_no_available())).toBeVisible();
+    await expect.element(page.getByText(m.skills_all_attached())).not.toBeInTheDocument();
   });
 
   test("keeps a populated create dialog open until discard is confirmed", async () => {

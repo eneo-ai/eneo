@@ -99,13 +99,18 @@
   });
   const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
+  const allCatalogSkillsAttached = $derived.by(() => {
+    if (catalog.length === 0) return false;
+    const boundSkillIds = new Set(bindings.map((binding) => binding.skill_id));
+    return catalog.every((skill) => boundSkillIds.has(skill.id));
+  });
   const rows = $derived(
     getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
   );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
     if (skillCatalog.query.trim()) return m.skills_search_no_results();
-    if (catalog.length > 0 && addExistingChoices.length === 0) return m.skills_all_attached();
+    if (allCatalogSkillsAttached) return m.skills_all_attached();
     return m.skills_no_available();
   });
 

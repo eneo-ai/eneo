@@ -3446,7 +3446,7 @@
   "skills_unavailable_status": "Ej tillgänglig",
   "skills_unavailable_binding_explanation": "Kan inte läggas till på fler ställen, men här fortsätter instruktionerna från den valda revisionen att gälla.",
   "skills_execution_blocked_status": "Blockerad av organisationen",
-  "skills_execution_blocked_binding_explanation": "Kopplingen behålls, men Skillen används inte vid körning. Revisionen kan inte bytas förrän en administratör avblockerar den.",
+  "skills_execution_blocked_binding_explanation": "Kopplingen behålls. I assistenter och Personlig chatt hoppas Skillen över. Appar stoppas innan någon modellförfrågan skickas. Du kan inte byta revision förrän en administratör har avblockerat Skillen.",
   "skills_newer_revision_available": "Revision {revision} finns tillgänglig",
   "skills_use_latest_revision": "Använd senaste revisionen",
   "skills_use_latest_revision_aria": "Använd revision {revision} av {name}",

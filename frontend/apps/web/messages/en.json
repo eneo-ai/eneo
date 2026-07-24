@@ -3413,7 +3413,7 @@
   "skills_unavailable_status": "Unavailable",
   "skills_unavailable_binding_explanation": "This Skill cannot be added elsewhere, but the selected revision still applies here.",
   "skills_execution_blocked_status": "Blocked by the organisation",
-  "skills_execution_blocked_binding_explanation": "The binding is retained, but the Skill is omitted at runtime. You cannot change its revision until an administrator unblocks it.",
+  "skills_execution_blocked_binding_explanation": "The binding is retained. Assistants and Personal Chat omit this Skill; Apps stop before a model request. You cannot change its revision until an administrator unblocks it.",
   "skills_newer_revision_available": "Revision {revision} available",
   "skills_use_latest_revision": "Use latest revision",
   "skills_use_latest_revision_aria": "Use revision {revision} of {name}",
