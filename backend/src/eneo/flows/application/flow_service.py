@@ -49,10 +49,10 @@ from eneo.flows.http_transport import (
     AuthoredSecretEncryptionUnavailableError,
     HttpAuthoredConfig,
     contains_secret_sentinel,
-    encrypt_authored_config,
     is_authored_config,
     merge_secrets_on_update,
-    reject_unprotectable_authored_secrets,
+    protect_authored_secrets,
+    unresolved_secret_sentinel_fields,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
@@ -113,7 +113,6 @@ class FlowService:
         owner_user_id: UUID | None = None,
     ) -> Flow:
         normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
-        self._reject_unprotectable_authored_secrets(steps)
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
             steps=steps,
@@ -129,7 +128,8 @@ class FlowService:
         )
 
         normalized_steps = self._normalize_steps_for_tenant(steps)
-        persisted_steps = self._prepare_steps_for_persist(normalized_steps)
+        persisted_steps = self._protect_authored_step_secrets(normalized_steps)
+        self._reject_unresolved_secret_sentinels(persisted_steps)
         flow = Flow(
             id=None,
             tenant_id=self.user.tenant_id,
@@ -217,7 +217,6 @@ class FlowService:
             )
 
         if steps is not None:
-            self._reject_unprotectable_authored_secrets(steps)
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
@@ -249,8 +248,10 @@ class FlowService:
             next_retention = data_retention_days
 
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
-        merged_steps = self._merge_step_secrets(normalized_steps, existing.steps)
-        persisted_steps = self._prepare_steps_for_persist(merged_steps)
+        if steps is not None:
+            normalized_steps = self._protect_authored_step_secrets(normalized_steps)
+        persisted_steps = self._merge_step_secrets(normalized_steps, existing.steps)
+        self._reject_unresolved_secret_sentinels(persisted_steps)
         updated = existing.model_copy(
             deep=True,
             update={
@@ -657,12 +658,61 @@ class FlowService:
             for step in steps
         ]
 
-    def _reject_unprotectable_authored_secrets(self, steps: list[FlowStep]) -> None:
-        """Refuse author-supplied HTTP credentials that could only be stored raw.
+    def _protect_authored_step_secrets(self, steps: list[FlowStep]) -> list[FlowStep]:
+        """Encrypt author-supplied HTTP credentials, or refuse to store them raw.
 
         Runs on incoming authored steps, before stored-secret sentinels are
         merged: only here is a secret value known to have come from the author
-        rather than from the existing row.
+        rather than from the existing row. Encrypting at this point is what lets
+        the merge combine ciphertext with ciphertext.
+        """
+        return [
+            step.model_copy(
+                update={
+                    "input_config": self._protect_config(
+                        step.input_config,
+                        step_order=step.step_order,
+                        label="input_config",
+                    ),
+                    "output_config": self._protect_config(
+                        step.output_config,
+                        step_order=step.step_order,
+                        label="output_config",
+                    ),
+                },
+                deep=True,
+            )
+            for step in steps
+        ]
+
+    def _protect_config(
+        self,
+        config: FlowPersistedJsonObject | None,
+        *,
+        step_order: int,
+        label: str,
+    ) -> FlowPersistedJsonObject | None:
+        if config is None or not is_authored_config(config):
+            return config
+        authored = HttpAuthoredConfig.model_validate(config)
+        try:
+            protected = protect_authored_secrets(authored, self.encryption_service)
+        except AuthoredSecretEncryptionUnavailableError as exc:
+            raise FlowStepValidationError(
+                f"Step {step_order}: {label} carries HTTP credentials "
+                f"({', '.join(exc.secret_fields)}) that cannot be stored while "
+                "credential encryption is inactive. Configure ENCRYPTION_KEY, or "
+                "remove the credentials, before saving this step.",
+                step_order=step_order,
+            ) from exc
+        return protected.model_dump(mode="json")
+
+    def _reject_unresolved_secret_sentinels(self, steps: list[FlowStep]) -> None:
+        """Refuse sentinels that resolved to no stored credential.
+
+        A sentinel means "keep what is already stored". Once stored secrets have
+        been merged, one that remains points at nothing, and persisting it would
+        store the sentinel itself in place of the credential.
         """
         for step in steps:
             for label, config in (
@@ -671,43 +721,16 @@ class FlowService:
             ):
                 if config is None or not is_authored_config(config):
                     continue
-                try:
-                    reject_unprotectable_authored_secrets(
-                        HttpAuthoredConfig.model_validate(config),
-                        self.encryption_service,
-                    )
-                except AuthoredSecretEncryptionUnavailableError as exc:
+                unresolved = unresolved_secret_sentinel_fields(
+                    HttpAuthoredConfig.model_validate(config)
+                )
+                if unresolved:
                     raise FlowStepValidationError(
-                        f"Step {step.step_order}: {label} carries HTTP credentials "
-                        f"({', '.join(exc.secret_fields)}) that cannot be stored "
-                        "while credential encryption is inactive. Configure "
-                        "ENCRYPTION_KEY, or remove the credentials, before saving "
-                        "this step.",
+                        f"Step {step.step_order}: {label} keeps stored HTTP "
+                        f"credentials ({', '.join(unresolved)}) that no longer "
+                        "exist. Re-enter the credentials before saving this step.",
                         step_order=step.step_order,
-                    ) from exc
-
-    def _prepare_steps_for_persist(self, steps: list[FlowStep]) -> list[FlowStep]:
-        return [
-            step.model_copy(
-                update={
-                    "input_config": self._encrypt_config(step.input_config),
-                    "output_config": self._encrypt_config(step.output_config),
-                },
-                deep=True,
-            )
-            for step in steps
-        ]
-
-    def _encrypt_config(
-        self, config: FlowPersistedJsonObject | None
-    ) -> FlowPersistedJsonObject | None:
-        if config is None:
-            return config
-        if is_authored_config(config):
-            authored = HttpAuthoredConfig.model_validate(config)
-            encrypted = encrypt_authored_config(authored, self.encryption_service)
-            return encrypted.model_dump(mode="json")
-        return config
+                    )
 
     def _merge_step_secrets(
         self,

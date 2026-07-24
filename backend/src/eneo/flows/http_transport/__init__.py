@@ -29,20 +29,17 @@ from eneo.flows.http_transport.errors import (
 from eneo.flows.http_transport.normalizer import is_authored_config
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.secret_codec import (
-    authored_secret_fields,
     decrypt_authored_config,
-    encrypt_authored_config,
     merge_secrets_on_update,
+    protect_authored_secrets,
     redact_authored_config,
-    reject_unprotectable_authored_secrets,
+    unresolved_secret_sentinel_fields,
 )
 from eneo.flows.http_transport.validator import validate_authored_config
 
 __all__ = [
     "AuthoredSecretEncryptionUnavailableError",
     "CustomHeader",
-    "authored_secret_fields",
-    "reject_unprotectable_authored_secrets",
     "EffectiveHttpRequest",
     "HttpAuth",
     "HttpAuthApiKey",
@@ -63,11 +60,12 @@ __all__ = [
     "HttpTemplateInterpolationError",
     "compile_http_config",
     "decrypt_authored_config",
-    "encrypt_authored_config",
     "contains_secret_sentinel",
     "is_secret_sentinel",
     "is_authored_config",
     "merge_secrets_on_update",
+    "protect_authored_secrets",
     "redact_authored_config",
+    "unresolved_secret_sentinel_fields",
     "validate_authored_config",
 ]

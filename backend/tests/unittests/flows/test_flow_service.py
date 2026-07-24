@@ -1508,6 +1508,127 @@ async def test_create_flow_persists_secret_free_http_config_when_encryption_inac
     assert created.steps[0].input_config["custom_headers"][0]["value"] == "visible"
 
 
+def _http_step_with_token(token, *, step_id=None, step_order: int = 1):
+    step = _step(step_order=step_order).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://example.org/input",
+                "auth": {"mode": "bearer_token", "token": token},
+            },
+        }
+    )
+    return step if step_id is None else step.model_copy(update={"id": step_id})
+
+
+def _published_flow_for_update(user, steps):
+    return Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        steps=steps,
+        published_version=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_new_http_secret_when_encryption_inactive(user):
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("enc:stored-secret", step_id=step_id)]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_InactiveEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.update_flow(
+            flow_id=stored.id,
+            steps=[_http_step_with_token("brand-new-secret", step_id=step_id)],
+        )
+
+    assert "ENCRYPTION_KEY" in str(excinfo.value)
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_flow_keeps_stored_secret_behind_sentinel_when_inactive(user):
+    """A sentinel is a reference to the stored row, so the edit stays possible."""
+    step_id = uuid4()
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("enc:stored-secret", step_id=step_id)]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_InactiveEncryptionService(),
+    )
+
+    updated = await service.update_flow(
+        flow_id=stored.id,
+        steps=[_http_step_with_token(SECRET_SENTINEL, step_id=step_id)],
+    )
+
+    assert updated.steps[0].input_config["auth"]["token"] == "enc:stored-secret"
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_sentinel_that_can_resolve_to_nothing(user):
+    flow_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[_http_step_with_token(SECRET_SENTINEL)],
+            metadata_json=None,
+        )
+
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_encrypts_authored_value_wearing_encryption_prefix(user):
+    """An author-typed prefix must not suppress encryption on the active path."""
+    flow_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[_http_step_with_token("enc:not-really-encrypted")],
+        metadata_json=None,
+    )
+
+    assert (
+        created.steps[0].input_config["auth"]["token"] == "enc:enc:not-really-encrypted"
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_flow_rejects_previous_step_input_for_first_step(user):
     flow_repo = AsyncMock()

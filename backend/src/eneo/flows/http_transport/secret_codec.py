@@ -62,39 +62,63 @@ def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
     return tuple(fields)
 
 
-def reject_unprotectable_authored_secrets(
+def unresolved_secret_sentinel_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the declared secret fields still holding a sentinel.
+
+    After stored secrets have been merged, a remaining sentinel resolved to
+    nothing: it references a stored value that does not exist. Persisting it
+    would store the sentinel itself as the credential.
+    """
+    fields: list[str] = []
+    match config.auth:
+        case HttpAuthBearer(token=token):
+            if is_secret_sentinel(token):
+                fields.append("auth.token")
+        case HttpAuthApiKey(key=key):
+            if is_secret_sentinel(key):
+                fields.append("auth.key")
+        case HttpAuthBasicAuth(password=password):
+            if is_secret_sentinel(password):
+                fields.append("auth.password")
+        case HttpAuthNone():
+            pass
+
+    fields.extend(
+        f"custom_headers[{index}].value"
+        for index, header in enumerate(config.custom_headers)
+        if header.secret and is_secret_sentinel(header.value)
+    )
+    return tuple(fields)
+
+
+def protect_authored_secrets(
     config: HttpAuthoredConfig,
     encryption_service: SupportsEncryption | None,
-) -> None:
-    """Refuse newly authored secrets that could only be stored unprotected.
+) -> HttpAuthoredConfig:
+    """Encrypt newly authored secrets, or refuse when they cannot be protected.
 
     Call this with author-supplied config, before stored-secret sentinels are
-    merged. Afterwards a secret may legitimately be ciphertext loaded from the
-    existing row, and the two are indistinguishable.
+    merged. Provenance only exists here: afterwards a secret may legitimately be
+    ciphertext loaded from the existing row, and syntax cannot tell the two
+    apart.
+
+    Sentinels pass through for the caller to resolve. Every other non-empty
+    declared secret is new authored input and is encrypted unconditionally — an
+    author can type ``enc:fernet:v1:`` into a token field, so the prefix is never
+    accepted as evidence that a value is already ciphertext.
 
     Raises:
         AuthoredSecretEncryptionUnavailableError: encryption is unavailable and
             the config carries at least one newly authored secret.
     """
-    if encryption_service is not None and encryption_service.is_active():
-        return
-    unprotectable = authored_secret_fields(config)
-    if unprotectable:
-        raise AuthoredSecretEncryptionUnavailableError(unprotectable)
-
-
-def encrypt_authored_config(
-    config: HttpAuthoredConfig,
-    encryption_service: SupportsEncryption | None,
-) -> HttpAuthoredConfig:
-    """Encrypt sensitive fields for database storage."""
     if encryption_service is None or not encryption_service.is_active():
+        unprotectable = authored_secret_fields(config)
+        if unprotectable:
+            raise AuthoredSecretEncryptionUnavailableError(unprotectable)
         return config
 
     def _encrypt(value: SecretValue) -> SecretValue:
         if not isinstance(value, str) or not value:
-            return value
-        if encryption_service.is_encrypted(value):
             return value
         return encryption_service.encrypt(value)
 
