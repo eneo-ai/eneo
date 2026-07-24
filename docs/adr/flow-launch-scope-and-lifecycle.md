@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-07-13
+- **Last revised:** 2026-07-24
 - **Decision owners:** Product, security, and architecture
 - **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
   activation, and the portable-package platform boundary
@@ -592,6 +592,29 @@ WI-MKT-02.
 - **Revision rule:** No adapter, child setting, classification label, or fallback
   may activate destructive Flow retention outside this envelope. Revise this
   record before adding another activator, clock, hold, or deletion mode.
+
+### 15. Service-key rerun is an explicit own-run capability
+
+- **Decision:** A service key may rerun only a run owned by the same service
+  principal, and only when the route explicitly requests the rerun capability.
+  The rerun operation records `requested_by_principal_type=service_key` together
+  with `requested_by_service_id`; cross-principal rerun remains forbidden.
+- **Consequences:** Service-key rerun fails closed by default at the API action
+  policy and passes only through the explicit route capability plus the run
+  access policy's own-principal check. Review and resume remain separate
+  capability rows, and Flow AI Builder actions remain user-only.
+- **Rejected posture:** The stale human-only posture is rejected because it
+  contradicts the shipped typed requester constraint, own-run access boundary,
+  and consumer API behavior. Restoring it would remove an already coherent
+  runtime capability without improving attribution or cross-principal safety.
+- **Implementation owner:** `FlowActionRequirement` in
+  `flow_access_policy.py` owns route-requested action eligibility;
+  `FlowRunRerunService` owns rerun validation, `FlowRunAccessPolicy` owns own-run
+  scoping, and `FlowRunRerunOperations` owns typed requester persistence and its
+  exactly-one-requester constraint.
+- **Revision rule:** Expanding beyond own-run service-principal access requires a
+  new product and security decision. Do not infer broader access from the
+  existence of service-key attribution columns.
 
 ## Delivery order and gates
 

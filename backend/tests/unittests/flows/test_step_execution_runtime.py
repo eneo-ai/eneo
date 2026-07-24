@@ -244,7 +244,7 @@ async def test_prepare_step_execution_reports_prompt_variable_miss_before_provid
 
 
 @pytest.mark.asyncio
-async def test_prepare_step_execution_keeps_json_binding_underlag_without_contract_failure():
+async def test_prepare_step_execution_rejects_non_json_explicit_binding_before_provider_io():
     run = _run()
     state = _state()
     step = _step(
@@ -259,6 +259,7 @@ async def test_prepare_step_execution_keeps_json_binding_underlag_without_contra
     )
     assistant = MagicMock()
     assistant.get_prompt_text.return_value = "Skapa slutresultatet."
+    assistant.get_response = AsyncMock()
     step_input = StepInputValue(
         text="Slutrapport: Saknar underlag\n\nTranskribering: mötesinnehåll",
         source_text='{"final_report":"Saknar underlag"}',
@@ -275,24 +276,78 @@ async def test_prepare_step_execution_keeps_json_binding_underlag_without_contra
         apply_output_cap=AsyncMock(),
     )
 
-    prepared = await prepare_step_execution(
-        step=step,
-        run=run,
-        state=state,
-        version_metadata=None,
-        deps=deps,
-        requested_file_ids=(),
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await prepare_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            version_metadata=None,
+            deps=deps,
+            requested_file_ids=(),
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT.value
+    assert "Step 3" in str(exc_info.value)
+    assert "input_bindings" in str(exc_info.value)
+    assert getattr(exc_info.value, "input_payload_json")["contract_validation"] == {
+        "schema_type_hint": "object",
+        "parse_attempted": False,
+        "parse_succeeded": False,
+        "candidate_type": "str",
+    }
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_step_execution_rejects_combined_interpolated_provider_input_cap():
+    run = _run()
+    run.input_payload_json = {
+        "text": "a" * 24,
+        "supporting_context": "b" * 24,
+    }
+    state = _state()
+    step = _step(step_order=2)
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = (
+        "Primary: {{flow_input.text}}\nSupporting: {{flow_input.supporting_context}}"
+    )
+    assistant.get_response = AsyncMock()
+    step_input = StepInputValue(
+        text="c" * 24,
+        source_text="c" * 24,
+        input_source="flow_input",
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(return_value=assistant),
+        resolve_step_input=AsyncMock(return_value=step_input),
+        retrieve_rag_chunks=AsyncMock(),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+        max_inline_text_bytes=80,
     )
 
-    assert prepared.step_input.text == (
-        "Slutrapport: Saknar underlag\n\nTranskribering: mötesinnehåll"
-    )
-    assert prepared.contract_validation is None
-    assert "contract_validation" not in prepared.input_payload_for_result
-    assert any(
-        diagnostic.code == "flow_input_contract_skipped_for_binding"
-        for diagnostic in prepared.diagnostics
-    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await prepare_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            version_metadata=None,
+            deps=deps,
+            requested_file_ids=(),
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert "Step 2" in str(exc_info.value)
+    assert "flow_input" in str(exc_info.value)
+    effective_prompt = getattr(exc_info.value, "effective_prompt")
+    assert isinstance(effective_prompt, str)
+    assert effective_prompt.startswith("Primary: ")
+    assert len(effective_prompt.encode("utf-8")) < 80
+    assert len(step_input.text.encode("utf-8")) < 80
+    assert len((effective_prompt + step_input.text).encode("utf-8")) > 80
+    assistant.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio

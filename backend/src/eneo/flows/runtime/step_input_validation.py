@@ -80,6 +80,7 @@ def validate_input_contract(
     input_contract: dict[str, Any] | None,
     text: str,
     structured: dict[str, Any] | list[Any] | None,
+    binding_context: str | None = None,
 ) -> dict[str, Any] | None:
     """Validate a resolved step input against input_contract and return validation metadata."""
     if input_contract is None:
@@ -93,8 +94,14 @@ def validate_input_contract(
                 "parse_succeeded": False,
                 "candidate_type": "str",
             }
+            binding_detail = (
+                f" resolved from explicit binding '{binding_context}'"
+                if binding_context is not None
+                else ""
+            )
             exc = TypedIOValidationException(
-                f"Step {step_order}: input_type 'json' requires valid JSON input before contract validation.",
+                f"Step {step_order}: input_type 'json'{binding_detail} requires valid JSON "
+                "input before contract validation.",
                 code=FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT.value,
             )
             setattr(exc, "contract_validation", contract_validation)

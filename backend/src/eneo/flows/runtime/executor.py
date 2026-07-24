@@ -1291,6 +1291,7 @@ class FlowRunExecutor:
             retrieve_rag_chunks=self._retrieve_rag_chunks,
             process_typed_output=self._process_typed_output,
             apply_output_cap=self._apply_output_cap,
+            max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,
             llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,

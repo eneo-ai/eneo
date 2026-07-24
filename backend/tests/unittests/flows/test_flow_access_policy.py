@@ -123,39 +123,83 @@ def test_coarse_flows_alias_keeps_current_shipped_grants(
     assert user_can_perform_flow_action(_user(Permission.FLOWS), action) is True
 
 
-def test_rerun_requires_manage_permission_not_run_or_view() -> None:
-    require_flow_action(_user(Permission.FLOWS_MANAGE), FlowApiAction.RERUN)
+@pytest.mark.parametrize(
+    (
+        "principal_type",
+        "permission",
+        "allow_service_key_principals",
+        "expected_error_code",
+    ),
+    [
+        pytest.param("user", Permission.FLOWS_MANAGE, False, None, id="user-manage"),
+        pytest.param(
+            "user",
+            Permission.FLOWS_RUN,
+            False,
+            "insufficient_tenant_permission",
+            id="user-run",
+        ),
+        pytest.param(
+            "user",
+            Permission.FLOWS_VIEW,
+            False,
+            "insufficient_tenant_permission",
+            id="user-view",
+        ),
+        pytest.param(
+            "service_key",
+            Permission.FLOWS_MANAGE,
+            False,
+            FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value,
+            id="service-key-default",
+        ),
+        pytest.param(
+            "service_key",
+            Permission.FLOWS_MANAGE,
+            True,
+            None,
+            id="service-key-explicit-own-runtime-capability",
+        ),
+    ],
+)
+def test_rerun_permission_matrix(
+    principal_type: str,
+    permission: Permission,
+    allow_service_key_principals: bool,
+    expected_error_code: str | None,
+) -> None:
+    principal = (
+        _service_key_user(permission)
+        if principal_type == "service_key"
+        else _user(permission)
+    )
 
-    for permission in (Permission.FLOWS_RUN, Permission.FLOWS_VIEW):
-        user = _user(permission)
+    if expected_error_code is None:
+        require_flow_action(
+            principal,
+            FlowApiAction.RERUN,
+            allow_service_key_principals=allow_service_key_principals,
+        )
+        return
 
-        assert user_can_perform_flow_action(user, FlowApiAction.RERUN) is False
-        with pytest.raises(UnauthorizedException, match="rerun flows"):
-            require_flow_action(user, FlowApiAction.RERUN)
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(
+            principal,
+            FlowApiAction.RERUN,
+            allow_service_key_principals=allow_service_key_principals,
+        )
+
+    assert exc_info.value.code == expected_error_code
+    if principal_type == "service_key":
+        assert exc_info.value.context == {
+            "auth_layer": "service_key_principal",
+            "capability": "rerun",
+        }
 
 
 def test_edit_requires_manage_permission_not_view_only() -> None:
     with pytest.raises(UnauthorizedException, match="manage flows"):
         require_flow_action(_user(Permission.FLOWS_VIEW), FlowApiAction.EDIT)
-
-
-def test_rerun_requires_explicit_service_key_opt_in() -> None:
-    service_key_user = _service_key_user(Permission.FLOWS_MANAGE)
-
-    with pytest.raises(UnauthorizedException) as default_exc_info:
-        require_flow_action(service_key_user, FlowApiAction.RERUN)
-
-    assert default_exc_info.value.code == "flow_service_key_principal_not_supported"
-    assert default_exc_info.value.context == {
-        "auth_layer": "service_key_principal",
-        "capability": "rerun",
-    }
-
-    require_flow_action(
-        service_key_user,
-        FlowApiAction.RERUN,
-        allow_service_key_principals=True,
-    )
 
 
 @pytest.mark.parametrize(

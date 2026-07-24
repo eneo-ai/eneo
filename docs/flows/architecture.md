@@ -520,9 +520,10 @@ Review and rerun are separate runtime features:
 3. `FlowRunRerunService` owns step rerun acceptance, invalidation graph logic,
    input validation, request fingerprinting, and idempotent replay. See
    `backend/src/eneo/flows/application/flow_run_rerun_service.py::FlowRunRerunService`.
-4. D1 is resolved in favor of the implemented typed attribution model. Rerun
-   persistence accepts either a user requester or a service-key requester and
-   requires exactly the matching identity field. See
+4. D1 is resolved in favor of the implemented typed attribution model in
+   [ADR: Flow launch scope and lifecycle, decision 15](../adr/flow-launch-scope-and-lifecycle.md#15-service-key-rerun-is-an-explicit-own-run-capability).
+   Rerun persistence accepts either a user requester or a service-key requester
+   and requires exactly the matching identity field. See
    `backend/src/eneo/database/tables/flow_tables.py::FlowRunRerunOperations`.
 5. API policy allows service-key principals for published runtime view/run and
    for own-run review, resume, and rerun when the capability is requested. A

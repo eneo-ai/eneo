@@ -50,6 +50,7 @@ from eneo.flows.runtime.output_formats.base import append_output_format_instruct
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
+from eneo.flows.runtime.step_input_resolution import enforce_inline_input_cap
 from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
@@ -245,6 +246,7 @@ class StepExecutionRuntimeDeps:
     retrieve_rag_chunks: RetrieveRagChunksFn
     process_typed_output: ProcessTypedOutputFn
     apply_output_cap: ApplyOutputCapFn
+    max_inline_text_bytes: int | None = None
     logger: logging.Logger | None = None
     llm_request_timeout_seconds: float = 600
     run_cancelled: RunCancelledFn | None = None
@@ -976,42 +978,35 @@ async def prepare_step_execution(
     )
     diagnostics = list(step_input.diagnostics)
 
-    if (
-        step.input_type == "json"
-        and step_input.used_question_binding
-        and step_input.structured is None
-    ):
-        contract_validation = None
-        diagnostics.append(
-            StepDiagnostic(
-                code="flow_input_contract_skipped_for_binding",
-                message=(
-                    f"Step {step.step_order}: skipped JSON input contract validation "
-                    "because explicit underlag replaced the previous structured input."
-                ),
-                severity="info",
-            )
-        )
-    else:
-        try:
-            contract_validation = validate_input_contract(
+    try:
+        if deps.max_inline_text_bytes is not None:
+            enforce_inline_input_cap(
                 step_order=step.step_order,
-                input_type=step.input_type,
-                input_contract=step.input_contract,
-                text=step_input.text,
-                structured=step_input.structured,
+                input_source=step_input.input_source,
+                text=effective_prompt + step_input.text,
+                max_inline_text_bytes=deps.max_inline_text_bytes,
             )
-        except TypedIOValidationException as exc:
-            contract_validation_payload = getattr(exc, "contract_validation", None)
-            if isinstance(contract_validation_payload, dict):
-                input_payload_for_result["contract_validation"] = (
-                    contract_validation_payload
-                )
-            raise attach_typed_failure_context(
-                exc,
-                input_payload_for_result=input_payload_for_result,
-                effective_prompt=effective_prompt,
-            ) from exc
+        contract_validation = validate_input_contract(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            input_contract=step.input_contract,
+            text=step_input.text,
+            structured=step_input.structured,
+            binding_context=(
+                "input_bindings" if step_input.used_question_binding else None
+            ),
+        )
+    except TypedIOValidationException as exc:
+        contract_validation_payload = getattr(exc, "contract_validation", None)
+        if isinstance(contract_validation_payload, dict):
+            input_payload_for_result["contract_validation"] = (
+                contract_validation_payload
+            )
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=effective_prompt,
+        ) from exc
 
     if contract_validation is not None:
         input_payload_for_result["contract_validation"] = contract_validation
