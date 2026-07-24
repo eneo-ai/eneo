@@ -385,11 +385,12 @@ class FileService:
             range_header=range_header,
         )
 
-    async def ensure_original_available(self, file_id: UUID) -> None:
+    async def ensure_original_available(self, file_id: UUID) -> FileMetadata:
         metadata = await self.repo.get_by_id(file_id=file_id)
         self._require_owner(metadata, action="read")
         references = await self.repo.get_content_references([file_id])
         self._original_reference(references)
+        return metadata
 
     async def get_original_download_no_auth(
         self,
@@ -397,9 +398,10 @@ class FileService:
         *,
         range_header: str | None = None,
     ) -> FileDownload:
-        metadata = await self.repo.get_by_id(file_id=file_id)
-        references = await self.repo.get_content_references([file_id])
-        reference = self._original_reference(references)
+        async with self.repo.session.begin():
+            metadata = await self.repo.get_by_id(file_id=file_id)
+            references = await self.repo.get_content_references([file_id])
+            reference = self._original_reference(references)
         return await self._open_download(
             metadata,
             reference,

@@ -55,7 +55,7 @@ test("original signed URLs use the explicit original-file route", async () => {
   });
 
   assert.deepEqual(result, {
-    url: "https://backend:8000/api/v1/files/file-1/original/download/?token=signed",
+    url: "https://eneo.example.eu/api/v1/files/file-1/original/download/?token=signed",
     expires_at: 1234
   });
   assert.deepEqual(calls, [

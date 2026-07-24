@@ -13,6 +13,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileMetadata,
     FileType,
+    OriginalSignedURLRequest,
 )
 from eneo.files.file_repo import FileContentReferenceRecord
 from eneo.files.file_service import FileDownload, FileService
@@ -25,6 +26,77 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
 )
+
+
+async def test_original_signed_url_audits_the_attributable_access_grant(
+    monkeypatch,
+):
+    file_id = uuid4()
+    tenant_id = uuid4()
+    user_id = uuid4()
+    now = datetime.now(UTC)
+    metadata = FileMetadata(
+        id=file_id,
+        created_at=now,
+        updated_at=now,
+        name="source.pdf",
+        file_type=FileType.TEXT,
+        mimetype="application/pdf",
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    service = AsyncMock()
+    service.ensure_original_available.return_value = metadata
+    audit_service = AsyncMock()
+    user = MagicMock(
+        id=user_id,
+        tenant_id=tenant_id,
+        username="file-owner",
+        email="owner@example.eu",
+    )
+
+    class Container:
+        @staticmethod
+        def file_service():
+            return service
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+        @staticmethod
+        def user():
+            return user
+
+    request = MagicMock()
+    request.base_url = "https://eneo.example.eu/"
+    monkeypatch.setattr(file_router.time, "time", lambda: 1_000)
+    monkeypatch.setattr(
+        file_router,
+        "generate_file_original_download_token",
+        lambda **_: "signed",
+    )
+
+    response = await file_router.generate_original_signed_url(
+        id=file_id,
+        request=request,
+        signed_url_req=OriginalSignedURLRequest(
+            expires_in=120,
+            content_disposition=ContentDisposition.ATTACHMENT,
+        ),
+        container=Container(),
+    )
+
+    assert response.expires_at == 1_120
+    audit_service.log_async.assert_awaited_once()
+    audit = audit_service.log_async.await_args.kwargs
+    assert audit["action"].value == "file_original_download_link_created"
+    assert audit["entity_id"] == file_id
+    assert audit["metadata"]["extra"] == {
+        "content_disposition": "attachment",
+        "expires_at": 1_120,
+        "expires_in_seconds": 120,
+    }
 
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):
@@ -329,7 +401,7 @@ def test_original_download_openapi_declares_json_error_contracts():
     app.include_router(file_router.router)
     operation = app.openapi()["paths"]["/{id}/original/download/"]["get"]
 
-    for status in ("400", "401", "403", "404", "416", "503"):
+    for status in ("400", "401", "403", "404", "409", "416", "503"):
         content = operation["responses"][status]["content"]
         schema = content["application/json"]["schema"]
         assert schema["$ref"] == "#/components/schemas/GeneralError"

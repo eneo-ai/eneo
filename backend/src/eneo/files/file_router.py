@@ -24,6 +24,7 @@ from eneo.files.file_models import (
     FileContentRangeError,
     FileDeletionPreview,
     FilePublic,
+    OriginalSignedURLRequest,
     SignedURLRequest,
     SignedURLResponse,
 )
@@ -241,17 +242,35 @@ async def generate_signed_url(
 async def generate_original_signed_url(
     id: UUID,
     request: Request,
-    signed_url_req: SignedURLRequest,
+    signed_url_req: OriginalSignedURLRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> SignedURLResponse:
     service = container.file_service()
-    await service.ensure_original_available(id)
+    file = await service.ensure_original_available(id)
+    current_user = container.user()
 
     expires_at = int(time.time()) + signed_url_req.expires_in
     token = generate_file_original_download_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+    )
+    await container.audit_service().log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
+        entity_type=EntityType.FILE,
+        entity_id=id,
+        description=f"Created an original download link for '{file.name}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=file,
+            extra={
+                "content_disposition": signed_url_req.content_disposition.value,
+                "expires_at": expires_at,
+                "expires_in_seconds": signed_url_req.expires_in,
+            },
+        ),
     )
     base_url = str(request.base_url).rstrip("/")
     return SignedURLResponse(
@@ -404,13 +423,16 @@ async def download_file_signed(
     responses={
         200: {"description": "Successfully downloaded the entire original file"},
         206: {"description": "Successfully downloaded part of the original audio"},
-        **responses.get_responses([400, 401, 403, 404, 416, 503]),
+        **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
     },
 )
 async def download_original_file_signed(
     id: UUID,
     token: Annotated[str, Query(description="The signed original-download token")],
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_transaction=False)),
+    ],
     range: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse | Response:
     content_disposition = _validate_download_claims(

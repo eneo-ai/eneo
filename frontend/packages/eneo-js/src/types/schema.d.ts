@@ -7865,6 +7865,7 @@ export interface components {
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
+      | "file_original_download_link_created"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -13789,6 +13790,16 @@ export interface components {
       /** First Published At */
       first_published_at: string | null;
       publication_state: components["schemas"]["SkillPublicationState"];
+    };
+    /** OriginalSignedURLRequest */
+    OriginalSignedURLRequest: {
+      /**
+       * Expires In
+       * @default 3600
+       */
+      expires_in?: number;
+      /** @default attachment */
+      content_disposition?: components["schemas"]["ContentDisposition"];
     };
     /**
      * Outcome
@@ -33579,7 +33590,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SignedURLRequest"];
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
       };
     };
     responses: {
@@ -33756,6 +33767,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

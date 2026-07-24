@@ -29,9 +29,12 @@ export function initFiles(client) {
       }
     });
 
-    // The backend does not necessarily know the protocol it uses, as it sits behind a reverse proxy
-    const url = new URL(res.url);
-    url.protocol = client.baseUrl.protocol;
+    // Keep the signed path and token, but use the public host configured by the caller.
+    const signedUrl = new URL(res.url);
+    const url = new URL(
+      `${signedUrl.pathname}${signedUrl.search}${signedUrl.hash}`,
+      client.baseUrl
+    );
 
     return {
       url: url.toString(),
@@ -85,7 +88,7 @@ export function initFiles(client) {
      * Generate a signed URL to access the uploaded file (returns full response with expires_at)
      * @param {Object} params
      * @param {string} params.fileId The file ID
-     * @param {number} [params.expiresIn] Expiry time in seconds (default: 3600)
+     * @param {number} [params.expiresIn] Expiry time in seconds (1–3600, default: 3600)
      * @param {"attachment" | "inline"} [params.contentDisposition] Content disposition (default: "inline")
      * @returns {Promise<{url: string, expires_at: number}>}
      * @throws {EneoError}

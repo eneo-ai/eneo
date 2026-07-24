@@ -345,6 +345,54 @@ async def test_original_mint_does_not_read_payload_and_corruption_fails_before_h
     assert download.headers["content-type"].startswith("application/json")
     assert download.json()["code"] == "object_content_integrity_failure"
 
+    retry = await client.get(f"{parsed.path}?{parsed.query}")
+
+    assert retry.status_code == 409
+    assert retry.headers["content-type"].startswith("application/json")
+    assert retry.json()["code"] == "object_content_state_conflict"
+    assert retry.json()["eneo_error_code"] == 9007
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_original_signed_url_enforces_short_lived_expiry(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    file_id = await _persist_prepared(
+        db_container,
+        PreparedFileUpload(
+            name="source.pdf",
+            file_type=FileType.TEXT,
+            display_media_type="application/pdf",
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes_source(b"exact source"),
+                    declared_media_type="application/pdf",
+                    verified_media_type="application/pdf",
+                ),
+            ),
+        ),
+    )
+    headers = {"X-API-Key": admin_user_api_key.key}
+
+    maximum = await client.post(
+        f"/api/v1/files/{file_id}/original/signed-url/",
+        json={"expires_in": 3600},
+        headers=headers,
+    )
+
+    assert maximum.status_code == 200, maximum.text
+    for invalid_expiry in (0, -1, 3601):
+        rejected = await client.post(
+            f"/api/v1/files/{file_id}/original/signed-url/",
+            json={"expires_in": invalid_expiry},
+            headers=headers,
+        )
+        assert rejected.status_code == 422
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -416,15 +464,26 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
                 content=captured,
             )
 
-        async with object_content_database.session() as session, session.begin():
-            descriptor = await session.get(ObjectStoreObjects, prepared.id)
-            assert descriptor is not None
-            object_key = descriptor.object_key
+        async with object_content_database.session() as session:
+            async with session.begin():
+                descriptor = await session.get(ObjectStoreObjects, prepared.id)
+                assert descriptor is not None
+                object_key = descriptor.object_key
+
+            checked_content_service = MagicMock(wraps=content_service)
+
+            def open_without_file_transaction(*args, **kwargs):
+                assert not session.in_transaction()
+                return content_service.open_content(*args, **kwargs)
+
+            checked_content_service.open_content.side_effect = (
+                open_without_file_transaction
+            )
             service = FileService(
                 user=None,
                 repo=FileRepository(session),
                 protocol=MagicMock(),
-                object_content=content_service,
+                object_content=checked_content_service,
             )
 
             class Container:

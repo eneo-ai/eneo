@@ -2,7 +2,7 @@ from enum import Enum, StrEnum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from eneo.main.models import InDB
 
@@ -144,6 +144,17 @@ class FileRestrictions(BaseModel):
 class SignedURLRequest(BaseModel):
     expires_in: int = 3600  # Default expiration time in seconds (1 hour)
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
+
+
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
+class OriginalSignedURLRequest(SignedURLRequest):
+    expires_in: int = Field(
+        default=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        ge=1,
+        le=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
 
 
 class SignedURLResponse(BaseModel):

@@ -411,14 +411,117 @@ tasks:
       - "The PR would imply that all of #586 is complete."
     receipt: null
 
+  - id: T008
+    type: worker
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Resolve PR #589 review F1-F3 at the existing File and object-content owners without broadening product scope."
+    allowed_files:
+      - "backend/src/eneo/files/file_models.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/audit/domain/action_types.py"
+      - "backend/src/eneo/audit/domain/category_mappings.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+      - "backend/tests/unit/test_audit_category_mappings.py"
+      - "backend/tests/unit/test_audit_config_service.py"
+      - "frontend/packages/eneo-js/src/endpoints/files.js"
+      - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/routes/(app)/admin/audit-logs/audit-action-labels.ts"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/state.yaml"
+    verify:
+      - "F1: original downloads end their File metadata/reference transaction before verified byte I/O starts."
+      - "F2: original signed links accept 1-3600 seconds and reject zero, negative, or longer lifetimes without changing the legacy request contract."
+      - "F3: retry after a corruption-triggered 503 returns a documented typed 409."
+      - "Focused HTTP, service, real-store, schema, Ruff, format, Pyright, SDK, docs, pre-push, and GitHub checks pass."
+    stop_if:
+      - "The fix requires changing legacy processing downloads."
+      - "The fix requires a storage-provider branch, generic transaction framework, or new configuration surface."
+      - "A current review finding is disproved by source or conflicts with an existing public contract."
+    receipt:
+      result: done
+      summary: "Closed review F1-F3 without changing legacy processing downloads or adding a storage-provider branch."
+      changed_files:
+        - "backend/src/eneo/audit/domain/action_types.py"
+        - "backend/src/eneo/audit/domain/category_mappings.py"
+        - "backend/src/eneo/files/file_models.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+        - "backend/tests/unit/test_audit_category_mappings.py"
+        - "backend/tests/unit/test_audit_config_service.py"
+        - "frontend/packages/eneo-js/src/endpoints/files.js"
+        - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "frontend/apps/web/src/routes/(app)/admin/audit-logs/audit-action-labels.ts"
+        - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      behavior:
+        - "The File metadata/reference transaction ends before object-content verification and streaming begin."
+        - "Original signed links accept 1-3600 seconds; the legacy processing-link request remains unchanged."
+        - "A retry after corruption has marked content failed returns the documented typed 409 state conflict."
+        - "Creating an original-recovery link records an attributable audit event with expiry and disposition but never the bearer token or URL."
+        - "The SDK preserves the signed path/query while rooting both signed-link kinds at the caller's public Eneo base URL."
+      red_green:
+        - "RED: 3 failed and 18 passed before production changes: missing OpenAPI 409, unbounded expiry, and a real-store read requiring an explicit short transaction."
+        - "GREEN: the focused review suite passed all 21 tests after the production changes."
+        - "RED: original-link mint had zero audit awaits; the SDK returned the backend's internal reverse-proxy host."
+        - "GREEN: route audit/category tests and SDK URL tests passed through their existing public owners."
+      commands:
+        - "Focused signed-token, router, audit, PostgreSQL-inline, and real compatible-store pytest selection"
+        - "Whole backend non-integration pytest selection"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "SDK test and lint"
+        - "Independent OpenAPI schema regeneration and byte comparison"
+        - "Docs-site production build"
+        - "Goal state validator and git diff --check"
+      validation:
+        - "118 focused unit, route-audit, PostgreSQL, and real compatible-store tests passed."
+        - "3825 backend non-integration tests passed."
+        - "Changed-path Ruff and format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "SDK: 13 passed; SDK lint passed."
+        - "OpenAPI schema independently regenerated and matched byte-for-byte."
+        - "Docs-site production build passed and indexed 28 pages with one pre-existing no-img warning."
+        - "Web i18n compilation, Prettier/ESLint, and Svelte-check passed with 0 errors and 0 warnings."
+        - "Goal state validation and git diff --check passed."
+      peer_review:
+        session: "eneo-pr589-original-download-fable"
+        iteration_1:
+          verdict: changes_required
+          minimum_score: 8
+          accepted:
+            - "Audit the attributable creation of exact-original bearer links."
+            - "Root signed SDK paths on the configured public Eneo base URL."
+          deferred:
+            - "S3 range-read spool cost belongs to future placement/scale work."
+            - "Typed shared token claims and legacy expiry bounds are separate hardening work."
+        iteration_2:
+          verdict: green
+          green_light: true
+          minimum_score: 8
+          blockers: none
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-pr-589-original-download-architecture-and-api-dx-review-20260724T130152Z.md"
+          - ".codex/artifacts/claude-peer-loop-pr-589-original-download-verification-20260724T131537Z.md"
+
 checks:
   dirty_fingerprint: "Only the new Goal Maker charter and board are tracked before T001."
   last_verification:
     result: pass
-    task: T005
+    task: T008
     commands:
-      - "96 focused backend and integration tests passed"
-      - "3823 backend non-integration tests passed"
+      - "118 focused backend and integration tests passed"
+      - "3825 backend non-integration tests passed"
       - "Prior full integration: 1125 passed; 77 skipped; 1 expected xfail"
       - "Strict Pyright 0/0 and changed-path Ruff/format passed"
-      - "SDK tests/lint, docs-site build, route metadata, schema parity, and diff check passed"
+      - "SDK tests/lint, web check/lint, docs-site build, schema parity, and diff check passed"
+      - "Fable high pass 1 changes_required at 8; pass 2 green at 8 with no blockers"

@@ -69,9 +69,27 @@ Eneo keeps processing views and original recovery explicit:
 | Normal download   | The representation Eneo uses for the File, such as extracted text or an image prepared for model input |
 | Original download | The exact persisted upload, with its original filename, media type, and byte length                    |
 
-Both use short-lived signed access. Original recovery is strict: Eneo never
-substitutes a processed representation when the original is absent. Instead it
-returns `404 file_original_not_found` (Eneo error `9045`).
+Both use signed access. Original-recovery links are deliberately short-lived:
+callers can request between one second and one hour. Original recovery is
+strict: Eneo never substitutes a processed representation when the original is
+absent. Instead it returns `404 file_original_not_found` (Eneo error `9045`).
+
+For a download button, keep the File ID and mint the URL when the user clicks:
+
+```js
+const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
+  fileId,
+  contentDisposition: "attachment",
+})
+
+window.location.assign(url)
+```
+
+Do not persist the returned URL or send it to analytics. It is a temporary
+bearer credential; use `expires_at` to decide when the application must request
+a new one. Eneo records who created an original-recovery link, its expiry, and
+whether it was intended for download or inline display; the bearer token itself
+is never written to the audit log.
 
 The original response includes `Repr-Digest` for the SHA-256 of the complete
 original. That value stays the same on an audio `206` range response because it
