@@ -191,7 +191,6 @@ class FlowBuilderProposalContent(BaseModel):
     spec: FlowDraftSpecCore
     assumptions: list[str] = Field(default_factory=list)
     lint_warnings: list[LintWarning] = Field(default_factory=_default_lint_warnings)
-    risk_acknowledgments: list[str] = Field(default_factory=list)
     plan_rationale: str | None = None
     description_override_manual: bool = False
     edit: FlowBuilderEditApproval | None = None
@@ -201,7 +200,6 @@ class FlowBuilderProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: FlowBuilderProposalContent
-    reasoning: str | None = None
     resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
 
     @property

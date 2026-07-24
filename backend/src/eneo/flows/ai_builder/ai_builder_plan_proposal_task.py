@@ -29,7 +29,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     PlanningState,

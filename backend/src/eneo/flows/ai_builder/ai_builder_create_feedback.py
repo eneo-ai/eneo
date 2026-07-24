@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_critic_invariants import CriticIssue
-from eneo.flows.ai_builder.ai_builder_feedback_formatting import (
-    format_revision_feedback,
-)
+
+
+def format_revision_feedback(title: str, issues: list[str]) -> str:
+    if not issues:
+        return title
+    numbered = "\n".join(
+        f"{index}. {issue}" for index, issue in enumerate(issues, start=1)
+    )
+    return f"{title}:\n{numbered}"
+
 
 # Raw critic remediations stay mechanics-oriented for edit/compiled contexts.
 # Create mode translates them here because propose_flow only accepts semantic create steps.
@@ -37,6 +44,9 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     ),
     "terminal_renderer_must_not_consume_review_only_step": (
         "Lägg inte ett granskningssteg som bara producerar anteckningar direkt före DOCX/PDF. Sista textsteget före renderern ska vara den färdiga dokumenttexten: flytta granskningen före slutlig sammanställning, eller låt granskningssteget skriva en reviderad slutversion av hela dokumentet."
+    ),
+    "document_renderer_must_immediately_follow_body_writer": (
+        "Placera DOCX/PDF-renderaren direkt efter det semantiska steg som skriver den färdiga dokumenttexten. Flytta eller ta bort mellanliggande steg som bryter den dokumentkedjan."
     ),
     "requested_output_sections_require_section_writers": (
         "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i intentionen, och gruppera bara närliggande rubriker när det behövs."

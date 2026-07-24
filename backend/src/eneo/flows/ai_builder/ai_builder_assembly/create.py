@@ -15,7 +15,14 @@ from eneo.flows.ai_builder.ai_builder_assembly.fixed_steps import (
     template_fill_step,
     template_variable_reader_step,
 )
-from eneo.flows.ai_builder.ai_builder_assembly.lower import lower_assembly_plan
+from eneo.flows.ai_builder.ai_builder_assembly.lower import (
+    COMPOSE_OVERALL_OVERVIEW_KEY,
+    COMPOSE_REPORT_TITLE_KEY,
+    COMPOSE_SECTION_BODY_KEY,
+    COMPOSE_SECTION_TITLE_KEY,
+    COMPOSE_SOURCE_LABEL_KEY,
+    lower_assembly_plan,
+)
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     FlowAssemblyPlan,
     PlannedStep,
@@ -1534,7 +1541,9 @@ def _step_outputs_source_section_array(planned_step: PlannedStep) -> bool:
     if field.field_type != "array":
         return False
     item_field_names = {item.name for item in field.item_fields or ()}
-    return {"section_title", "section_body"}.issubset(item_field_names)
+    return {COMPOSE_SECTION_TITLE_KEY, COMPOSE_SECTION_BODY_KEY}.issubset(
+        item_field_names
+    )
 
 
 def _step_outputs_weak_section_text(planned_step: PlannedStep) -> bool:
@@ -1557,7 +1566,7 @@ def _step_outputs_weak_section_text(planned_step: PlannedStep) -> bool:
 
 
 def _is_section_text_field_name(name: str) -> bool:
-    return name in {"section_text", "section_body"}
+    return name in {"section_text", COMPOSE_SECTION_BODY_KEY}
 
 
 def _document_report_section_writer_name(ui_language: str | None) -> str:
@@ -1932,7 +1941,7 @@ def _section_title_field(ui_language: str | None) -> StructuredFieldDraft:
         else "Mänsklig avsnittsrubrik från dokumentets titel eller ämne, inte uppladdat filnamn."
     )
     return StructuredFieldDraft(
-        name="section_title",
+        name=COMPOSE_SECTION_TITLE_KEY,
         field_type="string",
         description=description,
     )
@@ -1945,7 +1954,7 @@ def _section_body_field(ui_language: str | None) -> StructuredFieldDraft:
         else "Färdig källspecifik rapporttext för avsnittet."
     )
     return StructuredFieldDraft(
-        name="section_body",
+        name=COMPOSE_SECTION_BODY_KEY,
         field_type="string",
         description=description,
     )
@@ -1958,7 +1967,7 @@ def _runtime_source_label_field(ui_language: str | None) -> StructuredFieldDraft
         else "Runtimeägd källetikett för uppladdad fil. Runtime fyller fältet."
     )
     return StructuredFieldDraft(
-        name="source_label",
+        name=COMPOSE_SOURCE_LABEL_KEY,
         field_type="string",
         description=description,
     )
@@ -1983,24 +1992,24 @@ def _report_overview_fields(
     if ui_language == "en":
         return (
             StructuredFieldDraft(
-                name="report_title",
+                name=COMPOSE_REPORT_TITLE_KEY,
                 field_type="string",
                 description="Final report title.",
             ),
             StructuredFieldDraft(
-                name="overall_overview",
+                name=COMPOSE_OVERALL_OVERVIEW_KEY,
                 field_type="string",
                 description="Synthesized overview or conclusion across all sources.",
             ),
         )
     return (
         StructuredFieldDraft(
-            name="report_title",
+            name=COMPOSE_REPORT_TITLE_KEY,
             field_type="string",
             description="Slutrapportens titel.",
         ),
         StructuredFieldDraft(
-            name="overall_overview",
+            name=COMPOSE_OVERALL_OVERVIEW_KEY,
             field_type="string",
             description="Samlad översikt eller slutsats över alla källor.",
         ),

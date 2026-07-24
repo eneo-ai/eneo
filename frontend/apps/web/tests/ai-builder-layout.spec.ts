@@ -72,7 +72,6 @@ const PLAN = {
       "PDF-dokumentet behöver ingen särskild mall."
     ],
     lint_warnings: [],
-    risk_acknowledgments: [],
     description_override_manual: false,
     edit: null
   }

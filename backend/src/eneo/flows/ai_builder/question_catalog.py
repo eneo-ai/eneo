@@ -47,8 +47,7 @@ class QuestionOption:
 
     Bilingual label + description so the UI can render either language
     without a runtime lookup. `value` is the canonical answer token the
-    planner matches against (preserved from the legacy factory copy so
-    downstream answer-handling stays identical).
+    planner matches against.
     """
 
     id: str

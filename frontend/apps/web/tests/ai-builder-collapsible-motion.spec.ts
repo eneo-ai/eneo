@@ -66,7 +66,6 @@ const PLAN = {
     plan_rationale: "Tre steg håller varje delmoment enkelt att kontrollera.",
     assumptions: [],
     lint_warnings: [],
-    risk_acknowledgments: [],
     description_override_manual: false,
     edit: null
   }

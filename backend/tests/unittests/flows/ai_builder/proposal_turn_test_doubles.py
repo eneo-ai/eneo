@@ -1,4 +1,4 @@
-"""Mock-backed proposal-turn doubles shared by proposal processor/submission tests."""
+"""Mock-backed proposal-turn doubles shared by proposal submission tests."""
 
 from __future__ import annotations
 
@@ -11,9 +11,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     FlowBuilderProposalContent,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
@@ -24,20 +21,6 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
     CompletionTokenUsage,
 )
-
-
-def _make_processor(**overrides: object) -> AIBuilderProposalProcessor:
-    defaults = {
-        "user": MagicMock(tenant_id=uuid4()),
-        "repo": AsyncMock(),
-        "litellm_client": AsyncMock(),
-        "self_correction_temperature": 0.2,
-        "self_correction_bumped_temperature": 0.5,
-        "forced_proposal_temperature": 0.3,
-        "quality_retry_warning_codes": set(),
-    }
-    defaults.update(overrides)
-    return AIBuilderProposalProcessor(**defaults)
 
 
 def _make_submission(**overrides: object) -> ProposalSubmissionOwner:

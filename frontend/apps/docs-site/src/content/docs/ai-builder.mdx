@@ -7,8 +7,8 @@ AI Builder helps a human operator draft or revise an Eneo Flow through a guided 
 Use AI Builder when you know the outcome you want but do not want to assemble every step, input binding, and output contract by hand.
 
 <Callout type="info">
-  AI Builder requires a user principal with Flow edit permission. Service keys can run published
-  Flows, but they cannot author drafts through AI Builder.
+  AI Builder requires a user principal with Flow edit permission. Service keys
+  can run published Flows, but they cannot author drafts through AI Builder.
 </Callout>
 
 ## When to use AI Builder
@@ -143,7 +143,7 @@ never turn it into an automatic transport retry.
 
 ## Plan proposal contract
 
-AI Builder plan endpoints return one proposal object. Treat `proposal.spec` as the draft Flow that will be applied after approval. Supporting fields such as `assumptions`, `lint_warnings`, `risk_acknowledgments`, and `plan_rationale` explain why that draft was proposed.
+AI Builder plan endpoints return one proposal object. Treat `proposal.spec` as the draft Flow that will be applied after approval. Supporting fields such as `assumptions`, `lint_warnings`, and `plan_rationale` explain why that draft was proposed.
 
 Edit sessions may also include `proposal.edit`. This is the approval metadata for the edit, not a second Flow spec. It contains the base draft revision, the explicit existing step refs that will be removed, the preview diff, warnings, advisories, risk flags, and confidence. Use it to render edit review UI and stale-revision checks.
 

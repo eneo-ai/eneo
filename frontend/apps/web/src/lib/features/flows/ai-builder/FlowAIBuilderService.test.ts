@@ -51,8 +51,7 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
         form_fields: null
       },
       assumptions: [],
-      lint_warnings: [],
-      risk_acknowledgments: []
+      lint_warnings: []
     },
     ...overrides
   };

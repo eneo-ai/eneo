@@ -871,7 +871,7 @@ export class FlowAIBuilderDriver {
     return result;
   }
 
-  async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
+  async applyPlan(): Promise<ApplyResult> {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
@@ -890,7 +890,7 @@ export class FlowAIBuilderDriver {
         params: { path: { plan_id: plan.plan_id } },
         requestBody: {
           "application/json": {
-            expected_revision: expectedRevision ?? null
+            expected_revision: null
           }
         }
       })) as ApplyResult;
@@ -926,7 +926,7 @@ export class FlowAIBuilderDriver {
     }
   }
 
-  async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {
+  async unpublishAndApplyPlan(): Promise<ApplyResult> {
     const plan = this.#state.currentPlan;
     const owner = this.#currentSessionOwner();
     if (!plan || !owner) throw new Error("No plan to apply");
@@ -959,7 +959,7 @@ export class FlowAIBuilderDriver {
     }
 
     try {
-      return await this.applyPlan(expectedRevision);
+      return await this.applyPlan();
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
       const parsedApplyError = parseAIBuilderError({

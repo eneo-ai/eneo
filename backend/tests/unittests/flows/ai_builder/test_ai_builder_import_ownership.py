@@ -10,12 +10,6 @@ AI_BUILDER_MODELS_MODULE = ".".join(
 AI_BUILDER_DOMAIN_MODELS_MODULE = ".".join(
     ("eneo", "flows", "ai_builder", "ai_builder_domain_models")
 )
-AI_BUILDER_PROPOSAL_PROCESSOR_MODULE = ".".join(
-    ("eneo", "flows", "ai_builder", "ai_builder_proposal_processor")
-)
-BANNED_PROPOSAL_PROCESSOR_IMPORTS = frozenset(
-    {AI_BUILDER_PROPOSAL_PROCESSOR_MODULE, "ai_builder_proposal_processor"}
-)
 PROPOSAL_TOOL_MODULES = (
     Path("src/eneo/flows/ai_builder/ai_builder_create_proposal.py"),
     Path("src/eneo/flows/ai_builder/ai_builder_edit_proposal.py"),
@@ -60,15 +54,6 @@ BANNED_PROPOSAL_TOOL_NAMES = frozenset(
         "store_plan_and_update_conversation",
     }
 )
-PROCESSOR_FINALIZATION_METHODS = frozenset(
-    {
-        "_create_quality_result",
-        "_edit_quality_result",
-        "_finalize_compiled_proposal",
-        "_retry_context",
-        "mcp_clarification_events_if_needed",
-    }
-)
 BACKEND_QUESTION_PERSISTENCE_PATH = Path(
     "src/eneo/flows/ai_builder/ai_builder_backend_question_persistence.py"
 )
@@ -104,17 +89,6 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
         "llm_messages",
         "tool_call",
         "value",
-    }
-)
-PROPOSAL_SUBMISSION_METHODS = frozenset(
-    {
-        "active_submission_tool_schemas",
-        "_finalize_invocation_proposal",
-        "_handle_propose_flow_tool_call",
-        "_process_submission_invocation",
-        "_proposal_retry_config",
-        "retry_forced_proposal_after_text",
-        "_active_submission_tool_schemas",
     }
 )
 PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
@@ -177,7 +151,9 @@ AI_BUILDER_TOOL_NAME_OWNERS = {
     "CONFIRM_REQUIREMENTS_TOOL_NAME": Path(
         "src/eneo/flows/ai_builder/ai_builder_tool_names.py"
     ),
-    "PROPOSE_FLOW_TOOL_NAME": Path("src/eneo/flows/ai_builder/ai_builder_tools.py"),
+    "PROPOSE_FLOW_TOOL_NAME": Path(
+        "src/eneo/flows/ai_builder/ai_builder_tool_names.py"
+    ),
 }
 PRIVATE_TOOL_NAME_DUPLICATES = frozenset(
     f"_{name}" for name in AI_BUILDER_TOOL_NAME_OWNERS
@@ -203,9 +179,6 @@ ARCHITECTURE_ERROR_HELPERS = frozenset(
     }
 )
 AI_BUILDER_TEST_MODULE = ".".join(("tests", "unittests", "flows", "ai_builder"))
-PROPOSAL_PROCESSOR_TEST_MODULE = ".".join(
-    (AI_BUILDER_TEST_MODULE, "test_ai_builder_proposal_processor")
-)
 PROPOSAL_TURN_BUILDERS_IMPORT_MODULE = ".".join(
     (AI_BUILDER_TEST_MODULE, "proposal_turn_builders")
 )
@@ -213,7 +186,6 @@ PROPOSAL_TURN_TEST_DOUBLES_IMPORT_MODULE = ".".join(
     (AI_BUILDER_TEST_MODULE, "proposal_turn_test_doubles")
 )
 PROPOSAL_TEST_TOPOLOGY_FILES = (
-    Path("tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"),
     Path("tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"),
 )
 PROPOSAL_TURN_BUILDER_TEST_MODULE = Path(
@@ -351,13 +323,11 @@ PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
         "pytest",
         "types",
         "unittest.mock",
-        "eneo.flows.ai_builder.ai_builder_proposal_processor",
         "eneo.flows.ai_builder.ai_builder_proposal_submission",
     }
 )
 PURE_PROPOSAL_TURN_BUILDER_BANNED_NAMES = frozenset(
     {
-        "AIBuilderProposalProcessor",
         "ProposalSubmissionOwner",
         "AsyncMock",
         "MagicMock",
@@ -416,22 +386,6 @@ def test_ai_builder_model_imports_use_canonical_owners() -> None:
     assert violations == []
 
 
-def test_proposal_tool_modules_do_not_import_proposal_processor() -> None:
-    backend_root = Path(__file__).resolve().parents[4]
-    violations: list[str] = []
-
-    for relative_path in PROPOSAL_TOOL_MODULES:
-        path = backend_root / relative_path
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom):
-                continue
-            if node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS:
-                violations.append(f"{path}:{node.lineno} imports {node.module}")
-
-    assert violations == []
-
-
 def test_proposal_tool_modules_do_not_own_active_send_finalization() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     violations: list[str] = []
@@ -481,12 +435,6 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
     finalization_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_proposal_finalization.py"
     )
-    processor_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
-    contracts_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
-    )
     critic_paths = (
         backend_root
         / Path("src/eneo/flows/ai_builder/ai_builder_plan_quality_critic.py"),
@@ -504,22 +452,6 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
     assert FINALIZATION_OWNER_NAMES <= owner_names
 
     violations: list[str] = []
-    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
-    for node in ast.walk(processor_tree):
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in PROCESSOR_FINALIZATION_METHODS
-        ):
-            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
-
-    for path in (finalization_path, contracts_path):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (
-                node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
-            ):
-                violations.append(f"{path}:{node.lineno} imports {node.module}")
-
     for path in critic_paths:
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
@@ -530,6 +462,44 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
                 violations.append(f"{path}:{node.lineno} imports {node.module}")
 
     assert violations == []
+
+
+def test_planner_dispatches_without_reowning_proposal_internals() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    planner_path = backend_root / Path(
+        "src/eneo/flows/ai_builder/ai_builder_planner.py"
+    )
+    planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
+    planner_class = next(
+        node
+        for node in ast.walk(planner_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderPlanner"
+    )
+    forbidden_methods = {
+        "_active_submission_tool_schemas",
+        "_build_self_correction_request",
+        "_finalize_compiled_proposal",
+        "_finalize_invocation_proposal",
+        "_handle_propose_flow_tool_call",
+        "_process_submission_invocation",
+        "_proposal_retry_config",
+        "retry_forced_proposal_after_text",
+    }
+    owned_methods = {
+        node.name
+        for node in planner_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    submission_calls = [
+        node
+        for node in ast.walk(planner_class)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run_active_submission_attempt"
+    ]
+
+    assert owned_methods.isdisjoint(forbidden_methods)
+    assert len(submission_calls) == 1
 
 
 def test_backend_question_persistence_has_no_discovery_runtime_owner() -> None:
@@ -720,36 +690,6 @@ def test_compiled_proposal_finalization_has_no_completion_boundary() -> None:
     assert violations == []
 
 
-def test_proposal_processor_no_longer_owns_completion_boundary() -> None:
-    backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
-    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
-
-    acompletion_refs = [
-        node
-        for node in ast.walk(processor_tree)
-        if isinstance(node, ast.Attribute) and node.attr == "acompletion"
-    ]
-    violations: list[str] = []
-    if acompletion_refs:
-        lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
-        violations.append(f"{processor_path}: acompletion refs {lines}")
-
-    for node in ast.walk(processor_tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        kwarg = node.args.kwarg
-        if kwarg is None:
-            continue
-        annotation = ast.unparse(kwarg.annotation) if kwarg.annotation else ""
-        if kwarg.arg == "kwargs" and annotation == "Any":
-            violations.append(f"{processor_path}:{node.lineno} defines **kwargs: Any")
-
-    assert violations == []
-
-
 def test_litellm_completion_has_single_typed_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
@@ -812,7 +752,6 @@ def test_litellm_completion_dependency_direction_stays_leaf_owned() -> None:
         if not isinstance(node, ast.ImportFrom):
             continue
         if node.module in {
-            "eneo.flows.ai_builder.ai_builder_proposal_processor",
             "eneo.flows.ai_builder.ai_builder_planner",
         }:
             violations.append(f"{completion_path}:{node.lineno} imports {node.module}")
@@ -882,14 +821,10 @@ def test_ai_builder_tool_names_have_single_owners() -> None:
 
 def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
     tools_path = backend_root / Path("src/eneo/flows/ai_builder/ai_builder_tools.py")
     parsing_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_tool_parsing.py"
     )
-    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
     tools_tree = ast.parse(tools_path.read_text(), filename=str(tools_path))
     parsing_tree = ast.parse(parsing_path.read_text(), filename=str(parsing_path))
     violations: list[str] = []
@@ -897,24 +832,6 @@ def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
     for rel_path in OBSOLETE_MODEL_TOOL_RUNTIME_PATHS:
         if (backend_root / rel_path).exists():
             violations.append(f"{rel_path}: obsolete model-visible runtime exists")
-
-    processor_class = next(
-        node
-        for node in ast.walk(processor_tree)
-        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
-    )
-    obsolete_processor_methods = {
-        "handle_tool_call",
-        "_dispatch_known_tool_call",
-        "_handle_question_recovery_dispatch",
-        "_handle_confirm_requirements",
-    }
-    for node in processor_class.body:
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in obsolete_processor_methods
-        ):
-            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
 
     obsolete_tool_functions = {
         "build_all_tool_schemas",
@@ -1283,9 +1200,6 @@ def test_stream_events_have_single_wire_encoder_boundary() -> None:
 
 def test_proposal_retry_wrapper_stays_deleted_and_retry_owns_runtime_helpers() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
     repair_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_proposal_retry.py"
     )
@@ -1295,7 +1209,6 @@ def test_proposal_retry_wrapper_stays_deleted_and_retry_owns_runtime_helpers() -
     assert not runtime_path.exists()
     assert importlib.util.find_spec(PROPOSAL_RETRY_MODULE) is not None
 
-    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
     repair_text = repair_path.read_text()
     repair_tree = ast.parse(repair_text, filename=str(repair_path))
     violations: list[str] = []
@@ -1318,18 +1231,6 @@ def test_proposal_retry_wrapper_stays_deleted_and_retry_owns_runtime_helpers() -
                 violations.append(
                     f"{repair_path}:{node.lineno} builds ProposalCompletionRequest"
                 )
-
-    processor_class = next(
-        node
-        for node in ast.walk(processor_tree)
-        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
-    )
-    for node in processor_class.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "run_tool_self_correction",
-            "run_forced_tool_retry_after_text",
-        }:
-            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
 
     for node in ast.walk(repair_tree):
         if (
@@ -1365,9 +1266,6 @@ def test_proposal_retry_wrapper_stays_deleted_and_retry_owns_runtime_helpers() -
 
 def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/eneo/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
     submission_path = backend_root / Path(
         "src/eneo/flows/ai_builder/ai_builder_proposal_submission.py"
     )
@@ -1379,8 +1277,6 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
     )
     assert importlib.util.find_spec(PROPOSAL_SUBMISSION_MODULE) is not None
 
-    processor_text = processor_path.read_text()
-    processor_tree = ast.parse(processor_text, filename=str(processor_path))
     submission_text = submission_path.read_text()
     submission_tree = ast.parse(submission_text, filename=str(submission_path))
     repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
@@ -1388,42 +1284,6 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         architecture_errors_path.read_text(), filename=str(architecture_errors_path)
     )
     violations: list[str] = []
-
-    processor_class = next(
-        node
-        for node in ast.walk(processor_tree)
-        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
-    )
-    for node in processor_class.body:
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in PROPOSAL_SUBMISSION_METHODS
-        ):
-            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
-
-    for banned_import in {
-        "process_create_intent_arguments",
-        "process_edit_arguments",
-        "build_create_flow_tool_schema",
-        "build_edit_flow_tool_schema",
-        "OUTLINE_FLOW_FORCED_TOOL_PROMPT",
-        "EDIT_FLOW_FORCED_TOOL_PROMPT",
-        "SUBMISSION_TOOL_NAMES",
-    }:
-        if banned_import in processor_text:
-            violations.append(
-                f"{processor_path}: imports or references {banned_import}"
-            )
-
-    for banned_reference in {
-        "call_proposal_completion_with_usage",
-        "active_submission_tool_name(",
-        "active_submission_tool_schemas(",
-        "_preflight_scoped_step_revision_if_requested(",
-        "retry_forced_proposal_after_text(",
-    }:
-        if banned_reference in processor_text:
-            violations.append(f"{processor_path}: references {banned_reference}")
 
     submission_classes = [
         node
@@ -1517,11 +1377,6 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
             )
 
     for node in ast.walk(submission_tree):
-        if isinstance(node, ast.ImportFrom) and (
-            node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
-        ):
-            violations.append(f"{submission_path}:{node.lineno} imports {node.module}")
-
         if isinstance(node, ast.ClassDef) and node.name.endswith(
             ("Processor", "Service", "Manager", "Handler")
         ):
@@ -1660,36 +1515,9 @@ def test_scoped_plan_revision_owns_direct_revision_without_llm_or_repair() -> No
     assert violations == []
 
 
-def test_proposal_submission_tests_do_not_import_processor_test_setup() -> None:
-    backend_root = Path(__file__).resolve().parents[4]
-    submission_test_path = backend_root / Path(
-        "tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
-    )
-    tree = ast.parse(
-        submission_test_path.read_text(), filename=str(submission_test_path)
-    )
-    violations: list[str] = []
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        if node.module == PROPOSAL_PROCESSOR_TEST_MODULE:
-            violations.append(
-                f"{submission_test_path}:{node.lineno} imports {node.module}"
-            )
-
-    assert violations == []
-
-
 def test_proposal_tests_import_canonical_setup_modules() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     expected_modules_by_path = {
-        Path(
-            "tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
-        ): {
-            PROPOSAL_TURN_BUILDERS_IMPORT_MODULE,
-            PROPOSAL_TURN_TEST_DOUBLES_IMPORT_MODULE,
-        },
         Path(
             "tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
         ): {
@@ -1743,23 +1571,6 @@ def test_proposal_submission_tests_construct_submission_owner_directly() -> None
         if isinstance(node, ast.Attribute) and node.attr == "_proposal_submission":
             violations.append(
                 f"{submission_test_path}:{node.lineno} reaches {_attribute_chain(node)}"
-            )
-
-    assert violations == []
-
-
-def test_proposal_processor_tests_do_not_reach_into_submission_owner() -> None:
-    backend_root = Path(__file__).resolve().parents[4]
-    processor_test_path = backend_root / Path(
-        "tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
-    )
-    tree = ast.parse(processor_test_path.read_text(), filename=str(processor_test_path))
-    violations: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr == "_proposal_submission":
-            violations.append(
-                f"{processor_test_path}:{node.lineno} reaches {_attribute_chain(node)}"
             )
 
     assert violations == []
@@ -1869,7 +1680,6 @@ def test_server_decision_dispatch_has_canonical_owner() -> None:
         for module in _imported_modules(dispatch_tree):
             if module in {
                 AI_BUILDER_PLANNER_MODULE,
-                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 "eneo.flows.ai_builder.ai_builder_orchestrator",
             }:
                 violations.append(f"{dispatch_path}: imports {module}")
@@ -1951,7 +1761,6 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
         for module in _imported_modules(send_lease_tree):
             if module in {
                 AI_BUILDER_PLANNER_MODULE,
-                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 SERVER_DECISION_DISPATCH_MODULE,
                 USER_QUESTION_METADATA_MODULE,
                 "eneo.flows.ai_builder.ai_builder_litellm_completion",
@@ -1971,7 +1780,6 @@ def test_send_turn_lifecycle_has_canonical_owners() -> None:
         for module in _imported_modules(metadata_tree):
             if module in {
                 AI_BUILDER_PLANNER_MODULE,
-                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 SERVER_DECISION_DISPATCH_MODULE,
                 SEND_LEASE_MODULE,
                 "eneo.flows.ai_builder.ai_builder_repo",
@@ -2030,10 +1838,7 @@ def test_planner_request_preparation_has_canonical_owner() -> None:
                 f"{preparation_path}: public names {sorted(public_names)}"
             )
         for module in _imported_modules(preparation_tree):
-            if module in {
-                AI_BUILDER_PLANNER_MODULE,
-                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
-            }:
+            if module == AI_BUILDER_PLANNER_MODULE:
                 violations.append(f"{preparation_path}: imports {module}")
         for node in ast.walk(preparation_tree):
             if isinstance(node, ast.ClassDef) and node.name.endswith(

@@ -288,7 +288,6 @@ class ProposalCompletionRequest:
 class CompiledProposal:
     content: FlowBuilderProposalContent
     validation: SpecValidationResult
-    reasoning: str | None = None
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple()
     aggregation_intent: AggregationIntent = "linear"
 

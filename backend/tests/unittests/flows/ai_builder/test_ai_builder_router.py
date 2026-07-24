@@ -1528,27 +1528,6 @@ class TestPlanRecoveryEndpoints:
         assert result.status == plan.status
 
     @pytest.mark.anyio
-    async def test_get_plan_hides_reasoning(self):
-        container = _make_container()
-        plan = _make_plan_domain()
-        plan.proposal.reasoning = "Hidden"
-        session = _make_session_domain(
-            session_id=plan.session_id,
-            actor_user_id=container.user.return_value.id,
-        )
-        service = container.ai_builder_service.return_value
-        service.get_plan.return_value = plan
-        service.get_session.return_value = session
-
-        result = await get_plan(
-            request=MagicMock(),
-            plan_id=plan.id,
-            container=container,
-        )
-
-        assert "reasoning" not in type(result.proposal).model_fields
-
-    @pytest.mark.anyio
     async def test_get_plan_rejects_scoped_key_for_other_space(self):
         container = _make_container()
         plan = _make_plan_domain()

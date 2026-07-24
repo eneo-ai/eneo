@@ -183,7 +183,7 @@ async def prepare_planner_request(
         litellm_client=request.litellm_client,
         completion_model_route=request.completion_model_route,
         ui_language=ui_language,
-        allow_semantic_adjudication=request.allow_discovery_semantic_adjudication,
+        allow_classification=request.allow_discovery_semantic_adjudication,
         tenant_id=request.tenant_id,
         attachment_context=attachment_context_result,
         usage_tracker=request.usage_tracker,

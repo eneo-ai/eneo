@@ -278,7 +278,6 @@ class AIBuilderPlanLifecycle:
         revised_proposal = plan.proposal.model_copy(
             update={
                 "content": revised_content,
-                "reasoning": None,
             }
         )
 

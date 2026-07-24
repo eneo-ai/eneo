@@ -215,7 +215,6 @@ class TestFlowBuilderProposalContent:
         proposal = FlowBuilderProposalContent(
             spec=spec,
             assumptions=["User wants text output"],
-            risk_acknowledgments=[],
         )
         assert proposal.spec.flow_name == "Test flow"
         assert len(proposal.assumptions) == 1
@@ -225,7 +224,7 @@ class TestFlowBuilderProposalContent:
         proposal = FlowBuilderProposalContent(spec=spec)
         assert proposal.assumptions == []
         assert proposal.lint_warnings == []
-        assert proposal.risk_acknowledgments == []
+        assert "risk_acknowledgments" not in type(proposal).model_fields
 
 
 # ---------------------------------------------------------------------------

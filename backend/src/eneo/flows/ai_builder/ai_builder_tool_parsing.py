@@ -25,11 +25,6 @@ def extract_assumptions(arguments: dict[str, Any]) -> list[str]:
     return []
 
 
-def extract_reasoning(arguments: dict[str, Any]) -> str | None:
-    raw = arguments.get("reasoning")
-    return str(raw) if isinstance(raw, str) and raw else None
-
-
 def extract_plan_rationale(arguments: dict[str, Any]) -> str | None:
     raw = arguments.get("plan_rationale")
     return str(raw) if isinstance(raw, str) and raw else None

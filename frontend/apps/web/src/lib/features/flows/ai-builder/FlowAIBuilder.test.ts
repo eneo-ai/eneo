@@ -161,7 +161,6 @@ function planSessionHarness(): {
       },
       assumptions: [],
       lint_warnings: [],
-      risk_acknowledgments: [],
       description_override_manual: false,
       edit: null
     }

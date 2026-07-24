@@ -35,7 +35,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -138,7 +138,6 @@ def _compiled_outline_proposal_with_validation(
     compiled = _compiled_outline_proposal()
     return CompiledProposal(
         content=compiled.content,
-        reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
         aggregation_intent=compiled.aggregation_intent,

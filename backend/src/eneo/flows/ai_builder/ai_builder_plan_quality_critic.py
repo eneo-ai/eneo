@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, Any
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     create_compile_context_from_planning_state,
 )
+from eneo.flows.ai_builder.ai_builder_create_feedback import (
+    format_revision_feedback,
+)
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
     evaluate_critic_invariants,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-)
-from eneo.flows.ai_builder.ai_builder_feedback_formatting import (
-    format_revision_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,

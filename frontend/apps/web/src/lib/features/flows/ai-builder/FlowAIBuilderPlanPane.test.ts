@@ -229,8 +229,7 @@ describe("FlowAIBuilderPlanPane", () => {
         proposal: {
           spec: { flow_name: "Flow", flow_description: "", steps: [], form_fields: [] },
           assumptions: ["Underlaget är på svenska.", "En körning i taget."],
-          lint_warnings: [],
-          risk_acknowledgments: []
+          lint_warnings: []
         }
       })
     };
@@ -433,8 +432,7 @@ function makeApprovedCreatePlanState({ step }: { step: Partial<StepSpec> }) {
           form_fields: []
         },
         assumptions: [],
-        lint_warnings: [],
-        risk_acknowledgments: []
+        lint_warnings: []
       }
     })
   };
@@ -511,8 +509,7 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
         form_fields: []
       },
       assumptions: [],
-      lint_warnings: [],
-      risk_acknowledgments: []
+      lint_warnings: []
     },
     ...overrides
   };

@@ -72,6 +72,9 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
+    ScopedPlanRevisionOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
     PendingQuestionResolution,
 )
@@ -1287,7 +1290,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             allow_discovery_semantic_adjudication=False,
         )
 
-    assert discovery_runtime.await_args.kwargs["allow_semantic_adjudication"] is False
+    assert discovery_runtime.await_args.kwargs["allow_classification"] is False
 
 
 @pytest.mark.asyncio
@@ -1521,7 +1524,11 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
         "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         fake_dispatch,
     )
-    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
 
     events = await _collect_send_message_events(planner, session_id=session_id)
 
@@ -1590,7 +1597,11 @@ async def test_send_message_server_continuation_commits_the_exact_proposal_error
         "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
         fake_dispatch,
     )
-    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
 
     events = await _collect_send_message_events(planner, session_id=uuid4())
 
@@ -1651,7 +1662,11 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
         "eneo.flows.ai_builder.ai_builder_send_lease._refresh_session_send_lease",
         refresh_fails,
     )
-    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
 
     events = await _collect_send_message_events(planner, session_id=session_id)
 
@@ -1830,7 +1845,11 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
         await asyncio.Event().wait()
         yield build_text_event("unreachable")
 
-    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
     stream = planner.send_message(
         session_id=session_id,
         client_turn_id=_TEST_CLIENT_TURN_ID,
@@ -1923,7 +1942,15 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
         fake_prepare,
     )
-    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
 
     events = [
         encode_ai_builder_stream_event(event)
@@ -1953,6 +1980,99 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
     assert resource_catalog.models[0].authoring_ref == "model.fast-model"
     assert resource_catalog.models[0].slot_ref.label == "Renamed model"
     assert events[-1] == {"event": "done", "data": ""}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "expected_text", "expected_scoped_calls", "expected_submission_calls"),
+    [
+        ("scoped_hit", "scoped", 1, 0),
+        ("scoped_miss", "submission", 1, 1),
+        ("edit_flow", "submission", 0, 1),
+    ],
+)
+async def test_stream_proposal_events_dispatches_once_to_the_selected_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_text: str,
+    expected_scoped_calls: int,
+    expected_submission_calls: int,
+) -> None:
+    planner = _make_planner()
+    proposal_request = ProposalPrepared(
+        requirements_state=_requirements_state_confirmed(),
+        ui_language="sv",
+        message_groups=(
+            ProposalMessageGroup(
+                messages=({"role": "system", "content": "proposal"},),
+                kind="system",
+                protected=True,
+            ),
+        ),
+        system_prompt_hash="proposal-hash",
+        prior_plan_for_revision=None,
+        slot_classification_metadata=None,
+        plan_edit_context=None,
+        planning_state=PlanningState.empty(),
+        requested_output_sections=RequestedOutputSections.empty(),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+            prior_bindings=(),
+        ),
+    )
+    scoped_result = (
+        ScopedPlanRevisionOutcome(events=(build_text_event("scoped"),))
+        if mode == "scoped_hit"
+        else None
+    )
+    scoped_attempt = AsyncMock(return_value=scoped_result)
+    submission_calls = 0
+
+    async def run_submission_attempt(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        nonlocal submission_calls
+        submission_calls += 1
+        yield build_text_event("submission")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.run_scoped_plan_revision_attempt",
+        scoped_attempt,
+    )
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        run_submission_attempt,
+    )
+
+    events = [
+        event
+        async for event in planner._stream_proposal_events(
+            turn=cast(Any, SimpleNamespace()),
+            conversation=[],
+            new_messages_start=0,
+            proposal_request=proposal_request,
+            completion_model_route=_route(),
+            max_output_tokens=1024,
+            request_id="dispatch-owner-test",
+            usage_tracker=ProposalTurnTelemetry(
+                request_id="dispatch-owner-test",
+                model="openai/gpt-5.4",
+                target_kind=TargetKind.EDIT
+                if mode == "edit_flow"
+                else TargetKind.CREATE,
+            ),
+            flow=cast(Any, object()) if mode == "edit_flow" else None,
+            assistant_snapshots=None,
+            before_provider_call=AsyncMock(),
+        )
+    ]
+
+    assert events == [build_text_event(expected_text)]
+    assert scoped_attempt.await_count == expected_scoped_calls
+    assert submission_calls == expected_submission_calls
+    planner.repo.complete_session_turn.assert_awaited_once()
 
 
 @pytest.mark.asyncio

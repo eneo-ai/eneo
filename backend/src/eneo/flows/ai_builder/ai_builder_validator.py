@@ -53,16 +53,6 @@ _BUILDER_IGNORED_FLOW_VALIDATION_EXCEPTION_CODES = frozenset(
     code.value for code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
 )
 _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[FlowGraphIssueCode, str] = {
-    FlowGraphIssueCode.AUDIO_DOCUMENT_TRANSCRIPT_CHAIN_INVALID: (
-        "audio_document_transcript_chain_invalid"
-    ),
-    FlowGraphIssueCode.DUPLICATE_STEP_NAME: "duplicate_step_name",
-    FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_INVALID: (
-        "flow_audio_transcription_invalid"
-    ),
-    FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL: (
-        "flow_http_post_output_must_be_terminal"
-    ),
     FlowGraphIssueCode.FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE: (
         "input_binding_future_step_reference"
     ),
@@ -89,31 +79,8 @@ _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[FlowGraphIssueCode, str] = {
     FlowGraphIssueCode.TYPED_IO_INCOMPATIBLE_TYPE_CHAIN: "incompatible_type_chain",
     FlowGraphIssueCode.TRANSCRIBE_ONLY_VIOLATION: "transcribe_only_violation",
     FlowGraphIssueCode.TEMPLATE_FILL_REQUIRES_DOCX: "template_fill_requires_docx",
-    FlowGraphIssueCode.INVALID_INPUT_CONTRACT_SCHEMA: "invalid_input_contract_schema",
-    FlowGraphIssueCode.INVALID_OUTPUT_CONTRACT_SCHEMA: (
-        "invalid_output_contract_schema"
-    ),
-    FlowGraphIssueCode.INPUT_CONTRACT_TYPE_MISMATCH: "input_contract_type_mismatch",
     FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH: "input_contract_type_mismatch",
-    FlowGraphIssueCode.OUTPUT_CONTRACT_TYPE_MISMATCH: "output_contract_type_mismatch",
-    FlowGraphIssueCode.OUTPUT_CONTRACT_TEMPLATE_FILL_INCOMPATIBLE: (
-        "output_contract_template_fill_incompatible"
-    ),
-    FlowGraphIssueCode.UNSUPPORTED_INPUT_TYPE: "unsupported_input_type",
 }
-_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION: frozenset[
-    FlowGraphIssueCode
-] = frozenset(
-    {
-        FlowGraphIssueCode.DUPLICATE_STEP_ORDER,
-        FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-        FlowGraphIssueCode.FLOW_REVIEW_POLICY_INVALID,
-        FlowGraphIssueCode.FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
-        FlowGraphIssueCode.FLOW_STEP_INVALID,
-        FlowGraphIssueCode.STEP_ORDER_NOT_CONTIGUOUS,
-        FlowGraphIssueCode.TYPED_IO_MISSING_PREVIOUS_STEP,
-    }
-)
 
 
 def validate_spec(
@@ -321,12 +288,7 @@ def _builder_ignores_graph_issue(issue: FlowStepGraphIssue) -> bool:
 
 
 def _builder_code_from_graph_issue(issue: FlowStepGraphIssue) -> str:
-    mapped = _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE.get(issue.code)
-    if mapped is not None:
-        return mapped
-    if issue.code in _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION:
-        return "flow_step_invalid"
-    return "flow_step_invalid"
+    return _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE.get(issue.code, issue.code.value)
 
 
 def _builder_message_from_graph_issue(issue: FlowStepGraphIssue) -> str:

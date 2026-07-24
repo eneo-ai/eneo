@@ -187,7 +187,6 @@ def _compiled_outline_proposal_with_validation(
     compiled = _compiled_outline_proposal()
     return CompiledProposal(
         content=compiled.content,
-        reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
         aggregation_intent=compiled.aggregation_intent,

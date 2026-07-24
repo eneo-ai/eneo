@@ -72,7 +72,6 @@ def build_flow_builder_proposal(
     )
     return FlowBuilderProposal(
         content=content,
-        reasoning=compiled.reasoning,
         resource_bindings=compiled.resource_bindings,
     )
 
@@ -157,8 +156,8 @@ def append_plan_messages(
     spec: FlowDraftSpecCore,
     assumptions: list[str],
 ) -> None:
-    # Strip reasoning and full proposal from stored arguments to prevent
-    # leaking internal chain-of-thought through the session conversation API.
+    # Store only the canonical proposal envelope, never raw model arguments that
+    # could leak internal chain-of-thought through the session conversation API.
     # Replace with compact summary — full spec lives in BuilderPlans table.
     compact_arguments = {
         "flow_name": spec.flow_name,

@@ -69,7 +69,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
@@ -235,6 +235,12 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
         available_kbs=[],
     )
     turn = _make_context().turn
+    route = _route()
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-complex-authoring-spec",
+        model=route.litellm_model,
+        target_kind=TargetKind.CREATE,
+    )
     captured_compiled: list[CompiledProposal] = []
     captured_telemetry: list[dict[str, object]] = []
 
@@ -269,13 +275,14 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                     message_groups=_message_groups(
                         [{"role": "system", "content": "Prompt"}]
                     ),
-                    completion_model_route=_route(),
+                    completion_model_route=route,
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=resource_catalog,
                     max_output_tokens=8_192,
                     proposal_temperature=0.2,
                     request_id="req-complex-authoring-spec",
+                    usage_tracker=usage_tracker,
                     planning_state=planning_state,
                     requested_output_sections=requested_output_sections,
                 )

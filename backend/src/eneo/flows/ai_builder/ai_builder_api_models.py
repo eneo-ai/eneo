@@ -181,7 +181,6 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
         },
         "assumptions": ["Uploaded audio is clear enough to transcribe."],
         "lint_warnings": [],
-        "risk_acknowledgments": [],
         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
     },
     "created_at": "2026-03-17T10:02:00Z",

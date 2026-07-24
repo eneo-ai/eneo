@@ -130,7 +130,7 @@ async def dispatch_server_decision(
             return await _dispatch_requirements_confirmation(request, decision)
         case GenerateProposal() as unhandled:
             raise ValueError(
-                "GenerateProposal must be routed to AIBuilderProposalProcessor, "
+                "GenerateProposal must be routed to the planner proposal path, "
                 f"not dispatch_server_decision: {unhandled!r}"
             )
         case _ as unhandled:

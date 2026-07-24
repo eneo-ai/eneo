@@ -157,12 +157,10 @@ def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None
             spec=spec,
             assumptions=["The input is plain text."],
             lint_warnings=[warning],
-            risk_acknowledgments=["Generated summaries need review."],
             plan_rationale="One-step summary flow.",
             description_override_manual=True,
             edit=edit,
         ),
-        reasoning="Internal planning note.",
         resource_bindings=(binding,),
     )
 

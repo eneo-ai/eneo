@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
 )
@@ -9,13 +11,11 @@ from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
 )
-from eneo.flows.ai_builder.ai_builder_validator import (
-    _BUILDER_IGNORED_FLOW_VALIDATION_CODES,
-    _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE,
-    _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION,
-    validate_spec,
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepGraphIssue,
 )
-from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -72,15 +72,38 @@ def _assert_single_error(
     assert errors[0].step_ref == step_ref
 
 
-class TestCanonicalGraphIssuePresentation:
-    def test_every_canonical_graph_issue_has_builder_presentation(self) -> None:
-        presented_codes = (
-            set(_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE)
-            | set(_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION)
-            | set(_BUILDER_IGNORED_FLOW_VALIDATION_CODES)
-        )
+def test_canonical_graph_code_is_the_fallback_builder_presentation() -> None:
+    issue = FlowStepGraphIssue(
+        step_order=2,
+        code=FlowGraphIssueCode.DUPLICATE_STEP_ORDER,
+        message="Duplicate order",
+        exception_kind="bad_request",
+    )
 
-        assert set(FlowGraphIssueCode) <= presented_codes
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_validator.collect_step_graph_issues",
+        return_value=[issue],
+    ):
+        result = validate_spec(_spec([_step()]))
+
+    assert _errors_with_code(result, "duplicate_step_order")
+
+
+def test_explicit_builder_alias_still_overrides_the_canonical_code() -> None:
+    issue = FlowStepGraphIssue(
+        step_order=2,
+        code=FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH,
+        message="Input contract source mismatch",
+        exception_kind="bad_request",
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_validator.collect_step_graph_issues",
+        return_value=[issue],
+    ):
+        result = validate_spec(_spec([_step()]))
+
+    assert _errors_with_code(result, "input_contract_type_mismatch")
 
 
 # ---------------------------------------------------------------------------

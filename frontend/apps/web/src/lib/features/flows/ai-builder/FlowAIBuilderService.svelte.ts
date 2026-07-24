@@ -264,16 +264,16 @@ export class FlowAIBuilderService {
     await this.#driver.approvePlan();
   }
 
-  async applyPlan(expectedRevision?: number): Promise<ApplyResult> {
-    return await this.#driver.applyPlan(expectedRevision);
+  async applyPlan(): Promise<ApplyResult> {
+    return await this.#driver.applyPlan();
   }
 
   async createFlowFromPlan(): Promise<ApplyResult> {
     return await this.#driver.createFlowFromPlan();
   }
 
-  async unpublishAndApplyPlan(expectedRevision?: number): Promise<ApplyResult> {
-    return await this.#driver.unpublishAndApplyPlan(expectedRevision);
+  async unpublishAndApplyPlan(): Promise<ApplyResult> {
+    return await this.#driver.unpublishAndApplyPlan();
   }
 
   async confirmRequirements(): Promise<void> {

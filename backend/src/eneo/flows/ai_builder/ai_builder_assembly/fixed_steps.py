@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_assembly.plan import PlannedStep
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from eneo.flows.ai_builder.ai_builder_render_step_copy import render_step_display_copy
 from eneo.flows.flow_authoring_spec import (
     InputSource,
     InputType,
@@ -112,7 +111,12 @@ def render_verbatim_step(
     output_type: OutputType,
     ui_language: str | None,
 ) -> PlannedStep:
-    display_copy = render_step_display_copy(output_type, ui_language=ui_language)
+    output_label = output_type.value.upper()
+    display_copy = (
+        f"Render {output_label}"
+        if _uses_english(ui_language)
+        else f"Rendera {output_label}"
+    )
     return PlannedStep(
         role="renderer",
         name=display_copy,

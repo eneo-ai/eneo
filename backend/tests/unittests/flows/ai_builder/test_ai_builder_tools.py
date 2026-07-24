@@ -21,7 +21,6 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     build_propose_flow_tool_schema,
     extract_assumptions,
     extract_plan_rationale,
-    extract_reasoning,
 )
 
 
@@ -35,7 +34,8 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
 class TestBuildToolSchema:
     def test_single_active_submission_tool_name_is_canonical(self) -> None:
         assert PROPOSE_FLOW_TOOL_NAME == "propose_flow"
-        assert "PROPOSE_FLOW_TOOL_NAME" in ai_builder_tools.__all__
+        assert "PROPOSE_FLOW_TOOL_NAME" in ai_builder_tool_names.__all__
+        assert "PROPOSE_FLOW_TOOL_NAME" not in ai_builder_tools.__all__
         assert "ASK_STRUCTURED_QUESTION_TOOL_NAME" not in ai_builder_tools.__all__
         assert "CONFIRM_REQUIREMENTS_TOOL_NAME" not in ai_builder_tools.__all__
         assert "active_submission_tool_name" not in ai_builder_tools.__all__
@@ -113,6 +113,25 @@ class TestBuildToolSchema:
         assert step.uses_previous_fields == []
         assert step.uses_previous_outputs == []
 
+    def test_create_parser_tolerates_retired_reasoning_key_without_persisting_it(
+        self,
+    ) -> None:
+        intent = parse_create_flow_intent_arguments(
+            {
+                "flow_name": "Report",
+                "plan_rationale": "Create the report.",
+                "reasoning": "Private model scratchpad",
+                "steps": [
+                    {
+                        "name": "Write",
+                        "instructions": "Write the report.",
+                    }
+                ],
+            }
+        )
+
+        assert "reasoning" not in intent.model_dump()
+
 
 class TestParseToolCallArguments:
     def test_parse_tool_call_arguments_accepts_json_object(self) -> None:
@@ -136,10 +155,8 @@ class TestExtractHelpers:
     def test_extract_helpers_ignore_wrong_shapes(self) -> None:
         arguments = {
             "assumptions": ["A", 123, "B"],
-            "reasoning": "Reason",
             "plan_rationale": "Rationale",
         }
 
         assert extract_assumptions(arguments) == ["A", "B"]
-        assert extract_reasoning(arguments) == "Reason"
         assert extract_plan_rationale(arguments) == "Rationale"

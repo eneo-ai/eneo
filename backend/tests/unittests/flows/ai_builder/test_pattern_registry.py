@@ -1,7 +1,7 @@
 """Pattern Registry tests.
 
 Covers: `Pattern` dataclass shape (structural planner-strategy fields
-only), registry immutability, version constant, exact seed ids,
+only), registry immutability, exact seed ids,
 slot-vocabulary anchored on the live `ai_builder_slot_vocabulary`
 leaf export, and negative-pattern bite asserted against live FCM callables.
 Plain test class, no fixtures beyond scoped helpers, direct imports.
@@ -25,7 +25,6 @@ from eneo.flows.ai_builder.pattern_registry import (
     CHAIN_STEP_DESCRIPTORS,
     COMPILED_CHAIN_PATTERN_IDS,
     PATTERN_REGISTRY,
-    PATTERN_REGISTRY_VERSION,
     PLANNER_ONLY_CHAIN_PATTERN_IDS,
     Pattern,
     question_template_ids_for_slot,
@@ -108,14 +107,9 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_ten(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 10
-
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
             id="fixture",
-            examples=(),
-            negative_examples=(),
             required_architectural_slots=(),
             question_template_ids=(),
             polarity="positive",
@@ -132,8 +126,6 @@ class TestPatternDataclass:
         with pytest.raises(ValueError, match="polarity"):
             Pattern(
                 id="fixture",
-                examples=(),
-                negative_examples=(),
                 required_architectural_slots=(),
                 question_template_ids=(),
                 polarity="neutral",  # type: ignore[arg-type]
@@ -143,8 +135,6 @@ class TestPatternDataclass:
         with pytest.raises(ValueError, match="id"):
             Pattern(
                 id="",
-                examples=(),
-                negative_examples=(),
                 required_architectural_slots=(),
                 question_template_ids=(),
                 polarity="positive",
@@ -159,8 +149,6 @@ class TestPatternDataclass:
         single-step seed."""
         pattern = Pattern(
             id="fixture",
-            examples=(),
-            negative_examples=(),
             required_architectural_slots=(),
             question_template_ids=(),
             polarity="positive",
@@ -171,8 +159,6 @@ class TestPatternDataclass:
         with pytest.raises(ValueError, match="chain_kind"):
             Pattern(
                 id="fixture",
-                examples=(),
-                negative_examples=(),
                 required_architectural_slots=(),
                 question_template_ids=(),
                 polarity="positive",
@@ -183,8 +169,6 @@ class TestPatternDataclass:
         with pytest.raises(ValueError, match="without chain_steps"):
             Pattern(
                 id="fixture",
-                examples=(),
-                negative_examples=(),
                 required_architectural_slots=(),
                 question_template_ids=(),
                 polarity="positive",

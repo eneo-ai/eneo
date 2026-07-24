@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from eneo.flows.ai_builder.ai_builder_create_feedback import (
     format_create_critic_feedback,
+    format_revision_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_critic_invariants import (
     CriticIssue,
@@ -24,9 +25,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
 from eneo.flows.ai_builder.ai_builder_edit_preview_models import EditAdvisory
-from eneo.flows.ai_builder.ai_builder_feedback_formatting import (
-    format_revision_feedback,
-)
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,

@@ -69,10 +69,8 @@ async def test_create_plan_roundtrips_proposal_json(
         content=FlowBuilderProposalContent(
             spec=spec,
             assumptions=["Runtime input is plain text."],
-            risk_acknowledgments=["Summary is not fact-checked."],
             plan_rationale="Direct repository round-trip.",
         ),
-        reasoning="Use a single text step.",
     )
     expected_spec_json = spec.model_dump(mode="json")
     expected_stored_spec_json = proposal.storage_json()["content"]["spec"]
@@ -103,10 +101,8 @@ async def test_create_plan_roundtrips_proposal_json(
     assert stored_proposal_json["content"]["assumptions"] == [
         "Runtime input is plain text."
     ]
-    assert stored_proposal_json["content"]["risk_acknowledgments"] == [
-        "Summary is not fact-checked."
-    ]
-    assert stored_proposal_json["reasoning"] == "Use a single text step."
+    assert "risk_acknowledgments" not in stored_proposal_json["content"]
+    assert "reasoning" not in stored_proposal_json
     assert (
         stored_proposal_json["content"]["plan_rationale"]
         == "Direct repository round-trip."
@@ -122,10 +118,8 @@ async def test_create_plan_roundtrips_proposal_json(
     assert fetched.spec.model_dump(mode="json") == expected_spec_json
     assert fetched.proposal.spec.model_dump(mode="json") == expected_spec_json
     assert fetched.proposal.content.assumptions == ["Runtime input is plain text."]
-    assert fetched.proposal.content.risk_acknowledgments == [
-        "Summary is not fact-checked."
-    ]
-    assert fetched.proposal.reasoning == "Use a single text step."
+    assert "risk_acknowledgments" not in type(fetched.proposal.content).model_fields
+    assert "reasoning" not in type(fetched.proposal).model_fields
     assert fetched.proposal.content.plan_rationale == "Direct repository round-trip."
     assert fetched.proposal.content.spec.model_dump(mode="json") == expected_spec_json
 

@@ -66,7 +66,6 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
       },
       assumptions: [],
       lint_warnings: [],
-      risk_acknowledgments: [],
       description_override_manual: false,
       edit: null
     },
@@ -2395,7 +2394,7 @@ describe("FlowAIBuilderDriver", () => {
       }
     });
 
-    const result = await driver.unpublishAndApplyPlan(12);
+    const result = await driver.unpublishAndApplyPlan();
 
     expect(result.flow_id).toBe("flow-1");
     expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/flows/{id}/unpublish/", {
@@ -2410,7 +2409,7 @@ describe("FlowAIBuilderDriver", () => {
         params: { path: { plan_id: "plan-1" } },
         requestBody: {
           "application/json": {
-            expected_revision: 12
+            expected_revision: null
           }
         }
       })

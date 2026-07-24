@@ -40,6 +40,12 @@ from eneo.flows.source_identity import without_runtime_source_identity_draft_fie
 
 logger = logging.getLogger(__name__)
 
+COMPOSE_SECTION_TITLE_KEY = "section_title"
+COMPOSE_SECTION_BODY_KEY = "section_body"
+COMPOSE_SOURCE_LABEL_KEY = "source_label"
+COMPOSE_REPORT_TITLE_KEY = "report_title"
+COMPOSE_OVERALL_OVERVIEW_KEY = "overall_overview"
+
 
 def lower_assembly_plan(plan: FlowAssemblyPlan) -> FlowDraftSpecCore:
     flow_name = normalize_flow_name(plan.flow_name)
@@ -184,7 +190,7 @@ def _with_compose_source_refs(
             SourceRefBinding(
                 step_ref=overview_step.plan_step_ref,
                 output="structured",
-                field_path=("overall_overview",),
+                field_path=(COMPOSE_OVERALL_OVERVIEW_KEY,),
                 label=_compose_overview_label(ui_language),
             ).binding_payload()
         )
@@ -206,9 +212,11 @@ def _find_compose_section_source(
         properties = _schema_properties(prior_step.output_contract)
         for field_name, schema in properties.items():
             item_properties = _array_item_properties(schema)
-            if {"section_title", "section_body", "source_label"}.issubset(
-                item_properties
-            ):
+            if {
+                COMPOSE_SECTION_TITLE_KEY,
+                COMPOSE_SECTION_BODY_KEY,
+                COMPOSE_SOURCE_LABEL_KEY,
+            }.issubset(item_properties):
                 return prior_step, field_name
     return None, None
 
@@ -216,7 +224,9 @@ def _find_compose_section_source(
 def _find_compose_overview_source(prior_steps: list[StepSpec]) -> StepSpec | None:
     for prior_step in reversed(prior_steps):
         properties = _schema_properties(prior_step.output_contract)
-        if {"report_title", "overall_overview"}.issubset(properties):
+        if {COMPOSE_REPORT_TITLE_KEY, COMPOSE_OVERALL_OVERVIEW_KEY}.issubset(
+            properties
+        ):
             return prior_step
     return None
 
@@ -252,16 +262,16 @@ def _compose_report_title_question(
     ui_language: str | None,
 ) -> str:
     if overview_step is not None:
-        return (
-            f"# {{{{ {overview_step.plan_step_ref}.output.structured.report_title }}}}"
-        )
+        return f"# {{{{ {overview_step.plan_step_ref}.output.structured.{COMPOSE_REPORT_TITLE_KEY} }}}}"
     return "# Source report" if ui_language == "en" else "# Rapport per källa"
 
 
 def _compose_section_item_template(ui_language: str | None) -> str:
     source_label = "Source" if ui_language == "en" else "Källa"
     return (
-        f"## {{section_title}}\n\n{{section_body}}\n\n{source_label}: {{source_label}}"
+        f"## {{{COMPOSE_SECTION_TITLE_KEY}}}\n\n"
+        f"{{{COMPOSE_SECTION_BODY_KEY}}}\n\n"
+        f"{source_label}: {{{COMPOSE_SOURCE_LABEL_KEY}}}"
     )
 
 

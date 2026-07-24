@@ -24,7 +24,7 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
     render_confirmed_requirements_system_prompt_block,
     resolve_requirements_state,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 
 
 def _summary_payload() -> RequirementsSummaryPayload:

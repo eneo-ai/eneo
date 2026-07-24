@@ -220,7 +220,6 @@ def _make_plan(
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     lint_warnings: list[LintWarning] | None = None,
-    reasoning: str | None = None,
 ) -> BuilderPlan:
     used_spec = spec or _make_spec()
     return BuilderPlan(
@@ -235,7 +234,6 @@ def _make_plan(
                 description_override_manual=description_override_manual,
                 edit=edit,
             ),
-            reasoning=reasoning,
             resource_bindings=resource_bindings,
         ),
     )
@@ -354,7 +352,6 @@ class TestAIBuilderPlanLifecycle:
                     severity=LintSeverity.WARNING,
                 )
             ],
-            reasoning="prior proposal reasoning",
         )
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -402,7 +399,7 @@ class TestAIBuilderPlanLifecycle:
         assert proposal.spec == plan.spec
         assert proposal.content.lint_warnings == plan.proposal.content.lint_warnings
         assert proposal.content.description_override_manual is True
-        assert proposal.reasoning is None
+        assert "reasoning" not in type(proposal).model_fields
         assert proposal.resource_bindings == (binding,)
         assert proposal.content.edit is None
         repo.update_session_latest_plan_without_send_lease.assert_awaited_once_with(

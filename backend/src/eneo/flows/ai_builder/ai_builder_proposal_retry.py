@@ -60,11 +60,11 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     append_protected_repair_group,
     forced_tool_choice,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)

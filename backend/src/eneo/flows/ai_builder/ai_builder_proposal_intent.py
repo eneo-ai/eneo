@@ -112,9 +112,8 @@ class SemanticStepIntent(BaseModel):
 
     name: str
     instructions: str
-    # Parser compatibility for older create payloads and current edit payloads.
-    # Create-mode schema does not advertise this; the compiler derives step
-    # output types from output_fields, terminal architecture, and assembly rules.
+    # Older create payloads and current edit payloads may carry this field.
+    # Create compilation derives output types from fields and architecture instead.
     output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
     uses_form_fields: list[str] = Field(default_factory=list)

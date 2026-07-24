@@ -66,7 +66,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     self_correction_intent_with_step_assumptions_payload,
 )

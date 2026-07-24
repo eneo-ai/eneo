@@ -14,16 +14,14 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
     extract_plan_rationale,
-    extract_reasoning,
 )
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import FlowStep
-
-PROPOSE_FLOW_TOOL_NAME = "propose_flow"
 
 
 def build_propose_flow_tool_schema(
@@ -44,10 +42,8 @@ def build_propose_flow_tool_schema(
 
 
 __all__ = [
-    "PROPOSE_FLOW_TOOL_NAME",
     "build_propose_flow_tool_schema",
     "extract_assumptions",
     "extract_plan_rationale",
-    "extract_reasoning",
     "parse_create_flow_intent_arguments",
 ]

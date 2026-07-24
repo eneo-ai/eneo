@@ -46,14 +46,21 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     build_proposal_prepared,
     prepare_planner_request,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
+from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
+    CompiledProposalFinalizer,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_submission import (
+    ProposalSubmissionOwner,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
+)
+from eneo.flows.ai_builder.ai_builder_scoped_plan_revision import (
+    ScopedPlanRevisionRequest,
+    run_scoped_plan_revision_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_send_lease import claim_ai_builder_send_turn
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
@@ -91,11 +98,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_MESSAGE_ACCEPTING_SESSION_STATUSES = {
-    SessionStatus.CHATTING.value,
-    SessionStatus.AWAITING_APPROVAL.value,
-}
-
 
 def _session_status_value(status: object) -> str:
     value = getattr(status, "value", None)
@@ -121,14 +123,19 @@ class AIBuilderPlanner:
         self.repo = repo
         self.litellm_client = litellm_client
         self.planner_temperature = planner_temperature
-        self.proposal_processor = AIBuilderProposalProcessor(
-            user=user,
+        quality_retry_warning_code_set = frozenset(quality_retry_warning_codes)
+        self._compiled_proposal_finalizer = CompiledProposalFinalizer(
+            repo=repo,
+            quality_retry_warning_codes=quality_retry_warning_code_set,
+        )
+        self._proposal_submission = ProposalSubmissionOwner(
             repo=repo,
             litellm_client=litellm_client,
             self_correction_temperature=self_correction_temperature,
             self_correction_bumped_temperature=self_correction_bumped_temperature,
             forced_proposal_temperature=forced_proposal_temperature,
-            quality_retry_warning_codes=quality_retry_warning_codes,
+            quality_retry_warning_codes=quality_retry_warning_code_set,
+            compiled_proposal_finalizer=self._compiled_proposal_finalizer,
         )
 
     async def _complete_known_provider_rejection(
@@ -156,41 +163,72 @@ class AIBuilderPlanner:
         before_provider_call: Callable[[], Awaitable[None]],
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         try:
-            events = [
-                event
-                async for event in self.proposal_processor.propose_plan(
-                    turn=turn,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    message_groups=proposal_request.message_groups,
-                    completion_model_route=completion_model_route,
-                    available_model_refs=proposal_request.resource_catalog.model_refs,
-                    available_kb_refs=proposal_request.resource_catalog.knowledge_base_refs,
-                    resource_catalog=proposal_request.resource_catalog,
-                    max_output_tokens=max_output_tokens,
-                    proposal_temperature=self.planner_temperature,
-                    request_id=request_id,
-                    usage_tracker=usage_tracker,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                    assistant_metadata=build_assistant_message_metadata(conversation),
-                    planning_state=proposal_request.planning_state,
-                    requested_output_sections=(
-                        proposal_request.requested_output_sections
+            events: list[AIBuilderStreamEvent] | None = None
+            assistant_metadata = build_assistant_message_metadata(conversation)
+            if flow is None:
+                scoped_revision_result = await run_scoped_plan_revision_attempt(
+                    request=ScopedPlanRevisionRequest(
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        available_model_refs=proposal_request.resource_catalog.model_refs,
+                        available_kb_refs=(
+                            proposal_request.resource_catalog.knowledge_base_refs
+                        ),
+                        resource_catalog=proposal_request.resource_catalog,
+                        plan_edit_context=proposal_request.plan_edit_context,
+                        prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                        request_id=request_id,
+                        usage_tracker=usage_tracker,
+                        requested_output_sections=(
+                            proposal_request.requested_output_sections
+                        ),
+                        assistant_metadata=assistant_metadata,
+                        flow=flow,
                     ),
-                    plan_edit_context=proposal_request.plan_edit_context,
-                    prior_plan_for_revision=proposal_request.prior_plan_for_revision,
-                    before_provider_call=before_provider_call,
-                    proposal_request_budget=(
-                        replace(
-                            proposal_request.request_budget,
-                            request_id=request_id,
-                        )
-                        if proposal_request.request_budget is not None
-                        else None
-                    ),
+                    finalizer=self._compiled_proposal_finalizer,
                 )
-            ]
+                if scoped_revision_result is not None:
+                    events = list(scoped_revision_result.events)
+
+            if events is None:
+                events = [
+                    event
+                    async for event in self._proposal_submission.run_active_submission_attempt(
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        message_groups=proposal_request.message_groups,
+                        completion_model_route=completion_model_route,
+                        available_model_refs=proposal_request.resource_catalog.model_refs,
+                        available_kb_refs=(
+                            proposal_request.resource_catalog.knowledge_base_refs
+                        ),
+                        resource_catalog=proposal_request.resource_catalog,
+                        max_output_tokens=max_output_tokens,
+                        proposal_temperature=self.planner_temperature,
+                        request_id=request_id,
+                        usage_tracker=usage_tracker,
+                        flow=flow,
+                        assistant_snapshots=assistant_snapshots,
+                        assistant_metadata=assistant_metadata,
+                        planning_state=proposal_request.planning_state,
+                        requested_output_sections=(
+                            proposal_request.requested_output_sections
+                        ),
+                        plan_edit_context=proposal_request.plan_edit_context,
+                        prior_plan_for_revision=proposal_request.prior_plan_for_revision,
+                        before_provider_call=before_provider_call,
+                        proposal_request_budget=(
+                            replace(
+                                proposal_request.request_budget,
+                                request_id=request_id,
+                            )
+                            if proposal_request.request_budget is not None
+                            else None
+                        ),
+                    )
+                ]
         except AIBuilderKnownProviderRejectionException as error:
             yield await self._complete_known_provider_rejection(turn=turn, error=error)
             return

@@ -93,6 +93,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
@@ -109,7 +110,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationInput,
     SlotClassificationResult,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -5548,7 +5549,11 @@ async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-requirements-lost-lease",
                         litellm_model="server",
-                        used_auxiliary_llm=False,
+                        usage_tracker=ProposalTurnTelemetry(
+                            request_id="req-requirements-lost-lease",
+                            model="server",
+                            target_kind=TargetKind.CREATE,
+                        ),
                     ),
                     planning_state=PlanningState.empty(),
                 )
@@ -5634,7 +5639,11 @@ async def test_server_question_with_lost_lease_rolls_back(
                     telemetry=ServerDecisionTelemetry(
                         request_id="req-question-lost-lease",
                         litellm_model="server",
-                        used_auxiliary_llm=False,
+                        usage_tracker=ProposalTurnTelemetry(
+                            request_id="req-question-lost-lease",
+                            model="server",
+                            target_kind=TargetKind.CREATE,
+                        ),
                     ),
                     planning_state=PlanningState.empty(),
                 )
@@ -5664,8 +5673,14 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     admin_user,
 ):
     """Edit proposal storage must roll back if the active send lease is stale."""
-    from eneo.flows.ai_builder.ai_builder_proposal_processor import (
-        AIBuilderProposalProcessor,
+    from eneo.flows.ai_builder.ai_builder_proposal_submission import (
+        ProposalSubmissionOwner,
+    )
+    from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+        ProposalTurnTelemetry,
+    )
+    from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+        ProposalMessageGroup,
     )
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         build_ai_builder_resource_catalog,
@@ -5705,7 +5720,6 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        user = container.user()
         edit_flow_call = _make_tool_call(
             tool_call_id="call-edit-lost-lease",
             name=PROPOSE_FLOW_TOOL_NAME,
@@ -5727,14 +5741,13 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
         litellm_client.acompletion = AsyncMock(
             return_value=_make_llm_response(tool_calls=[edit_flow_call])
         )
-        processor = AIBuilderProposalProcessor(
-            user=user,
+        proposal_submission = ProposalSubmissionOwner(
             repo=repo,
             litellm_client=litellm_client,
             self_correction_temperature=0.2,
             self_correction_bumped_temperature=0.5,
             forced_proposal_temperature=0.3,
-            quality_retry_warning_codes=set(),
+            quality_retry_warning_codes=frozenset(),
         )
         stale_turn = _make_session_send_turn(
             session_id=session_id,
@@ -5749,21 +5762,33 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             available_models=[],
             available_kbs=[],
         )
+        completion_model_route = _route(kwargs={"api_key": "sk-test"})
         with pytest.raises(BadRequestException) as exc:
             _ = [
                 event
-                async for event in processor.propose_plan(
+                async for event in proposal_submission.run_active_submission_attempt(
                     turn=stale_turn,
                     conversation=[],
                     new_messages_start=0,
-                    llm_messages=[],
-                    completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    message_groups=(
+                        ProposalMessageGroup(
+                            messages=({"role": "system", "content": "Prompt"},),
+                            kind="system",
+                            protected=True,
+                        ),
+                    ),
+                    completion_model_route=completion_model_route,
                     available_model_refs=None,
                     available_kb_refs=None,
                     resource_catalog=resource_catalog,
                     max_output_tokens=512,
                     proposal_temperature=0.3,
                     request_id="req-edit-lost-lease",
+                    usage_tracker=ProposalTurnTelemetry(
+                        request_id="req-edit-lost-lease",
+                        model=completion_model_route.litellm_model,
+                        target_kind=TargetKind.EDIT,
+                    ),
                     flow=flow,
                     assistant_snapshots=None,
                     before_provider_call=mark_provider_work_started,

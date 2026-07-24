@@ -20,8 +20,8 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _normalize_requirement_text(text: str) -> str:

@@ -97,7 +97,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -2347,8 +2347,8 @@ class TestSendMessageStructuredQuestion:
 class TestReasoningLeakRegression:
     """Reasoning field must never be exposed in public API responses."""
 
-    def test_plan_event_strips_reasoning(self):
-        """Plan SSE events must not include reasoning."""
+    def test_plan_event_rejects_retired_reasoning_field(self):
+        """Plan proposals reject reasoning before public SSE serialization."""
         from eneo.flows.ai_builder.ai_builder_events import (
             build_plan_event,
             encode_ai_builder_stream_event,
@@ -2365,10 +2365,16 @@ class TestReasoningLeakRegression:
                 )
             ],
         )
-        proposal = FlowBuilderProposal(
-            content=FlowBuilderProposalContent(spec=spec, assumptions=["Test"]),
-            reasoning="SECRET REASONING THAT SHOULD NOT LEAK",
-        )
+        content = FlowBuilderProposalContent(spec=spec, assumptions=["Test"])
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            FlowBuilderProposal.model_validate(
+                {
+                    "content": content,
+                    "reasoning": "SECRET REASONING THAT SHOULD NOT LEAK",
+                }
+            )
+
+        proposal = FlowBuilderProposal(content=content)
 
         event = build_plan_event(plan_id=uuid4(), proposal=proposal.content)
         wire_event = encode_ai_builder_stream_event(event)

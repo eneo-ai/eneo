@@ -43,7 +43,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
@@ -161,7 +161,6 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
             plan_rationale="Use one step.",
             edit=edit,
         ),
-        reasoning="Internal reasoning.",
         validation=validation,
         resource_bindings=(binding,),
     )
@@ -171,11 +170,11 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     assert proposal.spec == compiled.content.spec
     assert proposal.content.assumptions == ["Assumption"]
     assert proposal.content.plan_rationale == "Use one step."
-    assert proposal.reasoning == "Internal reasoning."
+    assert "reasoning" not in type(proposal).model_fields
     assert proposal.resource_bindings == (binding,)
     assert not hasattr(proposal, "edit_result")
     assert proposal.content.description_override_manual is False
-    assert proposal.content.risk_acknowledgments == []
+    assert "risk_acknowledgments" not in type(proposal.content).model_fields
     assert proposal.content.edit is not None
     assert proposal.content.edit.base_flow_revision == 7
     assert proposal.content.edit.removed_existing_step_refs == frozenset(

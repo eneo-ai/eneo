@@ -61,7 +61,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     proposal_repair_reason_from_tool_failure,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 from eneo.observability.failure_events import (
     FAILURE_EVENT_SCHEMA_VERSION,
@@ -71,8 +71,11 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_us
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _FAILURE_KIND_SOURCE_FILES = (
-    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_proposal_processor.py",
+    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_create_proposal.py",
     _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_edit_proposal.py",
+    _REPO_ROOT
+    / "backend/src/eneo/flows/ai_builder/ai_builder_proposal_finalization.py",
+    _REPO_ROOT / "backend/src/eneo/flows/ai_builder/ai_builder_scoped_plan_revision.py",
 )
 
 

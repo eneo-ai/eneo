@@ -56,7 +56,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from eneo.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:

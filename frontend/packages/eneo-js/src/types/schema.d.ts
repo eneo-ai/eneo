@@ -13989,8 +13989,6 @@ export interface components {
       assumptions?: string[];
       /** Lint Warnings */
       lint_warnings?: components["schemas"]["LintWarning"][];
-      /** Risk Acknowledgments */
-      risk_acknowledgments?: string[];
       /** Plan Rationale */
       plan_rationale?: string | null;
       /**
@@ -23470,7 +23468,6 @@ export interface components {
      *         ],
      *         "lint_warnings": [],
      *         "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
-     *         "risk_acknowledgments": [],
      *         "spec": {
      *           "flow_description": "Transcribe a review conversation and generate a PDF summary.",
      *           "flow_name": "Employee Review Summary",
@@ -24760,7 +24757,6 @@ export interface components {
      *             ],
      *             "lint_warnings": [],
      *             "plan_rationale": "A two-step flow keeps the transcription and summary concerns separate.",
-     *             "risk_acknowledgments": [],
      *             "spec": {
      *               "flow_description": "Transcribe a review conversation and generate a PDF summary.",
      *               "flow_name": "Employee Review Summary",

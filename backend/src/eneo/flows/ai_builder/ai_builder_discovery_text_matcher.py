@@ -10,8 +10,8 @@ _SWEDISH_ARTIFACT_COMPOUND_PREFIXES: tuple[str, ...] = (
     "pdf",
     "json",
 )
-# Covers the common Swedish artifact noun forms users compound with Word/PDF/JSON.
-# Possessive forms are left unsplit until a real prompt needs them.
+# These are common Swedish artifact noun forms. Possessives stay unsplit until
+# direct prompt evidence requires support, avoiding speculative substring matching.
 _SWEDISH_ARTIFACT_COMPOUND_SUFFIX_CANONICALS: tuple[tuple[str, str], ...] = (
     ("dokumentets", "dokument"),
     ("dokumentet", "dokument"),
