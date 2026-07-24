@@ -106,7 +106,10 @@ def compile_new_step_draft(
     input_source = require_resolved_input_source(step_draft)
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
-    input_config = compile_runtime_input_overrides(step_draft)
+    input_config = compile_runtime_input_overrides(
+        step_draft,
+        previous_item_map_max_items=_previous_runtime_max_files(prior_steps),
+    )
     input_bindings = compile_input_bindings(
         step_draft,
         prior_steps,
@@ -213,7 +216,11 @@ def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
     )
 
 
-def compile_runtime_input_overrides(step_draft: NewStepDraft) -> dict[str, Any] | None:
+def compile_runtime_input_overrides(
+    step_draft: NewStepDraft,
+    *,
+    previous_item_map_max_items: int | None = None,
+) -> dict[str, Any] | None:
     if (
         not step_draft.runtime_required
         and step_draft.runtime_max_files is None
@@ -235,8 +242,29 @@ def compile_runtime_input_overrides(step_draft: NewStepDraft) -> dict[str, Any] 
     ):
         input_config["runtime_input"] = runtime_input
     if step_draft.previous_item_map_enabled:
-        input_config["item_map"] = {"enabled": True}
+        item_map: dict[str, Any] = {"enabled": True}
+        if previous_item_map_max_items is not None:
+            item_map["max_items"] = previous_item_map_max_items
+        input_config["item_map"] = item_map
     return input_config or None
+
+
+def _previous_runtime_max_files(prior_steps: list[StepSpec]) -> int | None:
+    if not prior_steps:
+        return None
+    input_config = prior_steps[-1].input_config
+    if not isinstance(input_config, Mapping):
+        return None
+    typed_input_config = cast(Mapping[str, object], input_config)
+    runtime_input = typed_input_config.get("runtime_input")
+    if not isinstance(runtime_input, Mapping):
+        return None
+    max_files = cast(Mapping[str, object], runtime_input).get("max_files")
+    return (
+        max_files
+        if isinstance(max_files, int) and not isinstance(max_files, bool)
+        else None
+    )
 
 
 def compile_output_config(step_draft: NewStepDraft) -> dict[str, Any] | None:

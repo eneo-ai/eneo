@@ -9,7 +9,10 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantType
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionContextPreview,
+    CompletionService,
+)
 from eneo.files.file_models import File, FileType
 from eneo.files.mime_support import (
     MimeSupport,
@@ -349,6 +352,30 @@ class Assistant(Entity):
             return self.prompt.text
 
         return ""
+
+    async def preview_response_context(
+        self,
+        question: str,
+        completion_service: "CompletionService",
+        files: list[File] | None = None,
+        prompt_override: str | None = None,
+        version: int = 1,
+    ) -> CompletionContextPreview:
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+        completion_model = cast("AICompletionModel", self.completion_model)
+        return await completion_service.preview_context(
+            model=completion_model,
+            text_input=question,
+            files=files or [],
+            prompt=(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text()
+            ),
+            prompt_files=self.attachments,
+            version=version,
+        )
 
     async def get_response(
         self,

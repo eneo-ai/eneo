@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -67,16 +68,20 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from eneo.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
     FileRoleEvidence,
+    MappedFileLimit,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
     SlotSource,
+    StepTriple,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import AIBuilderInputType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,6 +90,45 @@ from eneo.flows.domain.flow import Flow, FlowStep
 
 def _classifier_evidence(quote: str) -> tuple[ClassifiedEvidence, ...]:
     return (ClassifiedEvidence(source_id="user_message:test-source", quote=quote),)
+
+
+def test_mapped_file_limit_question_displays_current_policy_ceiling() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type=AIBuilderInputType.DOCUMENT,
+                output_type="json",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_document"],
+        committed_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    planning_state.mapped_file_limit = MappedFileLimit(
+        proposed_value=8,
+        diagnostic="confirmation_required",
+    )
+
+    analysis = analyze_discovery(
+        [ConversationMessage(role="user", content="Process documents")],
+        planning_state=planning_state,
+    )
+
+    issue = next(
+        issue
+        for issue in analysis.issues
+        if issue.issue_id == "mapped_file_limit_confirmation_required"
+    )
+    assert issue.suggestion is not None
+    organization_option = next(
+        option
+        for option in issue.suggestion.options
+        if option.id == "organization_limit"
+    )
+    assert organization_option.label == "Use organization limit (8)"
 
 
 def _make_turn(

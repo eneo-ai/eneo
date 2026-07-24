@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -328,3 +328,47 @@ async def test_estimated_context_overflow_is_still_sent_to_provider():
         adapter.prepare_streaming.await_args.kwargs["context"].token_count
         == response.total_token_count
     )
+
+
+@pytest.mark.asyncio
+async def test_preview_context_packages_and_counts_without_provider_or_mcp_io():
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+    context_builder = MagicMock()
+    context_builder.build_context.return_value = Context(input="hi", token_count=37)
+    service = CompletionService(
+        context_builder=context_builder,
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    preview = await service.preview_context(
+        model=completion_model,
+        text_input="hi",
+        prompt="system",
+        version=2,
+    )
+
+    assert preview.token_count == 37
+    assert preview.max_input_tokens == completion_model.max_input_tokens
+    assert preview.model_route == "dummy/model"
+    assert adapter.response_model_kwargs == []
+    assert adapter.streaming_model_kwargs == []
+    assert context_builder.build_context.call_args.kwargs == {
+        "input_str": "hi",
+        "max_tokens": completion_model.max_input_tokens,
+        "model_name": "dummy/model",
+        "files": [],
+        "prompt": "system",
+        "session": None,
+        "info_blob_chunks": [],
+        "prompt_files": [],
+        "transcription_inputs": [],
+        "version": 2,
+        "use_image_generation": False,
+        "web_search_results": [],
+        "vision": False,
+        "extra_tool_dicts": None,
+        "reject_over_limit": True,
+    }

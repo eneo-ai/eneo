@@ -33,6 +33,9 @@ from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     flow_stale_running_reconcile_after_seconds,
 )
+from eneo.flows.domain.mapped_execution_policy import (
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_document_limits import resolve_flow_document_render_limits
@@ -332,6 +335,9 @@ async def _execute_flow_run_async_traced(
                 tenant.flow_settings
             )
             runtime_policy = resolve_flow_runtime_policy(tenant.flow_settings)
+            mapped_execution_policy = resolve_flow_mapped_execution_policy(
+                tenant.flow_settings
+            )
 
             executor = FlowRunExecutor(
                 runtime_actor=run_actor,
@@ -357,6 +363,7 @@ async def _execute_flow_run_async_traced(
                     max_generic_files=flow_limits.max_files_per_run,
                     document_render_limits=document_render_limits,
                     runtime_policy=runtime_policy,
+                    mapped_execution_policy=mapped_execution_policy,
                 ),
             )
             result = await executor.execute_claimed(

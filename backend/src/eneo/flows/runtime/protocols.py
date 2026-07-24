@@ -17,7 +17,10 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
 )
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionContextPreview,
+    CompletionService,
+)
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.sessions.session import SessionInDB
@@ -71,6 +74,15 @@ class RuntimeAssistantProtocol(Protocol):
 
     def has_knowledge(self) -> bool: ...
     def get_prompt_text(self) -> str: ...
+
+    async def preview_response_context(
+        self,
+        question: str,
+        completion_service: CompletionService,
+        files: list[File] | None = None,
+        prompt_override: str | None = None,
+        version: int = 1,
+    ) -> CompletionContextPreview: ...
 
     async def get_response(
         self,

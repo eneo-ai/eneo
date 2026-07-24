@@ -18,7 +18,6 @@ from eneo.files.mime_support import canonicalize_mime
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_input_limits import FlowInputLimitsSource
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
 )
@@ -30,6 +29,7 @@ from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_runtime import (
     FlowRuntimeFlowSource,
     FlowRuntimePublicationIntent,
+    FlowRuntimeSettingsSource,
     FlowRuntimeVersionSource,
     load_published_flow_runtime,
     load_published_runtime_inputs,
@@ -171,7 +171,7 @@ class FlowRuntimeFileService:
         flow_service: FlowRuntimeFlowSource,
         file_service: FileService,
         runtime_upload_repo: FlowRuntimeUploadRepository,
-        settings_service: FlowInputLimitsSource,
+        settings_service: FlowRuntimeSettingsSource,
         flow_version_repo: FlowRuntimeVersionSource,
     ):
         _ensure_shared_write_session(

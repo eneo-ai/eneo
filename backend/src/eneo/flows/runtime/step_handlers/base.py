@@ -35,6 +35,20 @@ class PrepareAssistantStepFn(Protocol):
     ) -> PreparedAssistantStep: ...
 
 
+class PreviewAssistantStepFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: dict[str, object] | None,
+        attempt_no: int,
+        requested_file_ids_override: Sequence[UUID] | None = None,
+        step_input_override: StepInputValue | None = None,
+    ) -> PreparedAssistantStep: ...
+
+
 class ListStepInputFileIdsFn(Protocol):
     async def __call__(
         self,

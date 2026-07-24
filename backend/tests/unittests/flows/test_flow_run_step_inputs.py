@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_run_step_inputs import (
@@ -294,3 +295,31 @@ def test_aggregate_runtime_file_limit_uses_runtime_step_specs() -> None:
     assert aggregate_runtime_file_limit(specs={}) == 0
     assert aggregate_runtime_file_limit(specs=bounded_specs) == 4
     assert aggregate_runtime_file_limit(specs=unbounded_specs) is None
+
+
+def test_runtime_step_specs_clamp_per_source_to_published_policy_and_input_minimum() -> (
+    None
+):
+    step = replace(
+        _runtime_step(),
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 8,
+            }
+        },
+    )
+
+    specs = build_runtime_step_input_specs(
+        steps=[step],
+        limits=FlowInputLimits(
+            file_max_size_bytes=10_000,
+            audio_max_size_bytes=10_000,
+            max_files_per_run=6,
+        ),
+        mapped_policy=FlowMappedExecutionPolicy(max_provider_calls_per_mapped_step=4),
+    )
+
+    assert specs[step.step_id].max_files == 4

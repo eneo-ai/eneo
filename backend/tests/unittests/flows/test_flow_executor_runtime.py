@@ -41,6 +41,7 @@ from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -708,6 +709,9 @@ def test_executor_accepts_grouped_config(user):
             max_step_timeout_seconds=100,
             hard_ceiling_seconds=100,
         ),
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=4
+        ),
     )
 
     executor = FlowRunExecutor(
@@ -737,6 +741,7 @@ def test_executor_accepts_grouped_config(user):
     assert executor.rag_max_reference_sources == 12
     assert executor.rag_max_chunks_per_source == 6
     assert executor.document_render_service.limits.max_source_chars == 123
+    assert executor.mapped_execution_policy.max_provider_calls_per_mapped_step == 4
     assert (
         executor._step_deadline_seconds(
             RuntimeStep(

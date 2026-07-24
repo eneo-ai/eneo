@@ -44,6 +44,11 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
 )
+from eneo.flows.flow_run_provenance import (
+    MappedProviderCallProvenance,
+    ProviderCallTokenReceiptProvenance,
+    parse_attempt_provenance,
+)
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunDispatchRedriveGenerationConflict,
     FlowRunRepository,
@@ -612,45 +617,108 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
                 },
             ],
         )
+        step_one_id = flow.steps[0].id
+        assert step_one_id is not None
+        tenant_id = run.tenant_id
 
         first_attempt = await run_repo.create_or_get_attempt_started(
             run_id=run.id,
             flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            step_id=flow.steps[0].id,
+            tenant_id=tenant_id,
+            step_id=step_one_id,
             step_order=1,
             attempt_no=1,
             celery_task_id="token-usage-failed",
         )
-        await run_repo.finish_attempt(
+        await run_repo.append_attempt_provider_call_receipt(
             run_id=run.id,
-            step_id=flow.steps[0].id,
+            step_id=step_one_id,
             attempt_no=1,
-            tenant_id=admin_user.tenant_id,
-            status=FlowStepAttemptStatus.FAILED,
+            tenant_id=tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=1,
+                num_tokens_input=10,
+                num_tokens_output=4,
+                input_source="provider",
+                output_source="estimated",
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                provider_response_id="cancelled-attempt-call",
+                mapped_call=MappedProviderCallProvenance(
+                    execution_mode="per_item",
+                    item_index=1,
+                ),
+            ),
+        )
+        cancelled_attempt = await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=step_one_id,
+            attempt_no=1,
+            tenant_id=tenant_id,
+            status=FlowStepAttemptStatus.CANCELLED,
             num_tokens_input=10,
             num_tokens_output=4,
         )
+        assert cancelled_attempt is not None
+        cancelled_provenance = parse_attempt_provenance(
+            cancelled_attempt.provenance_json
+        )
+        assert cancelled_provenance.provenance is not None
+        assert cancelled_provenance.provenance.token_usage is not None
+        assert [
+            receipt.provider_response_id
+            for receipt in cancelled_provenance.provenance.token_usage.completed_provider_calls
+        ] == ["cancelled-attempt-call"]
 
         await run_repo.create_or_get_attempt_started(
             run_id=run.id,
             flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            step_id=flow.steps[0].id,
+            tenant_id=tenant_id,
+            step_id=step_one_id,
             step_order=1,
             attempt_no=2,
             celery_task_id="token-usage-completed",
             predecessor_attempt_id=first_attempt.id,
         )
-        await run_repo.finish_attempt(
+        await run_repo.append_attempt_provider_call_receipt(
             run_id=run.id,
-            step_id=flow.steps[0].id,
+            step_id=step_one_id,
             attempt_no=2,
-            tenant_id=admin_user.tenant_id,
+            tenant_id=tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=1,
+                num_tokens_input=20,
+                num_tokens_output=6,
+                input_source="provider",
+                output_source="provider",
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                provider_response_id="retry-call",
+                mapped_call=MappedProviderCallProvenance(
+                    execution_mode="per_item",
+                    item_index=1,
+                ),
+            ),
+        )
+        completed_attempt = await run_repo.finish_attempt(
+            run_id=run.id,
+            step_id=step_one_id,
+            attempt_no=2,
+            tenant_id=tenant_id,
             status=FlowStepAttemptStatus.COMPLETED,
             num_tokens_input=20,
             num_tokens_output=6,
         )
+        assert completed_attempt is not None
+        completed_provenance = parse_attempt_provenance(
+            completed_attempt.provenance_json
+        )
+        assert completed_provenance.provenance is not None
+        assert completed_provenance.provenance.token_usage is not None
+        assert [
+            receipt.provider_response_id
+            for receipt in completed_provenance.provenance.token_usage.completed_provider_calls
+        ] == ["retry-call"]
 
         await run_repo.create_or_get_attempt_started(
             run_id=run.id,

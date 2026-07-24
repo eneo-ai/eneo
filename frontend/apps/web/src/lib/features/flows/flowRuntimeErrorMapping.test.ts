@@ -116,7 +116,8 @@ describe("flowRuntimeErrorMapping", () => {
       code: FLOW_API_ERROR_CODE.STEP_EXECUTION_FAILED,
       message: "Step 2: typed input/output validation failed.",
       source: "executor_failed",
-      step_order: 2
+      step_order: 2,
+      retryable: false
     };
 
     expect(describeFlowRunError(error)).toEqual({
@@ -349,6 +350,7 @@ describe("review policy run error helpers", () => {
     source: "invalid_flow_definition",
     step_order: 10,
     details: { step_description: "Final review" },
+    retryable: false,
     ...overrides
   });
 

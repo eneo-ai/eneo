@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
     FileRoleEvidence,
+    MappedFileLimit,
     OutputSchemaEvidence,
     PlanningState,
     ResolvedSlot,
@@ -60,6 +61,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
 )
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 
 
 def _state(
@@ -217,6 +219,53 @@ class TestArchitectureCommitPreservation:
         )
 
         assert rebuilt.architecture_commit is None
+
+
+class TestMappedFileLimitPreservation:
+    def test_carries_forward_accepted_value_within_current_policy(self) -> None:
+        rebuilt = _state()
+        rebuilt.mapped_file_limit = MappedFileLimit(
+            proposed_value=5,
+            diagnostic="confirmation_required",
+        )
+        persisted = _state()
+        persisted.mapped_file_limit = MappedFileLimit(
+            proposed_value=8,
+            accepted_value=4,
+            provenance="authored",
+        )
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
+
+        assert rebuilt.mapped_file_limit == MappedFileLimit(
+            proposed_value=5,
+            accepted_value=4,
+            provenance="authored",
+        )
+
+    def test_drops_accepted_value_above_current_policy(self) -> None:
+        rebuilt = _state()
+        rebuilt.mapped_file_limit = MappedFileLimit(
+            proposed_value=5,
+            diagnostic="confirmation_required",
+        )
+        persisted = _state()
+        persisted.mapped_file_limit = MappedFileLimit(
+            proposed_value=8,
+            accepted_value=6,
+            provenance="authored",
+        )
+
+        carry_forward_persisted_planner_state(
+            rebuilt, persisted, attached_file_ids=set()
+        )
+
+        assert rebuilt.mapped_file_limit == MappedFileLimit(
+            proposed_value=5,
+            diagnostic="confirmation_required",
+        )
 
 
 class TestFileRoleEvidencePreservation:
@@ -2637,3 +2686,123 @@ class TestModelSlotMerge:
                 prompt_hash="",
                 freeform_text="",
             )
+
+
+def _mapped_file_limit_conversation(
+    *,
+    selected_value: str | None = None,
+    custom_value: str | None = None,
+) -> list[ConversationMessage]:
+    mapped_answer: dict[str, object] = {"question_id": "mapped_file_limit"}
+    if selected_value is not None:
+        mapped_answer.update(
+            selected_option_id=selected_value,
+            selected_value=selected_value,
+        )
+    if custom_value is not None:
+        mapped_answer["custom_value"] = custom_value
+    return [
+        ConversationMessage(
+            role="user",
+            content="Process several documents in one run.",
+            metadata={
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_option_id": "documents",
+                    "selected_value": "documents",
+                }
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="Several documents.",
+            metadata={
+                "question_answer": {
+                    "question_id": "document_material_scope",
+                    "selected_option_id": "multiple_documents_case",
+                    "selected_value": "multiple_documents_case",
+                }
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content=custom_value or selected_value or "",
+            metadata={"question_answer": mapped_answer},
+        ),
+    ]
+
+
+def test_mapped_file_limit_requires_explicit_policy_confirmation() -> None:
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(),
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8
+        ),
+    )
+
+    assert state.mapped_file_limit.accepted_value is None
+    assert state.mapped_file_limit.proposed_value == 8
+    assert state.mapped_file_limit.diagnostic == "confirmation_required"
+
+
+def test_mapped_file_limit_accepts_organization_limit_with_provenance() -> None:
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(selected_value="organization_limit"),
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8
+        ),
+    )
+
+    assert state.mapped_file_limit.accepted_value == 8
+    assert state.mapped_file_limit.provenance == "policy_default"
+    assert state.mapped_file_limit.diagnostic is None
+
+
+def test_mapped_file_limit_accepts_lower_custom_value_as_authored() -> None:
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(custom_value="3"),
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8
+        ),
+    )
+
+    assert state.mapped_file_limit.accepted_value == 3
+    assert state.mapped_file_limit.provenance == "authored"
+    assert state.mapped_file_limit.diagnostic is None
+
+
+@pytest.mark.parametrize(
+    ("custom_value", "diagnostic"),
+    [
+        ("true", "not_an_integer"),
+        ("1.5", "not_an_integer"),
+        ("0", "not_positive"),
+        ("-1", "not_positive"),
+        ("9", "exceeds_policy"),
+    ],
+)
+def test_mapped_file_limit_rejects_non_commit_grade_custom_values(
+    custom_value: str,
+    diagnostic: str,
+) -> None:
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(custom_value=custom_value),
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=8
+        ),
+    )
+
+    assert state.mapped_file_limit.accepted_value is None
+    assert state.mapped_file_limit.provenance is None
+    assert state.mapped_file_limit.diagnostic == diagnostic
+
+
+def test_mapped_file_limit_stays_uncommitted_when_policy_is_unset() -> None:
+    state = build_planning_state_from_conversation(
+        _mapped_file_limit_conversation(selected_value="organization_limit"),
+        mapped_execution_policy=FlowMappedExecutionPolicy(),
+    )
+
+    assert state.mapped_file_limit.accepted_value is None
+    assert state.mapped_file_limit.proposed_value is None
+    assert state.mapped_file_limit.diagnostic == "policy_unset"

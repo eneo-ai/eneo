@@ -214,6 +214,12 @@ def structured_io_contract_question(
     return _catalog_question("structured_io_contract", language=language)
 
 
+def mapped_file_limit_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("mapped_file_limit", language=language)
+
+
 def comparison_scope_conflict_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
@@ -491,6 +497,7 @@ def question_suggestion_for_id(
         "output_reader": output_reader_question,
         "final_output_scope": final_output_scope_question,
         "runtime_metadata_fields": runtime_metadata_fields_question,
+        "mapped_file_limit": mapped_file_limit_question,
         "final_pdf_type": final_pdf_type_question,
         "pdf_generation_mode": pdf_generation_mode_question,
     }

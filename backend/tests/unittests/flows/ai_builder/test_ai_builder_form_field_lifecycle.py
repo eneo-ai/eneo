@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputType,
@@ -366,6 +367,7 @@ def _flow_step(
     input_type: str,
     output_type: str,
     output_contract: dict[str, object] | None = None,
+    input_config: dict[str, object] | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -378,6 +380,7 @@ def _flow_step(
         input_type=input_type,
         output_type=output_type,
         output_mode="pass_through",
+        input_config=input_config,
         output_contract=output_contract,
     )
 
@@ -395,3 +398,41 @@ def _form_metadata(*, variable_name: str, label: str) -> dict[str, object]:
             ]
         }
     }
+
+
+def test_edit_preserves_authored_bound_and_reports_tightened_policy_conflict() -> None:
+    existing = [
+        _flow_step(
+            step_order=1,
+            user_description="Read each document",
+            input_source="flow_input",
+            input_type="document",
+            output_type="json",
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "max_files": 5,
+                    "execution_mode": "per_source",
+                }
+            },
+        )
+    ]
+    proposal = _edit_proposal(
+        steps=[ModifyExistingStep(existing_step_ref="existing_step_1")]
+    )
+
+    result = compile_edit_proposal(
+        proposal,
+        existing,
+        base_flow_revision=1,
+        mapped_execution_policy=FlowMappedExecutionPolicy(
+            max_provider_calls_per_mapped_step=3
+        ),
+    )
+
+    runtime_input = result.spec.steps[0].input_config["runtime_input"]
+    assert runtime_input["max_files"] == 5
+    assert [advisory.code for advisory in result.approval.advisories] == [
+        "mapped_file_limit_exceeds_policy"
+    ]

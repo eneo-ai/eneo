@@ -183,3 +183,37 @@ describe("settings flow policy endpoints", () => {
     });
   });
 });
+
+describe("mapped execution settings endpoint", () => {
+  it("loads the tenant mapped execution policy", async () => {
+    const policy = {
+      version: 1,
+      max_provider_calls_per_mapped_step: 8,
+      max_estimated_input_tokens_per_mapped_step: 90_000
+    };
+    const fetch = vi.fn(async () => policy);
+    const settings = initSettings({ fetch });
+
+    await expect(settings.getMappedExecutionPolicy()).resolves.toEqual(policy);
+    expect(fetch).toHaveBeenCalledWith("/api/v1/settings/flow-mapped-execution-policy", {
+      method: "get"
+    });
+  });
+
+  it("preserves null clearing intent when updating the policy", async () => {
+    const fetch = vi.fn(async () => ({
+      version: 1,
+      max_provider_calls_per_mapped_step: null,
+      max_estimated_input_tokens_per_mapped_step: 90_000
+    }));
+    const settings = initSettings({ fetch });
+    const policyPatch = { max_provider_calls_per_mapped_step: null };
+
+    await settings.updateMappedExecutionPolicy(policyPatch);
+
+    expect(fetch).toHaveBeenCalledWith("/api/v1/settings/flow-mapped-execution-policy", {
+      method: "patch",
+      requestBody: { "application/json": policyPatch }
+    });
+  });
+});

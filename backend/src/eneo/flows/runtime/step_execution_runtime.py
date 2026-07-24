@@ -28,6 +28,7 @@ from eneo.flows.citation_sidecar import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.runtime import (
+    ProviderCallTokenReceipt,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -41,6 +42,7 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
+from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
@@ -50,7 +52,10 @@ from eneo.flows.runtime.output_formats.base import append_output_format_instruct
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
-from eneo.flows.runtime.step_input_resolution import enforce_inline_input_cap
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+    enforce_inline_input_cap,
+)
 from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
@@ -222,6 +227,10 @@ class RunCancelledFn(Protocol):
     ) -> Awaitable[bool]: ...
 
 
+class RecordProviderCallReceiptFn(Protocol):
+    def __call__(self, receipt: ProviderCallTokenReceipt) -> Awaitable[None]: ...
+
+
 class FlowStepCancelledError(Exception):
     pass
 
@@ -253,6 +262,8 @@ class StepExecutionRuntimeDeps:
     run_cancel_poll_interval_seconds: float = 2.0
     llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
     rag_retrieval_timeout_seconds: float = 30
+    record_provider_call_receipt: RecordProviderCallReceiptFn | None = None
+    mapped_call_context: MappedProviderCallProvenance | None = None
 
 
 def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
@@ -260,8 +271,8 @@ def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | No
     if completion_model is None:
         return None
 
-    explicit_name = completion_model.litellm_model_name
-    if explicit_name and explicit_name.strip():
+    explicit_name = getattr(completion_model, "litellm_model_name", None)
+    if isinstance(explicit_name, str) and explicit_name.strip():
         return explicit_name.strip()
 
     provider = completion_model.provider_type
@@ -1038,6 +1049,79 @@ async def prepare_step_execution(
     )
 
 
+def _completion_prompt_override(
+    *,
+    prepared: PreparedStepExecution,
+    citation_mode: str,
+    inherited_citation_context: dict[str, Any] | None,
+) -> str:
+    prompt_override = prepared.effective_prompt
+    if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
+        inherited_appendix = build_inherited_citation_prompt_appendix(
+            inherited_citation_context or {}
+        )
+        if isinstance(inherited_appendix, str) and inherited_appendix.strip():
+            prompt_override = (
+                f"{prepared.effective_prompt}\n\n{inherited_appendix}"
+                if prepared.effective_prompt.strip()
+                else inherited_appendix
+            )
+    return prompt_override
+
+
+async def preview_step_execution_context(
+    *,
+    step: RuntimeStep,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+) -> int:
+    """Count the exact base package without RAG or provider/tool side effects."""
+    if any(
+        diagnostic.code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+        for diagnostic in prepared.diagnostics
+    ):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: mapped input contains a source with no readable text.",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
+        )
+    mcp_servers = getattr(prepared.assistant, "mcp_servers", [])
+    if mcp_servers:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: mapped preflight does not support mutable "
+            "external MCP tools; remove them from the published Flow assistant.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    citation_mode = citation_mode_for_step(step)
+    inherited_citation_context = (
+        collect_inherited_citation_context(step=step, state=state)
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else None
+    )
+    prompt_override = _completion_prompt_override(
+        prepared=prepared,
+        citation_mode=citation_mode,
+        inherited_citation_context=inherited_citation_context,
+    )
+    try:
+        preview = await prepared.assistant.preview_response_context(
+            question=prepared.step_input.text,
+            completion_service=deps.completion_service,
+            files=prepared.llm_files,
+            prompt_override=prompt_override,
+            version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+        )
+    except ContextWindowExceededError as exc:
+        raise _typed_context_window_error(
+            exc,
+            step=step,
+            prepared=prepared,
+            deps=deps,
+            effective_prompt=prompt_override,
+        ) from exc
+    return preview.token_count
+
+
 async def complete_step_execution(
     *,
     step: RuntimeStep,
@@ -1178,17 +1262,11 @@ async def complete_step_execution(
             deps.llm_request_timeout_seconds,
             native_json_object_requested,
         )
-    prompt_override = prepared.effective_prompt
-    if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
-        inherited_appendix = build_inherited_citation_prompt_appendix(
-            inherited_citation_context or {}
-        )
-        if isinstance(inherited_appendix, str) and inherited_appendix.strip():
-            prompt_override = (
-                f"{prepared.effective_prompt}\n\n{inherited_appendix}"
-                if prepared.effective_prompt.strip()
-                else inherited_appendix
-            )
+    prompt_override = _completion_prompt_override(
+        prepared=prepared,
+        citation_mode=citation_mode,
+        inherited_citation_context=inherited_citation_context,
+    )
     step_deadline_monotonic = (
         asyncio.get_event_loop().time() + deps.llm_request_timeout_seconds
     )
@@ -1257,6 +1335,48 @@ async def complete_step_execution(
         )
         reasoning_tokens = completion.reasoning_token_count or 0
 
+    response_model_info = getattr(response, "model", None)
+    response_usage = getattr(response, "usage", None)
+    num_tokens_input = (
+        response_usage.prompt_tokens
+        if response_usage is not None and response_usage.prompt_tokens is not None
+        else response.total_token_count
+    )
+    input_token_source = (
+        "provider"
+        if response_usage is not None and response_usage.prompt_tokens is not None
+        else "estimated"
+    )
+    num_tokens_output = (
+        response_usage.completion_tokens
+        if response_usage is not None and response_usage.completion_tokens is not None
+        else count_tokens(
+            raw_full_text, _resolve_litellm_model_name(prepared.assistant) or ""
+        )
+        + reasoning_tokens
+    )
+    output_token_source = (
+        "provider"
+        if response_usage is not None and response_usage.completion_tokens is not None
+        else "estimated"
+    )
+    call_index = state.provider_call_count_by_step.get(step.step_id, 0) + 1
+    receipt = ProviderCallTokenReceipt(
+        call_index=call_index,
+        num_tokens_input=num_tokens_input,
+        num_tokens_output=num_tokens_output,
+        input_source=input_token_source,
+        output_source=output_token_source,
+        requested_model=requested_model_name(prepared.assistant),
+        response_model=getattr(response_model_info, "name", None),
+        provider=getattr(response_model_info, "provider_type", None),
+        provider_response_id=getattr(completion, "provider_response_id", None),
+        mapped_call=deps.mapped_call_context,
+    )
+    if deps.record_provider_call_receipt is not None:
+        await deps.record_provider_call_receipt(receipt)
+    state.provider_call_count_by_step[step.step_id] = call_index
+
     rag_metadata = apply_prompt_context_trace(
         rag_metadata,
         knowledge_trace=getattr(response, "knowledge_trace", None),
@@ -1315,18 +1435,6 @@ async def complete_step_execution(
         run=run,
         step=step,
     )
-    response_model_info = getattr(response, "model", None)
-    response_usage = getattr(response, "usage", None)
-    num_tokens_input = (
-        response_usage.prompt_tokens
-        if response_usage is not None and response_usage.prompt_tokens is not None
-        else response.total_token_count
-    )
-    num_tokens_output = (
-        response_usage.completion_tokens
-        if response_usage is not None and response_usage.completion_tokens is not None
-        else count_tokens(raw_full_text) + reasoning_tokens
-    )
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
@@ -1359,4 +1467,7 @@ async def complete_step_execution(
             and bool(citation_sidecar.get("citation_observed"))
             else None
         ),
+        input_token_source=input_token_source,
+        output_token_source=output_token_source,
+        provider_call_receipts=[receipt],
     )

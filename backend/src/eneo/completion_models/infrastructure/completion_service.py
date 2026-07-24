@@ -256,6 +256,13 @@ async def generate_image(prompt: str):
     return await flux.generate_image(prompt=prompt)
 
 
+@dataclass(frozen=True, slots=True)
+class CompletionContextPreview:
+    token_count: int
+    max_input_tokens: int
+    model_route: str
+
+
 class CompletionService:
     def __init__(
         self,
@@ -437,6 +444,43 @@ class CompletionService:
                 chunk.response_type = ResponseType.TEXT
 
                 yield chunk
+
+    async def preview_context(
+        self,
+        *,
+        model: CompletionModel,
+        text_input: str,
+        files: list[File] | None = None,
+        prompt: str = "",
+        prompt_files: list[File] | None = None,
+        version: int = 1,
+    ) -> CompletionContextPreview:
+        """Package and count one request without provider, embedding, or MCP I/O."""
+        model_adapter = await self._get_adapter(model)
+        model_route = model_adapter.get_model_route()
+        max_tokens = model_adapter.get_token_limit_of_model()
+        context = self.context_builder.build_context(
+            input_str=text_input,
+            max_tokens=max_tokens,
+            model_name=model_route,
+            files=files or [],
+            prompt=prompt,
+            session=None,
+            info_blob_chunks=[],
+            prompt_files=prompt_files or [],
+            transcription_inputs=[],
+            version=version,
+            use_image_generation=False,
+            web_search_results=[],
+            vision=model.vision,
+            extra_tool_dicts=None,
+            reject_over_limit=True,
+        )
+        return CompletionContextPreview(
+            token_count=context.token_count,
+            max_input_tokens=max_tokens,
+            model_route=model_route,
+        )
 
     async def get_response(
         self,

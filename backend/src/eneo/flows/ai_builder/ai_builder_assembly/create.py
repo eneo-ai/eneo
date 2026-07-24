@@ -1429,6 +1429,7 @@ def _apply_per_source_reader_execution(
             planned_step_is_source_reader(planned_step)
             and structured_fields_have_document_items(planned_step.output_fields)
             and planned_step.input_type in _FILE_INPUT_TYPES
+            and planned_step.runtime_max_files is not None
             and planned_step.runtime_max_files != 1
         ):
             updated_steps.append(planned_step)

@@ -34,6 +34,7 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
         "post_processing_goal",
         "structured_io_contract",
         "runtime_metadata_fields",
+        "mapped_file_limit",
     }
 )
 
@@ -43,6 +44,9 @@ NON_LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = frozenset(
         # so the model resolves the artifact and policy chooses the mode.
         "docx_output_mode",
         "pdf_generation_mode",
+        # The mapped ceiling is committed only through the structured
+        # option/custom-answer lane; free-form model inference cannot author it.
+        "mapped_file_limit",
     }
 )
 

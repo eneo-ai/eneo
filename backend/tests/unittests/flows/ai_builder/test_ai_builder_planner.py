@@ -108,6 +108,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_spec import AssistantSpec
 from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
@@ -302,6 +303,7 @@ async def _prepare_planner_request_for_test(
             attachment_files=attachment_files or [],
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
+            mapped_execution_policy=FlowMappedExecutionPolicy(),
             budget_policy=budget_policy
             or AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,

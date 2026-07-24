@@ -21,6 +21,12 @@ import eneo.flows.runtime.executor as executor_module
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionContextPreview,
+)
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+)
 from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -29,6 +35,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
     RerunStepInputOverride,
 )
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import (
@@ -205,6 +212,7 @@ def _completed_step_result(
 
 def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
     assistant = MagicMock()
+    assistant.mcp_servers = []
     assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock()
     assistant.completion_model_kwargs.model_copy.return_value = (
@@ -221,6 +229,13 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
         return_value=SimpleNamespace(
             completion=response_text,
             total_token_count=3,
+        )
+    )
+    assistant.preview_response_context = AsyncMock(
+        return_value=CompletionContextPreview(
+            token_count=1,
+            max_input_tokens=100_000,
+            model_route="test/model",
         )
     )
     return assistant
@@ -2107,8 +2122,59 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
 
 
 @pytest.mark.asyncio
+async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=file_id,
+                text=None,
+                name="scan.pdf",
+                checksum="checksum-scan",
+                size=100,
+                mimetype="application/pdf",
+                file_type="document",
+                transcription=None,
+            )
+        ]
+    )
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    assistant.preview_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_per_source_reader_rejects_max_plus_one_before_assistant_prepare(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=1
+    )
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[uuid4(), uuid4()])
     executor._prepare_assistant_step = AsyncMock()
     step = _runtime_step(
@@ -2382,8 +2448,130 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
 
 
 @pytest.mark.asyncio
+async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2,
+        max_estimated_input_tokens_per_mapped_step=10,
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.preview_response_context = AsyncMock(
+        return_value=CompletionContextPreview(
+            token_count=6,
+            max_input_tokens=100_000,
+            model_route="test/model",
+        )
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={
+            "documents": [
+                {"title": "One", "source_file_id": "file-1"},
+                {"title": "Two", "source_file_id": "file-2"},
+            ]
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert assistant.preview_response_context.await_count == 2
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_rejects_over_window_package_before_provider_dispatch(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=1,
+        max_estimated_input_tokens_per_mapped_step=100,
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.preview_response_context = AsyncMock(
+        side_effect=ContextWindowExceededError(estimated_tokens=101, max_tokens=100)
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
+    )
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_per_item_map_rejects_max_plus_one_before_assistant_prepare(user):
     executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=1
+    )
     executor._prepare_assistant_step = AsyncMock()
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
     previous = _completed_step_result(

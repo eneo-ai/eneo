@@ -850,6 +850,36 @@ _SLOT_BACKED_DISCOVERY_GOLDEN = {
         "allow_custom": True,
         "exposure": "user_requirement",
     },
+    ("mapped_file_limit", "sv"): {
+        "question_id": "mapped_file_limit",
+        "question": "Hur många uppladdade filer ska ett mappat steg högst behandla?",
+        "options": (
+            (
+                "organization_limit",
+                "Använd organisationens gräns",
+                "Använd den aktuella administratörskonfigurerade gränsen.",
+                "organization_limit",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("mapped_file_limit", "en"): {
+        "question_id": "mapped_file_limit",
+        "question": "How many uploaded files may a mapped step process at most?",
+        "options": (
+            (
+                "organization_limit",
+                "Use organization limit",
+                "Use the current administrator-configured ceiling.",
+                "organization_limit",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
     ("terminal_output", "sv"): {
         "question_id": "terminal_output",
         "question": "Vad ska flödet producera som slutresultat?",

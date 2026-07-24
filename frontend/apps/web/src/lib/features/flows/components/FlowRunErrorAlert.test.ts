@@ -16,6 +16,7 @@ function runError(overrides: Partial<FlowRunError> = {}): FlowRunError {
     message: "Step 2: typed input/output validation failed.",
     source: "executor_failed",
     step_order: 2,
+    retryable: false,
     ...overrides
   };
 }

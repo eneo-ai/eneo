@@ -148,6 +148,30 @@ export function initSettings(client) {
     },
 
     /**
+     * Get mapped execution limits for the current tenant.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowMappedExecutionPolicy>}
+     */
+    getMappedExecutionPolicy: async () => {
+      return await client.fetch("/api/v1/settings/flow-mapped-execution-policy", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Update mapped execution limits for the current tenant.
+     * @param {import('../types/resources').FlowMappedExecutionPolicyUpdate} patch
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowMappedExecutionPolicy>}
+     */
+    updateMappedExecutionPolicy: async (patch) => {
+      return await client.fetch("/api/v1/settings/flow-mapped-execution-policy", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+    },
+
+    /**
      * Get flow evidence export policy for the current tenant.
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowEvidencePolicy>}

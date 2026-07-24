@@ -15,6 +15,8 @@
   let audioMaxFilesPerRun = $state("");
   let defaultStepTimeoutSeconds = $state("");
   let maxStepTimeoutSeconds = $state("");
+  let maxMappedProviderCalls = $state("");
+  let maxMappedInputTokens = $state("");
   let isSaving = $state(false);
 
   let initialFileMaxSizeBytes = "";
@@ -23,6 +25,8 @@
   let initialAudioMaxFilesPerRun = "";
   let initialDefaultStepTimeoutSeconds = "";
   let initialMaxStepTimeoutSeconds = "";
+  let initialMaxMappedProviderCalls = "";
+  let initialMaxMappedInputTokens = "";
 
   $effect.pre(() => {
     const nextFileMaxSizeBytes = String(data.flowInputLimits.file_max_size_bytes ?? "");
@@ -39,6 +43,12 @@
       data.flowRuntimePolicy.default_step_timeout_seconds ?? ""
     );
     const nextMaxStepTimeoutSeconds = String(data.flowRuntimePolicy.max_step_timeout_seconds ?? "");
+    const nextMaxMappedProviderCalls = String(
+      data.mappedExecutionPolicy.max_provider_calls_per_mapped_step ?? ""
+    );
+    const nextMaxMappedInputTokens = String(
+      data.mappedExecutionPolicy.max_estimated_input_tokens_per_mapped_step ?? ""
+    );
 
     fileMaxSizeBytes = nextFileMaxSizeBytes;
     audioMaxSizeBytes = nextAudioMaxSizeBytes;
@@ -46,6 +56,8 @@
     audioMaxFilesPerRun = nextAudioMaxFilesPerRun;
     defaultStepTimeoutSeconds = nextDefaultStepTimeoutSeconds;
     maxStepTimeoutSeconds = nextMaxStepTimeoutSeconds;
+    maxMappedProviderCalls = nextMaxMappedProviderCalls;
+    maxMappedInputTokens = nextMaxMappedInputTokens;
 
     initialFileMaxSizeBytes = nextFileMaxSizeBytes;
     initialAudioMaxSizeBytes = nextAudioMaxSizeBytes;
@@ -53,6 +65,8 @@
     initialAudioMaxFilesPerRun = nextAudioMaxFilesPerRun;
     initialDefaultStepTimeoutSeconds = nextDefaultStepTimeoutSeconds;
     initialMaxStepTimeoutSeconds = nextMaxStepTimeoutSeconds;
+    initialMaxMappedProviderCalls = nextMaxMappedProviderCalls;
+    initialMaxMappedInputTokens = nextMaxMappedInputTokens;
   });
 
   function normalizeNumericInput(value: unknown): string {
@@ -123,6 +137,7 @@
     try {
       const inputLimitsPatch: Record<string, number | null> = {};
       const runtimePolicyPatch: Record<string, number | null> = {};
+      const mappedExecutionPatch: Record<string, number | null> = {};
 
       if (fileMaxSizeBytes !== initialFileMaxSizeBytes) {
         inputLimitsPatch.file_max_size_bytes = toPositiveIntegerOrNull(
@@ -160,18 +175,36 @@
           m.flow_runtime_policy_max_timeout_title()
         );
       }
+      if (maxMappedProviderCalls !== initialMaxMappedProviderCalls) {
+        mappedExecutionPatch.max_provider_calls_per_mapped_step = toPositiveIntegerOrNull(
+          maxMappedProviderCalls,
+          m.flow_mapped_execution_calls_title()
+        );
+      }
+      if (maxMappedInputTokens !== initialMaxMappedInputTokens) {
+        mappedExecutionPatch.max_estimated_input_tokens_per_mapped_step = toPositiveIntegerOrNull(
+          maxMappedInputTokens,
+          m.flow_mapped_execution_tokens_title()
+        );
+      }
 
       const shouldUpdateInputLimits = Object.keys(inputLimitsPatch).length > 0;
       const shouldUpdateRuntimePolicy = Object.keys(runtimePolicyPatch).length > 0;
+      const shouldUpdateMappedExecution = Object.keys(mappedExecutionPatch).length > 0;
 
-      if (!shouldUpdateInputLimits && !shouldUpdateRuntimePolicy) {
+      if (!shouldUpdateInputLimits && !shouldUpdateRuntimePolicy && !shouldUpdateMappedExecution) {
         toast.success(m.saved_successfully());
         return;
       }
 
-      const [updatedInputLimits, updatedRuntimePolicy] = await Promise.all([
+      const [updatedInputLimits, updatedRuntimePolicy, updatedMappedExecution] = await Promise.all([
         shouldUpdateInputLimits ? eneo.settings.updateFlowInputLimits(inputLimitsPatch) : null,
-        shouldUpdateRuntimePolicy ? eneo.settings.updateFlowRuntimePolicy(runtimePolicyPatch) : null
+        shouldUpdateRuntimePolicy
+          ? eneo.settings.updateFlowRuntimePolicy(runtimePolicyPatch)
+          : null,
+        shouldUpdateMappedExecution
+          ? eneo.settings.updateMappedExecutionPolicy(mappedExecutionPatch)
+          : null
       ]);
 
       if (updatedInputLimits) {
@@ -190,6 +223,14 @@
         defaultStepTimeoutSeconds = String(updatedRuntimePolicy.default_step_timeout_seconds);
         maxStepTimeoutSeconds = String(updatedRuntimePolicy.max_step_timeout_seconds);
       }
+      if (updatedMappedExecution) {
+        maxMappedProviderCalls = String(
+          updatedMappedExecution.max_provider_calls_per_mapped_step ?? ""
+        );
+        maxMappedInputTokens = String(
+          updatedMappedExecution.max_estimated_input_tokens_per_mapped_step ?? ""
+        );
+      }
 
       initialFileMaxSizeBytes = fileMaxSizeBytes;
       initialAudioMaxSizeBytes = audioMaxSizeBytes;
@@ -197,6 +238,8 @@
       initialAudioMaxFilesPerRun = audioMaxFilesPerRun;
       initialDefaultStepTimeoutSeconds = defaultStepTimeoutSeconds;
       initialMaxStepTimeoutSeconds = maxStepTimeoutSeconds;
+      initialMaxMappedProviderCalls = maxMappedProviderCalls;
+      initialMaxMappedInputTokens = maxMappedInputTokens;
 
       toast.success(m.saved_successfully());
     } catch (error) {
@@ -327,6 +370,37 @@
                 value: formatSeconds(data.flowRuntimePolicy.hard_ceiling_seconds)
               })}
             </p>
+          </div>
+        </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.flow_mapped_execution_group()}>
+        <Settings.Row
+          title={m.flow_mapped_execution_calls_title()}
+          description={m.flow_mapped_execution_calls_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              placeholder={m.flow_mapped_execution_unset_hint()}
+              bind:value={maxMappedProviderCalls}
+            />
+          </div>
+        </Settings.Row>
+        <Settings.Row
+          title={m.flow_mapped_execution_tokens_title()}
+          description={m.flow_mapped_execution_tokens_description()}
+        >
+          <div class="flex w-full max-w-sm flex-col gap-1">
+            <input
+              class="border-default bg-primary ring-default w-full rounded-lg border px-3 py-2 shadow focus-within:ring-2"
+              type="number"
+              min="1"
+              placeholder={m.flow_mapped_execution_unset_hint()}
+              bind:value={maxMappedInputTokens}
+            />
           </div>
         </Settings.Row>
       </Settings.Group>

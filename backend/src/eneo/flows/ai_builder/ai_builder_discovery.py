@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Final
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -152,6 +153,47 @@ def analyze_discovery(
     )
     mvs_met = _has_minimum_viable_specification(profile)
     raw_issues = _build_raw_discovery_issues(conversation, profile)
+    if (
+        planning_state is not None
+        and planning_state.architecture_commit is not None
+        and planning_state.mapped_file_limit.proposed_value is not None
+        and planning_state.mapped_file_limit.accepted_value is None
+    ):
+        suggestion = question_suggestion_for_id(
+            "mapped_file_limit", language=profile.language
+        )
+        if suggestion is not None:
+            proposed_limit = planning_state.mapped_file_limit.proposed_value
+            suggestion = replace(
+                suggestion,
+                options=tuple(
+                    replace(
+                        option,
+                        label=localized_text(
+                            profile.language,
+                            f"Använd organisationens gräns ({proposed_limit})",
+                            f"Use organization limit ({proposed_limit})",
+                        ),
+                    )
+                    if option.id == "organization_limit"
+                    else option
+                    for option in suggestion.options
+                ),
+            )
+            raw_issues.append(
+                DiscoveryIssue(
+                    issue_id="mapped_file_limit_confirmation_required",
+                    category="input",
+                    severity="blocking",
+                    message=localized_text(
+                        profile.language,
+                        "Bekräfta filgränsen för mappad körning innan arkitekturen låses.",
+                        "Confirm the mapped execution file limit before locking the architecture.",
+                    ),
+                    suggestion=suggestion,
+                    question_level="blocking",
+                )
+            )
 
     # Confidence gating: when MVS met and no blocking issues, check for
     # low-confidence inferred signals that need clarification

@@ -10,6 +10,9 @@ import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.mapped_execution_policy import (
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -173,8 +176,10 @@ def test_executor_builds_expected_step_handler(
         FlowRunExecutor,
         SimpleNamespace(
             _prepare_assistant_step=AsyncMock(),
+            _preview_assistant_step=AsyncMock(),
             _list_step_input_file_ids=AsyncMock(),
             _template_fill_runtime_deps=MagicMock(),
+            mapped_execution_policy=resolve_flow_mapped_execution_policy(None),
         ),
     )
 

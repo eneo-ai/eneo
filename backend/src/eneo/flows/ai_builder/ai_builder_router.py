@@ -901,6 +901,9 @@ async def send_message(
                         prepared_context.planner_context.max_output_tokens
                     ),
                     budget_policy=prepared_context.planner_context.budget_policy,
+                    mapped_execution_policy=(
+                        prepared_context.planner_context.mapped_execution_policy
+                    ),
                     turn_preflight=turn_preflight,
                 )
             )

@@ -753,8 +753,37 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
 )
 
 
+_MAPPED_FILE_LIMIT = QuestionTemplate(
+    id="mapped_file_limit",
+    question_sv="Hur många uppladdade filer ska ett mappat steg högst behandla?",
+    question_en="How many uploaded files may a mapped step process at most?",
+    help_sv=(
+        "Bekräfta organisationens nuvarande gräns eller ange ett lägre positivt heltal."
+    ),
+    help_en=(
+        "Confirm the organization's current ceiling or enter a lower positive integer."
+    ),
+    options=(
+        _option(
+            id="organization_limit",
+            label_sv="Använd organisationens gräns",
+            label_en="Use organization limit",
+            description_sv="Använd den aktuella administratörskonfigurerade gränsen.",
+            description_en="Use the current administrator-configured ceiling.",
+            value="organization_limit",
+        ),
+    ),
+    worked_examples_sv=("Organisationens gräns", "3 filer per körning"),
+    worked_examples_en=("Organization limit", "3 files per run"),
+    family="input_shape",
+    priority_base=25,
+    impact="architecture",
+)
+
+
 _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _PRIMARY_RUNTIME_INPUT,
+    _MAPPED_FILE_LIMIT,
     _TERMINAL_OUTPUT,
     _DOCX_OUTPUT_MODE,
     _PDF_GENERATION_MODE,

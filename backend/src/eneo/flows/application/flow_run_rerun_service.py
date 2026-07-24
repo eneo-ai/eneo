@@ -7,6 +7,9 @@ from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.domain.flow import FlowPersistedJsonObject, RerunStepInputOverride
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.mapped_execution_policy import (
+    resolve_flow_mapped_execution_policy_from_source,
+)
 from eneo.flows.domain.rerun_exceptions import (
     FLOW_RUN_RERUN_LIFECYCLE_FAILURE_CLASSES,
     FlowRunRerunInvalidTransitionError,
@@ -340,9 +343,13 @@ class FlowRunRerunService:
             return normalized_step_inputs
 
         limits = await self._resolve_flow_input_limits()
+        mapped_policy = await resolve_flow_mapped_execution_policy_from_source(
+            self.settings_service
+        )
         runtime_specs = build_runtime_step_input_specs(
             steps=runtime_steps,
             limits=limits,
+            mapped_policy=mapped_policy,
         )
         root_specs = (
             {rerun_step_id: runtime_specs[rerun_step_id]}

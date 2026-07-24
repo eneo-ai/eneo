@@ -28,6 +28,9 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
+from eneo.flows.domain.mapped_execution_policy import (
+    resolve_flow_mapped_execution_policy_from_source,
+)
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -337,8 +340,13 @@ class FlowRunService:
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
+            mapped_policy = await resolve_flow_mapped_execution_policy_from_source(
+                self.settings_service
+            )
             runtime_specs = build_runtime_step_input_specs(
-                steps=runtime_steps, limits=limits
+                steps=runtime_steps,
+                limits=limits,
+                mapped_policy=mapped_policy,
             )
             await validate_submitted_step_inputs(
                 flow_id=flow_id,

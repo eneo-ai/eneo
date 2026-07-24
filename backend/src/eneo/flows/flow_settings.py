@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Final, cast
 
+from eneo.flows.domain.mapped_execution_policy import (
+    validate_flow_mapped_execution_policy_object,
+)
 from eneo.flows.flow_ai_builder_budget_settings import (
     validate_ai_builder_budget_settings_object,
 )
@@ -31,6 +34,7 @@ FLOW_SETTINGS_RUNTIME_POLICY_KEY: Final[str] = "runtime_policy"
 FLOW_SETTINGS_EVIDENCE_POLICY_KEY: Final[str] = "evidence_policy"
 FLOW_SETTINGS_RETENTION_POLICY_KEY: Final[str] = "retention_policy"
 FLOW_SETTINGS_AI_BUILDER_KEY: Final[str] = "ai_builder"
+FLOW_SETTINGS_MAPPED_EXECUTION_KEY: Final[str] = "mapped_execution"
 
 FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -40,6 +44,7 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_SETTINGS_EVIDENCE_POLICY_KEY,
         FLOW_SETTINGS_RETENTION_POLICY_KEY,
         FLOW_SETTINGS_AI_BUILDER_KEY,
+        FLOW_SETTINGS_MAPPED_EXECUTION_KEY,
     }
 )
 
@@ -118,6 +123,10 @@ def validate_flow_settings_object(value: object | None) -> dict[str, Any]:
         )
     if FLOW_SETTINGS_RUNTIME_POLICY_KEY in settings:
         validate_flow_runtime_policy_object(settings[FLOW_SETTINGS_RUNTIME_POLICY_KEY])
+    if FLOW_SETTINGS_MAPPED_EXECUTION_KEY in settings:
+        validate_flow_mapped_execution_policy_object(
+            settings[FLOW_SETTINGS_MAPPED_EXECUTION_KEY]
+        )
 
     return settings
 

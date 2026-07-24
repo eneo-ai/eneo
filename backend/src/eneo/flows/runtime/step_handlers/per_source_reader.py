@@ -9,6 +9,10 @@ from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    effective_mapped_cardinality,
+)
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -16,19 +20,25 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
 from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
     attach_typed_failure_context,
     complete_step_execution,
+    preview_step_execution_context,
 )
 from eneo.flows.runtime.step_handlers.base import (
     ListStepInputFileIdsFn,
     PrepareAssistantStepFn,
+    PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    aggregate_token_source,
+    mapped_admission_payload,
     mapped_output_diagnostics,
+    mapped_provider_call_receipts,
     mapped_rag_metadata,
     sum_optional_token_counts,
 )
@@ -74,7 +84,9 @@ async def execute_per_source_reader(
     version_metadata: dict[str, object] | None,
     attempt_no: int,
     prepare_assistant_step: PrepareAssistantStepFn,
+    preview_assistant_step: PreviewAssistantStepFn,
     list_step_input_file_ids: ListStepInputFileIdsFn,
+    mapped_execution_policy: FlowMappedExecutionPolicy,
 ) -> StepExecutionResult:
     runtime_input = build_runtime_input_config(step.input_config)
     file_ids = await list_step_input_file_ids(
@@ -87,10 +99,14 @@ async def execute_per_source_reader(
             f"Step {step.step_order}: per-source reader requires a published max_files ceiling.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
-    if len(file_ids) > runtime_input.max_files:
+    effective_max_files = effective_mapped_cardinality(
+        published_max=runtime_input.max_files,
+        mapped_policy=mapped_execution_policy,
+    )
+    if len(file_ids) > effective_max_files:
         raise TypedIOValidationException(
             f"Step {step.step_order}: per-source reader received {len(file_ids)} files, "
-            f"exceeding the published max_files ceiling of {runtime_input.max_files}.",
+            f"exceeding the effective max_files ceiling of {effective_max_files}.",
             code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         )
     if _documents_item_schema(step.output_contract) is None:
@@ -104,6 +120,30 @@ async def execute_per_source_reader(
         output_contract=without_runtime_source_identity_json_fields(
             step.output_contract
         ),
+    )
+    estimates: list[int] = []
+    preview_file_ids: list[UUID | None] = list(file_ids) if file_ids else [None]
+    for file_id in preview_file_ids:
+        preview_step = await preview_assistant_step(
+            step=per_call_step,
+            run=run,
+            state=state,
+            version_metadata=version_metadata,
+            attempt_no=attempt_no,
+            requested_file_ids_override=(file_id,) if file_id is not None else (),
+        )
+        estimates.append(
+            await preview_step_execution_context(
+                step=per_call_step,
+                state=state,
+                prepared=preview_step.prepared,
+                deps=preview_step.deps,
+            )
+        )
+    state.mapped_admission_by_step[step.step_id] = mapped_admission_payload(
+        execution_mode="per_source_reader",
+        estimates=estimates,
+        policy=mapped_execution_policy,
     )
     if not file_ids:
         prepared_step = await prepare_assistant_step(
@@ -119,7 +159,13 @@ async def execute_per_source_reader(
             run=run,
             state=state,
             prepared=prepared_step.prepared,
-            deps=prepared_step.deps,
+            deps=replace(
+                prepared_step.deps,
+                mapped_call_context=MappedProviderCallProvenance(
+                    execution_mode="per_source_reader",
+                    source_index=1,
+                ),
+            ),
         )
         return StepExecutionResult(output=output)
 
@@ -174,7 +220,14 @@ async def _execute_one_source(
         run=run,
         state=state,
         prepared=prepared_step.prepared,
-        deps=prepared_step.deps,
+        deps=replace(
+            prepared_step.deps,
+            mapped_call_context=MappedProviderCallProvenance(
+                execution_mode="per_source_reader",
+                source_index=source_number,
+                source_id=str(file_id),
+            ),
+        ),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     _raise_if_per_source_output_is_not_object(
@@ -289,6 +342,15 @@ async def _assemble_per_source_output(
         transcription_metadata=None,
         runtime_input_metadata=runtime_metadata,
         raw_completion_text=None,
+        input_token_source=aggregate_token_source(
+            (call.output for call in per_source_calls), dimension="input"
+        ),
+        output_token_source=aggregate_token_source(
+            (call.output for call in per_source_calls), dimension="output"
+        ),
+        provider_call_receipts=mapped_provider_call_receipts(
+            call.output for call in per_source_calls
+        ),
     )
 
 

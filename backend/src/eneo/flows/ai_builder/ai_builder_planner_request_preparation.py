@@ -81,6 +81,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 from eneo.observability.failure_events import stable_hash
@@ -109,6 +110,7 @@ class PlannerRequestPreparationInput:
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
+    mapped_execution_policy: FlowMappedExecutionPolicy
     base_planning_state_version: int
     tenant_id: UUID
     plan_edit_context: AIBuilderPlanEditContext | None
@@ -188,6 +190,7 @@ async def prepare_planner_request(
         attachment_context=attachment_context_result,
         usage_tracker=request.usage_tracker,
         before_provider_call=request.before_provider_call,
+        mapped_execution_policy=request.mapped_execution_policy,
     )
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state

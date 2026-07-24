@@ -7,12 +7,18 @@ from uuid import UUID
 
 from eneo.files.file_models import File
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    effective_mapped_cardinality,
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
     FlowInputLimits,
     effective_flow_input_limit,
+    effective_max_files_per_run,
     effective_runtime_max_files,
 )
 from eneo.flows.principal import FlowPrincipal
@@ -87,7 +93,9 @@ def build_runtime_step_input_specs(
     *,
     steps: Sequence[RuntimeStep],
     limits: FlowInputLimits,
+    mapped_policy: FlowMappedExecutionPolicy | None = None,
 ) -> dict[UUID, RuntimeStepInputSpec]:
+    resolved_mapped_policy = mapped_policy or resolve_flow_mapped_execution_policy(None)
     specs: dict[UUID, RuntimeStepInputSpec] = {}
     for step in steps:
         runtime_input = build_runtime_input_config(step.input_config)
@@ -97,10 +105,21 @@ def build_runtime_step_input_specs(
             step=step,
             runtime_input=runtime_input,
             accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
-            max_files=effective_runtime_max_files(
-                input_type=runtime_input.input_format,
-                step_max_files=runtime_input.max_files,
-                limits=limits,
+            max_files=(
+                effective_mapped_cardinality(
+                    published_max=runtime_input.max_files,
+                    mapped_policy=resolved_mapped_policy,
+                    input_max_files=effective_max_files_per_run(
+                        input_type=runtime_input.input_format,
+                        limits=limits,
+                    ),
+                )
+                if runtime_input.execution_mode == "per_source"
+                else effective_runtime_max_files(
+                    input_type=runtime_input.input_format,
+                    step_max_files=runtime_input.max_files,
+                    limits=limits,
+                )
             ),
             max_file_size_bytes=effective_flow_input_limit(
                 input_type=runtime_input.input_format,

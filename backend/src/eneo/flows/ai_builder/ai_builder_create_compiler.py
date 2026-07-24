@@ -365,6 +365,7 @@ def create_compile_context_from_planning_state(
     ) or _final_output_type_from_planning_state(planning_state)
     return CreateCompileContext(
         runtime_input_type=runtime_input_type,
+        runtime_max_files=planning_state.mapped_file_limit.accepted_value,
         final_output_type=final_output_type,
         final_output_mode=_final_output_mode_from_architecture(architecture),
         pattern_ids=_pattern_ids_from_architecture(architecture),

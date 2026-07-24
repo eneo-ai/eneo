@@ -6,6 +6,10 @@ from typing import Protocol, assert_never
 from uuid import UUID
 
 from eneo.flows.domain.flow import Flow, FlowVersion
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicySource,
+    resolve_flow_mapped_execution_policy_from_source,
+)
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -32,6 +36,14 @@ class FlowRuntimeVersionSource(Protocol):
     async def get(
         self, flow_id: UUID, version: int, tenant_id: UUID
     ) -> FlowVersion: ...
+
+
+class FlowRuntimeSettingsSource(
+    FlowInputLimitsSource,
+    FlowMappedExecutionPolicySource,
+    Protocol,
+):
+    pass
 
 
 class FlowRuntimePublicationIntent(Enum):
@@ -92,7 +104,7 @@ async def load_published_runtime_inputs(
     *,
     flow_service: FlowRuntimeFlowSource,
     flow_version_repo: FlowRuntimeVersionSource,
-    settings_source: FlowInputLimitsSource,
+    settings_source: FlowRuntimeSettingsSource,
     flow_id: UUID,
     intent: FlowRuntimePublicationIntent,
 ) -> PublishedRuntimeInputs:
@@ -113,7 +125,14 @@ async def load_published_runtime_inputs(
     )
     steps = tuple(definition.runtime_steps())
     limits = await resolve_flow_input_limits_from_source(settings_source)
-    input_specs = build_runtime_step_input_specs(steps=steps, limits=limits)
+    mapped_policy = await resolve_flow_mapped_execution_policy_from_source(
+        settings_source
+    )
+    input_specs = build_runtime_step_input_specs(
+        steps=steps,
+        limits=limits,
+        mapped_policy=mapped_policy,
+    )
     return PublishedRuntimeInputs(
         published=published,
         definition=definition,

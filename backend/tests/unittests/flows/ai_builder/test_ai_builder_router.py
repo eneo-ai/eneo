@@ -351,6 +351,7 @@ def _make_container(
             max_input_tokens=4096,
             max_output_tokens=2048,
             budget_policy=SimpleNamespace(),
+            mapped_execution_policy=None,
         ),
         completion_model_route=ResolvedCompletionModelRoute(
             litellm_model="openai/gpt-4",
@@ -1828,6 +1829,7 @@ class TestSendMessageEndpoint:
                 max_input_tokens=4096,
                 max_output_tokens=2048,
                 budget_policy=SimpleNamespace(),
+                mapped_execution_policy=None,
             ),
             completion_model_route=ResolvedCompletionModelRoute(
                 litellm_model="openai/gpt-4",
@@ -1889,6 +1891,7 @@ class TestSendMessageEndpoint:
                 max_input_tokens=4096,
                 max_output_tokens=4096,
                 budget_policy=SimpleNamespace(),
+                mapped_execution_policy=None,
             ),
             completion_model_route=ResolvedCompletionModelRoute(
                 litellm_model="azure/gpt-4",

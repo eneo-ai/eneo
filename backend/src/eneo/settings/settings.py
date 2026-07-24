@@ -112,6 +112,17 @@ FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "max_step_timeout_seconds": None,
 }
 
+FLOW_MAPPED_EXECUTION_POLICY_EXAMPLE: JsonDict = {
+    "version": 1,
+    "max_provider_calls_per_mapped_step": 20,
+    "max_estimated_input_tokens_per_mapped_step": 200000,
+}
+
+FLOW_MAPPED_EXECUTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "max_provider_calls_per_mapped_step": 20,
+    "max_estimated_input_tokens_per_mapped_step": None,
+}
+
 FLOW_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
     "allow_sensitive_flow_exports": False,
     "allow_space_admin_raw_export_class3": False,
@@ -421,6 +432,56 @@ class FlowRuntimePolicyUpdate(BaseModel):
         default=None,
         ge=1,
         description="Set the tenant maximum per-step LLM timeout, or send null to use the deployment ceiling.",
+    )
+
+
+class FlowMappedExecutionPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_MAPPED_EXECUTION_POLICY_EXAMPLE}
+    )
+
+    version: Literal[1] = Field(
+        default=1,
+        description="Mapped execution policy schema version.",
+    )
+    max_provider_calls_per_mapped_step: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum provider calls allowed for one mapped step attempt. Null means "
+            "no tenant ceiling is configured and new mapped Builder authoring is blocked."
+        ),
+    )
+    max_estimated_input_tokens_per_mapped_step: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum estimated packaged input tokens across one mapped step attempt. "
+            "Null means no aggregate tenant token ceiling is configured."
+        ),
+    )
+
+
+class FlowMappedExecutionPolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_MAPPED_EXECUTION_POLICY_UPDATE_EXAMPLE},
+    )
+
+    max_provider_calls_per_mapped_step: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Set a positive tenant provider-call ceiling, or send null to remove it."
+        ),
+    )
+    max_estimated_input_tokens_per_mapped_step: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Set a positive aggregate estimated-input-token ceiling, or send null to "
+            "remove it."
+        ),
     )
 
 

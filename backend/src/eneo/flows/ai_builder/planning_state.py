@@ -74,6 +74,14 @@ SlotSource = Literal[
 ]
 
 SlotConfidence = Literal["high", "medium", "low"]
+MappedFileLimitProvenance = Literal["policy_default", "authored"]
+MappedFileLimitDiagnostic = Literal[
+    "confirmation_required",
+    "policy_unset",
+    "not_an_integer",
+    "not_positive",
+    "exceeds_policy",
+]
 
 FileRole = Literal[
     "runtime_input_sample",
@@ -271,6 +279,27 @@ class OutputSchemaEvidence(_PlanningModel):
         return self
 
 
+class MappedFileLimit(_PlanningModel):
+    """Tenant proposal and explicitly accepted mapped file ceiling."""
+
+    proposed_value: int | None = Field(default=None, ge=1)
+    accepted_value: int | None = Field(default=None, ge=1)
+    provenance: MappedFileLimitProvenance | None = None
+    diagnostic: MappedFileLimitDiagnostic | None = None
+
+    @model_validator(mode="after")
+    def _accepted_value_is_coherent(self) -> "MappedFileLimit":
+        if (self.accepted_value is None) != (self.provenance is None):
+            raise ValueError("mapped file limit acceptance requires provenance")
+        if (
+            self.accepted_value is not None
+            and self.proposed_value is not None
+            and self.accepted_value > self.proposed_value
+        ):
+            raise ValueError("accepted mapped file limit cannot exceed policy")
+        return self
+
+
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
@@ -285,6 +314,7 @@ class PlanningState(_PlanningModel):
         default_factory=list[FlowInputFieldIntent]
     )
     architecture_commit: ArchitectureCommit | None = None
+    mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
 
     @model_validator(mode="after")
     def _file_role_ids_are_unique(self) -> PlanningState:

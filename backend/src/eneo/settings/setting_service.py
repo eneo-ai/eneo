@@ -19,6 +19,10 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
+from eneo.flows.domain.mapped_execution_policy import (
+    apply_flow_mapped_execution_policy_patch,
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
     resolve_flow_document_render_limits,
@@ -54,6 +58,8 @@ from eneo.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowMappedExecutionPolicyPublic,
+    FlowMappedExecutionPolicyUpdate,
     FlowRetentionEffectiveStatePublic,
     FlowRetentionImpactPreviewPublic,
     FlowRetentionOrganizationPreviewRequest,
@@ -389,6 +395,59 @@ class SettingService:
                         "old": getattr(previous, key),
                         "new": getattr(updated, key),
                     }
+                    for key in patch
+                },
+            },
+        )
+        return updated
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        policy = resolve_flow_mapped_execution_policy(
+            getattr(tenant, "flow_settings", None)
+        )
+        return FlowMappedExecutionPolicyPublic(
+            version=policy.version,
+            max_provider_calls_per_mapped_step=(
+                policy.max_provider_calls_per_mapped_step
+            ),
+            max_estimated_input_tokens_per_mapped_step=(
+                policy.max_estimated_input_tokens_per_mapped_step
+            ),
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_mapped_execution_policy(
+        self,
+        payload: FlowMappedExecutionPolicyUpdate,
+    ) -> FlowMappedExecutionPolicyPublic:
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "At least one mapped execution policy field must be provided.",
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            )
+        previous = await self.get_mapped_execution_policy()
+        tenant = await self._get_tenant_for_flow_settings()
+        next_flow_settings = apply_flow_mapped_execution_policy_patch(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+            remove_keys={key for key, value in patch.items() if value is None},
+            **{key: value for key, value in patch.items() if value is not None},
+        )
+        await self._persist_flow_settings(next_flow_settings)
+        updated = await self.get_mapped_execution_policy()
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            actor_id=self.user.id,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated mapped execution policy",
+            metadata={
+                "setting": "mapped_execution_policy",
+                "changes": {
+                    key: {"old": getattr(previous, key), "new": getattr(updated, key)}
                     for key in patch
                 },
             },

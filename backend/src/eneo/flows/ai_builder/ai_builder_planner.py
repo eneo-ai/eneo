@@ -85,6 +85,10 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 )
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
@@ -262,6 +266,7 @@ class AIBuilderPlanner:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
         turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         if turn_preflight is None:
@@ -283,6 +288,8 @@ class AIBuilderPlanner:
 
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
+        if mapped_execution_policy is None:
+            mapped_execution_policy = resolve_flow_mapped_execution_policy(None)
         litellm_model = completion_model_route.litellm_model
         bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
         defaults = lookup_model_defaults(litellm_model, bare_name)
@@ -447,6 +454,7 @@ class AIBuilderPlanner:
                         max_input_tokens=max_input_tokens,
                         max_output_tokens=max_output_tokens,
                         budget_policy=budget_policy,
+                        mapped_execution_policy=mapped_execution_policy,
                         plan_edit_context=plan_edit_context,
                         prior_plan_for_revision=prior_plan_for_revision,
                         allow_discovery_semantic_adjudication=(

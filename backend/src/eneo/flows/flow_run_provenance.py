@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_retention_tombstone import (
@@ -72,6 +72,54 @@ class ModelParameterSnapshot(BaseModel):
     verbosity: str | None = None
 
 
+MappedExecutionMode: TypeAlias = Literal["per_item", "per_source_reader"]
+
+
+class MappedAdmissionProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    execution_mode: MappedExecutionMode
+    prospective_provider_calls: int = Field(ge=1)
+    estimated_input_tokens: int = Field(ge=0)
+    per_call_estimated_input_tokens: tuple[int, ...]
+    max_estimated_input_tokens: int | None = Field(default=None, ge=1)
+    policy_source: Literal["configured", "unset"]
+    knowledge_included: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _estimates_are_coherent(self) -> "MappedAdmissionProvenance":
+        if len(self.per_call_estimated_input_tokens) != self.prospective_provider_calls:
+            raise ValueError(
+                "mapped admission call count must match per-call estimates"
+            )
+        if any(value < 0 for value in self.per_call_estimated_input_tokens):
+            raise ValueError("mapped admission estimates cannot be negative")
+        if sum(self.per_call_estimated_input_tokens) != self.estimated_input_tokens:
+            raise ValueError("mapped admission total must equal per-call estimates")
+        if (self.max_estimated_input_tokens is None) != (self.policy_source == "unset"):
+            raise ValueError("mapped admission policy source must match its ceiling")
+        return self
+
+
+class MappedProviderCallProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    execution_mode: MappedExecutionMode
+    item_index: int | None = Field(default=None, ge=1)
+    source_index: int | None = Field(default=None, ge=1)
+    source_id: str | None = None
+
+    @model_validator(mode="after")
+    def _index_matches_execution_mode(self) -> "MappedProviderCallProvenance":
+        if self.execution_mode == "per_item":
+            if self.item_index is None or self.source_index is not None:
+                raise ValueError("per-item calls require only an item index")
+        elif self.source_index is None or self.item_index is not None:
+            raise ValueError("per-source calls require only a source index")
+        return self
+
+
 class AttemptStartProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -83,6 +131,35 @@ class AttemptStartProvenance(BaseModel):
     input_text_length: int
     input_tokens_estimate: int | None = None
     model_parameter_snapshot: ModelParameterSnapshot
+    mapped_admission: MappedAdmissionProvenance | None = None
+
+
+TokenCountSource = Literal["provider", "estimated", "mixed", "not_applicable"]
+
+
+class ProviderCallTokenReceiptProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    call_index: int
+    num_tokens_input: int
+    num_tokens_output: int
+    input_source: TokenCountSource
+    output_source: TokenCountSource
+    requested_model: str | None = None
+    response_model: str | None = None
+    provider: str | None = None
+    provider_response_id: str | None = None
+    mapped_call: MappedProviderCallProvenance | None = None
+
+
+class TokenUsageProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    num_tokens_input: int
+    num_tokens_output: int
+    input_source: TokenCountSource
+    output_source: TokenCountSource
+    completed_provider_calls: tuple[ProviderCallTokenReceiptProvenance, ...] = ()
 
 
 class RagProvenance(BaseModel):
@@ -138,6 +215,7 @@ class FlowAttemptProvenance(BaseModel):
     agentic: AgenticProvenance | None = None
     guards: GuardsProvenance | None = None
     citations: CitationsProvenance | None = None
+    token_usage: TokenUsageProvenance | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -287,6 +365,29 @@ def normalize_attempt_provenance(
     return parse_result.provenance if parse_result.status == "tracked" else None
 
 
+def merge_attempt_token_usage(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep committed provider-call receipts when an attempt later terminalizes."""
+    if incoming is None:
+        return existing
+    existing_result = parse_attempt_provenance(existing)
+    incoming_result = parse_attempt_provenance(incoming)
+    if incoming_result.status != "tracked" or incoming_result.provenance is None:
+        return incoming
+    if (
+        incoming_result.provenance.token_usage is not None
+        or existing_result.status != "tracked"
+        or existing_result.provenance is None
+        or existing_result.provenance.token_usage is None
+    ):
+        return incoming
+    return incoming_result.provenance.model_copy(
+        update={"token_usage": existing_result.provenance.token_usage}
+    ).to_payload()
+
+
 def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
     if raw is None:
         return FlowAttemptProvenanceParseResult.not_tracked()
@@ -426,6 +527,7 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
         agentic=_validate_extra_model(AgenticProvenance, raw.get("agentic")),
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
+        token_usage=_validate_extra_model(TokenUsageProvenance, raw.get("token_usage")),
     )
 
 

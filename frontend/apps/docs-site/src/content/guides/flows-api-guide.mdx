@@ -202,12 +202,20 @@ These are admin surfaces, not end-user runtime endpoints:
 | Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                     | Control maximum file/audio sizes and file-count limits                                                                   |
 | Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                           | Control generated PDF/DOCX rendering limits                                                                              |
 | Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                                   | Control runtime step execution timeouts                                                                                  |
+| Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                          | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
 | Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                                  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
 | Flow retention policy       | `GET/PATCH/POST .../preview /api/v1/settings/flow-retention-policy`                | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
 | Classification retention    | `GET/PUT/POST .../preview /api/v1/settings/flow-classification-retention-policies` | Inspect and replace classification-scoped delete-after and barrier state through the same exact-preview gate             |
 
 AI Builder budget settings live at `GET/PATCH /api/v1/settings/ai-builder-budget`.
 They are authoring/admin settings for AI Builder sessions, not Flow runtime controls.
+
+Mapped execution has two independent positive-integer ceilings:
+
+- `max_provider_calls_per_mapped_step` limits the number of per-source or per-item provider calls in one step attempt. New mapped Builder authoring requires this value and may commit to a lower bound; lowering the tenant value clamps future attempts without rewriting published definitions.
+- `max_estimated_input_tokens_per_mapped_step` limits the aggregate estimated packaged input across the same attempt. A null value means no aggregate tenant token ceiling, while each provider call still obeys its model input limit.
+
+PATCH requests distinguish omission from null: omit a field to preserve it, or send null to remove its tenant override. Runtime admission occurs before the first provider call and records the requested, tenant, and effective ceilings together with actual provider-call and token receipts in attempt evidence.
 
 ### Flow retention policy shape
 

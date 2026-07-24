@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from eneo.flows.domain.flow import (
@@ -17,7 +17,11 @@ from eneo.flows.domain.step_output import (
     interpret_step_text,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
-from eneo.flows.flow_run_provenance import AttemptStartProvenance
+from eneo.flows.flow_run_provenance import (
+    AttemptStartProvenance,
+    MappedAdmissionProvenance,
+    MappedProviderCallProvenance,
+)
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File
@@ -41,6 +45,18 @@ def _empty_attempt_start_by_step() -> dict[UUID, AttemptStartProvenance]:
 
 
 def _empty_space_cache() -> dict[UUID, Space]:
+    return {}
+
+
+def _empty_provider_call_receipts() -> list[ProviderCallTokenReceipt]:
+    return []
+
+
+def _empty_provider_call_counts() -> dict[UUID, int]:
+    return {}
+
+
+def _empty_mapped_admission_by_step() -> dict[UUID, MappedAdmissionProvenance]:
     return {}
 
 
@@ -79,6 +95,23 @@ class StepDiagnostic:
     severity: str = "warning"
 
 
+TokenCountSource = Literal["provider", "estimated", "mixed", "not_applicable"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCallTokenReceipt:
+    call_index: int
+    num_tokens_input: int
+    num_tokens_output: int
+    input_source: TokenCountSource
+    output_source: TokenCountSource
+    requested_model: str | None = None
+    response_model: str | None = None
+    provider: str | None = None
+    provider_response_id: str | None = None
+    mapped_call: MappedProviderCallProvenance | None = None
+
+
 @dataclass
 class StepExecutionOutput:
     input_text: str
@@ -108,6 +141,11 @@ class StepExecutionOutput:
     output_payload_extensions: dict[str, Any] | None = None
     citation_sidecar: dict[str, Any] | None = None
     raw_completion_text: str | None = None
+    input_token_source: TokenCountSource = "not_applicable"
+    output_token_source: TokenCountSource = "not_applicable"
+    provider_call_receipts: list[ProviderCallTokenReceipt] = field(
+        default_factory=_empty_provider_call_receipts
+    )
 
 
 @dataclass
@@ -136,6 +174,12 @@ class RunExecutionState:
         default_factory=_empty_attempt_start_by_step
     )
     in_flight_llm_task: asyncio.Task[Any] | None = None
+    provider_call_count_by_step: dict[UUID, int] = field(
+        default_factory=_empty_provider_call_counts
+    )
+    mapped_admission_by_step: dict[UUID, MappedAdmissionProvenance] = field(
+        default_factory=_empty_mapped_admission_by_step
+    )
     step_names_by_order: dict[int, str] = field(
         default_factory=_empty_step_names_by_order
     )

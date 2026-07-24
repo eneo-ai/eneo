@@ -58,6 +58,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     merge_llm_resolved_slots,
 )
 from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -302,6 +303,7 @@ async def build_runtime_discovery_context(
     attachment_context: AIBuilderAttachmentContext | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> RuntimeDiscoveryContext:
     state = build_planning_state_from_conversation(
         conversation,
@@ -311,6 +313,7 @@ async def build_runtime_discovery_context(
             if attachment_context is not None
             else None
         ),
+        mapped_execution_policy=mapped_execution_policy,
     )
     apply_attachment_file_roles_to_planning_state(state, attachment_context)
     if (
@@ -407,6 +410,7 @@ async def build_discovery_runtime_result(
     attachment_context: AIBuilderAttachmentContext | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -419,6 +423,7 @@ async def build_discovery_runtime_result(
         attachment_context=attachment_context,
         usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
+        mapped_execution_policy=mapped_execution_policy,
     )
     analysis = analyze_discovery(
         conversation,

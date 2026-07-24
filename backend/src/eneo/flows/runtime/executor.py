@@ -35,6 +35,10 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
 )
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunMultipleActiveOperationsError,
@@ -46,6 +50,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
 )
 from eneo.flows.domain.runtime import (
+    ProviderCallTokenReceipt,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -71,6 +76,8 @@ from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenance,
     LlmProvenance,
     ModelParameterSnapshot,
+    ProviderCallTokenReceiptProvenance,
+    TokenUsageProvenance,
     normalize_json_preview,
     normalize_text_preview,
 )
@@ -267,6 +274,9 @@ class FlowRunExecutorConfig:
     runtime_policy: FlowRuntimePolicy = field(
         default_factory=default_flow_runtime_policy
     )
+    mapped_execution_policy: FlowMappedExecutionPolicy = field(
+        default_factory=lambda: resolve_flow_mapped_execution_policy(None)
+    )
     rag_retrieval_timeout_seconds: float = 30.0
     rag_max_reference_sources: int = 25
     rag_max_chunks_per_source: int = 5
@@ -283,6 +293,7 @@ class FlowRunExecutorConfig:
         max_generic_files: int | None = None,
         document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
         runtime_policy: FlowRuntimePolicy | None = None,
+        mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     ) -> "FlowRunExecutorConfig":
         settings = get_settings()
         resolved_runtime_policy = runtime_policy or default_flow_runtime_policy(
@@ -298,6 +309,9 @@ class FlowRunExecutorConfig:
             http_max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
             http_allow_private_networks=bool(settings.flow_http_allow_private_networks),
             runtime_policy=resolved_runtime_policy,
+            mapped_execution_policy=(
+                mapped_execution_policy or resolve_flow_mapped_execution_policy(None)
+            ),
             document_render_limits=document_render_limits,
         )
 
@@ -454,6 +468,28 @@ def _build_attempt_provenance(
         }
     if output.citation_sidecar is not None:
         provenance_payload["citations"] = output.citation_sidecar
+    if output.provider_call_receipts:
+        provenance_payload["token_usage"] = TokenUsageProvenance(
+            num_tokens_input=output.num_tokens_input or 0,
+            num_tokens_output=output.num_tokens_output or 0,
+            input_source=output.input_token_source,
+            output_source=output.output_token_source,
+            completed_provider_calls=tuple(
+                ProviderCallTokenReceiptProvenance(
+                    call_index=receipt.call_index,
+                    num_tokens_input=receipt.num_tokens_input,
+                    num_tokens_output=receipt.num_tokens_output,
+                    input_source=receipt.input_source,
+                    output_source=receipt.output_source,
+                    requested_model=receipt.requested_model,
+                    response_model=receipt.response_model,
+                    provider=receipt.provider,
+                    provider_response_id=receipt.provider_response_id,
+                    mapped_call=receipt.mapped_call,
+                )
+                for receipt in output.provider_call_receipts
+            ),
+        )
     return FlowAttemptProvenance.model_validate(provenance_payload).to_payload()
 
 
@@ -531,6 +567,7 @@ class FlowRunExecutor:
             allow_private_networks=self.http_allow_private_networks,
         )
         self.runtime_policy = resolved_config.runtime_policy
+        self.mapped_execution_policy = resolved_config.mapped_execution_policy
         self._step_deadline_seconds = resolved_config.step_deadline_seconds
         self.rag_retrieval_timeout_seconds = (
             resolved_config.rag_retrieval_timeout_seconds
@@ -1236,7 +1273,9 @@ class FlowRunExecutor:
             case FlowOutputMode.PASS_THROUGH:
                 return PassThroughStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step,
+                    preview_assistant_step=self._preview_assistant_step,
                     list_step_input_file_ids=self._list_step_input_file_ids,
+                    mapped_execution_policy=self.mapped_execution_policy,
                 )
             case FlowOutputMode.COMPOSE_TEXT:
                 return ComposeTextStepHandler(
@@ -1246,7 +1285,9 @@ class FlowRunExecutor:
                 return HttpPostStepHandler(
                     completion_handler=PassThroughStepHandler(
                         prepare_assistant_step=self._prepare_assistant_step,
+                        preview_assistant_step=self._preview_assistant_step,
                         list_step_input_file_ids=self._list_step_input_file_ids,
+                        mapped_execution_policy=self.mapped_execution_policy,
                     )
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
@@ -1272,7 +1313,11 @@ class FlowRunExecutor:
         )
 
     def _build_step_execution_runtime_deps(
-        self, *, step: RuntimeStep
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        attempt_no: int,
     ) -> StepExecutionRuntimeDeps:
         try:
             llm_timeout_seconds = self._step_deadline_seconds(step)
@@ -1296,6 +1341,12 @@ class FlowRunExecutor:
             llm_request_timeout_seconds=llm_timeout_seconds,
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
             run_cancelled=self._run_is_cancelled,
+            record_provider_call_receipt=lambda receipt: self._record_provider_call_receipt(
+                run=run,
+                step=step,
+                attempt_no=attempt_no,
+                receipt=receipt,
+            ),
         )
 
     async def _prepare_assistant_step(
@@ -1309,7 +1360,11 @@ class FlowRunExecutor:
         requested_file_ids_override: Sequence[UUID] | None = None,
         step_input_override: StepInputValue | None = None,
     ) -> PreparedAssistantStep:
-        execution_deps = self._build_step_execution_runtime_deps(step=step)
+        execution_deps = self._build_step_execution_runtime_deps(
+            step=step,
+            run=run,
+            attempt_no=attempt_no,
+        )
         if requested_file_ids_override is None:
             requested_file_ids = await self._list_step_input_file_ids(
                 step=step,
@@ -1340,6 +1395,7 @@ class FlowRunExecutor:
             input_text_length=len(prepared.step_input.text),
             input_tokens_estimate=count_tokens(prepared.step_input.text),
             model_parameter_snapshot=_model_parameter_snapshot(prepared.assistant),
+            mapped_admission=state.mapped_admission_by_step.get(step.step_id),
         )
         state.attempt_start_by_step[step.step_id] = attempt_start
         contract_validation = prepared.contract_validation or {}
@@ -1374,6 +1430,75 @@ class FlowRunExecutor:
         )
         await self._commit()
         return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
+
+    async def _preview_assistant_step(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: FlowPersistedJsonObject | None,
+        attempt_no: int,
+        requested_file_ids_override: Sequence[UUID] | None = None,
+        step_input_override: StepInputValue | None = None,
+    ) -> PreparedAssistantStep:
+        """Prepare mapped input without recording attempt-start or committing."""
+        execution_deps = self._build_step_execution_runtime_deps(
+            step=step,
+            run=run,
+            attempt_no=attempt_no,
+        )
+        requested_file_ids = (
+            await self._list_step_input_file_ids(
+                step=step,
+                run=run,
+                attempt_no=attempt_no,
+            )
+            if requested_file_ids_override is None
+            else list(requested_file_ids_override)
+        )
+        prepared = await prepare_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            version_metadata=version_metadata,
+            requested_file_ids=requested_file_ids,
+            deps=execution_deps,
+            step_input_override=step_input_override,
+        )
+        return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
+
+    async def _record_provider_call_receipt(
+        self,
+        *,
+        run: FlowRun,
+        step: RuntimeStep,
+        attempt_no: int,
+        receipt: ProviderCallTokenReceipt,
+    ) -> None:
+        persisted = await self.flow_run_repo.append_attempt_provider_call_receipt(
+            run_id=run.id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=run.tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=receipt.call_index,
+                num_tokens_input=receipt.num_tokens_input,
+                num_tokens_output=receipt.num_tokens_output,
+                input_source=receipt.input_source,
+                output_source=receipt.output_source,
+                requested_model=receipt.requested_model,
+                response_model=receipt.response_model,
+                provider=receipt.provider,
+                provider_response_id=receipt.provider_response_id,
+                mapped_call=receipt.mapped_call,
+            ),
+        )
+        if not persisted:
+            raise RuntimeError(
+                "Provider call receipt target attempt is no longer open."
+            )
+        await self._commit()
 
     async def _list_step_input_file_ids(
         self,

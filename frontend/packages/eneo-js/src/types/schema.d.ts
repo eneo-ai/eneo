@@ -963,6 +963,30 @@ export interface paths {
     patch: operations["update_flow_runtime_policy"];
     trace?: never;
   };
+  "/api/v1/settings/flow-mapped-execution-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get mapped execution policy
+     * @description Return the tenant ceilings for mapped provider-call fan-out and aggregate estimated input tokens. A null call ceiling blocks new mapped Builder authoring; a null token ceiling disables only that aggregate token check. Published definitions keep their explicit file or item bounds.
+     */
+    get: operations["get_mapped_execution_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update mapped execution policy
+     * @description Update the tenant ceilings for mapped provider calls and aggregate estimated input tokens. Omit a field to preserve it or send null to remove its tenant override. Lower call ceilings clamp future attempts without rewriting the explicit file or item bounds in published Flow definitions.
+     */
+    patch: operations["update_mapped_execution_policy"];
+    trace?: never;
+  };
   "/api/v1/settings/flow-evidence-policy": {
     parameters: {
       query?: never;
@@ -14426,6 +14450,51 @@ export interface components {
      * @enum {string}
      */
     FlowInputType: "text" | "json" | "image" | "audio" | "document" | "file" | "any";
+    /**
+     * FlowMappedExecutionPolicyPublic
+     * @example {
+     *       "max_estimated_input_tokens_per_mapped_step": 200000,
+     *       "max_provider_calls_per_mapped_step": 20,
+     *       "version": 1
+     *     }
+     */
+    FlowMappedExecutionPolicyPublic: {
+      /**
+       * Version
+       * @description Mapped execution policy schema version.
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+      /**
+       * Max Provider Calls Per Mapped Step
+       * @description Maximum provider calls allowed for one mapped step attempt. Null means no tenant ceiling is configured and new mapped Builder authoring is blocked.
+       */
+      max_provider_calls_per_mapped_step?: number | null;
+      /**
+       * Max Estimated Input Tokens Per Mapped Step
+       * @description Maximum estimated packaged input tokens across one mapped step attempt. Null means no aggregate tenant token ceiling is configured.
+       */
+      max_estimated_input_tokens_per_mapped_step?: number | null;
+    };
+    /**
+     * FlowMappedExecutionPolicyUpdate
+     * @example {
+     *       "max_provider_calls_per_mapped_step": 20
+     *     }
+     */
+    FlowMappedExecutionPolicyUpdate: {
+      /**
+       * Max Provider Calls Per Mapped Step
+       * @description Set a positive tenant provider-call ceiling, or send null to remove it.
+       */
+      max_provider_calls_per_mapped_step?: number | null;
+      /**
+       * Max Estimated Input Tokens Per Mapped Step
+       * @description Set a positive aggregate estimated-input-token ceiling, or send null to remove it.
+       */
+      max_estimated_input_tokens_per_mapped_step?: number | null;
+    };
     /**
      * FlowOutputDelivery
      * @enum {string}
@@ -32259,6 +32328,107 @@ export interface operations {
           /**
            * @example {
            *       "message": "At least one flow runtime policy field must be provided.",
+           *       "eneo_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_mapped_execution_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowMappedExecutionPolicyPublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "eneo_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_mapped_execution_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowMappedExecutionPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowMappedExecutionPolicyPublic"];
+        };
+      };
+      /** @description Invalid mapped execution policy payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one mapped execution policy field must be provided.",
            *       "eneo_error_code": 9007,
            *       "code": "flow_settings_invalid_payload"
            *     }

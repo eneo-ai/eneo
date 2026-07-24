@@ -80,6 +80,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionTurnPreflight
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.main.exceptions import NotFoundException
 from eneo.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
@@ -467,6 +468,7 @@ class AIBuilderService:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
+        mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
         turn_preflight: SessionTurnPreflight | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         if turn_preflight is None:
@@ -499,6 +501,7 @@ class AIBuilderService:
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             budget_policy=budget_policy,
+            mapped_execution_policy=mapped_execution_policy,
             turn_preflight=turn_preflight,
         ):
             yield event

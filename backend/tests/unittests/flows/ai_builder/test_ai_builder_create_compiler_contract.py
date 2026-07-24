@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.pattern_registry import (
 )
 from eneo.flows.ai_builder.planning_state import (
     AggregationIntent,
+    MappedFileLimit,
     OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
@@ -2639,7 +2640,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
         "Rendera PDF",
     ]
     section_step = compiled.steps[1]
-    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 4}}
     assert "körs en gång per documents[]-post" in (
         section_step.assistant_spec.instructions
     )
@@ -2767,7 +2768,7 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
     ]
     section_step = compiled.steps[1]
     assert section_step.name == "Bygg källavsnitt"
-    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 4}}
     section_properties = section_step.output_contract["properties"]["source_sections"][
         "items"
     ]["properties"]
@@ -2988,7 +2989,7 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
         "Rendera PDF",
     ]
     section_step = compiled.steps[1]
-    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 4}}
     section_properties = section_step.output_contract["properties"]["source_sections"][
         "items"
     ]["properties"]
@@ -3121,7 +3122,7 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
     )
 
     section_step = compiled.steps[1]
-    assert section_step.input_config == {"item_map": {"enabled": True}}
+    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 4}}
     assert section_step.output_contract is not None
     section_properties = section_step.output_contract["properties"]["source_sections"][
         "items"
@@ -3319,4 +3320,71 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
     assert writer_step.output_type == OutputType.TEXT
     assert "title" in writer_step.assistant_spec.instructions
     assert "summary" in writer_step.assistant_spec.instructions
+    assert validate_spec(compiled).valid
+
+
+def test_compile_context_uses_only_accepted_mapped_file_limit() -> None:
+    state = PlanningState.empty()
+    state.mapped_file_limit = MappedFileLimit(
+        proposed_value=8,
+        accepted_value=3,
+        provenance="authored",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_max_files == 3
+
+
+def test_compile_context_does_not_use_unaccepted_policy_proposal() -> None:
+    state = PlanningState.empty()
+    state.mapped_file_limit = MappedFileLimit(
+        proposed_value=8,
+        diagnostic="confirmation_required",
+    )
+
+    context = create_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_max_files is None
+
+
+def test_runtime_max_files_none_keeps_document_reader_single_call() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Single-call document reader",
+            "plan_rationale": "Read source material before writing a summary.",
+            "steps": [
+                {
+                    "name": "Read documents",
+                    "instructions": "Extract one summary from the supplied material.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "The supplied source material.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write one combined summary.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_max_files=None,
+        ),
+    )
+
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
+    assert runtime_input.get("execution_mode") is None
     assert validate_spec(compiled).valid

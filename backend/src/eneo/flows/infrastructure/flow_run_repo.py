@@ -61,6 +61,11 @@ from eneo.flows.flow_run_input_envelope import (
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
+    ProviderCallTokenReceiptProvenance,
+    TokenCountSource,
+    TokenUsageProvenance,
+    merge_attempt_token_usage,
+    parse_attempt_provenance,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
@@ -1461,6 +1466,67 @@ class FlowRunRepository:
             return None
         return FlowStepAttempt.model_validate(row)
 
+    async def append_attempt_provider_call_receipt(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        receipt: ProviderCallTokenReceiptProvenance,
+    ) -> bool:
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+            .with_for_update()
+        )
+        if row is None:
+            return False
+        parsed = parse_attempt_provenance(row.provenance_json)
+        provenance = (
+            parsed.provenance
+            if parsed.status == "tracked" and parsed.provenance is not None
+            else FlowAttemptProvenance()
+        )
+        usage = provenance.token_usage
+        receipts = list(usage.completed_provider_calls) if usage is not None else []
+        expected_index = len(receipts) + 1
+        if receipt.call_index != expected_index:
+            raise ValueError(
+                f"Provider call receipt index must be {expected_index}, got {receipt.call_index}."
+            )
+        receipts.append(receipt)
+        input_sources: set[TokenCountSource] = {item.input_source for item in receipts}
+        output_sources: set[TokenCountSource] = {
+            item.output_source for item in receipts
+        }
+        provenance = provenance.model_copy(
+            update={
+                "token_usage": TokenUsageProvenance(
+                    num_tokens_input=sum(item.num_tokens_input for item in receipts),
+                    num_tokens_output=sum(item.num_tokens_output for item in receipts),
+                    input_source=(
+                        next(iter(input_sources))
+                        if len(input_sources) == 1
+                        else "mixed"
+                    ),
+                    output_source=(
+                        next(iter(output_sources))
+                        if len(output_sources) == 1
+                        else "mixed"
+                    ),
+                    completed_provider_calls=tuple(receipts),
+                )
+            }
+        )
+        row.provenance_json = provenance.to_payload()
+        await self.session.flush()
+        return True
+
     async def finish_attempt(
         self,
         *,
@@ -1482,6 +1548,17 @@ class FlowRunRepository:
         input_payload_json: FlowPersistedJsonObject | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
+        current_provenance = await self.session.scalar(
+            sa.select(FlowStepAttempts.provenance_json)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        provenance_json = merge_attempt_token_usage(
+            current_provenance,
+            provenance_json,
+        )
         row = await self.session.scalar(
             sa.update(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)

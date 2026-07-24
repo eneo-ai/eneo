@@ -20,7 +20,6 @@ from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_input_limits import FlowInputLimitsSource
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
@@ -32,6 +31,7 @@ from eneo.flows.published_definition import (
 from eneo.flows.published_runtime import (
     FlowRuntimeFlowSource,
     FlowRuntimePublicationIntent,
+    FlowRuntimeSettingsSource,
     FlowRuntimeVersionSource,
     load_published_runtime_inputs,
 )
@@ -47,7 +47,7 @@ class _FlowTemplateAssetRepositoryProtocol(Protocol):
 @dataclass(frozen=True)
 class FlowRunContractService:
     flow_service: FlowRuntimeFlowSource
-    settings_service: FlowInputLimitsSource
+    settings_service: FlowRuntimeSettingsSource
     flow_version_repo: FlowRuntimeVersionSource
     template_asset_repo: _FlowTemplateAssetRepositoryProtocol
 

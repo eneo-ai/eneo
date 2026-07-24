@@ -16,6 +16,10 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
 )
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    resolve_flow_mapped_execution_policy,
+)
 from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
@@ -31,6 +35,7 @@ class AIBuilderPlannerContext:
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
+    mapped_execution_policy: FlowMappedExecutionPolicy
 
 
 def serialize_space_models(space: "Space") -> list[AIBuilderAvailableModelResource]:
@@ -109,6 +114,7 @@ def build_planner_context(
         getattr(model, "name", None),
     )
     budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
+    mapped_execution_policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
     max_input_tokens = (
         getattr(model, "max_input_tokens", None)
         or (defaults.max_input_tokens if defaults else None)
@@ -138,4 +144,5 @@ def build_planner_context(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,
+        mapped_execution_policy=mapped_execution_policy,
     )

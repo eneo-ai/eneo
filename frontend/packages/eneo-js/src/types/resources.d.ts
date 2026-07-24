@@ -64,6 +64,9 @@ export type Settings = components["schemas"]["SettingsPublic"];
 export type FlowInputLimits = components["schemas"]["FlowInputLimitsPublic"];
 export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"];
 export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
+export type FlowMappedExecutionPolicy = components["schemas"]["FlowMappedExecutionPolicyPublic"];
+export type FlowMappedExecutionPolicyUpdate =
+  components["schemas"]["FlowMappedExecutionPolicyUpdate"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
 export type FlowRetentionPolicyUpdate = components["schemas"]["FlowRetentionPolicyUpdate"];

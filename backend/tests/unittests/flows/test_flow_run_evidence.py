@@ -864,6 +864,81 @@ def test_parse_attempt_provenance_returns_tracked_current_payload() -> None:
     assert payload["schema_version"] == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
 
 
+def test_parse_attempt_provenance_preserves_independent_token_receipts() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": 17,
+                "num_tokens_output": 9,
+                "input_source": "mixed",
+                "output_source": "provider",
+                "completed_provider_calls": [
+                    {
+                        "call_index": 1,
+                        "num_tokens_input": 10,
+                        "num_tokens_output": 4,
+                        "input_source": "provider",
+                        "output_source": "provider",
+                        "requested_model": "openai/gpt-4o-mini",
+                        "response_model": "gpt-4o-mini-2026-06-01",
+                        "provider": "openai",
+                        "provider_response_id": "response-1",
+                        "mapped_call": {
+                            "execution_mode": "per_item",
+                            "item_index": 1,
+                        },
+                    },
+                    {
+                        "call_index": 2,
+                        "num_tokens_input": 7,
+                        "num_tokens_output": 5,
+                        "input_source": "estimated",
+                        "output_source": "provider",
+                        "requested_model": "openai/gpt-4o-mini",
+                        "provider": "openai",
+                        "provider_response_id": "response-2",
+                        "mapped_call": {
+                            "execution_mode": "per_item",
+                            "item_index": 2,
+                        },
+                    },
+                ],
+            },
+        }
+    )
+
+    assert result.status == "tracked"
+    assert result.provenance is not None
+    assert result.provenance.token_usage is not None
+    assert result.provenance.token_usage.input_source == "mixed"
+    assert result.provenance.token_usage.output_source == "provider"
+    assert [
+        receipt.provider_response_id
+        for receipt in result.provenance.token_usage.completed_provider_calls
+    ] == ["response-1", "response-2"]
+    assert result.to_export_payload() == result.provenance.to_payload()
+
+
+def test_parse_attempt_provenance_rejects_invalid_token_source() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": 1,
+                "num_tokens_output": 1,
+                "input_source": "guessed",
+                "output_source": "provider",
+                "completed_provider_calls": [],
+            },
+        }
+    )
+
+    assert result.status == "corrupt"
+    assert result.marker is not None
+    assert result.marker.error_code == "flow_attempt_provenance_invalid_current_payload"
+
+
 def test_parse_attempt_provenance_accepts_attempt_start_section() -> None:
     result = parse_attempt_provenance(
         {

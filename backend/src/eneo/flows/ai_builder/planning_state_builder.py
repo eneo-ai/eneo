@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.planning_state import (
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     FileRole,
+    MappedFileLimit,
     OutputSchemaEvidence,
     PlanningSignal,
     PlanningState,
@@ -94,6 +95,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.output_processing import (
     schema_yields_top_level_object,
     validate_schema_syntax,
@@ -176,6 +178,7 @@ def build_planning_state_from_conversation(
     *,
     flow: Flow | None = None,
     attachment_output_schema_evidence: OutputSchemaEvidence | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> PlanningState:
     """Derive a `PlanningState` from a conversation and optional `Flow`.
 
@@ -204,11 +207,77 @@ def build_planning_state_from_conversation(
         resolved_slots=resolved_slots,
         output_schema_evidence=output_schema_evidence,
         input_fields=_confirmed_input_fields(conversation),
+        mapped_file_limit=_mapped_file_limit(
+            conversation,
+            mapped_execution_policy=mapped_execution_policy,
+        ),
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
     _reconcile_output_schema_evidence(state, conversation)
     return state
+
+
+def _mapped_file_limit(
+    conversation: list[ConversationMessage],
+    *,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None,
+) -> MappedFileLimit:
+    proposed = (
+        mapped_execution_policy.max_provider_calls_per_mapped_step
+        if mapped_execution_policy is not None
+        else None
+    )
+    latest_answer = None
+    for message in reversed(conversation):
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is not None and answer.question_id == "mapped_file_limit":
+            latest_answer = answer
+            break
+    if proposed is None:
+        return MappedFileLimit(diagnostic="policy_unset")
+    if latest_answer is None:
+        return MappedFileLimit(
+            proposed_value=proposed,
+            diagnostic="confirmation_required",
+        )
+    custom = latest_answer.custom_value
+    if custom is not None:
+        normalized = custom.strip()
+        try:
+            accepted = int(normalized)
+        except ValueError:
+            return MappedFileLimit(
+                proposed_value=proposed,
+                diagnostic="not_an_integer",
+            )
+        if str(accepted) != normalized:
+            return MappedFileLimit(
+                proposed_value=proposed,
+                diagnostic="not_an_integer",
+            )
+        if accepted < 1:
+            return MappedFileLimit(proposed_value=proposed, diagnostic="not_positive")
+        if accepted > proposed:
+            return MappedFileLimit(proposed_value=proposed, diagnostic="exceeds_policy")
+        return MappedFileLimit(
+            proposed_value=proposed,
+            accepted_value=accepted,
+            provenance="authored",
+        )
+    if (
+        latest_answer.selected_option_id == "organization_limit"
+        or latest_answer.selected_value == "organization_limit"
+    ):
+        return MappedFileLimit(
+            proposed_value=proposed,
+            accepted_value=proposed,
+            provenance="policy_default",
+        )
+    return MappedFileLimit(
+        proposed_value=proposed,
+        diagnostic="confirmation_required",
+    )
 
 
 def _confirmed_input_fields(
@@ -312,6 +381,17 @@ def carry_forward_persisted_planner_state(
     """
     if persisted is None:
         return
+    if rebuilt.mapped_file_limit.accepted_value is None:
+        prior_limit = persisted.mapped_file_limit
+        if prior_limit.accepted_value is not None and (
+            rebuilt.mapped_file_limit.proposed_value is None
+            or prior_limit.accepted_value <= rebuilt.mapped_file_limit.proposed_value
+        ):
+            rebuilt.mapped_file_limit = MappedFileLimit(
+                proposed_value=rebuilt.mapped_file_limit.proposed_value,
+                accepted_value=prior_limit.accepted_value,
+                provenance=prior_limit.provenance,
+            )
     if (
         rebuilt.architecture_commit is None
         and persisted.architecture_commit is not None

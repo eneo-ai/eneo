@@ -56,6 +56,7 @@ from eneo.flows.application.flow_authoring_description_semantics import (
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -114,6 +115,7 @@ def compile_edit_proposal(
     resource_catalog: AIBuilderResourceCatalog | None = None,
     requested_primary_runtime_input_type: InputType | None = None,
     ui_language: str | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = (
@@ -200,6 +202,12 @@ def compile_edit_proposal(
             field_names=prepared.shadowed_primary_input_fields,
             primary_runtime_input_type=primary_runtime_input_type,
             field_provenance=prepared.form_field_provenance,
+        )
+    )
+    advisories.extend(
+        _mapped_file_limit_policy_advisories(
+            current_steps=current_steps,
+            mapped_execution_policy=mapped_execution_policy,
         )
     )
 
@@ -501,6 +509,39 @@ def _runtime_input_max_files(input_config: dict[str, Any] | None) -> int | None:
     runtime_input = _runtime_input_config(input_config)
     max_files = runtime_input.get("max_files")
     return max_files if isinstance(max_files, int) else None
+
+
+def _mapped_file_limit_policy_advisories(
+    *,
+    current_steps: list[FlowStep],
+    mapped_execution_policy: FlowMappedExecutionPolicy | None,
+) -> list[EditAdvisory]:
+    policy_limit = (
+        mapped_execution_policy.max_provider_calls_per_mapped_step
+        if mapped_execution_policy is not None
+        else None
+    )
+    if policy_limit is None:
+        return []
+    authored_limits = [
+        limit
+        for step in current_steps
+        if (limit := _runtime_input_max_files(step.input_config)) is not None
+        and limit > policy_limit
+    ]
+    if not authored_limits:
+        return []
+    return [
+        EditAdvisory(
+            code="mapped_file_limit_exceeds_policy",
+            message=(
+                "The authored mapped file ceiling exceeds the current organization "
+                "policy. It is preserved and must be reviewed explicitly."
+            ),
+            severity="warning",
+            field="steps.runtime_input.max_files",
+        )
+    ]
 
 
 def _runtime_input_config(input_config: dict[str, Any] | None) -> dict[str, Any]:

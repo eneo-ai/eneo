@@ -192,7 +192,15 @@ def _rank_issues_for_profile(
         issues,
         key=lambda issue: (
             0 if issue.severity == "blocking" else 1,
-            DISCOVERY_ISSUE_PRIORITY.get(issue.issue_id, 999)
+            DISCOVERY_ISSUE_PRIORITY.get(
+                issue.issue_id,
+                DISCOVERY_ISSUE_PRIORITY.get(
+                    issue.suggestion.question_id
+                    if issue.suggestion is not None
+                    else "",
+                    999,
+                ),
+            )
             + _dynamic_issue_priority_offset(issue, profile),
         ),
     )
@@ -249,10 +257,17 @@ def build_candidate(
     return DiscoveryCandidate(
         issue_id=issue.issue_id,
         question_id=question_id,
-        impact=_QUESTION_IMPACT.get(issue.issue_id, "quality"),
+        impact=_QUESTION_IMPACT.get(
+            issue.issue_id,
+            _QUESTION_IMPACT.get(question_id or "", "quality"),
+        ),
         confidence=confidence,
         assumption_safe=candidate_assumption_safe(issue.issue_id, profile),
-        family=family_for_issue(issue.issue_id) or issue.category,
+        family=(
+            family_for_issue(issue.issue_id)
+            or family_for_issue(question_id or "")
+            or issue.category
+        ),
         resolved_by=resolved_by,
         evidence=evidence,
     )
@@ -319,6 +334,7 @@ def candidate_assumption_safe(issue_id: str, profile: DiscoveryProfile) -> bool:
         "terminal_output",
         "docx_output_mode",
         "pdf_generation_mode",
+        "mapped_file_limit_confirmation_required",
     }:
         return False
     if issue_id == "case_scope":

@@ -37,6 +37,8 @@ from eneo.settings.settings import (
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
+    FlowMappedExecutionPolicyPublic,
+    FlowMappedExecutionPolicyUpdate,
     FlowRetentionImpactPreviewPublic,
     FlowRetentionOrganizationPreviewRequest,
     FlowRetentionPolicyPublic,
@@ -69,6 +71,10 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_runtime_policy(
         self, payload: FlowRuntimePolicyUpdate
     ) -> FlowRuntimePolicyPublic: ...
+    async def get_mapped_execution_policy(self) -> FlowMappedExecutionPolicyPublic: ...
+    async def update_mapped_execution_policy(
+        self, payload: FlowMappedExecutionPolicyUpdate
+    ) -> FlowMappedExecutionPolicyPublic: ...
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic: ...
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
@@ -393,6 +399,55 @@ async def update_flow_runtime_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_runtime_policy(payload)
+
+
+@settings_admin_router.get(
+    "/flow-mapped-execution-policy",
+    response_model=FlowMappedExecutionPolicyPublic,
+    operation_id="get_mapped_execution_policy",
+    summary="Get mapped execution policy",
+    description=(
+        "Return the tenant ceilings for mapped provider-call fan-out and aggregate "
+        "estimated input tokens. A null call ceiling blocks new mapped Builder "
+        "authoring; a null token ceiling disables only that aggregate token check. "
+        "Published definitions keep their explicit file or item bounds."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def get_mapped_execution_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowMappedExecutionPolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_mapped_execution_policy()
+
+
+@settings_admin_router.patch(
+    "/flow-mapped-execution-policy",
+    response_model=FlowMappedExecutionPolicyPublic,
+    operation_id="update_mapped_execution_policy",
+    summary="Update mapped execution policy",
+    description=(
+        "Update the tenant ceilings for mapped provider calls and aggregate estimated "
+        "input tokens. Omit a field to preserve it or send null to remove its tenant "
+        "override. Lower call ceilings clamp future attempts without rewriting the "
+        "explicit file or item bounds in published Flow definitions."
+    ),
+    responses={
+        400: _flow_settings_invalid_payload_response(
+            "Invalid mapped execution policy payload.",
+            "At least one mapped execution policy field must be provided.",
+        ),
+        403: _flow_settings_admin_forbidden_response(),
+    },
+)
+async def update_mapped_execution_policy(
+    payload: FlowMappedExecutionPolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowMappedExecutionPolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_mapped_execution_policy(payload)
 
 
 @settings_admin_router.get(

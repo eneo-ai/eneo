@@ -6,9 +6,10 @@ export const load = async (event) => {
       eneo.client.fetch("/api/v1/settings/flow-runtime-policy", {
         method: "get"
       }));
-  const [flowInputLimits, flowRuntimePolicy] = await Promise.all([
+  const [flowInputLimits, flowRuntimePolicy, mappedExecutionPolicy] = await Promise.all([
     eneo.settings.getFlowInputLimits(),
-    getFlowRuntimePolicy()
+    getFlowRuntimePolicy(),
+    eneo.settings.getMappedExecutionPolicy()
   ]);
-  return { flowInputLimits, flowRuntimePolicy };
+  return { flowInputLimits, flowRuntimePolicy, mappedExecutionPolicy };
 };

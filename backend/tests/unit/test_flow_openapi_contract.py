@@ -331,6 +331,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {"post"},
     "/api/v1/settings/flow-input-limits": {"get", "patch"},
+    "/api/v1/settings/flow-mapped-execution-policy": {"get", "patch"},
     "/api/v1/settings/flow-document-render-limits": {"get", "patch"},
     "/api/v1/settings/flow-runtime-policy": {"get", "patch"},
     "/api/v1/settings/flow-evidence-policy": {"get", "patch"},
@@ -403,6 +404,8 @@ REQUIRED_SCHEMAS = {
     "FlowRunStatusCapabilitiesPublic",
     "FlowRunStatusCapabilityPublic",
     "FlowInputLimitsPublic",
+    "FlowMappedExecutionPolicyPublic",
+    "FlowMappedExecutionPolicyUpdate",
     "FlowRetentionChangeConfirmationPublic",
     "FlowRetentionDataImpactPublic",
     "FlowRetentionImpactPreviewPublic",
@@ -440,6 +443,14 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/{id}/template-inspect/", "get"): "inspect_flow_template",
     ("/api/v1/settings/flow-input-limits", "get"): "get_flow_input_limits",
     ("/api/v1/settings/flow-input-limits", "patch"): "update_flow_input_limits",
+    (
+        "/api/v1/settings/flow-mapped-execution-policy",
+        "get",
+    ): "get_mapped_execution_policy",
+    (
+        "/api/v1/settings/flow-mapped-execution-policy",
+        "patch",
+    ): "update_mapped_execution_policy",
     (
         "/api/v1/settings/flow-document-render-limits",
         "get",

@@ -7,6 +7,10 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    effective_mapped_cardinality,
+)
 from eneo.flows.domain.runtime import (
     RunExecutionState,
     RuntimeStep,
@@ -15,16 +19,24 @@ from eneo.flows.domain.runtime import (
     StepInputValue,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
 from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
     attach_typed_failure_context,
     complete_step_execution,
+    preview_step_execution_context,
 )
-from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
+from eneo.flows.runtime.step_handlers.base import (
+    PrepareAssistantStepFn,
+    PreviewAssistantStepFn,
+)
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    aggregate_token_source,
+    mapped_admission_payload,
     mapped_output_diagnostics,
+    mapped_provider_call_receipts,
     mapped_rag_metadata,
     sum_optional_token_counts,
 )
@@ -67,6 +79,8 @@ async def execute_per_item_map(
     version_metadata: dict[str, object] | None,
     attempt_no: int,
     prepare_assistant_step: PrepareAssistantStepFn,
+    preview_assistant_step: PreviewAssistantStepFn,
+    mapped_execution_policy: FlowMappedExecutionPolicy,
 ) -> StepExecutionResult:
     output_array_key = _single_output_array_key(step.output_contract)
     if output_array_key is None:
@@ -100,10 +114,14 @@ async def execute_per_item_map(
             f"Step {step.step_order}: per-item map requires a published max_items ceiling.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
-    if len(input_items) > item_map.max_items:
+    effective_max_items = effective_mapped_cardinality(
+        published_max=item_map.max_items,
+        mapped_policy=mapped_execution_policy,
+    )
+    if len(input_items) > effective_max_items:
         raise TypedIOValidationException(
             f"Step {step.step_order}: per-item map received {len(input_items)} items, "
-            f"exceeding the published max_items ceiling of {item_map.max_items}.",
+            f"exceeding the effective max_items ceiling of {effective_max_items}.",
             code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         )
     if not input_items:
@@ -112,6 +130,35 @@ async def execute_per_item_map(
             f"{input_array_key}[] item.",
             code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
+
+    estimates: list[int] = []
+    for item_number, input_item in enumerate(input_items, start=1):
+        preview_step = await preview_assistant_step(
+            step=per_call_step,
+            run=run,
+            state=state,
+            version_metadata=version_metadata,
+            attempt_no=attempt_no,
+            requested_file_ids_override=(),
+            step_input_override=_step_input_for_item(
+                item_number=item_number,
+                input_array_key=input_array_key,
+                input_item=input_item,
+            ),
+        )
+        estimates.append(
+            await preview_step_execution_context(
+                step=per_call_step,
+                state=state,
+                prepared=preview_step.prepared,
+                deps=preview_step.deps,
+            )
+        )
+    state.mapped_admission_by_step[step.step_id] = mapped_admission_payload(
+        execution_mode="per_item",
+        estimates=estimates,
+        policy=mapped_execution_policy,
+    )
 
     item_calls: list[PerItemMapCall] = []
     for item_number, input_item in enumerate(input_items, start=1):
@@ -172,7 +219,14 @@ async def _execute_one_item(
         run=run,
         state=state,
         prepared=prepared_step.prepared,
-        deps=prepared_step.deps,
+        deps=replace(
+            prepared_step.deps,
+            mapped_call_context=MappedProviderCallProvenance(
+                execution_mode="per_item",
+                item_index=item_number,
+                source_id=_optional_string(input_item.get("source_file_id")),
+            ),
+        ),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     _raise_if_item_output_is_not_object(
@@ -296,6 +350,15 @@ async def _assemble_per_item_output(
         artifacts=typed_output.artifacts,
         rag_metadata=_item_map_rag_metadata(item_calls),
         runtime_input_metadata=item_map_metadata,
+        input_token_source=aggregate_token_source(
+            (call.output for call in item_calls), dimension="input"
+        ),
+        output_token_source=aggregate_token_source(
+            (call.output for call in item_calls), dimension="output"
+        ),
+        provider_call_receipts=mapped_provider_call_receipts(
+            call.output for call in item_calls
+        ),
     )
 
 

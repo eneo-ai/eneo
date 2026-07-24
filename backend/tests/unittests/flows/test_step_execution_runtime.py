@@ -36,6 +36,7 @@ from eneo.flows.domain.runtime import (
     StepInputValue,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
@@ -699,6 +700,89 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert state.json_mode_supported["openai:gpt-test:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
+
+
+@pytest.mark.asyncio
+async def test_completed_provider_call_receipt_is_recorded_before_postprocessing_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    model_names: list[str | None] = []
+
+    def _count_tokens(text: str, model_name: str | None = None) -> int:
+        model_names.append(model_name)
+        return 3
+
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.count_tokens", _count_tokens
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        litellm_model_name="openai/gpt-test",
+        name="gpt-test",
+        provider_type="openai",
+    )
+    assistant.completion_model_kwargs = None
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=5,
+            completion="answer",
+            usage=SimpleNamespace(prompt_tokens=7, completion_tokens=None),
+            model=SimpleNamespace(name="gpt-test", provider_type="openai"),
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="hello", source_text="hello"),
+        effective_prompt="Prompt",
+        input_payload_for_result={"text": "hello", "source_text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    record_receipt = AsyncMock()
+
+    async def _fail_after_receipt(**_kwargs):
+        record_receipt.assert_awaited_once()
+        raise RuntimeError("postprocessing failed")
+
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(side_effect=_fail_after_receipt),
+        apply_output_cap=AsyncMock(),
+        record_provider_call_receipt=record_receipt,
+        mapped_call_context=MappedProviderCallProvenance(
+            execution_mode="per_item",
+            item_index=1,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="postprocessing failed"):
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    receipt = record_receipt.await_args.args[0]
+    assert receipt.num_tokens_input == 7
+    assert receipt.input_source == "provider"
+    assert receipt.num_tokens_output == 3
+    assert receipt.output_source == "estimated"
+    assert receipt.mapped_call == MappedProviderCallProvenance(
+        execution_mode="per_item",
+        item_index=1,
+    )
+    assert model_names == ["openai/gpt-test"]
 
 
 @pytest.mark.asyncio
@@ -1528,9 +1612,12 @@ async def test_complete_step_execution_prefers_provider_reported_usage(
 async def test_complete_step_execution_falls_back_to_estimated_usage_when_provider_usage_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def _count_tokens(_text: str, _model_name: str | None = None) -> int:
+        return 19
+
     monkeypatch.setattr(
         "eneo.flows.runtime.step_execution_runtime.count_tokens",
-        lambda text: 19,
+        _count_tokens,
     )
     run = _run()
     state = _state()
@@ -1600,9 +1687,12 @@ async def test_complete_step_execution_falls_back_per_usage_field(
     expected_input_tokens: int,
     expected_output_tokens: int,
 ) -> None:
+    def _count_tokens(_text: str, _model_name: str | None = None) -> int:
+        return 26
+
     monkeypatch.setattr(
         "eneo.flows.runtime.step_execution_runtime.count_tokens",
-        lambda text: 26,
+        _count_tokens,
     )
     run = _run()
     state = _state()
