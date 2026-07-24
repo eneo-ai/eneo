@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, undefer
 
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
@@ -183,6 +183,24 @@ class QuestionRepository:
             return None
         return (await self._hydrate_questions([question]))[0]
 
+    async def get_with_skill_activation(
+        self,
+        *,
+        id: UUID,
+        tenant_id: UUID,
+    ) -> Question | None:
+        """Load hidden Skill evidence through an explicit tenant-scoped read."""
+        stmt = (
+            sa.select(Questions)
+            .where(Questions.id == id)
+            .where(Questions.tenant_id == tenant_id)
+            .options(undefer(Questions.skill_activation_data))
+        )
+        question = await self.delegate.get_model_from_query(stmt)
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
+
     async def update_with_answer(
         self,
         *,
@@ -286,7 +304,7 @@ class QuestionRepository:
             )["skill_provenance"]
         else:
             question_values["skill_provenance"] = None
-        question_values["skill_activation"] = (
+        question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")
             if question.skill_activation is not None
             else None

@@ -269,7 +269,7 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_frozen_skill_evidence_hydrates_and_survives_abort_update(
+async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
     client,
     db_container,
     default_user,
@@ -323,11 +323,69 @@ async def test_frozen_skill_evidence_hydrates_and_survives_abort_update(
             completion_model=None,
             skill_activation=evidence,
         )
+        await session_service.create_question_placeholder(
+            question="A second turn without activation evidence",
+            session=chat_session,
+            files=None,
+            assistant_id=UUID(assistant_id),
+            completion_model=None,
+        )
 
     async with db_container() as container:
-        hydrated = await container.question_repo().get(question_id)
+        session = container.session()
+        assert session.bind is not None
+        sync_engine = session.bind.sync_engine
+        conversation_statements: list[str] = []
+
+        def capture_conversation_statement(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            if "from questions" in statement.lower():
+                conversation_statements.append(statement)
+
+        sa.event.listen(
+            sync_engine,
+            "before_cursor_execute",
+            capture_conversation_statement,
+        )
+        try:
+            hydrated_session = await container.session_repo().get(chat_session.id)
+        finally:
+            sa.event.remove(
+                sync_engine,
+                "before_cursor_execute",
+                capture_conversation_statement,
+            )
+
+    assert hydrated_session is not None
+    assert len(hydrated_session.questions) == 2
+    assert all(
+        question.skill_activation is None for question in hydrated_session.questions
+    )
+    assert conversation_statements
+    assert all(
+        "skill_activation" not in statement for statement in conversation_statements
+    )
+
+    async with db_container() as container:
+        hydrated = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
     assert hydrated is not None
     assert hydrated.skill_activation == evidence
+
+    async with db_container() as container:
+        cross_tenant = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=uuid4(),
+        )
+    assert cross_tenant is None
 
     await persist_partial_question_answer(
         tenant_id=default_user.tenant_id,
@@ -338,7 +396,10 @@ async def test_frozen_skill_evidence_hydrates_and_survives_abort_update(
     )
 
     async with db_container() as container:
-        after_abort = await container.question_repo().get(question_id)
+        after_abort = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
     assert after_abort is not None
     assert after_abort.answer == "Partial answer"
     assert after_abort.skill_activation == evidence

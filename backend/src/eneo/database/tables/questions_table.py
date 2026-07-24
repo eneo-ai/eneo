@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
+from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -31,8 +32,12 @@ class Questions(BasePublic):
     skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
         JSONB, nullable=True
     )
-    skill_activation: Mapped[Optional[dict[str, object]]] = mapped_column(
-        JSONB, nullable=True
+    skill_activation_data: Mapped[Optional[dict[str, object]]] = mapped_column(
+        "skill_activation",
+        JSONB,
+        nullable=True,
+        deferred=True,
+        deferred_raiseload=True,
     )
 
     # Foreign keys
@@ -77,6 +82,15 @@ class Questions(BasePublic):
     mcp_tool_references: Mapped[list["McpToolReference"]] = relationship(
         order_by="[McpToolReference.tool_call_id, McpToolReference.order]"
     )
+
+    @property
+    def skill_activation(self) -> Optional[dict[str, object]]:
+        """Expose activation evidence only when an explicit query loaded it."""
+        state = sa_inspect(self)
+        assert state is not None
+        if "skill_activation_data" in state.unloaded:
+            return None
+        return self.skill_activation_data
 
 
 class InfoBlobReferences(BaseCrossReference):
