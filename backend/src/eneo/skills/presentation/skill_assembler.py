@@ -1,8 +1,8 @@
 from eneo.skills.domain.skill import (
     OrganizationSkillProjection,
     OrganizationSkillSummaryProjection,
-    PublishedSkill,
-    PublishedSkillSummary,
+    PublishedSkillProjection,
+    PublishedSkillSummaryProjection,
     ResolvedSkillBinding,
     Skill,
     SkillAdoptionPersonalChat,
@@ -250,8 +250,9 @@ class SkillAssembler:
 
     @staticmethod
     def published_summary_to_public(
-        skill: PublishedSkillSummary,
+        projection: PublishedSkillSummaryProjection,
     ) -> PublishedSkillSummaryPublic:
+        skill = projection.skill
         return PublishedSkillSummaryPublic(
             id=skill.id,
             slug=skill.slug,
@@ -261,12 +262,22 @@ class SkillAssembler:
             description=skill.description,
             content_digest=skill.content_digest,
             first_published_at=skill.first_published_at,
+            execution_blocked=projection.execution_blocked,
         )
 
     @classmethod
-    def published_to_public(cls, skill: PublishedSkill) -> PublishedSkillPublic:
+    def published_to_public(
+        cls,
+        projection: PublishedSkillProjection,
+    ) -> PublishedSkillPublic:
+        skill = projection.skill
         return PublishedSkillPublic(
-            **cls.published_summary_to_public(skill.summary).model_dump(),
+            **cls.published_summary_to_public(
+                PublishedSkillSummaryProjection(
+                    skill=skill.summary,
+                    execution_blocked=projection.execution_blocked,
+                )
+            ).model_dump(),
             revision=PublishedSkillRevisionPublic(
                 id=skill.revision.id,
                 skill_id=skill.revision.skill_id,

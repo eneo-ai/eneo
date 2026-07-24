@@ -333,6 +333,18 @@ class PublishedSkill:
 
 
 @dataclass(frozen=True)
+class PublishedSkillSummaryProjection:
+    skill: PublishedSkillSummary
+    execution_blocked: bool
+
+
+@dataclass(frozen=True)
+class PublishedSkillProjection:
+    skill: PublishedSkill
+    execution_blocked: bool
+
+
+@dataclass(frozen=True)
 class OrganizationSkillSummaryProjectionPage:
     items: tuple[OrganizationSkillSummaryProjection, ...]
     limit: int
@@ -341,7 +353,7 @@ class OrganizationSkillSummaryProjectionPage:
 
 @dataclass(frozen=True)
 class PublishedSkillSummaryPage:
-    items: tuple[PublishedSkillSummary, ...]
+    items: tuple[PublishedSkillSummaryProjection, ...]
     limit: int
     next_cursor: str | None
 

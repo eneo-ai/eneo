@@ -13,9 +13,10 @@ from eneo.skills.domain.skill import (
     OrganizationSkillProjection,
     OrganizationSkillSummaryProjection,
     OrganizationSkillSummaryProjectionPage,
-    PublishedSkill,
     PublishedSkillDeletionError,
+    PublishedSkillProjection,
     PublishedSkillSummaryPage,
+    PublishedSkillSummaryProjection,
     Skill,
     SkillAdoptionCursor,
     SkillAdoptionProjectionPage,
@@ -82,15 +83,33 @@ class OrganizationSkillService:
             search=normalized_search or None,
         )
         visible = summaries[:limit]
+        blocks = (
+            await self.repo.list_active_execution_blocks(
+                tenant_id=self.user.tenant_id,
+                skill_ids=[summary.id for summary in visible],
+            )
+            if visible
+            else {}
+        )
         return PublishedSkillSummaryPage(
-            items=tuple(visible),
+            items=tuple(
+                PublishedSkillSummaryProjection(
+                    skill=summary,
+                    execution_blocked=summary.id in blocks,
+                )
+                for summary in visible
+            ),
             limit=limit,
             next_cursor=(
                 visible[-1].slug if len(summaries) > limit and visible else None
             ),
         )
 
-    async def get_catalogue_skill(self, *, skill_id: UUID) -> PublishedSkill:
+    async def get_catalogue_skill(
+        self,
+        *,
+        skill_id: UUID,
+    ) -> PublishedSkillProjection:
         self._require_catalogue_read()
         skill = await self.repo.get_published_for_tenant(
             tenant_id=self.user.tenant_id,
@@ -98,7 +117,14 @@ class OrganizationSkillService:
         )
         if skill is None:
             raise NotFoundException()
-        return skill
+        blocks = await self.repo.list_active_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            skill_ids=[skill.summary.id],
+        )
+        return PublishedSkillProjection(
+            skill=skill,
+            execution_blocked=skill.summary.id in blocks,
+        )
 
     async def list_organization_skills(
         self,

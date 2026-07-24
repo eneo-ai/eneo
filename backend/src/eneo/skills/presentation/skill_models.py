@@ -155,6 +155,7 @@ class PublishedSkillSummaryPublic(BaseModel):
     description: str
     content_digest: str
     first_published_at: datetime
+    execution_blocked: bool
 
 
 class PublishedSkillRevisionPublic(BaseModel):

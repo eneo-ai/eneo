@@ -78,12 +78,15 @@ def _service(*, organization, permissions, repo=None):
 async def test_use_permission_lists_only_published_tenant_skills():
     organization = _organization()
     summaries = [
-        SimpleNamespace(slug="absence"),
-        SimpleNamespace(slug="payroll"),
-        SimpleNamespace(slug="travel"),
+        SimpleNamespace(id=uuid4(), slug="absence"),
+        SimpleNamespace(id=uuid4(), slug="payroll"),
+        SimpleNamespace(id=uuid4(), slug="travel"),
     ]
     repo = AsyncMock()
     repo.list_published_for_tenant.return_value = summaries
+    repo.list_active_execution_blocks.return_value = {
+        summaries[1].id: SimpleNamespace(skill_id=summaries[1].id)
+    }
     service = _service(
         organization=organization,
         permissions={Permission.SKILLS},
@@ -96,13 +99,18 @@ async def test_use_permission_lists_only_published_tenant_skills():
         search=" payroll ",
     )
 
-    assert page.items == tuple(summaries[:2])
+    assert [item.skill for item in page.items] == summaries[:2]
+    assert [item.execution_blocked for item in page.items] == [False, True]
     assert page.next_cursor == "payroll"
     repo.list_published_for_tenant.assert_awaited_once_with(
         tenant_id=organization.tenant_id,
         limit=3,
         after_slug="benefits",
         search="payroll",
+    )
+    repo.list_active_execution_blocks.assert_awaited_once_with(
+        tenant_id=organization.tenant_id,
+        skill_ids=[summaries[0].id, summaries[1].id],
     )
 
 
@@ -122,6 +130,9 @@ async def test_use_permission_reads_only_the_published_revision():
     published = SimpleNamespace(summary=SimpleNamespace(id=uuid4()))
     repo = AsyncMock()
     repo.get_published_for_tenant.return_value = published
+    repo.list_active_execution_blocks.return_value = {
+        published.summary.id: SimpleNamespace(skill_id=published.summary.id)
+    }
     service = _service(
         organization=organization,
         permissions={Permission.SKILLS},
@@ -130,10 +141,15 @@ async def test_use_permission_reads_only_the_published_revision():
 
     result = await service.get_catalogue_skill(skill_id=published.summary.id)
 
-    assert result is published
+    assert result.skill is published
+    assert result.execution_blocked is True
     repo.get_published_for_tenant.assert_awaited_once_with(
         tenant_id=organization.tenant_id,
         skill_id=published.summary.id,
+    )
+    repo.list_active_execution_blocks.assert_awaited_once_with(
+        tenant_id=organization.tenant_id,
+        skill_ids=[published.summary.id],
     )
 
 

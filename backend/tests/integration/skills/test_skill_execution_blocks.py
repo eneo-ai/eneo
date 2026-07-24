@@ -14,6 +14,7 @@ from eneo.database.tables.spaces_table import (
     SpacesUsers,
 )
 from eneo.database.tables.users_table import users_roles_table
+from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     SkillBindingReference,
@@ -380,6 +381,175 @@ async def test_queued_snapshot_predating_block_fails_at_live_runtime_resolution(
     assert exc_info.value.reason == blocked.block.reason
 
 
+async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_pins(
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    incident_reason = "Confirmed unsafe instructions"
+    async with db_container() as container:
+        session = container.session()
+        organization = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert organization is not None
+        model = await completion_model_factory(
+            session,
+            "blocked-binding-integrity-model",
+        )
+        target_space = await space_factory(
+            session,
+            "Blocked binding integrity target",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=target_space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        existing_assistant = await assistant_factory(
+            session,
+            "Existing blocked binding",
+            model.id,
+            space_id=target_space.id,
+        )
+        new_assistant = await assistant_factory(
+            session,
+            "New blocked binding",
+            model.id,
+            space_id=target_space.id,
+        )
+        repo = container.skill_repo()
+        blocked_skill = await repo.create(
+            space_id=organization.id,
+            slug=f"blocked-binding-{uuid4().hex[:8]}",
+            display_name="Blocked binding guidance",
+            description="Approved guidance with multiple revisions",
+            instructions="Use revision one.",
+            content_digest="6" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        revision_one = blocked_skill.current_revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=blocked_skill.id,
+            expected_revision_id=revision_one.id,
+        )
+        companion_skill = await repo.create(
+            space_id=organization.id,
+            slug=f"companion-binding-{uuid4().hex[:8]}",
+            display_name="Companion guidance",
+            description="A second approved Skill for ordering",
+            instructions="Use the companion guidance.",
+            content_digest="8" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=companion_skill.id,
+            expected_revision_id=companion_skill.current_revision.id,
+        )
+        blocked_reference = SkillBindingReference(
+            skill_id=blocked_skill.id,
+            skill_revision_id=revision_one.id,
+        )
+        companion_reference = SkillBindingReference(
+            skill_id=companion_skill.id,
+            skill_revision_id=companion_skill.current_revision.id,
+        )
+        service = container.skill_service()
+        await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=existing_assistant.id,
+            references=[blocked_reference, companion_reference],
+        )
+        revision_two_change = await repo.create_revision(
+            skill_id=blocked_skill.id,
+            display_name="Blocked binding guidance",
+            description="Approved guidance with multiple revisions",
+            instructions="Use revision two.",
+            content_digest="7" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert revision_two_change is not None
+        revision_two = revision_two_change.revision
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=blocked_skill.id,
+            expected_revision_id=revision_two.id,
+        )
+        blocked = await repo.block_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=blocked_skill.id,
+            blocked_by_user_id=admin_user.id,
+            reason=incident_reason,
+        )
+        assert blocked is not None
+
+        retained = await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=existing_assistant.id,
+            references=[companion_reference, blocked_reference],
+        )
+        assert [binding.skill_id for binding in retained] == [
+            companion_skill.id,
+            blocked_skill.id,
+        ]
+
+        with pytest.raises(BadRequestException) as new_binding:
+            await service.replace_assistant_bindings(
+                space_id=target_space.id,
+                assistant_id=new_assistant.id,
+                references=[
+                    SkillBindingReference(
+                        skill_id=blocked_skill.id,
+                        skill_revision_id=revision_two.id,
+                    )
+                ],
+            )
+        with pytest.raises(BadRequestException) as revision_change:
+            await service.replace_assistant_bindings(
+                space_id=target_space.id,
+                assistant_id=existing_assistant.id,
+                references=[
+                    companion_reference,
+                    SkillBindingReference(
+                        skill_id=blocked_skill.id,
+                        skill_revision_id=revision_two.id,
+                    ),
+                ],
+            )
+
+        assert incident_reason not in str(new_binding.value)
+        assert incident_reason not in str(revision_change.value)
+
+        released = await repo.unblock_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=blocked_skill.id,
+            expected_block_id=blocked.block.id,
+            unblocked_by_user_id=admin_user.id,
+            reason="The approved revision is safe again",
+        )
+        assert released is not None
+        updated = await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=existing_assistant.id,
+            references=[
+                companion_reference,
+                SkillBindingReference(
+                    skill_id=blocked_skill.id,
+                    skill_revision_id=revision_two.id,
+                ),
+            ],
+        )
+        assert updated[1].skill_revision_id == revision_two.id
+
+
 async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(
     client,
     admin_token,
@@ -400,7 +570,7 @@ async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(
         )
         app_role = Roles(
             name=f"App runner {uuid4().hex[:8]}",
-            permissions=[Permission.APPS.value],
+            permissions=[Permission.APPS.value, Permission.SKILLS.value],
             tenant_id=admin_user.tenant_id,
         )
         session.add(app_role)
@@ -491,6 +661,55 @@ async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(
         assert blocked is not None
         app_id = app.id
         skill_id = skill.id
+        target_space_id = target_space.id
+
+    binding_response = await client.get(
+        f"/api/v1/spaces/{target_space_id}/apps/{app_id}/skills/",
+        headers={"Authorization": f"Bearer {runner_token}"},
+    )
+    assert binding_response.status_code == 200, binding_response.text
+    assert binding_response.json()[0]["execution_blocked"] is True
+    assert incident_reason not in binding_response.text
+
+    detail_response = await client.get(
+        f"/api/v1/skills/organization/{skill_id}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["execution_blocked"] is True
+    assert incident_reason not in detail_response.text
+
+    list_response = await client.get(
+        "/api/v1/skills/organization/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert list_response.status_code == 200, list_response.text
+    listed_skill = next(
+        item for item in list_response.json()["items"] if item["id"] == str(skill_id)
+    )
+    assert listed_skill["execution_blocked"] is True
+    assert incident_reason not in list_response.text
+
+    catalogue_response = await client.get(
+        "/api/v1/skills/catalogue/",
+        headers={"Authorization": f"Bearer {runner_token}"},
+    )
+    assert catalogue_response.status_code == 200, catalogue_response.text
+    catalogue_skill = next(
+        item
+        for item in catalogue_response.json()["items"]
+        if item["id"] == str(skill_id)
+    )
+    assert catalogue_skill["execution_blocked"] is True
+    assert incident_reason not in catalogue_response.text
+
+    catalogue_detail_response = await client.get(
+        f"/api/v1/skills/catalogue/{skill_id}/",
+        headers={"Authorization": f"Bearer {runner_token}"},
+    )
+    assert catalogue_detail_response.status_code == 200, catalogue_detail_response.text
+    assert catalogue_detail_response.json()["execution_blocked"] is True
+    assert incident_reason not in catalogue_detail_response.text
 
     run_response = await client.post(
         f"/api/v1/apps/{app_id}/runs/",

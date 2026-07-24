@@ -12,7 +12,9 @@ from eneo.skills.domain.skill import (
     OrganizationSkillProjection,
     OrganizationSkillSummaryProjection,
     PublishedSkill,
+    PublishedSkillProjection,
     PublishedSkillSummary,
+    PublishedSkillSummaryProjection,
     Skill,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
@@ -239,10 +241,16 @@ def test_catalogue_summary_projects_the_exact_approved_revision():
         first_published_at=now,
     )
 
-    public = SkillAssembler.published_summary_to_public(summary)
+    public = SkillAssembler.published_summary_to_public(
+        PublishedSkillSummaryProjection(
+            skill=summary,
+            execution_blocked=False,
+        )
+    )
 
     assert public.revision_id == summary.revision_id
     assert public.revision_number == 4
+    assert public.execution_blocked is False
     assert not hasattr(public, "instructions")
 
 
@@ -261,10 +269,14 @@ def test_catalogue_detail_exposes_approved_body_without_author_identity():
     )
 
     public = SkillAssembler.published_to_public(
-        PublishedSkill(summary=summary, revision=skill.current_revision)
+        PublishedSkillProjection(
+            skill=PublishedSkill(summary=summary, revision=skill.current_revision),
+            execution_blocked=False,
+        )
     )
 
     assert public.revision.instructions == skill.current_revision.instructions
+    assert public.execution_blocked is False
     assert not hasattr(public.revision, "created_by_user_id")
 
 
