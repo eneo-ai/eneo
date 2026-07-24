@@ -130,6 +130,29 @@ async def persist_partial_question_answer(
         )
 
 
+async def persist_final_skill_runtime_state(
+    *,
+    tenant_id: UUID,
+    question_id: UUID,
+    skill_provenance: Sequence[SkillExecutionReference],
+    skill_activation: SkillActivationEvidenceV1,
+) -> None:
+    """Commit final Skill evidence independently of a failing request transaction."""
+
+    async with sessionmanager.session() as session, session.begin():
+        repo = QuestionRepository(session)
+        await repo.update_skill_runtime_state(
+            question_id=question_id,
+            tenant_id=tenant_id,
+            skill_provenance=skill_provenance,
+            skill_activation=skill_activation,
+        )
+    logger.info(
+        "Persisted final Skill activation evidence after completion failure",
+        extra={"question_id": str(question_id)},
+    )
+
+
 class SessionService:
     def __init__(
         self,
@@ -499,23 +522,6 @@ class SessionService:
                 else None,
                 logging_details=logging_details,
                 mcp_tool_references=mcp_tool_references,
-                skill_provenance=skill_provenance,
-                skill_activation=skill_activation,
-            )
-
-    async def update_question_skill_runtime_state(
-        self,
-        *,
-        question_id: UUID,
-        skill_provenance: Sequence[SkillExecutionReference],
-        skill_activation: SkillActivationEvidenceV1,
-    ) -> None:
-        """Persist final Skill evidence when completion fails before finalization."""
-
-        async with self._write_transaction():
-            await self.question_repo.update_skill_runtime_state(
-                question_id=question_id,
-                tenant_id=self.user.tenant_id,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
             )

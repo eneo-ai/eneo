@@ -361,12 +361,10 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
 
     async def fake_completion_stream():
         for text in ["hello ", "wor", "ld"]:
-            yield SimpleNamespace(
+            yield Completion(
                 reasoning_token_count=0,
-                usage=None,
                 response_type=ResponseType.TEXT,
                 text=text,
-                reference_chunks=[],
             )
 
     response = SimpleNamespace(
@@ -436,9 +434,8 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
 @pytest.mark.asyncio
 async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.ENEO_EVENT,
         )
 
@@ -497,12 +494,10 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
     called (once) and no partial-save task should be scheduled."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="ok",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -566,6 +561,56 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
     # Crucially: no partial-save task was scheduled on a clean finish.
     assert persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_persists_cumulative_input_estimate():
+    async def fake_completion_stream():
+        yield Completion(
+            reasoning_token_count=0,
+            response_type=ResponseType.TEXT,
+            text="ok",
+        )
+        yield Completion(
+            reasoning_token_count=0,
+            stop=True,
+            input_token_estimate=41,
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+        assistant_selector_tokens=2,
+        **_skill_runtime_args(
+            initial_skill_context_tokens=2,
+            final_skill_context_tokens=7,
+        ),
+    )
+    async for _ in gen:
+        pass
+
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    assert persisted["num_tokens_question"] == 43
 
 
 @pytest.mark.asyncio
@@ -643,18 +688,15 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
 
     async def fake_completion_stream():
         for reasoning in ["let me ", "think"]:
-            yield SimpleNamespace(
+            yield Completion(
                 reasoning_token_count=0,
-                usage=None,
                 response_type=ResponseType.REASONING,
                 reasoning_content=reasoning,
             )
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=2,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="ok",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -701,18 +743,15 @@ async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort()
     transparency record even for interrupted turns."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.REASONING,
             reasoning_content="thinking hard",
         )
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="never reached",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -835,21 +874,17 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
     save through with num_tokens_answer=0."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="partial",
-            reference_chunks=[],
         )
         # Hang on the next chunk — the consumer will aclose() in between.
         await asyncio.sleep(10)
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="lost",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(

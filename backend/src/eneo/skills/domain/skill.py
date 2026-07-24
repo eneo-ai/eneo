@@ -720,6 +720,7 @@ class SkillActivationFallbackReason(str, Enum):
 class SkillActivationRejectionReason(str, Enum):
     UNKNOWN_KEY = "unknown_key"
     BLOCKED = "blocked"
+    ACTIVATION_UNAVAILABLE = "activation_unavailable"
     ACTIVATION_LIMIT_EXCEEDED = "activation_limit_exceeded"
     CONTEXT_LIMIT_EXCEEDED = "context_limit_exceeded"
     MODEL_CONTEXT_LIMIT_EXCEEDED = "model_context_limit_exceeded"

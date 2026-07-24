@@ -666,8 +666,35 @@ class SkillActivationRuntime:
             )
         selection_started_at = perf_counter_ns()
         self._validate_provider_calls(calls)
-        previous_prompt = self.prompt
         requests = tuple(self._request_from_provider_call(call) for call in internal)
+        if self.tool_definition is None:
+            staged = self._fork()
+            result = staged._apply_round(
+                requests,
+                forced_rejections={
+                    request.activation_key or "": (
+                        SkillActivationRejectionReason.ACTIVATION_UNAVAILABLE
+                    )
+                    for request in requests
+                },
+            )
+            external, deferred = self._append_provider_round(
+                messages=messages,
+                calls=calls,
+                assistant_content=assistant_content,
+                result=result,
+            )
+            staged._selection_latency_ms = self._selection_latency_ms + (
+                (perf_counter_ns() - selection_started_at) // 1_000_000
+            )
+            self._commit(staged)
+            return SkillToolCallApplication(
+                external_calls=external,
+                deferred_calls=deferred,
+                assistant_message_appended=True,
+            )
+
+        previous_prompt = self.prompt
         bounded_requests = requests[:MAX_SKILL_ACTIVATIONS_PER_TURN]
         overflow_requests = requests[MAX_SKILL_ACTIVATIONS_PER_TURN:]
         forced_rejections: dict[str, SkillActivationRejectionReason] = {}

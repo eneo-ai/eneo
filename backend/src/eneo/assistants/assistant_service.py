@@ -1353,6 +1353,7 @@ class AssistantService:
                 # that legitimately share a URI.
                 mcp_ref_seen: set[UUID] = set()
                 stream_usage: TokenUsage | None = None
+                stream_input_token_estimate: int | None = None
                 completed = False
 
                 try:
@@ -1364,6 +1365,8 @@ class AssistantService:
                         reasoning_token_count = chunk.reasoning_token_count
                         if chunk.usage:
                             stream_usage = chunk.usage
+                        if chunk.input_token_estimate is not None:
+                            stream_input_token_estimate = chunk.input_token_estimate
 
                         if chunk.response_type == ResponseType.TEXT:
                             response_string = f"{response_string}{chunk.text}"
@@ -1549,13 +1552,17 @@ class AssistantService:
                         )
                     else:
                         final_skill_tokens = skill_runtime.snapshot().measurement.tokens
-                        num_tokens_question = (
-                            response.total_token_count
+                        base_input_tokens = (
+                            stream_input_token_estimate
+                            if stream_input_token_estimate is not None
+                            else response.total_token_count
                             + max(
                                 final_skill_tokens - initial_skill_context_tokens,
                                 0,
                             )
-                            + assistant_selector_tokens
+                        )
+                        num_tokens_question = (
+                            base_input_tokens + assistant_selector_tokens
                         )
                         input_source = "litellm"
 
@@ -2102,7 +2109,12 @@ class AssistantService:
             failed_snapshot = skill_runtime.snapshot()
             if failed_snapshot.changed:
                 try:
-                    await self.session_service.update_question_skill_runtime_state(
+                    from eneo.sessions.session_service import (
+                        persist_final_skill_runtime_state,
+                    )
+
+                    await persist_final_skill_runtime_state(
+                        tenant_id=self.user.tenant_id,
                         question_id=question_id,
                         skill_provenance=skill_plan.active_provenance(failed_snapshot),
                         skill_activation=skill_plan.activation_evidence(

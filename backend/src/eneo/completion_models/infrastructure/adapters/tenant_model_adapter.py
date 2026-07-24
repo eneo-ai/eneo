@@ -58,6 +58,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
+from eneo.tokens.token_utils import measure_provider_input_tokens
 
 logger = get_logger(__name__)
 
@@ -590,6 +591,25 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
         )
 
+    def _resolve_request_input_tokens(
+        self,
+        *,
+        response: _LiteLLMHasUsage,
+        messages: list[dict[str, Any]],
+        provider_tools: list[dict[str, Any]],
+    ) -> tuple[int, bool]:
+        """Return one provider request's input count and whether it is estimated."""
+
+        usage = self._extract_usage(response)
+        if usage is not None and usage.prompt_tokens is not None:
+            return usage.prompt_tokens, False
+        measurement = measure_provider_input_tokens(
+            messages,
+            provider_tools,
+            self.litellm_model,
+        )
+        return measurement.tokens, True
+
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
         Build tools/functions array from context function definitions.
@@ -638,7 +658,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             for tool in mcp_tools
             if not (
                 isinstance(tool.get("function"), dict)
-                and tool["function"].get("name") in built_in_names
+                and (
+                    tool["function"].get("name") in built_in_names
+                    or tool["function"].get("name") == SKILL_ACTIVATION_TOOL_NAME
+                )
             )
         ]
         if skill_runtime is not None and any(
@@ -839,6 +862,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
+            cumulative_input_tokens = 0
+            used_input_estimate = False
             # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = cast(
                 _LiteLLMResponse,
@@ -850,6 +875,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                     **litellm_kwargs,
                 ),
             )
+            request_input_tokens, request_was_estimated = (
+                self._resolve_request_input_tokens(
+                    response=response,
+                    messages=messages,
+                    provider_tools=cast(
+                        "list[dict[str, Any]]",
+                        litellm_kwargs.get("tools") or [],
+                    ),
+                )
+            )
+            cumulative_input_tokens += request_input_tokens
+            used_input_estimate = used_input_estimate or request_was_estimated
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
@@ -982,6 +1019,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                             **litellm_kwargs,
                         ),
                     )
+                    request_input_tokens, request_was_estimated = (
+                        self._resolve_request_input_tokens(
+                            response=response,
+                            messages=messages,
+                            provider_tools=cast(
+                                "list[dict[str, Any]]",
+                                litellm_kwargs.get("tools") or [],
+                            ),
+                        )
+                    )
+                    cumulative_input_tokens += request_input_tokens
+                    used_input_estimate = used_input_estimate or request_was_estimated
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -994,6 +1043,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
 
+            if used_input_estimate:
+                completion.input_token_estimate = cumulative_input_tokens
+                if usage is not None:
+                    usage = usage.model_copy(update={"prompt_tokens": None})
             completion.usage = usage
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
@@ -1185,17 +1238,25 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.tool_calls_acc: dict[int, _AccumulatedToolCall] = {}
                     self.assistant_content: list[str] = []
                     self.usage: TokenUsage | None = None
+                    self.cumulative_input_tokens = 0
+                    self.used_input_estimate = False
 
             result = _StreamResult()
 
             async def _drain_stream(
-                s: AsyncIterator[_LiteLLMStreamChunk], res: _StreamResult
+                s: AsyncIterator[_LiteLLMStreamChunk],
+                res: _StreamResult,
+                *,
+                request_messages: list[dict[str, Any]] | None = None,
+                provider_tools: list[dict[str, Any]] | None = None,
             ) -> AsyncIterator[Completion]:
                 """Drain a stream: yield text Completions, accumulate tool calls into res."""
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                request_prompt_tokens = 0
+                provider_reported_prompt_tokens = False
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
                 res.assistant_content = []
@@ -1208,6 +1269,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if chunk_usage_obj:
                         chunk_usage = self._extract_usage(chunk)
                         if chunk_usage:
+                            if chunk_usage.prompt_tokens is not None:
+                                request_prompt_tokens += chunk_usage.prompt_tokens
+                                provider_reported_prompt_tokens = True
                             res.usage = (
                                 self._accumulate_usage(res.usage, chunk)
                                 if res.usage
@@ -1329,8 +1393,29 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 yield Completion(text=cleaned)
                         buffer = ""
 
+                if provider_reported_prompt_tokens:
+                    res.cumulative_input_tokens += request_prompt_tokens
+                elif request_messages is not None:
+                    measurement = measure_provider_input_tokens(
+                        request_messages,
+                        provider_tools or [],
+                        self.litellm_model,
+                    )
+                    res.cumulative_input_tokens += measurement.tokens
+                    res.used_input_estimate = True
+
             # --- Drain initial stream ---
-            async for comp in _drain_stream(source_stream, result):
+            async for comp in _drain_stream(
+                source_stream,
+                result,
+                request_messages=list(prepared.messages) if prepared else None,
+                provider_tools=cast(
+                    "list[dict[str, Any]]",
+                    prepared.kwargs.get("tools") or [],
+                )
+                if prepared
+                else None,
+            ):
                 yield comp
 
             # --- Built-in activation and MCP tool call loop ---
@@ -1441,7 +1526,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 **litellm_kwargs,
                             ),
                         )
-                        async for comp in _drain_stream(follow_up, result):
+                        async for comp in _drain_stream(
+                            follow_up,
+                            result,
+                            request_messages=list(messages),
+                            provider_tools=cast(
+                                "list[dict[str, Any]]",
+                                litellm_kwargs.get("tools") or [],
+                            ),
+                        ):
                             yield comp
                         continue
 
@@ -1787,7 +1880,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                     # Drain follow-up stream
-                    async for comp in _drain_stream(follow_up, result):
+                    async for comp in _drain_stream(
+                        follow_up,
+                        result,
+                        request_messages=list(messages),
+                        provider_tools=cast(
+                            "list[dict[str, Any]]",
+                            litellm_kwargs.get("tools") or [],
+                        ),
+                    ):
                         yield comp
 
                 if result.has_tool_calls and tool_round >= max_rounds:
@@ -1797,8 +1898,22 @@ class TenantModelAdapter(CompletionModelAdapter):
                         code="tool_round_limit",
                     )
 
-            # Final stop — attach accumulated usage
-            yield Completion(text="", stop=True, usage=result.usage)
+            # Final stop — attach accumulated usage. If any request lacked
+            # provider prompt usage, keep that field unset and expose the
+            # cumulative request-payload estimate separately.
+            final_usage = result.usage
+            if result.used_input_estimate and final_usage is not None:
+                final_usage = final_usage.model_copy(update={"prompt_tokens": None})
+            yield Completion(
+                text="",
+                stop=True,
+                usage=final_usage,
+                input_token_estimate=(
+                    result.cumulative_input_tokens
+                    if result.used_input_estimate
+                    else None
+                ),
+            )
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"

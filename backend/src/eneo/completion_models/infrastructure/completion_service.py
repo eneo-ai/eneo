@@ -349,6 +349,8 @@ class CompletionService:
                     mcp_proxy=mcp_proxy,
                     skill_runtime=skill_runtime,
                 )
+                adapter_input_estimate = completion.input_token_estimate
+                usage = completion.usage
             finally:
                 # Ensure cleanup for non-streaming
                 if mcp_proxy:
@@ -436,17 +438,23 @@ class CompletionService:
                         await mcp_proxy.close()
 
             completion = self._handle_tool_call(streaming_wrapper())
+            adapter_input_estimate = None
+            usage = None
 
         final_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
             if skill_runtime is not None
             else 0
         )
-        total_token_count = context.token_count + max(
-            final_skill_tokens - initial_skill_tokens,
-            0,
+        total_token_count = (
+            adapter_input_estimate
+            if adapter_input_estimate is not None
+            else context.token_count
+            + max(
+                final_skill_tokens - initial_skill_tokens,
+                0,
+            )
         )
-        usage = getattr(completion, "usage", None) if not stream else None
         if usage is not None:
             log_token_count_drift(
                 model_name=model_adapter.get_model_route(),

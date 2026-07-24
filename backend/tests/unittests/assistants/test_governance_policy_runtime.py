@@ -842,6 +842,9 @@ async def test_provider_failure_persists_activation_that_happened_before_error()
         personal_default=False,
         skill_service=skill_service,
     )
+    assistant.completion_model = TEST_MODEL_CHATGPT.model_copy(
+        update={"supports_tool_calling": True}
+    )
 
     async def activate_then_fail(**kwargs):
         runtime = kwargs["skill_runtime"]
@@ -859,13 +862,21 @@ async def test_provider_failure_persists_activation_that_happened_before_error()
 
     assistant.ask.side_effect = activate_then_fail
 
-    with pytest.raises(RuntimeError, match="provider failed"):
+    with (
+        patch(
+            "eneo.sessions.session_service.persist_final_skill_runtime_state",
+            AsyncMock(),
+        ) as persist_final_state,
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
         await service.ask(question="hello", assistant_id=assistant.id)
 
-    state = session_service.update_question_skill_runtime_state.await_args.kwargs
+    state = persist_final_state.await_args.kwargs
+    assert state["tenant_id"] == TEST_USER.tenant_id
     assert state["skill_activation"].accepted == ("skill-1",)
     assert state["skill_activation"].activation_rounds == 1
     assert state["skill_provenance"][0].skill_revision_id == (binding.skill_revision_id)
+    session_service.update_question_skill_runtime_state.assert_not_awaited()
 
 
 async def test_evidence_write_failure_does_not_mask_provider_failure():
@@ -887,6 +898,9 @@ async def test_evidence_write_failure_does_not_mask_provider_failure():
         personal_default=False,
         skill_service=skill_service,
     )
+    assistant.completion_model = TEST_MODEL_CHATGPT.model_copy(
+        update={"supports_tool_calling": True}
+    )
 
     async def activate_then_fail(**kwargs):
         runtime = kwargs["skill_runtime"]
@@ -903,11 +917,14 @@ async def test_evidence_write_failure_does_not_mask_provider_failure():
         raise RuntimeError("provider failed")
 
     assistant.ask.side_effect = activate_then_fail
-    session_service.update_question_skill_runtime_state.side_effect = RuntimeError(
-        "evidence write failed"
-    )
 
-    with pytest.raises(RuntimeError, match="provider failed"):
+    with (
+        patch(
+            "eneo.sessions.session_service.persist_final_skill_runtime_state",
+            AsyncMock(side_effect=RuntimeError("evidence write failed")),
+        ),
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
         await service.ask(question="hello", assistant_id=assistant.id)
 
 

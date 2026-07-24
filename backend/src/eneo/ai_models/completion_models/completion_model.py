@@ -138,6 +138,9 @@ class Completion:
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
+    # Cumulative request-payload count when at least one provider round omitted
+    # prompt usage. Provider-reported usage remains separate and authoritative.
+    input_token_estimate: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):
