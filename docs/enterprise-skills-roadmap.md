@@ -97,7 +97,7 @@ The foundation merged into `develop` before this roadmap was written:
 - PR #580 locked the deletion and retained-provenance recovery contract. It
   squash-merged as `c642da49` on 2026-07-23.
 
-The delivery graph was last verified on 2026-07-23:
+The delivery graph was last verified on 2026-07-24:
 
 | Work item                                                | Purpose                                         | State and next action                                                                                               |
 | -------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -110,6 +110,7 @@ The delivery graph was last verified on 2026-07-23:
 | [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint         | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
 | [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode         | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
 | [#583](https://github.com/eneo-ai/eneo/pull/583)         | Task #553 slice 2: typed runtime policy         | Merged as `e681171f`; required CI passed and the final review found no current findings.                            |
+| [#590](https://github.com/eneo-ai/eneo/pull/590)         | Task #553 slice 3: frozen plan and evidence     | Merged as `d2651dee`; required CI passed and Review 2 found no current findings.                                    |
 | [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
 | [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                              |
 | [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge   | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
@@ -718,9 +719,9 @@ on-demand loading ineffective without adding a second event source.
    adoption evidence, and emergency execution block on `develop`.
 4. **Completed:** T007/PR #580 locked deletion and retained provenance with the
    existing Skill and App-run owners and merged as `c642da49`.
-5. **Active:** finish T013, the frozen-plan and body-free evidence slice of
-   Task #553.
-6. Land T014 block integrity and visibility before the trusted runtime:
+5. **Completed:** T013 froze one immutable eager plan per turn and added
+   body-free activation evidence; PR #590 merged as `d2651dee`.
+6. **Active:** land T014 block integrity and visibility before the trusted runtime:
    reject new or changed pins while blocked, retain unchanged pins, and expose
    the derived block state in catalogue and binding projections.
 7. Finish Task #553 through T015 trusted runtime and T016 save contract/UI.
