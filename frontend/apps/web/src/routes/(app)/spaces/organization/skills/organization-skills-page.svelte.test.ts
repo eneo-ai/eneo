@@ -25,7 +25,8 @@ import OrganizationSkillsPage from "./+page.svelte";
 
 function skill(
   id: string,
-  publicationState: OrganizationSkillSummaryPublic["publication_state"]
+  publicationState: OrganizationSkillSummaryPublic["publication_state"],
+  executionBlocked = false
 ): OrganizationSkillSummaryPublic {
   const revisionNumber = publicationState === "draft" ? 1 : 2;
   return {
@@ -43,7 +44,8 @@ function skill(
     updated_at: "2026-07-20T09:00:00Z",
     published_revision_number: publicationState === "draft" ? null : 1,
     first_published_at: publicationState === "draft" ? null : "2026-07-19T08:00:00Z",
-    publication_state: publicationState
+    publication_state: publicationState,
+    execution_blocked: executionBlocked
   };
 }
 
@@ -136,6 +138,40 @@ describe("organisation Skill catalogue page", () => {
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
     await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
     await expect.element(page.getByText(unpublished.display_name)).toBeVisible();
+  });
+
+  test("shows execution blocking as the dominant operational status", async () => {
+    const blocked = skill("blocked", "unpublished", true);
+
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        page: {
+          items: [blocked],
+          count: 1,
+          limit: 25,
+          next_cursor: null
+        },
+        eneo: {
+          skills: {
+            organization: {
+              delete: vi.fn(),
+              list: vi.fn()
+            },
+            catalogue: {
+              list: vi.fn()
+            }
+          }
+        }
+      } as never
+    });
+
+    await expect
+      .element(page.getByText(m.organization_skills_status_blocked(), { exact: true }).first())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_status_unpublished(), { exact: true }))
+      .not.toBeInTheDocument();
   });
 
   test("keeps the catalogue table out of a second keyboard navigation region", async () => {

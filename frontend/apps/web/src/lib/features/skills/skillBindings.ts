@@ -38,6 +38,7 @@ export type SkillBindingRow = {
   source: SkillBindingSource | undefined;
   pinnedRevision: number | undefined;
   isActive: boolean | undefined;
+  executionBlocked: boolean;
   hasNewerRevision: boolean;
 };
 
@@ -46,7 +47,12 @@ export function getAvailableSkills(
   bindings: SkillBindingReferenceInput[]
 ): SkillBindingCandidate[] {
   const boundSkillIds = new Set(bindings.map((binding) => binding.skill_id));
-  return catalog.filter((skill) => isSkillCandidateActive(skill) && !boundSkillIds.has(skill.id));
+  return catalog.filter(
+    (skill) =>
+      isSkillCandidateActive(skill) &&
+      !isSkillCandidateExecutionBlocked(skill) &&
+      !boundSkillIds.has(skill.id)
+  );
 }
 
 export function appendSkillRevisionBinding(
@@ -199,6 +205,9 @@ export function getSkillBindingRows(
         (referencesAttachableRevision ? attachableRevisionNumber : undefined),
       isActive:
         currentSkill !== undefined ? isSkillCandidateActive(currentSkill) : skillSummary?.is_active,
+      executionBlocked:
+        skillSummary?.execution_blocked ??
+        (currentSkill === undefined ? false : isSkillCandidateExecutionBlocked(currentSkill)),
       hasNewerRevision: attachableRevisionId !== undefined && !referencesAttachableRevision
     };
   });
@@ -214,6 +223,10 @@ export function getSkillCandidateRevisionNumber(skill: SkillBindingCandidate): n
 
 export function isSkillCandidateActive(skill: SkillBindingCandidate): boolean {
   return skill.source === "space" ? skill.is_active : true;
+}
+
+function isSkillCandidateExecutionBlocked(skill: SkillBindingCandidate): boolean {
+  return skill.source === "organization" && skill.execution_blocked;
 }
 
 function bindingKey(skillId: string, revisionId: string): string {

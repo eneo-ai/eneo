@@ -13722,6 +13722,8 @@ export interface components {
       /** First Published At */
       first_published_at: string | null;
       publication_state: components["schemas"]["SkillPublicationState"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
       current_revision: components["schemas"]["SkillRevisionPublic"];
     };
     /** OrganizationSkillSummaryPagePublic */
@@ -13790,6 +13792,8 @@ export interface components {
       /** First Published At */
       first_published_at: string | null;
       publication_state: components["schemas"]["SkillPublicationState"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
     };
     /** OriginalSignedURLRequest */
     OriginalSignedURLRequest: {
@@ -15218,6 +15222,8 @@ export interface components {
        * Format: date-time
        */
       first_published_at: string;
+      /** Execution Blocked */
+      execution_blocked: boolean;
       revision: components["schemas"]["PublishedSkillRevisionPublic"];
     };
     /** PublishedSkillRevisionPublic */
@@ -15292,6 +15298,8 @@ export interface components {
        * Format: date-time
        */
       first_published_at: string;
+      /** Execution Blocked */
+      execution_blocked: boolean;
     };
     /** QuestionMetadata */
     QuestionMetadata: {
@@ -16309,6 +16317,8 @@ export interface components {
       /** Is Active */
       is_active: boolean;
       source: components["schemas"]["SkillBindingSource"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
     };
     /** SkillCreateRequest */
     SkillCreateRequest: {

@@ -48,6 +48,7 @@ function makeSummary(skill: SkillSparse, revision: number): SkillBindingSummary 
     is_active: skill.is_active,
     attachable_revision_id: skill.current_revision_id,
     attachable_revision_number: skill.current_revision_number,
+    execution_blocked: false,
     source: "space"
   };
 }
@@ -87,6 +88,23 @@ describe("Skill binding draft state", () => {
         revisionId: bound.current_revision_id
       })
     ).toBe(bindings);
+  });
+
+  test("excludes blocked organisation Skills from new bindings", () => {
+    const blocked: SkillBindingCandidate = {
+      id: "blocked",
+      slug: "blocked",
+      revision_id: "blocked-revision-1",
+      revision_number: 1,
+      display_name: "Blocked Skill",
+      description: "Unavailable during an incident.",
+      content_digest: "digest-blocked-1",
+      first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: true,
+      source: "organization"
+    };
+
+    expect(getAvailableSkills([blocked], [])).toEqual([]);
   });
 
   test("adds the exact current revision, reorders deterministically, and removes by identity", () => {
@@ -193,6 +211,7 @@ describe("Skill binding draft state", () => {
       description: "Current description",
       content_digest: "digest-renamed-2",
       first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: false,
       source: "organization"
     };
     const pinnedBindings = [
@@ -251,6 +270,24 @@ describe("Skill binding draft state", () => {
     expect(row.isActive).toBe(false);
   });
 
+  test("keeps a blocked exact pin visible while preventing a revision change", () => {
+    const skill = makeSkill("blocked-pinned", 2);
+    const summary = makeSummary(skill, 1);
+    summary.source = "organization";
+    summary.execution_blocked = true;
+    summary.attachable_revision_id = skill.current_revision_id;
+    summary.attachable_revision_number = skill.current_revision_number;
+
+    const [row] = getSkillBindingRows(
+      [{ skill_id: skill.id, skill_revision_id: summary.skill_revision_id }],
+      [summary],
+      []
+    );
+
+    expect(row.executionBlocked).toBe(true);
+    expect(row.hasNewerRevision).toBe(true);
+  });
+
   test("adds a created Skill to the local catalog and binding draft", () => {
     const created = makePublicSkill("created");
     const candidate = { ...created, source: "space" as const };
@@ -280,6 +317,7 @@ describe("Skill binding draft state", () => {
       description: "Approved content only",
       content_digest: "digest-approved-4",
       first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: false,
       source: "organization"
     };
 

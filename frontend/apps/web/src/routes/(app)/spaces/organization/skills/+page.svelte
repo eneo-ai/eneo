@@ -47,7 +47,8 @@
     });
   }
 
-  function publicationLabel(skill: OrganizationSkillSummaryPublic): string {
+  function statusLabel(skill: OrganizationSkillSummaryPublic): string {
+    if (skill.execution_blocked) return m.organization_skills_status_blocked();
     switch (skill.publication_state) {
       case "draft":
         return m.organization_skills_status_draft();
@@ -60,9 +61,10 @@
     }
   }
 
-  function publicationVariant(
+  function statusVariant(
     skill: OrganizationSkillSummaryPublic
-  ): "default" | "secondary" | "outline" {
+  ): "default" | "destructive" | "secondary" | "outline" {
+    if (skill.execution_blocked) return "destructive";
     if (skill.publication_state === "published") return "secondary";
     if (skill.publication_state === "update_pending") return "default";
     return "outline";
@@ -246,7 +248,7 @@
                       {skill.slug}
                     </p>
                     <div class="mt-2 @md:hidden">
-                      <Badge variant={publicationVariant(skill)}>{publicationLabel(skill)}</Badge>
+                      <Badge variant={statusVariant(skill)}>{statusLabel(skill)}</Badge>
                     </div>
                     <p
                       class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
@@ -276,7 +278,7 @@
                     <p class="line-clamp-2">{skill.description}</p>
                   </Table.Cell>
                   <Table.Cell class="hidden @md:table-cell">
-                    <Badge variant={publicationVariant(skill)}>{publicationLabel(skill)}</Badge>
+                    <Badge variant={statusVariant(skill)}>{statusLabel(skill)}</Badge>
                   </Table.Cell>
                   <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                     {m.organization_skills_version({

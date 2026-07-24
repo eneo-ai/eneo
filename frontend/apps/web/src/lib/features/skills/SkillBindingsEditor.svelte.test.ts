@@ -44,6 +44,7 @@ function makeSummary(skill: SkillSparse, revision: number, position: number): Sk
     is_active: skill.is_active,
     attachable_revision_id: skill.current_revision_id,
     attachable_revision_number: skill.current_revision_number,
+    execution_blocked: false,
     source: "space"
   };
 }
@@ -165,6 +166,7 @@ describe("SkillBindingsEditor", () => {
       description: "Approved organisation instructions.",
       content_digest: "published-digest",
       first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: false,
       source: "organization"
     };
     const onGetSkillPreview = vi.fn(getPreview);
@@ -454,6 +456,63 @@ describe("SkillBindingsEditor", () => {
       )
       .toBeVisible();
     await expect.element(page.getByRole("listitem").first()).toHaveFocus();
+  });
+
+  test("keeps a blocked binding visible and removes blocked Skills from the picker", async () => {
+    const bound = makeSkill("blocked-bound", 2);
+    const boundSummary = makeSummary(bound, 1, 0);
+    boundSummary.source = "organization";
+    boundSummary.is_active = false;
+    boundSummary.execution_blocked = true;
+    const blockedChoice: SkillBindingCandidate = {
+      id: "blocked-choice",
+      slug: "blocked-choice",
+      revision_id: "blocked-choice-revision-1",
+      revision_number: 1,
+      display_name: "Blocked catalogue Skill",
+      description: "This Skill cannot be attached during an incident.",
+      content_digest: "blocked-choice-digest",
+      first_published_at: "2026-07-20T12:00:00Z",
+      execution_blocked: true,
+      source: "organization"
+    };
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: bound.id, skill_revision_id: boundSummary.skill_revision_id }],
+      initialCatalogPage: makePage([bound, blockedChoice]),
+      bindingSummaries: [boundSummary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(page.getByText(m.skills_execution_blocked_status(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_execution_blocked_binding_explanation(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.skills_unavailable_status(), { exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(m.skills_newer_revision_available({ revision: "2" }), { exact: true })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_use_latest_revision_aria({ name: bound.display_name, revision: "2" })
+        })
+      )
+      .not.toBeInTheDocument();
+
+    await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
+    await expect
+      .element(page.getByText(blockedChoice.display_name, { exact: true }))
+      .not.toBeInTheDocument();
   });
 
   test("keeps a populated create dialog open until discard is confirmed", async () => {

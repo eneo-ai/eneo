@@ -245,6 +245,9 @@ operate this human-audited control.
   message; only tenant admins can read the incident reason.
 - A request whose Skill plan was already resolved may finish. The next request
   sees the block.
+- New attachments and revision changes are rejected while the block is active.
+  Unchanged exact-version pins remain visible and survive unrelated saves or
+  reordering.
 - Bindings, publication state, versions, and adoption evidence remain intact.
 - Blocking and unblocking both require a reason. The lifecycle record remains
   durable even when optional audit logging is disabled.
@@ -325,7 +328,8 @@ Chat requests.
 
 No. It stops runtime composition while preserving exact pins and adoption
 evidence. This lets administrators see the full impact, remediate resources,
-and later unblock with an auditable reason.
+and later unblock with an auditable reason. Removing the bindings would erase
+that operational context and make recovery a manual reconfiguration task.
 
 ### When can I delete a Skill?
 
