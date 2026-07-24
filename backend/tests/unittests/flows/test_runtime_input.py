@@ -26,6 +26,15 @@ def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None
     assert config.execution_mode == "per_source"
 
 
+def test_parse_runtime_input_config_keeps_single_call_file_ceiling_optional() -> None:
+    config = parse_runtime_input_config(
+        {"runtime_input": {"enabled": True, "execution_mode": "single_call"}}
+    )
+
+    assert config.enabled is True
+    assert config.max_files is None
+
+
 @pytest.mark.parametrize(
     ("runtime_input", "expected_enabled"),
     [
@@ -49,6 +58,8 @@ def test_parse_runtime_input_config_supports_literal_bool_shortcuts(
         {"required": "false"},
         {"max_files": "2"},
         {"max_files": True},
+        {"max_files": 0},
+        {"max_files": -1},
         {"execution_mode": "per_document"},
         0,
     ],

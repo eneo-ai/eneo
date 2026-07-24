@@ -731,6 +731,69 @@ def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
     )
 
 
+def test_validate_steps_publish_rejects_unbounded_per_source_runtime_input() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(
+                input_type="document",
+                input_config={
+                    "runtime_input": {
+                        "enabled": True,
+                        "input_format": "document",
+                        "execution_mode": "per_source",
+                    }
+                },
+            )
+        ],
+        expected_type=FlowStepValidationError,
+        match="per_source.*max_files",
+        step_order=1,
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_validate_steps_publish_rejects_unbounded_item_map() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(1),
+            _step(
+                2,
+                input_type="json",
+                input_config={"item_map": {"enabled": True}},
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="item_map.*max_items",
+        step_order=2,
+        require_complete_template_fill_config=True,
+    )
+
+
+def test_validate_steps_publish_accepts_bounded_mapped_modes() -> None:
+    validate_steps(
+        [
+            _step(
+                1,
+                input_type="document",
+                input_config={
+                    "runtime_input": {
+                        "enabled": True,
+                        "input_format": "document",
+                        "execution_mode": "per_source",
+                        "max_files": 2,
+                    }
+                },
+            ),
+            _step(
+                2,
+                input_type="json",
+                input_config={"item_map": {"enabled": True, "max_items": 2}},
+            ),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
 def test_validate_steps_source_refs_do_not_satisfy_runtime_input_consumption() -> None:
     with pytest.raises(
         BadRequestException,

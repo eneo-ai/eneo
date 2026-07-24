@@ -172,7 +172,7 @@ class FlowStep(BaseModel):
 class FlowRuntimeInputConfig(BaseModel):
     enabled: StrictBool = False
     required: StrictBool = False
-    max_files: StrictInt | None = None
+    max_files: Annotated[StrictInt, Field(gt=0)] | None = None
     input_format: FlowRuntimeInputFormat = FlowRuntimeInputFormat.DOCUMENT
     execution_mode: RuntimeInputExecutionMode = "single_call"
     accepted_mimetypes_override: list[str] | None = None

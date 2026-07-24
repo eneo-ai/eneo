@@ -247,6 +247,16 @@ Rerunning either mode repeats all source or item calls. A caller must therefore
 treat an ambiguous failure or `flow_llm_request_timeout` as possible duplicate
 provider work and spend, even when no partial output was persisted.
 
+Published mapped definitions are bounded by two separate authoring choices:
+`runtime_input.execution_mode: per_source` requires a positive per-step
+`runtime_input.max_files`, while an enabled `item_map` requires its own positive
+per-step `max_items`. Runtime compares the actual bound source-file or previous-item
+count with that ceiling before assistant preparation or the first provider call;
+exactly the ceiling is allowed and max+1 rejects the whole step without truncation
+or partial calls. Both maps remain sequential and rerun as a whole. The Celery
+soft/hard task timeout is their aggregate step deadline; there is no per-source or
+per-item timeout owner.
+
 Design note: a bounded pre-provider-infrastructure retry class may be added only
 at an adapter boundary that can prove transport invocation did not begin. It
 must use a small explicit attempt budget and exclude timeouts, disconnects, and

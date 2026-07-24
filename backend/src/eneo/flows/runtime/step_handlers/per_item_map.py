@@ -94,6 +94,18 @@ async def execute_per_item_map(
         state=state,
         input_array_key=input_array_key,
     )
+    item_map = build_step_item_map_config(step.input_config)
+    if item_map.max_items is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-item map requires a published max_items ceiling.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if len(input_items) > item_map.max_items:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-item map received {len(input_items)} items, "
+            f"exceeding the published max_items ceiling of {item_map.max_items}.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
     if not input_items:
         raise TypedIOValidationException(
             f"Step {step.step_order}: per-item map requires at least one previous "

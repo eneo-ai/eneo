@@ -32,11 +32,6 @@ def parse_runtime_input_config(
             "Step input_config.runtime_input is invalid."
         ) from exc
 
-    if parsed.max_files is not None and parsed.max_files <= 0:
-        raise BadRequestException(
-            "Step input_config.runtime_input.max_files must be greater than zero."
-        )
-
     return parsed
 
 

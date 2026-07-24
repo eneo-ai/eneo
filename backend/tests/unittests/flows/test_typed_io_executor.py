@@ -2063,6 +2063,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
                 "enabled": True,
                 "input_format": "document",
                 "execution_mode": "per_source",
+                "max_files": 2,
             }
         },
     )
@@ -2106,6 +2107,42 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
 
 
 @pytest.mark.asyncio
+async def test_per_source_reader_rejects_max_plus_one_before_assistant_prepare(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[uuid4(), uuid4()])
+    executor._prepare_assistant_step = AsyncMock()
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    executor._prepare_assistant_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_per_source_config_fails_closed_when_step_is_not_document_reader(user):
     executor, _, _, _ = _build_executor(user)
     step = _runtime_step(
@@ -2116,6 +2153,7 @@ async def test_per_source_config_fails_closed_when_step_is_not_document_reader(u
                 "enabled": True,
                 "input_format": "document",
                 "execution_mode": "per_source",
+                "max_files": 1,
             }
         },
     )
@@ -2205,7 +2243,7 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
             "required": ["source_sections"],
             "additionalProperties": False,
         },
-        input_config={"item_map": {"enabled": True}},
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
     )
 
     output = (
@@ -2311,7 +2349,7 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
             "required": ["sections"],
             "additionalProperties": False,
         },
-        input_config={"item_map": {"enabled": True}},
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
     )
 
     output = (
@@ -2344,6 +2382,56 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
 
 
 @pytest.mark.asyncio
+async def test_per_item_map_rejects_max_plus_one_before_assistant_prepare(user):
+    executor, _, _, _ = _build_executor(user)
+    executor._prepare_assistant_step = AsyncMock()
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"records":[]}',
+        structured={"records": [{"value": "one"}, {"value": "two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"records": {"type": "array", "items": {"type": "object"}}},
+            "required": ["records"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(
+            step=step,
+            run=run,
+            state=state,
+            attempt_no=1,
+        )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    executor._prepare_assistant_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_per_item_map_config_fails_closed_when_step_is_not_previous_json(user):
     executor, _, _, _ = _build_executor(user)
     step = _runtime_step(
@@ -2355,7 +2443,7 @@ async def test_per_item_map_config_fails_closed_when_step_is_not_previous_json(u
             "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
             "required": ["sections"],
         },
-        input_config={"item_map": {"enabled": True}},
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
     )
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
 

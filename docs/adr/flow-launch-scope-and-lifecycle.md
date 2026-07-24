@@ -352,13 +352,19 @@ WI-MKT-02.
 ### 7. Corpus processing covers every source sequentially
 
 - **Decision:** Launch posture is `one_record_per_source`, all-source coverage,
-  sequential bounded mapping, and no resumable fan-out. Selective retrieval is not
-  a launch default and requires a later explicit, evidence-backed decision.
+  sequential bounded mapping, and no resumable fan-out. Every published
+  `per_source` step declares a positive `runtime_input.max_files` ceiling, and
+  every published `item_map` step declares its own positive `max_items` ceiling.
+  Runtime rejects max+1 before preparing an assistant or making a provider call.
+  Selective retrieval is not a launch default and requires a later explicit,
+  evidence-backed decision.
 - **Consequences:** Result detail, source coverage, retrieval posture, source-record
   cardinality, extraction quality, and processing strategy remain separate typed
   decisions. Concise output never implies that fewer sources may be read.
-- **Retained surface:** Deterministic per-source order, explicit limits and one
-  aggregate deadline, exact source references, and whole-step retry semantics.
+- **Retained surface:** Deterministic sequential mapping, definition-owned file
+  and item ceilings, exact source references, and whole-step retry semantics.
+  The Celery soft/hard task timeout remains the one aggregate mapped-step
+  deadline; no per-source or per-item deadline owner is added.
 - **Removed or unavailable surface:** Implicit `contained_records`, selective
   retrieval inferred from words such as “overview,” resumable fan-out, silent
   truncation, and invented conditional `item_template` syntax.

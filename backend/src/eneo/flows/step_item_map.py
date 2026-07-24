@@ -10,6 +10,7 @@ from eneo.main.exceptions import BadRequestException
 @dataclass(frozen=True, slots=True)
 class FlowStepItemMapConfig:
     enabled: bool = False
+    max_items: int | None = None
 
 
 def build_step_item_map_config(
@@ -32,4 +33,13 @@ def build_step_item_map_config(
         raise BadRequestException(
             "Step input_config.item_map.enabled must be a boolean."
         )
-    return FlowStepItemMapConfig(enabled=raw_enabled)
+    raw_max_items = typed_config.get("max_items")
+    if raw_max_items is not None and (
+        not isinstance(raw_max_items, int)
+        or isinstance(raw_max_items, bool)
+        or raw_max_items <= 0
+    ):
+        raise BadRequestException(
+            "Step input_config.item_map.max_items must be a positive integer."
+        )
+    return FlowStepItemMapConfig(enabled=raw_enabled, max_items=raw_max_items)

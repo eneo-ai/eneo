@@ -1298,6 +1298,12 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
     if not runtime_input.enabled:
         return
 
+    if runtime_input.execution_mode == "per_source" and runtime_input.max_files is None:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: per_source runtime input requires an explicit max_files ceiling.",
+            step_order=step.step_order,
+        )
+
     if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
         raise FlowStepValidationError(
             f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'.",
@@ -1323,4 +1329,9 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
 
 
 def _validate_step_item_map_config(*, step: FlowStepValidationView) -> None:
-    build_step_item_map_config(step.input_config)
+    item_map = build_step_item_map_config(step.input_config)
+    if item_map.enabled and item_map.max_items is None:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: enabled item_map requires an explicit max_items ceiling.",
+            step_order=step.step_order,
+        )

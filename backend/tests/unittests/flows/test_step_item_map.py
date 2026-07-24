@@ -22,11 +22,22 @@ def test_build_step_item_map_config_accepts_enabled_values(item_map: object) -> 
     assert build_step_item_map_config({"item_map": item_map}).enabled is True
 
 
+def test_build_step_item_map_config_preserves_positive_item_ceiling() -> None:
+    config = build_step_item_map_config({"item_map": {"enabled": True, "max_items": 7}})
+
+    assert config.enabled is True
+    assert config.max_items == 7
+
+
 @pytest.mark.parametrize(
     "item_map",
     [
         0,
         {"enabled": "true"},
+        {"max_items": True},
+        {"max_items": "2"},
+        {"max_items": 0},
+        {"max_items": -1},
     ],
 )
 def test_build_step_item_map_config_rejects_invalid_values(item_map: object) -> None:

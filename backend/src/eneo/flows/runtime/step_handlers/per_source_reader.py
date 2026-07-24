@@ -76,11 +76,23 @@ async def execute_per_source_reader(
     prepare_assistant_step: PrepareAssistantStepFn,
     list_step_input_file_ids: ListStepInputFileIdsFn,
 ) -> StepExecutionResult:
+    runtime_input = build_runtime_input_config(step.input_config)
     file_ids = await list_step_input_file_ids(
         step=step,
         run=run,
         attempt_no=attempt_no,
     )
+    if runtime_input.max_files is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader requires a published max_files ceiling.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if len(file_ids) > runtime_input.max_files:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader received {len(file_ids)} files, "
+            f"exceeding the published max_files ceiling of {runtime_input.max_files}.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
     if _documents_item_schema(step.output_contract) is None:
         raise TypedIOValidationException(
             "Per-source document readers require a JSON output contract shaped "
