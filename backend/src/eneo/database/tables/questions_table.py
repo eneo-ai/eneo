@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -99,3 +99,5 @@ class QuestionsFiles(BaseCrossReference):
     type: Mapped[str] = mapped_column()
 
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_questions_files_file_id", "file_id"),)

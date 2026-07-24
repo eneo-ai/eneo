@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_models import FileInUseError
 from eneo.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
@@ -115,6 +116,7 @@ def add_exception_handlers(app: FastAPI):
         ),
         ObjectContentStateError: (409, None, ErrorCodes.BAD_REQUEST),
         ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
+        FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
         ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
         InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
     }

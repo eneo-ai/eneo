@@ -118,6 +118,8 @@ class AppsFiles(BaseCrossReference):
     # Relationships
     file: Mapped[Files] = relationship()
 
+    __table_args__ = (Index("ix_apps_files_file_id", "file_id"),)
+
 
 class AppsPrompts(BaseCrossReference):
     prompt_id: Mapped[UUID] = mapped_column(
@@ -139,3 +141,5 @@ class AppRunsFiles(BaseCrossReference):
 
     # Relationships
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_app_runs_files_file_id", "file_id"),)
