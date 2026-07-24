@@ -894,6 +894,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/skills/runtime-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the tenant Skill runtime policy
+     * @description Return the stored organisation Skill runtime policy: selective-activation enablement, attachment limit, context share, and the per-turn activation ceiling.
+     */
+    get: operations["get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get"];
+    /**
+     * Replace the tenant Skill runtime policy
+     * @description Replace all stored Skill runtime policy values. The per-turn activation ceiling can be lowered but never raised past the platform bound.
+     */
+    put: operations["update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore the seeded Skill runtime policy defaults
+     * @description Restore the product-standard seeded values, which may differ from a deployment's migrated environment seed.
+     */
+    post: operations["reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/model-projections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get per-model Skill context allowances
+     * @description Return the read-only policy allowance for each accessible completion model: input window, native tool-calling support, and the token allowance produced by the configured context share.
+     */
+    get: operations["get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -16374,6 +16438,61 @@ export interface components {
        */
       created_at: string;
     };
+    /**
+     * SkillRuntimeModelProjection
+     * @description Read-only policy allowance for one accessible completion model. The
+     *     exact LiteLLM-measured configuration fit belongs to save-time validation,
+     *     not this projection.
+     */
+    SkillRuntimeModelProjection: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Supports Tool Calling */
+      supports_tool_calling: boolean;
+      /** Skill Context Token Allowance */
+      skill_context_token_allowance: number;
+    };
+    /** SkillRuntimeModelProjections */
+    SkillRuntimeModelProjections: {
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Models */
+      models: components["schemas"]["SkillRuntimeModelProjection"][];
+    };
+    /** SkillRuntimePolicyPublic */
+    SkillRuntimePolicyPublic: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
+    };
+    /**
+     * SkillRuntimePolicyUpdate
+     * @description Full replacement of the one four-field tenant policy.
+     */
+    SkillRuntimePolicyUpdate: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
+    };
     /** SkillSparse */
     SkillSparse: {
       /**
@@ -22941,6 +23060,144 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRuntimePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimeModelProjections"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

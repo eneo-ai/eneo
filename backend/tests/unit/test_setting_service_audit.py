@@ -16,12 +16,20 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import UnauthorizedException
 from eneo.settings.setting_service import SettingService
-from eneo.skills.domain.skill import SkillExecutionBlock, SkillExecutionBlockChange
+from eneo.settings.settings import SkillRuntimePolicyUpdate
+from eneo.skills.domain.skill import (
+    SKILL_RUNTIME_POLICY_DEFAULTS,
+    SkillExecutionBlock,
+    SkillExecutionBlockChange,
+    SkillRuntimePolicy,
+    SkillRuntimePolicyChange,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -283,3 +291,170 @@ class TestSettingToggleAuditLoggingAdditional:
         call_kwargs = audit_mock.log_async.call_args[1]
         assert call_kwargs["metadata"]["changes"]["using_templates"]["old"] is True
         assert call_kwargs["metadata"]["changes"]["using_templates"]["new"] is True
+
+
+class TestSkillRuntimePolicy:
+    @staticmethod
+    def _stored(**overrides: object) -> SkillRuntimePolicy:
+        return replace(SKILL_RUNTIME_POLICY_DEFAULTS, **overrides)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_cannot_read_or_change_policy(self):
+        service, _ = _make_service(user=_make_user(permissions=[]))
+
+        with pytest.raises(UnauthorizedException):
+            await service.get_skill_runtime_policy()
+        with pytest.raises(UnauthorizedException):
+            await service.update_skill_runtime_policy(
+                SkillRuntimePolicyUpdate(
+                    selective_activation_enabled=True,
+                    max_attached_skills=50,
+                    context_share_percent=5,
+                    max_activations_per_turn=5,
+                )
+            )
+        with pytest.raises(UnauthorizedException):
+            await service.reset_skill_runtime_policy()
+        with pytest.raises(UnauthorizedException):
+            await service.get_skill_runtime_model_projections()
+
+        service.skill_repo.get_or_seed_runtime_policy.assert_not_awaited()
+        service.skill_repo.update_runtime_policy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_audits_only_changed_fields_with_old_and_new(self):
+        service, audit_mock = _make_service()
+        old = self._stored()
+        new = self._stored(
+            selective_activation_enabled=True,
+            context_share_percent=5,
+        )
+        service.skill_repo.update_runtime_policy = AsyncMock(
+            return_value=SkillRuntimePolicyChange(old=old, new=new)
+        )
+
+        result = await service.update_skill_runtime_policy(
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=True,
+                max_attached_skills=old.max_attached_skills,
+                context_share_percent=5,
+                max_activations_per_turn=old.max_activations_per_turn,
+            )
+        )
+
+        assert result.selective_activation_enabled is True
+        assert result.context_share_percent == 5
+        call_kwargs = audit_mock.log_async.call_args[1]
+        assert call_kwargs["action"] == ActionType.TENANT_SETTINGS_UPDATED
+        assert call_kwargs["metadata"]["setting"] == "skill_runtime_policy"
+        changes = call_kwargs["metadata"]["changes"]
+        assert changes == {
+            "selective_activation_enabled": {"old": False, "new": True},
+            "context_share_percent": {"old": 10, "new": 5},
+        }
+
+    @pytest.mark.asyncio
+    async def test_identical_update_emits_no_audit_event(self):
+        service, audit_mock = _make_service()
+        stored = self._stored()
+        service.skill_repo.update_runtime_policy = AsyncMock(
+            return_value=SkillRuntimePolicyChange(old=stored, new=stored)
+        )
+
+        await service.update_skill_runtime_policy(
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=stored.selective_activation_enabled,
+                max_attached_skills=stored.max_attached_skills,
+                context_share_percent=stored.context_share_percent,
+                max_activations_per_turn=stored.max_activations_per_turn,
+            )
+        )
+
+        audit_mock.log_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reset_restores_product_defaults_and_audits(self):
+        service, audit_mock = _make_service()
+        migrated = self._stored(max_attached_skills=37)
+        service.skill_repo.update_runtime_policy = AsyncMock(
+            return_value=SkillRuntimePolicyChange(
+                old=migrated, new=SKILL_RUNTIME_POLICY_DEFAULTS
+            )
+        )
+
+        result = await service.reset_skill_runtime_policy()
+
+        persisted = service.skill_repo.update_runtime_policy.call_args[1]["policy"]
+        assert persisted == SKILL_RUNTIME_POLICY_DEFAULTS
+        assert result.max_attached_skills == 100
+        changes = audit_mock.log_async.call_args[1]["metadata"]["changes"]
+        assert changes == {"max_attached_skills": {"old": 37, "new": 100}}
+
+    @pytest.mark.asyncio
+    async def test_activation_ceiling_cannot_be_raised_past_platform_bound(self):
+        with pytest.raises(ValidationError):
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=False,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=11,
+            )
+        with pytest.raises(ValidationError):
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=False,
+                max_attached_skills=1001,
+                context_share_percent=10,
+                max_activations_per_turn=10,
+            )
+        with pytest.raises(ValidationError):
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=False,
+                max_attached_skills=100,
+                context_share_percent=0,
+                max_activations_per_turn=10,
+            )
+
+    @pytest.mark.asyncio
+    async def test_model_projections_filter_and_compute_allowance(self):
+        service, _ = _make_service()
+        service.skill_repo.get_or_seed_runtime_policy = AsyncMock(
+            return_value=self._stored(context_share_percent=10)
+        )
+        accessible = SimpleNamespace(
+            id=uuid4(),
+            name="gpt-test",
+            nickname="Test",
+            max_input_tokens=128_000,
+            supports_tool_calling=True,
+            can_access=True,
+        )
+        no_tools = SimpleNamespace(
+            id=uuid4(),
+            name="basic-test",
+            nickname=None,
+            max_input_tokens=8_192,
+            supports_tool_calling=False,
+            can_access=True,
+        )
+        locked = SimpleNamespace(
+            id=uuid4(),
+            name="locked-test",
+            nickname="Locked",
+            max_input_tokens=200_000,
+            supports_tool_calling=True,
+            can_access=False,
+        )
+        service.ai_models_service.get_completion_models = AsyncMock(
+            return_value=[accessible, no_tools, locked]
+        )
+
+        projections = await service.get_skill_runtime_model_projections()
+
+        assert projections.context_share_percent == 10
+        assert [entry.completion_model_id for entry in projections.models] == [
+            accessible.id,
+            no_tools.id,
+        ]
+        assert projections.models[0].skill_context_token_allowance == 12_800
+        assert projections.models[0].supports_tool_calling is True
+        assert projections.models[1].skill_context_token_allowance == 819

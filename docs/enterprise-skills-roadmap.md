@@ -342,6 +342,15 @@ product bounds; the current user-bound `SettingsRepository` and numeric feature
 flags are not suitable storage owners. Every change records the actor and old
 and new typed values through the existing audit owner.
 
+Selective activation seeds disabled: enabling it is an explicit administrator
+decision once the runtime exists. The attached-Skill limit carries an
+operational abuse ceiling of 1,000; the real cost guard remains the context
+percentage. Restoring defaults returns the product-standard seeds
+(disabled, 100 Skills, 10%, 10 activations) — not a deployment's migrated
+`SKILL_MAX_BINDINGS` environment seed. After the policy row exists, the
+attachment guard on Assistant, App, and Governance Policy binding writes reads
+the stored value; the environment variable is never consulted per request.
+
 The seeded values are never consulted as runtime constants after persistence.
 A count guard helps reviewability and abuse control; the context percentage
 controls the real model cost. The organisation catalogue itself may contain
@@ -713,10 +722,13 @@ Implement #553 through these reviewable slices:
    Governance Policy bindings, backfill `always`, and prove byte-equivalent
    behavior. Do not accept `on_demand` from public writes yet.
 2. **Policy and projection:** add the typed Skill runtime policy behind the
-   existing Admin Settings route and return per-model token/capability
-   projections using the canonical LiteLLM counters. Do not use the current
-   user-bound settings row or numeric feature flags. Keep controls unavailable
-   to non-admin users.
+   existing Admin Settings route and return read-only per-model policy
+   allowances: input window, native tool-calling capability, and the token
+   allowance the stored share produces for each accessible model. The exact
+   LiteLLM-counted configuration fit belongs to save-time validation in
+   slice 5; slice 2 does not fabricate measured-looking samples. Do not use
+   the current user-bound settings row or numeric feature flags. Keep
+   controls unavailable to non-admin users.
 3. **Frozen plan and evidence:** make every existing eager turn consume one
    immutable plan; add typed, body-free activation evidence while behavior
    remains all-`always`.
