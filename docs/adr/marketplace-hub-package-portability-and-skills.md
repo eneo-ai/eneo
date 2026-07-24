@@ -528,13 +528,13 @@ the destination's stored guardrail during planning.
 
 The fixed limits are limited to stable schema/interoperability constraints:
 
-| Field                      |                             Limit | Reason                                                    |
-| -------------------------- | --------------------------------: | --------------------------------------------------------- |
-| Slug                       |                     64 characters | Agent Skills name interoperability and stable coordinates |
-| Description                |                  1,024 characters | Agent Skills metadata interoperability                    |
-| Display name               |                    200 characters | Existing Eneo prompt-library convention                   |
-| Instructions               |          No character or line cap | Capacity is measured against the effective model context  |
-| Bindings per parent/policy | `SKILL_MAX_BINDINGS`, default 100 | Configurable abuse/operational guardrail                  |
+| Field                      |                                                    Limit | Reason                                                    |
+| -------------------------- | -------------------------------------------------------: | --------------------------------------------------------- |
+| Slug                       |                                            64 characters | Agent Skills name interoperability and stable coordinates |
+| Description                |                                         1,024 characters | Agent Skills metadata interoperability                    |
+| Display name               |                                           200 characters | Existing Eneo prompt-library convention                   |
+| Instructions               |                                 No character or line cap | Capacity is measured against the effective model context  |
+| Bindings per parent/policy | Stored tenant runtime policy, seeded 100 (range 1–1,000) | Administrator-managed abuse/operational guardrail         |
 
 ### Organizational Skills for personal chat
 
@@ -2060,7 +2060,7 @@ mock architecture.
 | Prompt/context growth causes provider failures       | Validate worst permitted combination with the effective model and shared context accounting. Reject before run; never truncate silently.                                                                                                                                         |
 | Duplicate Skill identities confuse authors           | Search/select existing local-Space and published organisation Skills and enforce unique slugs per owning Space. Keep digest non-unique and never merge by text similarity; explicit identities preserve ownership and revision history.                                          |
 | Author assumes library creation attached the Skill   | Distinguish the committed library action from the unsaved parent draft. Show attached state only after parent save succeeds; on discard/failure, explain that the valid unbound Skill remains available for reuse or explicit deletion. No hidden cleanup deletes it.            |
-| A binding cap is too low or implies false capacity   | Make `SKILL_MAX_BINDINGS` operator-configurable with default 100. Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                                         |
+| A binding cap is too low or implies false capacity   | The stored tenant runtime policy owns the cap (seeded 100, range 1–1,000, admin-managed). Treat it as abuse protection only; the effective model context check is authoritative.                                                                                                 |
 | Knowledge import leaks or strands data               | Strict sharing policy, quarantine/scan, hidden staging, local policy, durable ingestion state, global reference fence, and cleanup_pending recovery. Disable asset-bearing publication/install while instruction-only packages remain available.                                 |
 | Hub or object-store compromise                       | Narrow roles/scopes, isolated workers, immutable release rows, append-only audit, authenticated metadata, exact digest verification, and restore drills. Revoke/yank affected releases; local content is not remotely changed. Signing requires its separate named trigger.      |
 | Hub outage                                           | Local content has no Hub runtime dependency. Marketplace reports outage/stale cache; offline package transfer remains separate.                                                                                                                                                  |
