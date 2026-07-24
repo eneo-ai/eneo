@@ -87,6 +87,7 @@ async def test_mcp_only_update_skips_personal_baseline_scan():
     service = MagicMock()
     service.get_policy_for_update = AsyncMock(return_value=policy)
     service.get_skill_bindings = AsyncMock(return_value=[])
+    service.get_skill_binding_projections = AsyncMock(return_value=[])
     service.update_policy = AsyncMock(return_value=policy)
     assistant_service = MagicMock()
     assistant_service.assert_personal_default_governance_context_fit = AsyncMock()

@@ -105,7 +105,10 @@ async def list_organization_skills(
     )
     assembler = container.skill_assembler()
     return OrganizationSkillSummaryPagePublic(
-        items=[assembler.organization_summary_to_public(skill) for skill in page.items],
+        items=[
+            assembler.organization_summary_to_public(projection)
+            for projection in page.items
+        ],
         limit=page.limit,
         next_cursor=page.next_cursor,
     )
@@ -129,7 +132,12 @@ async def create_organization_skill(
         instructions=payload.instructions,
     )
     await audit_skill_created(container=container, skill=skill)
-    return container.skill_assembler().organization_to_public(skill)
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
 
 
 @router.get(
@@ -141,10 +149,12 @@ async def get_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
 ) -> OrganizationSkillPublic:
-    skill = await container.organization_skill_service().get_organization_skill(
-        skill_id=skill_id
+    projection = (
+        await container.organization_skill_service().get_organization_skill_projection(
+            skill_id=skill_id
+        )
     )
-    return container.skill_assembler().organization_to_public(skill)
+    return container.skill_assembler().organization_to_public(projection)
 
 
 @router.get(
@@ -389,7 +399,12 @@ async def publish_organization_skill(
                 extra=skill_audit_extra(skill),
             ),
         )
-    return container.skill_assembler().organization_to_public(change.skill)
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=change.skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
 
 
 @router.post(
@@ -429,7 +444,12 @@ async def unpublish_organization_skill(
                 extra=skill_audit_extra(skill),
             ),
         )
-    return container.skill_assembler().organization_to_public(change.skill)
+    projection = (
+        await container.organization_skill_service().project_organization_skill(
+            skill=change.skill
+        )
+    )
+    return container.skill_assembler().organization_to_public(projection)
 
 
 @router.delete(

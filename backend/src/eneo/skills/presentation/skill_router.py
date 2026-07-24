@@ -390,7 +390,7 @@ async def list_assistant_skill_bindings(
     assistant_id: UUID,
     container: _ContainerWithUser,
 ) -> list[SkillBindingSummary]:
-    bindings = await container.skill_service().list_assistant_bindings(
+    bindings = await container.skill_service().list_assistant_binding_projections(
         space_id=space_id, assistant_id=assistant_id
     )
     assembler = container.skill_assembler()
@@ -405,7 +405,7 @@ async def list_assistant_skill_bindings(
 async def list_app_skill_bindings(
     space_id: UUID, app_id: UUID, container: _ContainerWithUser
 ) -> list[SkillBindingSummary]:
-    bindings = await container.skill_service().list_app_bindings(
+    bindings = await container.skill_service().list_app_binding_projections(
         space_id=space_id, app_id=app_id
     )
     assembler = container.skill_assembler()

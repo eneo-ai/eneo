@@ -1,6 +1,8 @@
 from eneo.skills.domain.skill import (
-    PublishedSkill,
-    PublishedSkillSummary,
+    OrganizationSkillProjection,
+    OrganizationSkillSummaryProjection,
+    PublishedSkillProjection,
+    PublishedSkillSummaryProjection,
     ResolvedSkillBinding,
     Skill,
     SkillAdoptionPersonalChat,
@@ -8,11 +10,11 @@ from eneo.skills.domain.skill import (
     SkillAdoptionResource,
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
+    SkillBindingProjection,
     SkillBindingReference,
     SkillCatalogEntry,
     SkillRevision,
     SkillRevisionSummary,
-    SkillSummary,
 )
 from eneo.skills.presentation.skill_models import (
     OrganizationSkillPublic,
@@ -209,8 +211,9 @@ class SkillAssembler:
 
     @staticmethod
     def organization_summary_to_public(
-        skill: SkillSummary,
+        projection: OrganizationSkillSummaryProjection,
     ) -> OrganizationSkillSummaryPublic:
+        skill = projection.skill
         return OrganizationSkillSummaryPublic(
             id=skill.id,
             space_id=skill.space_id,
@@ -227,22 +230,29 @@ class SkillAssembler:
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
+            execution_blocked=projection.execution_blocked,
         )
 
     @classmethod
-    def organization_to_public(cls, skill: Skill) -> OrganizationSkillPublic:
+    def organization_to_public(
+        cls,
+        projection: OrganizationSkillProjection,
+    ) -> OrganizationSkillPublic:
+        skill = projection.skill
         return OrganizationSkillPublic(
             **cls.to_sparse(skill).model_dump(),
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
             publication_state=skill.publication_state,
+            execution_blocked=projection.execution_blocked,
             current_revision=cls.revision_to_public(skill.current_revision),
         )
 
     @staticmethod
     def published_summary_to_public(
-        skill: PublishedSkillSummary,
+        projection: PublishedSkillSummaryProjection,
     ) -> PublishedSkillSummaryPublic:
+        skill = projection.skill
         return PublishedSkillSummaryPublic(
             id=skill.id,
             slug=skill.slug,
@@ -252,12 +262,22 @@ class SkillAssembler:
             description=skill.description,
             content_digest=skill.content_digest,
             first_published_at=skill.first_published_at,
+            execution_blocked=projection.execution_blocked,
         )
 
     @classmethod
-    def published_to_public(cls, skill: PublishedSkill) -> PublishedSkillPublic:
+    def published_to_public(
+        cls,
+        projection: PublishedSkillProjection,
+    ) -> PublishedSkillPublic:
+        skill = projection.skill
         return PublishedSkillPublic(
-            **cls.published_summary_to_public(skill.summary).model_dump(),
+            **cls.published_summary_to_public(
+                PublishedSkillSummaryProjection(
+                    skill=skill.summary,
+                    execution_blocked=projection.execution_blocked,
+                )
+            ).model_dump(),
             revision=PublishedSkillRevisionPublic(
                 id=skill.revision.id,
                 skill_id=skill.revision.skill_id,
@@ -271,7 +291,8 @@ class SkillAssembler:
         )
 
     @staticmethod
-    def binding_to_summary(binding: ResolvedSkillBinding) -> SkillBindingSummary:
+    def binding_to_summary(projection: SkillBindingProjection) -> SkillBindingSummary:
+        binding = projection.binding
         return SkillBindingSummary(
             skill_id=binding.skill_id,
             skill_revision_id=binding.skill_revision_id,
@@ -285,4 +306,5 @@ class SkillAssembler:
             position=binding.position,
             is_active=binding.is_active,
             source=binding.source,
+            execution_blocked=projection.execution_blocked,
         )

@@ -239,6 +239,12 @@ class Skill:
         )
 
 
+@dataclass(frozen=True)
+class OrganizationSkillProjection:
+    skill: Skill
+    execution_blocked: bool
+
+
 class SkillPublicationState(str, Enum):
     DRAFT = "draft"
     PUBLISHED = "published"
@@ -303,6 +309,12 @@ class SkillSummary:
 
 
 @dataclass(frozen=True)
+class OrganizationSkillSummaryProjection:
+    skill: SkillSummary
+    execution_blocked: bool
+
+
+@dataclass(frozen=True)
 class PublishedSkillSummary:
     id: UUID
     slug: str
@@ -321,15 +333,27 @@ class PublishedSkill:
 
 
 @dataclass(frozen=True)
-class SkillSummaryPage:
-    items: tuple[SkillSummary, ...]
+class PublishedSkillSummaryProjection:
+    skill: PublishedSkillSummary
+    execution_blocked: bool
+
+
+@dataclass(frozen=True)
+class PublishedSkillProjection:
+    skill: PublishedSkill
+    execution_blocked: bool
+
+
+@dataclass(frozen=True)
+class OrganizationSkillSummaryProjectionPage:
+    items: tuple[OrganizationSkillSummaryProjection, ...]
     limit: int
     next_cursor: str | None
 
 
 @dataclass(frozen=True)
 class PublishedSkillSummaryPage:
-    items: tuple[PublishedSkillSummary, ...]
+    items: tuple[PublishedSkillSummaryProjection, ...]
     limit: int
     next_cursor: str | None
 
@@ -604,6 +628,12 @@ class ResolvedSkillBinding:
     attachable_revision_id: UUID | None = None
     attachable_revision_number: int | None = None
     activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS
+
+
+@dataclass(frozen=True)
+class SkillBindingProjection:
+    binding: ResolvedSkillBinding
+    execution_blocked: bool
 
 
 @dataclass(frozen=True)

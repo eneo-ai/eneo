@@ -99,13 +99,18 @@
   });
   const catalog = $derived(mergeSkillCatalog(skillCatalog.items, matchingCreatedSkills));
   const addExistingChoices = $derived(getAvailableSkills(catalog, bindings));
+  const allCatalogSkillsAttached = $derived.by(() => {
+    if (catalog.length === 0) return false;
+    const boundSkillIds = new Set(bindings.map((binding) => binding.skill_id));
+    return catalog.every((skill) => boundSkillIds.has(skill.id));
+  });
   const rows = $derived(
     getSkillBindingRows(bindings, bindingSummaries, catalog, loadedRevisionMetadata)
   );
   const emptyChoiceMessage = $derived.by(() => {
     if (skillCatalog.loading) return m.skills_search_loading();
     if (skillCatalog.query.trim()) return m.skills_search_no_results();
-    if (catalog.length > 0 && addExistingChoices.length === 0) return m.skills_all_attached();
+    if (allCatalogSkillsAttached) return m.skills_all_attached();
     return m.skills_no_available();
   });
 
@@ -312,7 +317,8 @@
           <li
             id={rowId(row.reference.skill_id)}
             tabindex="-1"
-            class="focus-visible:ring-ring flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
+            data-execution-blocked={row.executionBlocked || undefined}
+            class="focus-visible:ring-ring data-[execution-blocked]:bg-destructive/5 flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
           >
             <div class="flex min-w-0 flex-1 items-start gap-3">
               <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
@@ -331,13 +337,19 @@
                       {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
                     </Badge>
                   {/if}
-                  {#if row.isActive === false}
+                  {#if row.isActive === false && !row.executionBlocked}
                     <Badge variant="outline">{m.skills_unavailable_status()}</Badge>
                     <span class="text-muted-foreground text-xs">
                       {m.skills_unavailable_binding_explanation()}
                     </span>
                   {/if}
-                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined}
+                  {#if row.executionBlocked}
+                    <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
+                    <span class="text-destructive text-xs">
+                      {m.skills_execution_blocked_binding_explanation()}
+                    </span>
+                  {/if}
+                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && !row.executionBlocked}
                     <Badge variant="secondary">
                       {m.skills_newer_revision_available({
                         revision: String(row.attachableRevisionNumber)
@@ -349,7 +361,7 @@
             </div>
 
             <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
-              {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive}
+              {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive && !row.executionBlocked}
                 <Button
                   type="button"
                   variant="outline"

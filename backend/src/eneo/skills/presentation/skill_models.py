@@ -91,6 +91,7 @@ class OrganizationSkillSummaryPublic(SkillSparse):
     published_revision_number: int | None
     first_published_at: datetime | None
     publication_state: SkillPublicationState
+    execution_blocked: bool
 
 
 class OrganizationSkillPublic(OrganizationSkillSummaryPublic):
@@ -154,6 +155,7 @@ class PublishedSkillSummaryPublic(BaseModel):
     description: str
     content_digest: str
     first_published_at: datetime
+    execution_blocked: bool
 
 
 class PublishedSkillRevisionPublic(BaseModel):
@@ -194,3 +196,4 @@ class SkillBindingSummary(BaseModel):
     position: int
     is_active: bool
     source: SkillBindingSource
+    execution_blocked: bool
