@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -15,7 +15,9 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
+    SKILL_RUNTIME_POLICY_DEFAULTS,
     ResolvedSkillBinding,
+    SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
@@ -133,6 +135,7 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
     repo = repo or AsyncMock()
     repo.lock_assistant_space_for_update.return_value = space.id
     repo.lock_app_for_binding_update.return_value = True
+    repo.get_or_seed_runtime_policy.return_value = SKILL_RUNTIME_POLICY_DEFAULTS
     return SkillService(
         user=user,
         repo=repo,
@@ -1136,29 +1139,29 @@ async def test_skill_user_without_tenant_admin_cannot_replace_governance_binding
     repo.list_policy_bindings.assert_not_awaited()
 
 
-async def test_binding_abuse_guardrail_comes_from_deployment_settings():
+async def test_binding_abuse_guardrail_comes_from_stored_runtime_policy():
     space = _space()
     repo = AsyncMock()
     repo.list_app_bindings.return_value = []
     service = _service(space=space, repo=repo)
+    repo.get_or_seed_runtime_policy.return_value = replace(
+        SKILL_RUNTIME_POLICY_DEFAULTS, max_attached_skills=1
+    )
     references = [
         SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
         SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
     ]
 
-    with (
-        patch(
-            "eneo.skills.application.skill_service.get_settings",
-            return_value=SimpleNamespace(skill_max_bindings=1),
-        ),
-        pytest.raises(BadRequestException, match="more than 1 Skills"),
-    ):
+    with pytest.raises(BadRequestException, match="more than 1 Skills"):
         await service.replace_app_bindings(
             space_id=space.id,
             app_id=space.app.id,
             references=references,
         )
 
+    repo.get_or_seed_runtime_policy.assert_awaited_once_with(
+        tenant_id=space.tenant_id, shared_lock=True
+    )
     repo.resolve_bound_references_for_binding_update.assert_not_awaited()
     repo.resolve_local_references_for_binding_update.assert_not_awaited()
 
@@ -1176,3 +1179,128 @@ async def test_governance_bindings_require_organization_space_in_same_tenant():
             organization_space_id=space.id,
             references=[],
         )
+
+
+async def test_retained_assistant_binding_keeps_activation_mode_on_resave():
+    space = _space()
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    freshly_resolved = replace(existing, activation_mode=SkillActivationMode.ALWAYS)
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [freshly_resolved]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        references=[_binding_reference(existing)],
+    )
+
+    assert result[0].activation_mode is SkillActivationMode.ON_DEMAND
+    persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
+    assert [binding.activation_mode for binding in persisted] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+
+
+async def test_retained_governance_binding_keeps_activation_mode_on_resave():
+    space = _space(organization=True)
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    freshly_resolved = replace(existing, activation_mode=SkillActivationMode.ALWAYS)
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [freshly_resolved]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        references=[_binding_reference(existing)],
+    )
+
+    assert result[0].activation_mode is SkillActivationMode.ON_DEMAND
+    persisted = repo.replace_policy_bindings.await_args.kwargs["bindings"]
+    assert [binding.activation_mode for binding in persisted] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+
+
+async def test_new_binding_defaults_to_always_activation_mode():
+    space = _space()
+    added = _binding()
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = []
+    repo.resolve_local_references_for_binding_update.return_value = [added]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        references=[_binding_reference(added)],
+    )
+
+    assert [binding.activation_mode for binding in result] == [
+        SkillActivationMode.ALWAYS
+    ]
+
+
+async def test_assistant_revision_upgrade_keeps_activation_mode():
+    space = _space()
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    upgraded = replace(
+        _binding(skill_id=existing.skill_id),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_local_references_for_binding_update.return_value = [upgraded]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        references=[_binding_reference(upgraded)],
+    )
+
+    assert [binding.activation_mode for binding in result] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+    persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
+    assert [binding.activation_mode for binding in persisted] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+
+
+async def test_governance_revision_upgrade_keeps_activation_mode():
+    space = _space(organization=True)
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    upgraded = replace(
+        _binding(skill_id=existing.skill_id),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    repo = AsyncMock()
+    repo.list_policy_bindings.return_value = [existing]
+    repo.resolve_published_references_for_binding_update.return_value = [upgraded]
+    service = _service(
+        space=space,
+        repo=repo,
+        permissions={Permission.ADMIN, Permission.SKILLS},
+    )
+
+    result = await service.replace_governance_bindings(
+        policy_id=uuid4(),
+        organization_space_id=space.id,
+        references=[_binding_reference(upgraded)],
+    )
+
+    assert [binding.activation_mode for binding in result] == [
+        SkillActivationMode.ON_DEMAND
+    ]
+    persisted = repo.replace_policy_bindings.await_args.kwargs["bindings"]
+    assert [binding.activation_mode for binding in persisted] == [
+        SkillActivationMode.ON_DEMAND
+    ]

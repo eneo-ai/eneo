@@ -850,6 +850,114 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/skills/{skill_id}/execution-block": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get an organisation Skill execution block
+     * @description Return the active tenant-scoped execution block for one organisation Skill.
+     */
+    get: operations["get_skill_execution_block_api_v1_settings_skills__skill_id__execution_block_get"];
+    put?: never;
+    /**
+     * Block an organisation Skill from execution
+     * @description Block every retained version of an organisation Skill from subsequent runtime composition without changing its bindings or history.
+     */
+    post: operations["block_skill_execution_api_v1_settings_skills__skill_id__execution_block_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/{skill_id}/execution-block/unblock": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Unblock an organisation Skill
+     * @description Release the exact active execution block reviewed by the tenant administrator.
+     */
+    post: operations["unblock_skill_execution_api_v1_settings_skills__skill_id__execution_block_unblock_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the tenant Skill runtime policy
+     * @description Return the stored organisation Skill runtime policy: selective-activation enablement, attachment limit, context share, and the per-turn activation ceiling.
+     */
+    get: operations["get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get"];
+    /**
+     * Replace the tenant Skill runtime policy
+     * @description Replace all stored Skill runtime policy values. The per-turn activation ceiling can be lowered but never raised past the platform bound.
+     */
+    put: operations["update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore the seeded Skill runtime policy defaults
+     * @description Restore the product-standard seeded values, which may differ from a deployment's migrated environment seed.
+     */
+    post: operations["reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/skills/runtime-policy/model-projections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get per-model Skill context allowances
+     * @description Return the read-only policy allowance for each accessible completion model: input window, native tool-calling support, and the token allowance produced by the configured context share.
+     */
+    get: operations["get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/templates": {
     parameters: {
       query?: never;
@@ -16118,6 +16226,45 @@ export interface components {
       /** Slug */
       slug: string;
     };
+    /** SkillExecutionBlockPublic */
+    SkillExecutionBlockPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Blocked By User Id
+       * Format: uuid
+       */
+      blocked_by_user_id: string;
+      /** Reason */
+      reason: string;
+      /**
+       * Blocked At
+       * Format: date-time
+       */
+      blocked_at: string;
+    };
+    /** SkillExecutionBlockState */
+    SkillExecutionBlockState: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      block: components["schemas"]["SkillExecutionBlockPublic"] | null;
+    };
+    /** SkillExecutionBlockUpdate */
+    SkillExecutionBlockUpdate: {
+      /** Reason */
+      reason: string;
+    };
     /** SkillExecutionReference */
     SkillExecutionReference: {
       /**
@@ -16136,6 +16283,16 @@ export interface components {
       content_digest: string;
       /** Position */
       position: number;
+    };
+    /** SkillExecutionUnblockUpdate */
+    SkillExecutionUnblockUpdate: {
+      /** Reason */
+      reason: string;
+      /**
+       * Expected Block Id
+       * Format: uuid
+       */
+      expected_block_id: string;
     };
     /** SkillPublic */
     SkillPublic: {
@@ -16280,6 +16437,61 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * SkillRuntimeModelProjection
+     * @description Read-only policy allowance for one accessible completion model. The
+     *     exact LiteLLM-measured configuration fit belongs to save-time validation,
+     *     not this projection.
+     */
+    SkillRuntimeModelProjection: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string | null;
+      /** Max Input Tokens */
+      max_input_tokens: number;
+      /** Supports Tool Calling */
+      supports_tool_calling: boolean;
+      /** Skill Context Token Allowance */
+      skill_context_token_allowance: number;
+    };
+    /** SkillRuntimeModelProjections */
+    SkillRuntimeModelProjections: {
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Models */
+      models: components["schemas"]["SkillRuntimeModelProjection"][];
+    };
+    /** SkillRuntimePolicyPublic */
+    SkillRuntimePolicyPublic: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
+    };
+    /**
+     * SkillRuntimePolicyUpdate
+     * @description Full replacement of the one four-field tenant policy.
+     */
+    SkillRuntimePolicyUpdate: {
+      /** Selective Activation Enabled */
+      selective_activation_enabled: boolean;
+      /** Max Attached Skills */
+      max_attached_skills: number;
+      /** Context Share Percent */
+      context_share_percent: number;
+      /** Max Activations Per Turn */
+      max_activations_per_turn: number;
     };
     /** SkillSparse */
     SkillSparse: {
@@ -22666,6 +22878,326 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_str_"];
+        };
+      };
+    };
+  };
+  get_skill_execution_block_api_v1_settings_skills__skill_id__execution_block_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  block_skill_execution_api_v1_settings_skills__skill_id__execution_block_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillExecutionBlockUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  unblock_skill_execution_api_v1_settings_skills__skill_id__execution_block_unblock_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        skill_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillExecutionUnblockUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillExecutionBlockState"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_policy_api_v1_settings_skills_runtime_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_skill_runtime_policy_api_v1_settings_skills_runtime_policy_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRuntimePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reset_skill_runtime_policy_api_v1_settings_skills_runtime_policy_reset_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_skill_runtime_model_projections_api_v1_settings_skills_runtime_policy_model_projections_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRuntimeModelProjections"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

@@ -239,17 +239,6 @@ def test_primary_federation_flag_works_without_deprecated_alias(
     assert "FEDERATION_PER_TENANT_ENABLED is deprecated" not in caplog.text
 
 
-def test_skill_binding_guardrail_can_be_configured_from_environment(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    _set_minimal_settings_env(monkeypatch)
-    monkeypatch.setenv("SKILL_MAX_BINDINGS", "37")
-
-    settings = Settings(_env_file=None)
-
-    assert settings.skill_max_bindings == 37
-
-
 @pytest.fixture(autouse=True)
 def cleanup_settings():
     """Automatically reset settings after each test."""

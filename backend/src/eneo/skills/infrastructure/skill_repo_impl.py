@@ -2,6 +2,7 @@ from typing import TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
@@ -15,19 +16,23 @@ from eneo.database.tables.skill_table import (
     AppSkillBindings,
     AssistantSkillBindings,
     GovernancePolicySkillBindings,
+    SkillExecutionBlocks,
     SkillRevisions,
+    SkillRuntimePolicies,
     Skills,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
+    SKILL_RUNTIME_POLICY_DEFAULTS,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
     PublishedSkillSummary,
     ResolvedSkillBinding,
     Skill,
+    SkillActivationMode,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
@@ -39,6 +44,9 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
+    SkillExecutionBlock,
+    SkillExecutionBlockChange,
+    SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
     SkillPublicationChange,
@@ -46,6 +54,8 @@ from eneo.skills.domain.skill import (
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionSummary,
+    SkillRuntimePolicy,
+    SkillRuntimePolicyChange,
     SkillSlugConflictError,
     SkillStatusChange,
     SkillSummary,
@@ -92,6 +102,21 @@ class SkillRepoImpl:
             content_digest=row.content_digest,
             created_by_user_id=row.created_by_user_id,
             created_at=row.created_at,
+        )
+
+    @staticmethod
+    def _to_execution_block(row: SkillExecutionBlocks) -> SkillExecutionBlock:
+        return SkillExecutionBlock(
+            id=row.id,
+            tenant_id=row.tenant_id,
+            skill_space_id=row.skill_space_id,
+            skill_id=row.skill_id,
+            blocked_by_user_id=row.blocked_by_user_id,
+            reason=row.reason,
+            blocked_at=row.created_at,
+            unblocked_by_user_id=row.unblocked_by_user_id,
+            unblock_reason=row.unblock_reason,
+            unblocked_at=row.unblocked_at,
         )
 
     @classmethod
@@ -1233,6 +1258,134 @@ class SkillRepoImpl:
             skill=self._to_skill(skill_row, revision_row)
         )
 
+    async def get_active_execution_block(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+    ) -> SkillExecutionBlock | None:
+        row = await self.session.scalar(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        return self._to_execution_block(row) if row is not None else None
+
+    async def list_active_execution_blocks(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_ids: list[UUID],
+    ) -> dict[UUID, SkillExecutionBlock]:
+        if not skill_ids:
+            return {}
+        rows = await self.session.scalars(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id.in_(skill_ids),
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        return {
+            block.skill_id: block
+            for block in (self._to_execution_block(row) for row in rows.all())
+        }
+
+    async def block_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        blocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None:
+        skill = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill is None or skill.first_published_at is None:
+            return None
+        existing = await self.session.scalar(
+            sa.select(SkillExecutionBlocks).where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+        )
+        if existing is not None:
+            return SkillExecutionBlockChange(
+                block=self._to_execution_block(existing),
+                changed=False,
+            )
+        block_id = uuid4()
+        await self.session.execute(
+            sa.insert(SkillExecutionBlocks).values(
+                id=block_id,
+                tenant_id=tenant_id,
+                skill_space_id=skill.space_id,
+                skill_id=skill_id,
+                blocked_by_user_id=blocked_by_user_id,
+                reason=reason,
+            )
+        )
+        persisted = await self.session.get(SkillExecutionBlocks, block_id)
+        if persisted is None:
+            raise RuntimeError("Skill execution block was not persisted")
+        return SkillExecutionBlockChange(
+            block=self._to_execution_block(persisted),
+            changed=True,
+        )
+
+    async def unblock_organization_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        skill_id: UUID,
+        expected_block_id: UUID,
+        unblocked_by_user_id: UUID,
+        reason: str,
+    ) -> SkillExecutionBlockChange | None:
+        skill = await self._lock_organization_skill(
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+        )
+        if skill is None or skill.first_published_at is None:
+            return None
+        active = await self.session.scalar(
+            sa.select(SkillExecutionBlocks)
+            .where(
+                SkillExecutionBlocks.tenant_id == tenant_id,
+                SkillExecutionBlocks.skill_id == skill_id,
+                SkillExecutionBlocks.unblocked_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if active is None or active.id != expected_block_id:
+            raise SkillExecutionBlockConflictError
+        await self.session.execute(
+            sa.update(SkillExecutionBlocks)
+            .where(SkillExecutionBlocks.id == active.id)
+            .values(
+                unblocked_by_user_id=unblocked_by_user_id,
+                unblock_reason=reason,
+                unblocked_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        persisted = await self.session.get(
+            SkillExecutionBlocks,
+            active.id,
+            populate_existing=True,
+        )
+        if persisted is None:
+            raise RuntimeError("Skill execution block disappeared during unblock")
+        return SkillExecutionBlockChange(
+            block=self._to_execution_block(persisted),
+            changed=True,
+        )
+
     async def _delete_locked_skill(self, *, skill: Skill) -> Skill:
         if skill.first_published_at is not None:
             raise PublishedSkillDeletionError
@@ -1333,6 +1486,8 @@ class SkillRepoImpl:
         attachable_revision_id: UUID | None,
         attachable_revision_number: int | None,
         position: int,
+        *,
+        activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS,
     ) -> ResolvedSkillBinding:
         return ResolvedSkillBinding(
             skill_id=skill.id,
@@ -1355,6 +1510,7 @@ class SkillRepoImpl:
             is_active=skill.is_active,
             attachable_revision_id=attachable_revision_id,
             attachable_revision_number=attachable_revision_number,
+            activation_mode=activation_mode,
         )
 
     async def _resolve_references(
@@ -1591,6 +1747,7 @@ class SkillRepoImpl:
                 attachable_revision_id,
                 attachable_revision_number,
                 binding.position,
+                activation_mode=SkillActivationMode(binding.activation_mode),
             )
             for (
                 binding,
@@ -1639,6 +1796,7 @@ class SkillRepoImpl:
                         "skill_id": binding.skill_id,
                         "skill_revision_id": binding.skill_revision_id,
                         "position": position,
+                        "activation_mode": binding.activation_mode.value,
                     }
                     for position, binding in enumerate(bindings)
                 ],
@@ -1746,6 +1904,7 @@ class SkillRepoImpl:
                 attachable_revision_id,
                 attachable_revision_number,
                 binding.position,
+                activation_mode=SkillActivationMode(binding.activation_mode),
             )
             for (
                 binding,
@@ -1782,7 +1941,89 @@ class SkillRepoImpl:
                         "skill_id": binding.skill_id,
                         "skill_revision_id": binding.skill_revision_id,
                         "position": position,
+                        "activation_mode": binding.activation_mode.value,
                     }
                     for position, binding in enumerate(bindings)
                 ],
             )
+
+    @staticmethod
+    def _to_runtime_policy(row: SkillRuntimePolicies) -> SkillRuntimePolicy:
+        return SkillRuntimePolicy(
+            selective_activation_enabled=row.selective_activation_enabled,
+            max_attached_skills=row.max_attached_skills,
+            context_share_percent=row.context_share_percent,
+            max_activations_per_turn=row.max_activations_per_turn,
+        )
+
+    async def _runtime_policy_row(
+        self, *, tenant_id: UUID, for_update: bool, shared_lock: bool = False
+    ) -> SkillRuntimePolicies | None:
+        query = sa.select(SkillRuntimePolicies).where(
+            SkillRuntimePolicies.tenant_id == tenant_id
+        )
+        if for_update:
+            query = query.with_for_update()
+        elif shared_lock:
+            query = query.with_for_update(read=True)
+        return await self.session.scalar(query)
+
+    async def _seed_and_reload_runtime_policy(
+        self, *, tenant_id: UUID, for_update: bool, shared_lock: bool = False
+    ) -> SkillRuntimePolicies:
+        # Tenants created after the backfill migration receive their row on
+        # first access; ON CONFLICT keeps concurrent first reads race-safe.
+        # The established path stays SELECT-only — this runs only when the
+        # first SELECT found no row.
+        seed = SKILL_RUNTIME_POLICY_DEFAULTS
+        await self.session.execute(
+            pg_insert(SkillRuntimePolicies)
+            .values(
+                tenant_id=tenant_id,
+                selective_activation_enabled=seed.selective_activation_enabled,
+                max_attached_skills=seed.max_attached_skills,
+                context_share_percent=seed.context_share_percent,
+                max_activations_per_turn=seed.max_activations_per_turn,
+            )
+            .on_conflict_do_nothing(index_elements=["tenant_id"])
+        )
+        row = await self._runtime_policy_row(
+            tenant_id=tenant_id, for_update=for_update, shared_lock=shared_lock
+        )
+        if row is None:
+            raise RuntimeError("Skill runtime policy seed did not persist")
+        return row
+
+    async def get_or_seed_runtime_policy(
+        self, *, tenant_id: UUID, shared_lock: bool = False
+    ) -> SkillRuntimePolicy:
+        # shared_lock takes FOR SHARE so a binding write serializes against a
+        # concurrent admin FOR UPDATE and re-reads the committed limit instead
+        # of validating against a superseded policy.
+        row = await self._runtime_policy_row(
+            tenant_id=tenant_id, for_update=False, shared_lock=shared_lock
+        )
+        if row is None:
+            row = await self._seed_and_reload_runtime_policy(
+                tenant_id=tenant_id, for_update=False, shared_lock=shared_lock
+            )
+        return self._to_runtime_policy(row)
+
+    async def update_runtime_policy(
+        self,
+        *,
+        tenant_id: UUID,
+        policy: SkillRuntimePolicy,
+    ) -> SkillRuntimePolicyChange:
+        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=True)
+        if row is None:
+            row = await self._seed_and_reload_runtime_policy(
+                tenant_id=tenant_id, for_update=True
+            )
+        old = self._to_runtime_policy(row)
+        row.selective_activation_enabled = policy.selective_activation_enabled
+        row.max_attached_skills = policy.max_attached_skills
+        row.context_share_percent = policy.context_share_percent
+        row.max_activations_per_turn = policy.max_activations_per_turn
+        await self.session.flush()
+        return SkillRuntimePolicyChange(old=old, new=policy)

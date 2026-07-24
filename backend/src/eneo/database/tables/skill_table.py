@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -112,6 +113,79 @@ class SkillRevisions(BasePublic):
     )
 
 
+class SkillExecutionBlocks(BasePublic):
+    tenant_id: Mapped[UUID] = mapped_column()
+    skill_space_id: Mapped[UUID] = mapped_column()
+    skill_id: Mapped[UUID] = mapped_column()
+    blocked_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Users.id,
+            name="fk_skill_execution_blocks_blocked_by_user_id",
+            ondelete="RESTRICT",
+        )
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    unblocked_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            Users.id,
+            name="fk_skill_execution_blocks_unblocked_by_user_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    unblock_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unblocked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "skill_space_id"],
+            ["spaces.tenant_id", "spaces.id"],
+            name="fk_skill_execution_blocks_tenant_space",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["skill_space_id", "skill_id"],
+            ["skills.space_id", "skills.id"],
+            name="fk_skill_execution_blocks_skill",
+            ondelete="NO ACTION",
+        ),
+        CheckConstraint(
+            "char_length(btrim(reason)) BETWEEN 1 AND 1000",
+            name="ck_skill_execution_blocks_reason_length",
+        ),
+        CheckConstraint(
+            """
+            (
+                unblocked_at IS NULL
+                AND unblocked_by_user_id IS NULL
+                AND unblock_reason IS NULL
+            )
+            OR
+            (
+                unblocked_at IS NOT NULL
+                AND unblocked_by_user_id IS NOT NULL
+                AND unblock_reason IS NOT NULL
+                AND char_length(btrim(unblock_reason)) BETWEEN 1 AND 1000
+            )
+            """,
+            name="ck_skill_execution_blocks_unblock_state",
+        ),
+        Index(
+            "uq_skill_execution_blocks_active_tenant_skill",
+            "tenant_id",
+            "skill_id",
+            unique=True,
+            postgresql_where=text("unblocked_at IS NULL"),
+        ),
+        Index(
+            "ix_skill_execution_blocks_tenant_skill_created",
+            "tenant_id",
+            "skill_id",
+            "created_at",
+        ),
+    )
+
+
 class AssistantSkillBindings(BaseCrossReference):
     assistant_id: Mapped[UUID] = mapped_column()
     tenant_id: Mapped[UUID] = mapped_column()
@@ -120,6 +194,7 @@ class AssistantSkillBindings(BaseCrossReference):
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
+    activation_mode: Mapped[str] = mapped_column(Text, server_default="always")
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -135,6 +210,10 @@ class AssistantSkillBindings(BaseCrossReference):
         CheckConstraint(
             "position >= 0",
             name="ck_assistant_skill_bindings_position_nonnegative",
+        ),
+        CheckConstraint(
+            "activation_mode IN ('always', 'on_demand')",
+            name="ck_assistant_skill_bindings_activation_mode",
         ),
         ForeignKeyConstraint(
             ["space_id", "assistant_id"],
@@ -257,6 +336,7 @@ class GovernancePolicySkillBindings(BaseCrossReference):
     skill_id: Mapped[UUID] = mapped_column()
     skill_revision_id: Mapped[UUID] = mapped_column()
     position: Mapped[int] = mapped_column()
+    activation_mode: Mapped[str] = mapped_column(Text, server_default="always")
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -272,6 +352,10 @@ class GovernancePolicySkillBindings(BaseCrossReference):
         CheckConstraint(
             "position >= 0",
             name="ck_governance_policy_skill_bindings_position_nonnegative",
+        ),
+        CheckConstraint(
+            "activation_mode IN ('always', 'on_demand')",
+            name="ck_governance_policy_skill_bindings_activation_mode",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "policy_id"],
@@ -307,5 +391,35 @@ class GovernancePolicySkillBindings(BaseCrossReference):
             "ix_governance_policy_skill_bindings_tenant_space",
             "tenant_id",
             "skill_space_id",
+        ),
+    )
+
+
+class SkillRuntimePolicies(BaseCrossReference):
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "tenants.id",
+            name="fk_skill_runtime_policies_tenant",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    selective_activation_enabled: Mapped[bool] = mapped_column()
+    max_attached_skills: Mapped[int] = mapped_column()
+    context_share_percent: Mapped[int] = mapped_column()
+    max_activations_per_turn: Mapped[int] = mapped_column()
+
+    __table_args__ = (
+        CheckConstraint(
+            "max_attached_skills BETWEEN 1 AND 1000",
+            name="ck_skill_runtime_policies_max_attached_skills",
+        ),
+        CheckConstraint(
+            "context_share_percent BETWEEN 1 AND 100",
+            name="ck_skill_runtime_policies_context_share_percent",
+        ),
+        CheckConstraint(
+            "max_activations_per_turn BETWEEN 1 AND 10",
+            name="ck_skill_runtime_policies_max_activations_per_turn",
         ),
     )

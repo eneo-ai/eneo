@@ -87,18 +87,34 @@ The foundation merged into `develop` before this roadmap was written:
   provenance. It squash-merged as `a29e9464` on 2026-07-22.
 - PR #559 added paginated immutable revision history and conflict-safe
   restore-as-a-new-revision. It squash-merged as `8ef96390` on 2026-07-22.
+- PR #560 added the admin-owned organisation catalogue, exact publication
+  lifecycle, and direct approved-revision reuse. It squash-merged as
+  `71de15e5` on 2026-07-23.
+- PR #574 added tenant-scoped adoption and drift evidence to the existing Skill
+  detail. It squash-merged as `dfe9dbe7` on 2026-07-23.
+- PR #577 added the organisation-wide emergency execution block. It
+  squash-merged as `b186f175` on 2026-07-23.
+- PR #580 locked the deletion and retained-provenance recovery contract. It
+  squash-merged as `c642da49` on 2026-07-23.
 
-The delivery graph was last verified on 2026-07-22:
+The delivery graph was last verified on 2026-07-23:
 
-| Work item                                                | Purpose                                         | Base                                                  | State and next action                                                                                                                                                    |
-| -------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                     | `develop`                                             | Merged as `a29e9464`. Full local verification and all required GitHub checks passed; Review 7 found no current findings and Opus high gave green light at score 8.       |
-| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                          | `develop`                                             | Merged as `8ef96390`. Full CI passed; Review 5 inspected all 29 paths with no findings, and Opus high gave green light at score 8.                                       |
-| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                       | `develop` at `8ef96390`                               | Active replay. Complete the admin-only authority correction and picker projection, then render and review the full UX before Fable high, `/review`, CI, Opus, and merge. |
-| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Current `develop` after the object-content foundation | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                                                                            |
-| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | `develop`                                             | Open and conflict-marked. It belongs to the object-content/file track.                                                                                                   |
-| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Internal MCP and on-demand knowledge            | `feat/mcp-file-ref-and-identity`                      | Open and coupled to #464. Split its internal-effect/knowledge core from file references before selective Skills if the maintainers accept the split.                     |
-| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                         | `feat/agentic-rag-knowledge-mcp`                      | Draft. It should not gate Skills.                                                                                                                                        |
+| Work item                                                | Purpose                                         | State and next action                                                                                               |
+| -------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                     | Merged as `a29e9464`; required CI and final review passed.                                                          |
+| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                          | Merged as `8ef96390`; required CI and final review passed.                                                          |
+| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                       | Merged as `71de15e5`; required CI, final review, and product review passed.                                         |
+| [#574](https://github.com/eneo-ai/eneo/pull/574)         | O1 adoption and drift evidence                  | Merged as `dfe9dbe7`; required CI and final review passed.                                                          |
+| [#577](https://github.com/eneo-ai/eneo/pull/577)         | O1 emergency execution block                    | Merged as `b186f175`; required CI passed and the final review found no current findings.                            |
+| [#580](https://github.com/eneo-ai/eneo/pull/580)         | O1 deletion and retained-provenance closure     | Merged as `c642da49`; PostgreSQL behavior proof, documentation, required CI, and final full-coverage review passed. |
+| [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint         | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
+| [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode         | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
+| [#583](https://github.com/eneo-ai/eneo/pull/583)         | Task #553 slice 2: typed runtime policy         | Merged as `e681171f`; required CI passed and the final review found no current findings.                            |
+| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
+| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                              |
+| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge   | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
+| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                         | Draft. It does not gate Skills.                                                                                     |
+| `refactor/flows-clean`                                   | Flow package export/import vertical             | Active at `77202b4f`; it must land on `develop` before S2 extracts any shared package mechanics.                    |
 
 Passing checks on an old PR head do not remove the need to rebase and rerun the
 full checks against the current `develop` branch.
@@ -125,9 +141,9 @@ We reuse its existing navigation and layout and do not build a duplicate editor
 under Admin.
 
 The global workspace tab keeps the name `Organisation`. Inside Admin, the
-current overview destination should be labelled `Översikt` rather than a second
-`Organisation`; this removes the visible name collision without changing either
-route's responsibility.
+current overview destination is labelled `Overview` / `Översikt` rather than a
+second `Organisation`; this removes the visible name collision without changing
+either route's responsibility.
 
 Ordinary builders work where their resource already lives. An Assistant or App
 editor uses the published-catalogue projection to search, preview, and attach an
@@ -229,11 +245,22 @@ variant with an independent lifecycle.
 O2 should provide:
 
 - an idempotent install command with exact source provenance;
-- one canonical installation per source revision and target Space;
+- one canonical installation per source Skill and target Space;
 - a clear `up to date | update available | locally modified` state;
 - preview and explicit approval before replacing a local copy's contents;
+- explicit tenant-admin emergency block and unblock of each installed local
+  identity through the existing central execution-block owner, enforced in
+  Assistant composition and queued App pre-provider checks;
+- install and update that fail closed while the source is currently blocked;
+- affected-copy visibility when a source is blocked, with each unsafe local
+  identity blocked explicitly instead of silently propagating the source block;
 - no automatic update, text merge, or silent parent rebinding; and
 - unchanged parent pins after installing or updating the local copy.
+
+A name or slug collision stops the install preview and requires the installer
+to choose the target identity explicitly. Eneo never auto-suffixes the copy.
+Installing a newer source revision updates the existing canonical copy; it does
+not create another copy merely because the source revision changed.
 
 O2 is not a prerequisite for attaching an approved organisation Skill. It must
 not become a generic package installer before S2 provides a second real package
@@ -254,17 +281,17 @@ impact belong to Task #553, when descriptions begin to control runtime loading.
 Eneo should extend the existing role, Space, resource, and Governance Policy
 owners. It should not add a parallel tenant-policy framework.
 
-| Action                                                       | Initial authority                                                                             |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Enter the Organisation workspace                             | Tenant administrator                                                                          |
-| Author or publish an organisation Skill                      | Tenant administrator in `Organisation > Skills`                                               |
-| Browse and attach a published organisation Skill             | `Use Skills` plus edit access to the target Assistant or App, through its catalogue picker    |
-| Read or attach a local Skill                                 | `Use Skills`, the relevant Space action, and edit access to the target Assistant or App       |
-| Create, revise, restore, deactivate, or delete a local Skill | `Use Skills` plus `Manage Skills` and the relevant action in the owning personal/shared Space |
-| Configure Personal Chat Skills                               | Tenant administrator through Governance Policy                                                |
-| Set organisation Skill runtime limits                        | Tenant administrator through the existing settings owner                                      |
-| View per-Skill audit, adoption, and drift                    | Tenant administrator on the organisation Skill detail page                                    |
-| View fleet-wide runtime health                               | Existing `Insights` permission in `Admin > Insikter`                                          |
+| Action                                                       | Initial authority                                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Enter the Organisation workspace                             | Tenant administrator                                                                                |
+| Author or publish an organisation Skill                      | Tenant administrator in `Organisation > Skills`                                                     |
+| Browse and attach a published organisation Skill             | `Use Skills` plus edit access to the target Assistant or App, through its catalogue picker          |
+| Read or attach a local Skill                                 | `Use Skills`, the relevant Space action, and edit access to the target Assistant or App             |
+| Create, revise, restore, deactivate, or delete a local Skill | `Use Skills` plus `Manage Skills` and the relevant action in the owning personal/shared Space       |
+| Configure Personal Chat Skills                               | Tenant administrator through Governance Policy                                                      |
+| Set organisation Skill runtime limits                        | Tenant administrator in `Admin > Overview/Översikt`, backed by the typed Skill runtime-policy owner |
+| View per-Skill audit, adoption, and drift                    | Tenant administrator on the organisation Skill detail page                                          |
+| View fleet-wide runtime health                               | Existing `Insights` permission in `Admin > Insikter`                                                |
 
 Configuration-time authorization is conjunctive: tenant capability, Space
 action, and parent-resource edit permission must all allow the requested
@@ -298,19 +325,39 @@ user need.
 
 ### Organisation policy
 
-The tenant administrator owns changeable product policy. The first defaults are:
+The tenant administrator owns changeable product policy. The first seeded
+defaults are:
 
 - at most 100 attached Skills per Assistant;
-- at most 2% of the selected model's input context for total Skill-attributable
+- at most 10% of the selected model's input context for total Skill-attributable
   context; and
 - at most 10 accepted on-demand activations per turn. Ten is a fixed platform
   safety ceiling; an administrator may lower it.
 
-The attached-count and context-percentage defaults are stored organisation
-settings after initial seeding. They are not hard-coded model limits. A count
-guard helps reviewability and abuse control; the context percentage controls the
-real model cost. The organisation catalogue itself may contain more than 100
-Skills.
+The existing `Admin > Overview/Översikt` settings surface lets a tenant administrator
+enable or disable selective activation, change the attached-Skill limit and
+total Skill-context percentage, lower the per-turn activation ceiling, and
+restore the seeded defaults without code or a deployment. The typed Skill
+runtime-policy owner persists those organisation values and validates their
+product bounds; the current user-bound `SettingsRepository` and numeric feature
+flags are not suitable storage owners. Every change records the actor and old
+and new typed values through the existing audit owner.
+
+Selective activation seeds disabled: enabling it is an explicit administrator
+decision once the runtime exists. The attached-Skill limit carries an
+operational abuse ceiling of 1,000; the real cost guard remains the context
+percentage. Restoring defaults returns the product-standard seeds
+(disabled, 100 Skills, 10%, 10 activations) — not a deployment's migrated
+`SKILL_MAX_BINDINGS` environment seed. After the policy row exists, the
+attachment guard on Assistant, App, and Governance Policy binding writes reads
+the stored value; the environment variable is never consulted per request.
+
+The seeded values are never consulted as runtime constants after persistence.
+A count guard helps reviewability and abuse control; the context percentage
+controls the real model cost. The organisation catalogue itself may contain
+more Skills than the attachment limit. Ten percent is a measured starting value,
+not a universal model truth. The selected model window, hard platform safety
+ceilings, and the administrator's stored value remain authoritative.
 
 ## Runtime activation
 
@@ -346,6 +393,11 @@ The model receives compact descriptors plus one trusted internal activation
 tool. The Skill description is the only discovery description. Eneo should not
 add a second `activation_hint` field that can drift.
 
+The model-visible descriptor contains one plan-local activation key, display
+name, and description. Exact revision ID, revision number, digest, source, and
+position stay in the frozen server-side plan and evidence; advertising those
+fields would spend context without helping selection.
+
 Mentioning a Skill name in the base prompt is neither authorization nor a
 reliable selector. The prompt can tell the model to choose relevant Skills, but
 the trusted activation tool, exact binding set, and policy decide what may enter
@@ -379,9 +431,14 @@ evaluation platform.
 
 ### Stable activation rules
 
-- The activation tool uses an internal identity, not a display name that an MCP
-  server can forge.
-- External tool-name collisions fail closed.
+- The activation tool uses a reserved internal identity containing no double
+  underscore, not a display name that an MCP server can forge. External MCP
+  names are always proxy-prefixed `server__tool`, so the namespaces cannot
+  coincide. Tool merging still drops an external exact-name collision
+  defensively and records a closed collision reason.
+- An accepted activation preempts external sibling calls from the same provider
+  round. Siblings are not dispatched, receive protocol-valid deferred results,
+  and may be requested again after the updated Skill context is in place.
 - Accepted bodies follow saved binding order, independent of tool-call order.
 - Repeated activation is idempotent and appears once in evidence.
 - Eneo validates optional additions against the selected model's context before
@@ -397,6 +454,17 @@ table or use character counts as a policy decision.
 
 The percentage measures all Skill-attributable context: required `always`
 bodies, descriptors, the activation tool schema, and accepted on-demand bodies.
+At save time, the activatability invariant requires the required bodies,
+complete attached descriptor catalogue, tool schema, and largest single
+attached on-demand body to fit. An Assistant save that adds or edits an
+`on_demand` binding evaluates its currently effective completion model. A
+Governance Policy save evaluates every completion model that the policy
+currently permits because Personal Chat may select any of them. The API rejects
+that mode edit when any model in the applicable set fails; models merely
+available to the tenant do not participate in an Assistant save. A model added
+later through provider-based policy expansion is post-save drift and produces
+the documented visible `always_only` fallback until the policy or budget is
+corrected. API, UI, and tests share this one condition.
 Enforcement follows the split contract in
 [Token budget and compatibility behavior](adr/marketplace-hub-package-portability-and-skills.md#token-budget-and-compatibility-behavior):
 new or edited configurations may be rejected when a newly added Skill exceeds
@@ -410,9 +478,48 @@ The UI should show:
 - token count for each bound revision;
 - descriptor tokens, required body tokens, and optional maximum;
 - configured percentage and resulting token allowance;
-- whether any advertised descriptions were shortened for this model and budget;
 - exact provider count or named estimate/fallback; and
 - the most restrictive result when an Assistant can use several models.
+
+### Authoring and administration UX
+
+The user-facing controls ship together in slice 5, after the dormant policy,
+plan, evidence, and trusted runtime paths exist. Slice 2 exposes the typed policy
+and read-only projections through generated contracts but does not show a mode
+that runtime still ignores.
+
+The existing Eneo and shadcn-svelte component vocabulary remains authoritative:
+
+- `Admin > Overview/Översikt` adds one **Skill runtime** settings group with a Switch for
+  selective activation, typed number fields for attachment and context-share
+  limits, a bounded per-turn activation field, a reset-to-defaults action, and a
+  model result table. It does not add a dashboard, wizard, or modal.
+- The shared `SkillBindingsEditor` remains the binding owner for both Assistant
+  settings and Personal Chat Governance Policy. Each binding row adds an
+  `Always | On demand` Select beside its existing exact-revision state. The
+  Assistant view shows its effective-model result; Personal Chat shows every
+  policy-permitted model that blocks the mode. The App consumer renders no mode
+  control and retains its eager-only binding contract.
+- Existing `Field`, `InputGroup`, `Switch`, `Select`, `Alert`, `Badge`, `Table`,
+  `Skeleton`, `Button`, and save-bar patterns are reused. No parallel form
+  library, design system, hidden validation store, or decorative card grid is
+  introduced.
+- An unavailable on-demand choice has an inline reason and remediation, never a
+  tooltip-only explanation. A rejected save preserves the draft, focuses the
+  first invalid control, and keeps the existing dirty/discard workflow.
+- Loading, refresh, empty-model, estimated-count, partial projection, stale
+  response, save error, disabled, and success states are explicit. Background
+  projection responses are generation-owned so stale results cannot overwrite a
+  newer draft.
+- Controls keep keyboard order, labelled fieldsets or fields,
+  `aria-describedby`, the existing save live region, 44-pixel narrow-screen
+  targets, and single-column row fallbacks. Swedish and English copy uses
+  concrete terms: `Alltid`, `Vid behov`, measured allowance, and the exact
+  blocking model.
+- Motion is limited to existing state transitions and respects reduced motion.
+  Responsive browser checks cover tenant admin, Assistant builder, Personal
+  Chat policy, non-admin denial, a tool-capable model, and a no-tool or
+  budget-incompatible model.
 
 ### Behaviour with many Skills
 
@@ -423,15 +530,24 @@ The UI should show:
 | 50 to 100 Skills                | Enforce the organisation's attachment and percentage policy. Warn at authoring time when optional discovery will not fit.                      |
 | 200 or more organisation Skills | Keep them in the catalogue, but do not attach or advertise all of them by default. Builders select the approved subset needed by the resource. |
 
-Codex uses 2% of the context window only for its initial Skill list. Eneo's 2%
-pool covers more, so the similar number is inspiration rather than equivalent
-evidence. Before #553 ships, measure a realistic 20-Skill catalogue, activation
-tool, `always` bodies, and at least one representative on-demand body with each
-model the product labels on-demand-capable. Raise the default or mark on-demand
-unavailable for models where that representative activation cannot fit. Keep one
-admin-controlled percentage unless production evidence earns a second budget.
-Derive on-demand capability from native tool support and the same LiteLLM budget
-calculation. Do not maintain a curated per-model availability table.
+Codex uses 2% of the context window only for its initial Skill list. Claude Code
+defaults its listing to 1% and shortens descriptions before omitting lower-use
+descriptions. Eneo's single percentage also pays for required and activated
+bodies, so copying either listing percentage would be a category error.
+
+A local calibration fixture with 300-character Swedish descriptions measured
+1,408 catalogue tokens for 20 Skills, 54 tool-schema tokens, and 1,801 tokens
+for one representative body with the existing LiteLLM counters. The 3,263-token
+total exceeds 2% of a 128k window. The 10% starting value leaves useful room for
+`always` content and larger attached sets while save-time validation remains the
+real guard.
+
+Before #553 ships, rerun the fixture for every model the product labels
+on-demand-capable. Mark on-demand unavailable where the complete configuration
+fails the activatability invariant. Keep one admin-controlled percentage unless
+production evidence earns a separate discovery budget. Derive capability from
+native tool support and the same LiteLLM calculation; do not maintain a curated
+per-model availability table.
 
 ### Descriptor shortening and operator guidance
 
@@ -521,21 +637,21 @@ on-demand loading ineffective without adding a second event source.
 
 ## Architecture ownership
 
-| Responsibility                                   | Canonical owner                                                          | Reuse or change                                                                        |
-| ------------------------------------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Skill identity and immutable revisions           | `eneo.skills`                                                            | Deepen one module; do not create an organisation-only Skill type.                      |
-| Organisation lifecycle and publication           | `OrganizationSkillService`                                               | Require tenant admin for lifecycle writes; keep published catalogue reads separate.    |
-| Published organisation catalogue projection      | Existing catalogue list/preview methods                                  | Preserve `Use Skills` access for pickers; never use workspace access as a substitute.  |
-| Local Skill authorization                        | Existing Space actor                                                     | Preserve tenant capability plus Space-action checks; add no parallel ACL.              |
-| Parent binding authorization and composition     | Existing `SkillService`                                                  | Preserve Skill read plus parent edit and runtime composition checks.                   |
-| Assistant and App binding writes                 | Existing parent update commands                                          | Replace the ordered binding facet atomically with parent fields. No binding write API. |
-| Personal Chat selection                          | Governance Policy                                                        | Add exact approved revision pins to the existing policy.                               |
-| Final prompt, model window, and token accounting | Completion context module                                                | Consume one frozen Skill plan and LiteLLM counts.                                      |
-| Organisation runtime policy                      | Existing settings service with typed organisation persistence            | Seed defaults once; stored admin values become authoritative.                          |
-| Trusted on-demand activation                     | Internal MCP/effect registry from the #538 core                          | Reuse a typed internal identity. Do not let the external MCP catalogue confer trust.   |
-| Chat diagnostics                                 | Canonical generic debug panel and retained turn evidence                 | Add Skill sections to the existing panel.                                              |
-| Audit                                            | Existing audit domain                                                    | Record lifecycle, publication, binding, policy, and bounded runtime events.            |
-| Package portability                              | Existing Flow package mechanics after a second consumer earns extraction | Move shared mechanics during S2, then delete duplicate vertical copies.                |
+| Responsibility                                   | Canonical owner                                                          | Reuse or change                                                                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Skill identity and immutable revisions           | `eneo.skills`                                                            | Deepen one module; do not create an organisation-only Skill type.                                                       |
+| Organisation lifecycle and publication           | `OrganizationSkillService`                                               | Require tenant admin for lifecycle writes; keep published catalogue reads separate.                                     |
+| Published organisation catalogue projection      | Existing catalogue list/preview methods                                  | Preserve `Use Skills` access for pickers; never use workspace access as a substitute.                                   |
+| Local Skill authorization                        | Existing Space actor                                                     | Preserve tenant capability plus Space-action checks; add no parallel ACL.                                               |
+| Parent binding authorization and composition     | Existing `SkillService`                                                  | Preserve Skill read plus parent edit and runtime composition checks.                                                    |
+| Assistant and App binding writes                 | Existing parent update commands                                          | Replace the ordered binding facet atomically with parent fields. No binding write API.                                  |
+| Personal Chat selection                          | Governance Policy                                                        | Add exact approved revision pins to the existing policy.                                                                |
+| Final prompt, model window, and token accounting | Completion context module                                                | Own the adapter-facing frozen value, consume the mapped Skill plan, and use LiteLLM counts.                             |
+| Organisation runtime policy                      | `eneo.skills` typed runtime-policy owner, exposed in Admin Settings      | Seed defaults once; stored admin values become authoritative and audited.                                               |
+| Trusted on-demand activation                     | Existing completion loop with its concrete completion-owned frozen value | Use a reserved Eneo built-in identity. Do not route the authority change through loopback MCP or external tool results. |
+| Chat diagnostics                                 | Canonical generic debug panel and retained turn evidence                 | Add Skill sections to the existing panel.                                                                               |
+| Audit                                            | Existing audit domain                                                    | Record lifecycle, publication, binding, policy, and bounded runtime events.                                             |
+| Package portability                              | Existing Flow package mechanics after a second consumer earns extraction | Move shared mechanics during S2, then delete duplicate vertical copies.                                                 |
 
 ## Delivery and merge order
 
@@ -549,20 +665,19 @@ on-demand loading ineffective without adding a second event source.
    `8ef96390` on 2026-07-22. Restore remains a copy-to-new-revision operation;
    the reviewed current revision is checked under the append lock and a stale
    review returns 409 without discarding dirty editor content.
-3. **Active:** rebase #560 on merged #559. Keep organisation navigation canonical and retain
-   O1 publication, direct reuse, the adoption-projection contract, and this roadmap. Put the
-   admin-only Organisation correction in #560; do not create another stacked PR
-   for a small subtractive alignment.
-   Before merge, run the complete catalogue and binding flow, capture desktop
-   and responsive evidence, address verified accessibility or UX problems, and
-   obtain both a Fable high whole-PR assessment and explicit product approval.
-   #560 lands the catalogue foundation; queued task T005 owns the adoption
-   projection and remains required before O1 is generally available.
-4. Before O1 is generally available, land the emergency execution block in #560
-   or a narrow follow-up. Do not delay the #560 rebase to absorb unrelated #553
-   work.
-5. Build O2 after O1 if local editable copies remain the next product priority.
-   O2 has no internal MCP dependency.
+3. **Completed:** #560, #574, and #577 delivered the organisation catalogue,
+   adoption evidence, and emergency execution block on `develop`.
+4. **Completed:** T007/PR #580 locked deletion and retained provenance with the
+   existing Skill and App-run owners and merged as `c642da49`.
+5. **Next:** implement Task #553 in small vertical slices. It has the highest
+   current ROI because it bounds recurring context cost and lets authors keep
+   specialised instructions available without making every body eager.
+6. Consolidate T008 typed lifecycle conflicts after the #553 backend core. It is
+   real debt but does not gate selective activation.
+7. Build O2 editable copies after #553. O2 remains useful but lower priority and
+   has no completion-loop dependency.
+8. Keep T009 evidence-gated. Start it only when search and source labels prove
+   insufficient around 200 or more catalogue entries.
 
 ### O1 admin-only alignment inside #560
 
@@ -595,45 +710,80 @@ red behaviour test proves an actual defect. No data migration or compatibility
 flag is warranted because delegated organisation access has not shipped; only a
 pilot running this develop stack would need release communication.
 
-### Internal MCP and selective activation
+### Selective activation boundary and slices
 
-The clean path splits #538 at its real ownership boundary:
+PR #538 implements loopback FastMCP servers, scoped bearer identity, and
+knowledge/file consumers across 21 files. Task #553 does not need that transport
+to perform an in-process system-prompt transition, so #538 is no longer a merge
+gate. Reuse its hardening lessons, not its HTTP/token/registry stack.
 
-1. Rebase the internal-effect registry/proxy and on-demand Knowledge consumer on
-   current `develop` after the Skills foundation. Keep file-reference behaviour
-   out of that PR.
-2. Leave MCP file references behind #551 and #464. If the maintainers reject the
-   split, use the fallback order `#551 -> #464 -> cleaned #538`.
-3. Treat #541 web search as an independent consumer. It must not gate Skills.
-4. Rebase the generic debug branch on its canonical parent and keep one debug
-   implementation.
-5. Implement Task #553 after S1 and the trusted internal MCP/effect core are in
-   `develop`. Integrate Skill evidence into the generic debug panel.
+Implement #553 through these reviewable slices:
+
+1. **Dormant binding contract:** add closed modes only to Assistant and
+   Governance Policy bindings, backfill `always`, and prove byte-equivalent
+   behavior. Do not accept `on_demand` from public writes yet.
+2. **Policy and projection:** add the typed Skill runtime policy behind the
+   existing Admin Settings route and return read-only per-model policy
+   allowances: input window, native tool-calling capability, and the token
+   allowance the stored share produces for each accessible model. The exact
+   LiteLLM-counted configuration fit belongs to save-time validation in
+   slice 5; slice 2 does not fabricate measured-looking samples. Do not use
+   the current user-bound settings row or numeric feature flags. Keep
+   controls unavailable to non-admin users.
+3. **Frozen plan and evidence:** make every existing eager turn consume one
+   immutable plan; add typed, body-free activation evidence while behavior
+   remains all-`always`.
+4. **Trusted runtime:** map `SkillTurnPlan` into a concrete frozen value owned
+   beside completion `Context`, inject one reserved Eneo activation function,
+   and handle it before external MCP dispatch in both provider loops through one
+   private applicator. Recompose with the existing Skill composer and recheck
+   fit before the next provider call. The adapter imports no Skills module; do
+   not create a one-method port or generic effect framework.
+5. **Save contract and UI:** only after runtime behavior exists, accept
+   `on_demand`; expose the Admin runtime-policy group and shared binding-row mode
+   controls with calm Swedish/English shadcn-svelte states; add responsive,
+   accessibility, stale-response, and model-projection tests; run
+   positive/negative activation fixtures; and update the docs guide.
+
+The reserved Eneo function contains no double underscore, while external MCP
+proxy names are always `server__tool`. Tool merging nevertheless drops an
+external definition whose name exactly equals the reserved identity and records
+a closed collision reason. Accepted activation calls are applied before any
+external dispatch; sibling external calls from that round receive protocol-valid
+deferred results and may be requested again. Unknown, duplicated, forged, or
+colliding activation calls fail closed. #541 web search and the #551/#464 file
+track remain independent.
 
 ### Portability and external marketplace
 
 S2 starts after Task #553 because Assistant packages must preserve
-`always | on_demand` bindings. S2 should reuse the Flow package export/import
-work and extract shared archive mechanics only when both verticals need them.
+`always | on_demand` bindings. The current product order also finishes O2 first,
+although editable copies are not a package-schema prerequisite. S2 waits until
+the Flow package vertical on `refactor/flows-clean` has landed on `develop`, then
+extracts only archive,
+manifest-coordinate, digest, and closed-dispatch mechanics that have two real
+consumers; kind-specific validation, planning, installation, and receipts stay
+in their product owners.
 
-The external Marketplace can continue its Flow-only work in its own repository.
-Eneo should not advertise external Skill or Assistant packages until S2 has
-versioned fixtures, plan/apply behaviour, receipts, and cross-repository contract
-tests.
+The external Marketplace is technically independent of local runtime, but the
+current product order defers all new Marketplace work until the local #553, O2,
+and S2 gates are complete. Eneo must not advertise external Skill or Assistant
+packages until S2 has versioned fixtures, plan/apply behaviour, receipts, and
+cross-repository contract tests.
 
 ```mermaid
 flowchart LR
     D[develop foundations] --> S1[#552 S1]
     S1 --> H1[#559 restore]
     H1 --> O1[#560 organisation catalogue]
-    O1 --> O2[O2 optional install/update]
-    S1 --> IMCP[#538 internal MCP core split]
-    IMCP --> SEL[#553 selective activation]
-    SEL --> S2[S2 Skill and Assistant packages]
+    O1 --> SEL[#553 selective activation]
+    SEL --> O2[O2 optional install/update]
+    O2 --> S2[S2 Skill and Assistant packages]
+    FLOW[Flow package vertical on develop] --> S2
     S2 --> EXT[External Skill/Assistant Marketplace]
     F551[#551 object file cutover] --> F464[#464 MCP file references]
-    F464 -. fallback if no split .-> IMCP
-    W[#541 web search] -. independent .-> IMCP
+    F464 -. independent .-> SEL
+    W[#541 web search] -. independent .-> SEL
 ```
 
 ## Acceptance gates
@@ -645,6 +795,9 @@ flowchart LR
 - Parent saves update fields and bindings atomically.
 - Provider-facing instructions preserve exact revision and order.
 - Queued App runs retain bounded provenance and stay stable after later edits.
+- Bound Skills and retained queued or running App runs block deletion. Complete
+  and failed runs keep readable body-free provenance but no longer retain an
+  otherwise eligible Skill.
 - Personal Chat uses Governance Policy pins and rejects direct default-Assistant
   bindings.
 - Zero-Skill behaviour remains byte-equivalent.
@@ -670,13 +823,32 @@ flowchart LR
 - Adoption counts are tenant-scoped, exact, paginated, and free of N+1 queries.
 - O2 install and update are idempotent, previewed, explicit, and leave parent
   pins unchanged.
+- A bound, locally modified installed copy can be blocked through the central
+  execution-block owner with tenant-admin authority; Assistant composition and
+  queued App pre-provider checks enforce that local-identity block, and
+  install/update from a currently blocked source fails closed. Behaviour tests
+  cover the queued-App path.
 
 ### Task #553
 
 - Existing rows remain `always` and continue to answer after policy changes.
+- Tenant admins can change the seeded enablement, attachment, context-share, and
+  activation-limit values in `Admin > Overview/Översikt` without code or deployment;
+  typed storage, bounds, reset, audit actor, and old/new values have behaviour
+  tests.
+- Assistant and Personal Chat mode controls reuse `SkillBindingsEditor`, preserve
+  drafts on validation failure, explain each blocking model inline, and pass
+  Swedish/English keyboard, screen-reader, narrow-screen, and stale-response
+  checks using installed shadcn-svelte primitives.
+- The App consumer of `SkillBindingsEditor` renders no mode control, accepts no
+  mode field, and has a behavior test that pins eager-only operation.
 - The save contract defines one exact rejection condition for a newly added
-  Skill that exceeds the configured share; API, UI, and tests use the same
-  condition.
+  or edited `on_demand` binding: use the Assistant's effective selected model or
+  every model currently permitted by the Governance Policy. API, UI, and tests
+  use the same condition.
+- Every advertised on-demand Skill is individually activatable within the saved
+  model configuration: required bodies, complete descriptors, tool schema, and
+  the largest single on-demand body fit the configured share.
 - Streaming and non-streaming paths produce the same plan and evidence.
 - External tool-name collisions, forged calls, repeated calls, and stale
   revisions fail with explicit reason codes.
@@ -708,25 +880,27 @@ flowchart LR
 
 ## Risks and edge cases
 
-| Risk or case                                    | Required handling                                                                                                           |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| A Skill changes after attachment                | Exact revision pin stays unchanged; UI shows update drift.                                                                  |
-| Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                          |
-| Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                     |
-| Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.            |
-| Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                          |
-| End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                        |
-| Two Skills contradict each other                | Saved order is visible. The author resolves the conflict; Eneo does not invent semantic precedence.                         |
-| Two Skills share a display name                 | Stable IDs and revision IDs govern activation; UI includes owner/Space context.                                             |
-| Descriptor matches too broadly                  | Task #553 evaluation catches false positives; admins can set the binding to `always`, remove it, or revise the description. |
-| Descriptor language differs from the user query | Evaluate trigger cases in the languages the Assistant serves. Record the model used for the test.                           |
-| Descriptor budget is exceeded                   | Preserve required content, disable optional catalogue for the turn, and record the reason.                                  |
-| Model cannot call tools                         | Run `always_only`; never change `on_demand` into eager loading.                                                             |
-| Model requests an unbound or blocked Skill      | Reject it and record a bounded reason code.                                                                                 |
-| Policy changes during a stream                  | The frozen turn plan completes; the next turn sees the new policy.                                                          |
-| Analytics could expose instructions             | Store IDs, counts, digests, and reason codes. Keep bodies and prompts out of aggregate rows.                                |
-| Admin raises limits beyond useful values        | Show measured impact and warnings; the selected model's hard context validation remains final.                              |
-| Imported Skill contains code or tools           | S1/O1 stay instruction-only. S2 rejects executable content until a separate security contract exists.                       |
+| Risk or case                                    | Required handling                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A Skill changes after attachment                | Exact revision pin stays unchanged; UI shows update drift.                                                                                                                |
+| Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                                                                        |
+| Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                                                                   |
+| Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.                                                          |
+| Blocked source has installed local copies       | Copies keep their independent identity. Admins see affected copies, block each unsafe local identity explicitly, and install/update from the blocked source fails closed. |
+| Skill deletion could invalidate a queued run    | Bindings and retained queued/running App-run evidence block deletion; terminal runs retain body-free IDs and digests.                                                     |
+| Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                                                                        |
+| End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                                                                      |
+| Two Skills contradict each other                | Saved order is visible. The author resolves the conflict; Eneo does not invent semantic precedence.                                                                       |
+| Two Skills share a display name                 | Stable IDs and revision IDs govern activation; UI includes owner/Space context.                                                                                           |
+| Descriptor matches too broadly                  | Task #553 evaluation catches false positives; admins can set the binding to `always`, remove it, or revise the description.                                               |
+| Descriptor language differs from the user query | Evaluate trigger cases in the languages the Assistant serves. Record the model used for the test.                                                                         |
+| Descriptor budget is exceeded                   | Preserve required content, disable optional catalogue for the turn, and record the reason.                                                                                |
+| Model cannot call tools                         | Run `always_only`; never change `on_demand` into eager loading.                                                                                                           |
+| Model requests an unbound or blocked Skill      | Reject it and record a bounded reason code.                                                                                                                               |
+| Policy changes during a stream                  | The frozen turn plan completes; the next turn sees the new policy.                                                                                                        |
+| Analytics could expose instructions             | Store IDs, counts, digests, and reason codes. Keep bodies and prompts out of aggregate rows.                                                                              |
+| Admin raises limits beyond useful values        | Show measured impact and warnings; the selected model's hard context validation remains final.                                                                            |
+| Imported Skill contains code or tools           | S1/O1 stay instruction-only. S2 rejects executable content until a separate security contract exists.                                                                     |
 
 ### Recovery and rollback
 
@@ -737,9 +911,12 @@ flowchart LR
 - Use the organisation execution block for an incident. In-flight provider
   requests finish, while later turns and App runs that have not begun provider
   execution fail closed with a recorded reason.
-- Roll back a selective-activation release by keeping existing bindings as
-  `always`; do not drop mode or evidence columns until the team has migrated the
-  data.
+- Detach a local or never-published organisation draft before deletion. Wait
+  for retained App runs to complete or fail; their body-free provenance remains
+  readable after an eligible hard deletion.
+- Roll back a selective-activation release by disabling selective execution,
+  retaining stored modes, and running only `always` bodies as `always_only`; do
+  not drop mode or evidence columns until the team has migrated the data.
 - Pause S2 or the external Marketplace without affecting local pinned Skills.
 
 ## Explicit deferrals
@@ -766,16 +943,19 @@ tests before implementation.
 The sources below inform the plan. They do not override Eneo's accepted runtime
 contract.
 
-| Source                                                                                                                                                                                                                                                    | Useful pattern                                                                                                        | Eneo decision                                                                                                                                   |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Agent Skills specification](https://agentskills.io/specification) and [client guide](https://agentskills.io/client-implementation/adding-skills-support)                                                                                                 | Name/description discovery, full-body activation, and on-demand resources                                             | Follow the core instruction format in S2 and use progressive disclosure in #553. Keep Eneo's database revision and permission model.            |
-| [Agent Skills best practices](https://agentskills.io/skill-creation/best-practices), [description optimisation](https://agentskills.io/skill-creation/optimizing-descriptions), and [evaluation](https://agentskills.io/skill-creation/evaluating-skills) | Focused bodies, clear trigger descriptions, and positive/negative activation tests                                    | Add author guidance and evaluation evidence; do not enforce the 5,000-token recommendation as a hard policy.                                    |
-| [ChatGPT Skills](https://help.openai.com/en/articles/20001066)                                                                                                                                                                                            | Workspace publication, role controls, per-Skill owner/access, users, 30-day invocations, dates, and compliance events | Borrow the governance and oversight shape. Use “entered context” until Eneo can define an honest invocation/outcome metric.                     |
-| [Codex Skills](https://developers.openai.com/codex/skills)                                                                                                                                                                                                | Explicit and implicit activation, progressive disclosure, and a 2% initial-catalogue budget                           | Use 2% as an admin-changeable default. Defer explicit mentions until override and audit semantics are accepted.                                 |
-| [Claude Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) and [Managed Agents Skills](https://platform.claude.com/docs/en/managed-agents/skills)                                                                  | Metadata-first loading, exact version pins, and up to 500 mounted Skills with a startup cost warning                  | Borrow progressive disclosure and exact versions. Use context percentage plus an admin count guard instead of copying 500 as a universal limit. |
-| [Open WebUI Skills](https://docs.openwebui.com/features/workspace/skills/)                                                                                                                                                                                | Lazy `view_skill`, model bindings, `$` mention, per-chat toggles, active state, and user/group access                 | Borrow the clear distinction between Skill and tool. Start with admin/resource bindings; defer user overrides and per-Skill ACLs.               |
-| [AnythingLLM intelligent tool selection](https://docs.anythingllm.com/agent/intelligent-tool-selection)                                                                                                                                                   | Optional reranking above an admin-set tool count, with documented latency overhead                                    | Keep reranking out of the first release. Reconsider only with measured descriptor overflow and explainable selection evidence.                  |
-| [Dify Agent node](https://docs.dify.ai/en/cloud/use-dify/nodes/agent)                                                                                                                                                                                     | Native function calling, explicit iteration limits, tool descriptions, outputs, and structured logs                   | Use a trusted activation tool, a fixed accepted-activation ceiling, and structured evidence. Do not expose hidden chain-of-thought.             |
+| Source                                                                                                                                                                                                                                                    | Useful pattern                                                                                                           | Eneo decision                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Agent Skills specification](https://agentskills.io/specification) and [client guide](https://agentskills.io/client-implementation/adding-skills-support)                                                                                                 | Name/description discovery, full-body activation, and on-demand resources                                                | Follow the core instruction format in S2 and use progressive disclosure in #553. Keep Eneo's database revision and permission model.            |
+| [Agent Skills best practices](https://agentskills.io/skill-creation/best-practices), [description optimisation](https://agentskills.io/skill-creation/optimizing-descriptions), and [evaluation](https://agentskills.io/skill-creation/evaluating-skills) | Focused bodies, clear trigger descriptions, and positive/negative activation tests                                       | Add author guidance and evaluation evidence; do not enforce the 5,000-token recommendation as a hard policy.                                    |
+| [ChatGPT Skills](https://help.openai.com/en/articles/20001066)                                                                                                                                                                                            | Workspace publication, role controls, per-Skill owner/access, users, 30-day invocations, dates, and compliance events    | Borrow the governance and oversight shape. Use “entered context” until Eneo can define an honest invocation/outcome metric.                     |
+| [Codex Skills](https://developers.openai.com/codex/skills)                                                                                                                                                                                                | Explicit and implicit activation, progressive disclosure, and a 2% initial-catalogue budget                              | Borrow the bounded, inspectable discovery principle. Eneo uses a measured 10% total Skill share because the same budget also pays for bodies.   |
+| [Claude Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) and [Managed Agents Skills](https://platform.claude.com/docs/en/managed-agents/skills)                                                                  | Metadata-first loading, exact version pins, and up to 500 mounted Skills with a startup cost warning                     | Borrow progressive disclosure and exact versions. Use context percentage plus an admin count guard instead of copying 500 as a universal limit. |
+| [Open WebUI Skills](https://docs.openwebui.com/features/workspace/skills/)                                                                                                                                                                                | Lazy `view_skill`, model bindings, `$` mention, per-chat toggles, active state, and user/group access                    | Borrow the clear distinction between Skill and tool. Start with admin/resource bindings; defer user overrides and per-Skill ACLs.               |
+| [LibreChat Skills](https://www.librechat.ai/docs/features/skills) and [Agent settings](https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/agents)                                                                                | Manual, model-invoked, and always modes; per-Agent allowlists; a model-visible catalogue cap; description-led activation | Borrow the focused allowlist and explicit mode vocabulary. Do not inherit scripts/assets, tool grants, GitHub sync, or user overrides in #553.  |
+| [Onyx Agents](https://docs.onyx.app/overview/core_features/agents) and [Actions](https://docs.onyx.app/overview/core_features/actions)                                                                                                                    | Separates Agent instructions, scoped knowledge, and executable Actions; recommends testing and narrow knowledge          | Preserve Eneo's Skill/tool/knowledge boundaries. Onyx documents no equivalent versioned lazy Skill catalogue, so do not invent one by analogy.  |
+| [Flowise Agentflow](https://docs.flowiseai.com/using-flowise/agentflowv2) and [Agent as Tool](https://docs.flowiseai.com/tutorials/agent-as-tool)                                                                                                         | Explicit graph steps, described agent-as-tool selection, and observable bounded loops                                    | Borrow bounded-loop and traceability questions only. Eneo Skills do not need a workflow graph or multi-agent runtime.                           |
+| [AnythingLLM intelligent tool selection](https://docs.anythingllm.com/agent/intelligent-tool-selection)                                                                                                                                                   | Optional reranking above an admin-set tool count, with documented latency overhead                                       | Keep reranking out of the first release. Reconsider only with measured descriptor overflow and explainable selection evidence.                  |
+| [Dify Agent node](https://docs.dify.ai/en/cloud/use-dify/nodes/agent)                                                                                                                                                                                     | Native function calling, explicit iteration limits, tool descriptions, outputs, and structured logs                      | Use a trusted activation tool, a fixed accepted-activation ceiling, and structured evidence. Do not expose hidden chain-of-thought.             |
 
 ### Patterns we should preserve
 
@@ -802,37 +982,38 @@ These local Codex artifacts contain the planning reviews that shaped this
 roadmap. Their accepted decisions are restated above because `.codex/artifacts`
 is a working-session record, not the product contract.
 
-| Review                                   | Local artifact                                                                                                             | Result used here                                                                                                                           |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Selective activation architecture        | `.codex/artifacts/claude-peer-loop-fable-enterprise-selective-skill-activation-architecture-review-20260721T143724Z.md`    | Replaced eager-all-at-scale with explicit `always` and `on_demand`, a trusted activation effect, and bounded evidence.                     |
-| Organisation budget adjudication         | `.codex/artifacts/claude-peer-loop-fable-organization-admin-skill-budget-final-adjudication-20260721T145646Z.md`           | Made the percentage and attachment guard administrator-owned; kept the model window authoritative.                                         |
-| Selective blueprint verification         | `.codex/artifacts/claude-peer-loop-fable-selective-skill-blueprint-final-verification-20260721T150419Z.md`                 | Confirmed the frozen turn plan, fallback semantics, and explainability language.                                                           |
-| Implementation boundary gate             | `.codex/artifacts/claude-peer-loop-selective-skills-implementation-boundary-verification-20260721T152413Z.md`              | Held #553 until the trusted internal MCP/effect owner is in the branch ancestry.                                                           |
-| Integration train review                 | `.codex/artifacts/claude-peer-loop-eneo-integration-train-before-selective-skills-20260721T165736Z.md`                     | Identified the coupled PR graph and the need to avoid copying #538 into Skills.                                                            |
-| Revised integration train verification   | `.codex/artifacts/claude-peer-loop-revised-eneo-integration-train-verification-20260721T170352Z.md`                        | Accepted Skills-first, split internal MCP core, and file-reference fallback order.                                                         |
-| Admin information architecture           | `.codex/artifacts/claude-peer-loop-eneo-skills-admin-ia-and-permissions-plan-20260721T071004Z.md`                          | Kept one Organisation editor and moved useful adoption/drift data to Skill detail.                                                         |
-| Debug security and reliability           | `.codex/artifacts/claude-peer-loop-debug-mode-security-and-reliability-verification-20260721T133316Z.md`                   | Required one canonical, server-governed debug capability and owner-authorised evidence.                                                    |
-| Skills UI review                         | `.codex/artifacts/claude-peer-loop-eneo-skills-ui-final-ux-review-20260721T094940Z.md`                                     | Retained flat, task-oriented layouts and explicit revision states.                                                                         |
-| Navigation and visual polish             | `.codex/artifacts/claude-peer-loop-eneo-skills-nordic-polish-and-navigation-final-verification-20260721T141118Z.md`        | Reused the organisation navigation and removed route-specific visual duplication.                                                          |
-| Consolidated roadmap challenge           | `.codex/artifacts/claude-peer-loop-enterprise-skills-roadmap-skeptical-review-20260722T115806Z.md`                         | Reconciled token policy with the ADR, restored the dependency graph, and added measurable release calibration.                             |
-| Comparative enterprise challenge         | `.codex/artifacts/claude-peer-loop-enterprise-skills-comparative-blueprint-challenge-20260722T120529Z.md`                  | Added the O1 emergency stop, activation latency, multilingual evaluation, and binding-site drift visibility.                               |
-| Authoritative contract verification      | `.codex/artifacts/claude-peer-loop-enterprise-skills-roadmap-authoritative-contract-verification-20260722T121803Z.md`      | Gave green light at score 8 after both documents agreed on the minimal O1 execution-block contract and test boundary.                      |
-| Two-layer authorization adjudication     | `.codex/artifacts/claude-peer-loop-eneo-skills-two-layer-enterprise-authorization-and-ux-adjudication-20260722T123308Z.md` | Confirmed admin-only Organisation authoring, tenant-plus-Space local management, picker-only published reuse, and no new ACL or dashboard. |
-| Implementation architecture verification | `.codex/artifacts/claude-peer-loop-eneo-skills-implementation-order-and-architecture-verification-20260722T124707Z.md`     | Gave green light at score 8, placed the subtractive correction in #560, and fixed the red-test-first owner and merge sequence.             |
+| Review                                   | Local artifact                                                                                                              | Result used here                                                                                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Selective activation architecture        | `.codex/artifacts/claude-peer-loop-fable-enterprise-selective-skill-activation-architecture-review-20260721T143724Z.md`     | Replaced eager-all-at-scale with explicit `always` and `on_demand`, a trusted activation effect, and bounded evidence.                     |
+| Organisation budget adjudication         | `.codex/artifacts/claude-peer-loop-fable-organization-admin-skill-budget-final-adjudication-20260721T145646Z.md`            | Made the percentage and attachment guard administrator-owned; kept the model window authoritative.                                         |
+| Selective blueprint verification         | `.codex/artifacts/claude-peer-loop-fable-selective-skill-blueprint-final-verification-20260721T150419Z.md`                  | Confirmed the frozen turn plan, fallback semantics, and explainability language.                                                           |
+| Implementation boundary gate             | `.codex/artifacts/claude-peer-loop-selective-skills-implementation-boundary-verification-20260721T152413Z.md`               | Held #553 until the trusted internal MCP/effect owner is in the branch ancestry.                                                           |
+| Integration train review                 | `.codex/artifacts/claude-peer-loop-eneo-integration-train-before-selective-skills-20260721T165736Z.md`                      | Identified the coupled PR graph and the need to avoid copying #538 into Skills.                                                            |
+| Revised integration train verification   | `.codex/artifacts/claude-peer-loop-revised-eneo-integration-train-verification-20260721T170352Z.md`                         | Accepted Skills-first, split internal MCP core, and file-reference fallback order.                                                         |
+| Admin information architecture           | `.codex/artifacts/claude-peer-loop-eneo-skills-admin-ia-and-permissions-plan-20260721T071004Z.md`                           | Kept one Organisation editor and moved useful adoption/drift data to Skill detail.                                                         |
+| Debug security and reliability           | `.codex/artifacts/claude-peer-loop-debug-mode-security-and-reliability-verification-20260721T133316Z.md`                    | Required one canonical, server-governed debug capability and owner-authorised evidence.                                                    |
+| Skills UI review                         | `.codex/artifacts/claude-peer-loop-eneo-skills-ui-final-ux-review-20260721T094940Z.md`                                      | Retained flat, task-oriented layouts and explicit revision states.                                                                         |
+| Navigation and visual polish             | `.codex/artifacts/claude-peer-loop-eneo-skills-nordic-polish-and-navigation-final-verification-20260721T141118Z.md`         | Reused the organisation navigation and removed route-specific visual duplication.                                                          |
+| Consolidated roadmap challenge           | `.codex/artifacts/claude-peer-loop-enterprise-skills-roadmap-skeptical-review-20260722T115806Z.md`                          | Reconciled token policy with the ADR, restored the dependency graph, and added measurable release calibration.                             |
+| Comparative enterprise challenge         | `.codex/artifacts/claude-peer-loop-enterprise-skills-comparative-blueprint-challenge-20260722T120529Z.md`                   | Added the O1 emergency stop, activation latency, multilingual evaluation, and binding-site drift visibility.                               |
+| Authoritative contract verification      | `.codex/artifacts/claude-peer-loop-enterprise-skills-roadmap-authoritative-contract-verification-20260722T121803Z.md`       | Gave green light at score 8 after both documents agreed on the minimal O1 execution-block contract and test boundary.                      |
+| Two-layer authorization adjudication     | `.codex/artifacts/claude-peer-loop-eneo-skills-two-layer-enterprise-authorization-and-ux-adjudication-20260722T123308Z.md`  | Confirmed admin-only Organisation authoring, tenant-plus-Space local management, picker-only published reuse, and no new ACL or dashboard. |
+| Implementation architecture verification | `.codex/artifacts/claude-peer-loop-eneo-skills-implementation-order-and-architecture-verification-20260722T124707Z.md`      | Gave green light at score 8, placed the subtractive correction in #560, and fixed the red-test-first owner and merge sequence.             |
+| Remaining-roadmap and O2 blueprint       | `.codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-20260723T211419Z.md`                | Rejected the copied 2% total budget and #538 merge gate; ordered #553 before O2 and kept T009, S2, and Marketplace behind explicit gates.  |
+| Remaining-roadmap verification           | `.codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-verification-20260723T214123Z.md`   | Confirmed the architecture and identified three exact wording gaps in model validation, sibling deferral, and reserved identity.           |
+| Final selective-plan verification        | `.codex/artifacts/claude-peer-loop-enterprise-skills-remaining-roadmap-and-o2-blueprint-verification-3-20260723T220002Z.md` | Gave green light at score 8 after the contracts, admin configuration, slice order, and shared UI ownership agreed with current source.     |
 
 ## Open decisions before implementation
 
 Product and architecture should close these questions at the named gate:
 
-1. **Before O2:** Does install-to-Space preserve the source Skill's display name
-   when that name collides, or require the installer to choose a new name before
-   apply?
-2. **Before Task #553:** How long should per-turn Skill evidence remain available
+1. **Before Task #553:** How long should per-turn Skill evidence remain available
    in ordinary history versus restricted audit storage?
-3. **Before scoped Personal Chat policies:** Which existing group/role owner
+2. **Before scoped Personal Chat policies:** Which existing group/role owner
    supplies the scope and conflict precedence? O1 stays tenant-policy scoped
    until this is defined.
-4. **Before S2:** Which accepted Flow package branch owns the archive mechanics,
-   receipts, and exported Assistant contract?
-5. **Before external Skill distribution:** Which scanner, signature policy,
+3. **Before S2:** Which exact merged Flow package commit owns the archive
+   mechanics that have earned extraction? The active `refactor/flows-clean`
+   branch is evidence, not a stable dependency until it lands on `develop`.
+4. **Before external Skill distribution:** Which scanner, signature policy,
    sandbox, and review workflow can accept scripts, assets, or references?

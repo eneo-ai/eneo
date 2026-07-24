@@ -2,7 +2,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -22,6 +21,8 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillCatalogPage,
     SkillComposition,
+    SkillExecutionBlock,
+    SkillExecutionBlockedException,
     SkillExecutionReference,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
@@ -389,12 +390,23 @@ class SkillService:
             raise NotFoundException()
         return deleted
 
-    @staticmethod
-    def _validate_reference_count(references: list[SkillBindingReference]) -> None:
-        max_bindings = get_settings().skill_max_bindings
-        if len(references) > max_bindings:
+    async def _validate_reference_count(
+        self,
+        *,
+        tenant_id: UUID,
+        references: list[SkillBindingReference],
+    ) -> None:
+        # The stored organisation policy is the source of truth for the
+        # attachment guard; the SKILL_MAX_BINDINGS environment value only
+        # seeded it during migration. The shared lock serializes this write
+        # against a concurrent admin policy change so the guard never
+        # validates against a superseded limit.
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=tenant_id, shared_lock=True
+        )
+        if len(references) > policy.max_attached_skills:
             raise BadRequestException(
-                f"A resource cannot use more than {max_bindings} Skills"
+                f"A resource cannot use more than {policy.max_attached_skills} Skills"
             )
         if len({reference.skill_id for reference in references}) != len(references):
             raise BadRequestException("A Skill can only be attached once")
@@ -450,6 +462,7 @@ class SkillService:
         *,
         references: list[SkillBindingReference],
         resolved_groups: tuple[list[ResolvedSkillBinding], ...],
+        existing: list[ResolvedSkillBinding],
         missing_error: Exception,
     ) -> list[ResolvedSkillBinding]:
         resolved_by_reference = {
@@ -459,8 +472,23 @@ class SkillService:
         }
         if any(reference not in resolved_by_reference for reference in references):
             raise missing_error
+        # Re-resolution rebuilds bindings from catalogue state, which would
+        # silently reset a stored activation mode. A parent carries at most one
+        # binding per Skill, so a Skill already bound to the parent keeps its
+        # saved mode even when the request pins a different revision; only a
+        # genuinely new Skill takes the resolver default.
+        existing_mode_by_skill_id = {
+            binding.skill_id: binding.activation_mode for binding in existing
+        }
         return [
-            replace(resolved_by_reference[reference], position=position)
+            replace(
+                resolved_by_reference[reference],
+                position=position,
+                activation_mode=existing_mode_by_skill_id.get(
+                    reference.skill_id,
+                    resolved_by_reference[reference].activation_mode,
+                ),
+            )
             for position, reference in enumerate(references)
         ]
 
@@ -473,7 +501,7 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
-        self._validate_reference_count(references)
+        await self._validate_reference_count(tenant_id=tenant_id, references=references)
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=tenant_id,
             parent_space_id=space_id,
@@ -511,6 +539,7 @@ class SkillService:
                 local,
                 published,
             ),
+            existing=existing,
             missing_error=NotFoundException(
                 "One or more Skill revisions are unavailable for this resource"
             ),
@@ -523,7 +552,9 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
     ) -> list[ResolvedSkillBinding]:
-        self._validate_reference_count(references)
+        await self._validate_reference_count(
+            tenant_id=self.user.tenant_id, references=references
+        )
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=self.user.tenant_id,
             parent_space_id=organization_space_id,
@@ -541,6 +572,7 @@ class SkillService:
         return self._order_resolved_bindings(
             references=references,
             resolved_groups=(list(retained_by_reference.values()), published),
+            existing=existing,
             missing_error=BadRequestException(
                 "Personal Chat can only use published organisation Skill versions"
             ),
@@ -701,10 +733,66 @@ class SkillService:
         validate_permission(self.user, Permission.ADMIN)
         return await self.repo.list_policy_bindings(policy_id=policy_id)
 
+    async def _active_execution_blocks(
+        self,
+        *,
+        tenant_id: UUID,
+        bindings: list[ResolvedSkillBinding],
+    ) -> dict[UUID, SkillExecutionBlock]:
+        return await self.repo.list_active_execution_blocks(
+            tenant_id=tenant_id,
+            skill_ids=[binding.skill_id for binding in bindings],
+        )
+
+    async def _exclude_execution_blocks(
+        self,
+        *,
+        tenant_id: UUID,
+        bindings: list[ResolvedSkillBinding],
+    ) -> list[ResolvedSkillBinding]:
+        blocks = await self._active_execution_blocks(
+            tenant_id=tenant_id,
+            bindings=bindings,
+        )
+        return [binding for binding in bindings if binding.skill_id not in blocks]
+
+    async def _require_execution_allowed(
+        self,
+        *,
+        tenant_id: UUID,
+        bindings: list[ResolvedSkillBinding],
+    ) -> None:
+        blocks = await self._active_execution_blocks(
+            tenant_id=tenant_id,
+            bindings=bindings,
+        )
+        for binding in sorted(bindings, key=lambda item: item.position):
+            block = blocks.get(binding.skill_id)
+            if block is not None:
+                raise SkillExecutionBlockedException(
+                    block=block,
+                    binding=binding,
+                )
+
+    async def list_governance_bindings_for_runtime(
+        self,
+        *,
+        policy_id: UUID,
+    ) -> list[ResolvedSkillBinding]:
+        bindings = await self.repo.list_policy_bindings(policy_id=policy_id)
+        return await self._exclude_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
+
     async def compose_for_assistant(
         self, *, assistant_id: UUID, base_instructions: str
     ) -> SkillComposition:
         bindings = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
+        bindings = await self._exclude_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
         return compose_skill_instructions(
             base_instructions=base_instructions, bindings=bindings
         )
@@ -713,6 +801,10 @@ class SkillService:
         self, *, app_id: UUID, base_instructions: str
     ) -> SkillComposition:
         bindings = await self.repo.list_app_bindings_for_execution_plan(app_id=app_id)
+        await self._require_execution_allowed(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
         return compose_skill_instructions(
             base_instructions=base_instructions, bindings=bindings
         )
@@ -785,6 +877,10 @@ class SkillService:
                 )
             snapshot_bindings.append(replace(binding, position=reference.position))
 
+        await self._require_execution_allowed(
+            tenant_id=tenant_id,
+            bindings=snapshot_bindings,
+        )
         return compose_skill_instructions(
             base_instructions=base_instructions,
             bindings=snapshot_bindings,
@@ -793,7 +889,7 @@ class SkillService:
     async def compose_for_policy(
         self, *, policy_id: UUID, base_instructions: str
     ) -> SkillComposition:
-        bindings = await self.repo.list_policy_bindings(policy_id=policy_id)
+        bindings = await self.list_governance_bindings_for_runtime(policy_id=policy_id)
         return compose_skill_instructions(
             base_instructions=base_instructions, bindings=bindings
         )
