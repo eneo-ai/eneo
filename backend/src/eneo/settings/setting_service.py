@@ -212,20 +212,29 @@ class SettingService:
     def _runtime_policy_audit_changes(
         change: SkillRuntimePolicyChange,
     ) -> dict[str, dict[str, bool | int]]:
-        fields = (
-            "selective_activation_enabled",
-            "max_attached_skills",
-            "context_share_percent",
-            "max_activations_per_turn",
-        )
-        return {
-            field: {
-                "old": getattr(change.old, field),
-                "new": getattr(change.new, field),
+        old, new = change.old, change.new
+        changes: dict[str, dict[str, bool | int]] = {}
+        if old.selective_activation_enabled != new.selective_activation_enabled:
+            changes["selective_activation_enabled"] = {
+                "old": old.selective_activation_enabled,
+                "new": new.selective_activation_enabled,
             }
-            for field in fields
-            if getattr(change.old, field) != getattr(change.new, field)
-        }
+        if old.max_attached_skills != new.max_attached_skills:
+            changes["max_attached_skills"] = {
+                "old": old.max_attached_skills,
+                "new": new.max_attached_skills,
+            }
+        if old.context_share_percent != new.context_share_percent:
+            changes["context_share_percent"] = {
+                "old": old.context_share_percent,
+                "new": new.context_share_percent,
+            }
+        if old.max_activations_per_turn != new.max_activations_per_turn:
+            changes["max_activations_per_turn"] = {
+                "old": old.max_activations_per_turn,
+                "new": new.max_activations_per_turn,
+            }
+        return changes
 
     @validate_permissions(Permission.ADMIN)
     async def get_skill_runtime_policy(self) -> SkillRuntimePolicyPublic:

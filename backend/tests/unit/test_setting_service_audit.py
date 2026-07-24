@@ -295,8 +295,19 @@ class TestSettingToggleAuditLoggingAdditional:
 
 class TestSkillRuntimePolicy:
     @staticmethod
-    def _stored(**overrides: object) -> SkillRuntimePolicy:
-        return replace(SKILL_RUNTIME_POLICY_DEFAULTS, **overrides)  # type: ignore[arg-type]
+    def _stored(
+        *,
+        selective_activation_enabled: bool = False,
+        max_attached_skills: int = 100,
+        context_share_percent: int = 10,
+        max_activations_per_turn: int = 10,
+    ) -> SkillRuntimePolicy:
+        return SkillRuntimePolicy(
+            selective_activation_enabled=selective_activation_enabled,
+            max_attached_skills=max_attached_skills,
+            context_share_percent=context_share_percent,
+            max_activations_per_turn=max_activations_per_turn,
+        )
 
     @pytest.mark.asyncio
     async def test_non_admin_cannot_read_or_change_policy(self):
@@ -458,3 +469,36 @@ class TestSkillRuntimePolicy:
         assert projections.models[0].skill_context_token_allowance == 12_800
         assert projections.models[0].supports_tool_calling is True
         assert projections.models[1].skill_context_token_allowance == 819
+
+
+class TestSkillRuntimePolicyActivationLimitAudit:
+    @pytest.mark.asyncio
+    async def test_lowering_activation_ceiling_audits_old_and_new(self):
+        service, audit_mock = _make_service()
+        old = SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        )
+        new = SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=3,
+        )
+        service.skill_repo.update_runtime_policy = AsyncMock(
+            return_value=SkillRuntimePolicyChange(old=old, new=new)
+        )
+
+        await service.update_skill_runtime_policy(
+            SkillRuntimePolicyUpdate(
+                selective_activation_enabled=False,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            )
+        )
+
+        changes = audit_mock.log_async.call_args[1]["metadata"]["changes"]
+        assert changes == {"max_activations_per_turn": {"old": 10, "new": 3}}

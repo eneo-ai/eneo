@@ -1956,9 +1956,23 @@ class SkillRepoImpl:
             max_activations_per_turn=row.max_activations_per_turn,
         )
 
-    async def _seed_runtime_policy(self, *, tenant_id: UUID) -> None:
+    async def _runtime_policy_row(
+        self, *, tenant_id: UUID, for_update: bool
+    ) -> SkillRuntimePolicies | None:
+        query = sa.select(SkillRuntimePolicies).where(
+            SkillRuntimePolicies.tenant_id == tenant_id
+        )
+        if for_update:
+            query = query.with_for_update()
+        return await self.session.scalar(query)
+
+    async def _seed_and_reload_runtime_policy(
+        self, *, tenant_id: UUID, for_update: bool
+    ) -> SkillRuntimePolicies:
         # Tenants created after the backfill migration receive their row on
         # first access; ON CONFLICT keeps concurrent first reads race-safe.
+        # The established path stays SELECT-only — this runs only when the
+        # first SELECT found no row.
         seed = SKILL_RUNTIME_POLICY_DEFAULTS
         await self.session.execute(
             pg_insert(SkillRuntimePolicies)
@@ -1971,18 +1985,19 @@ class SkillRepoImpl:
             )
             .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
+        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=for_update)
+        if row is None:
+            raise RuntimeError("Skill runtime policy seed did not persist")
+        return row
 
     async def get_or_seed_runtime_policy(
         self, *, tenant_id: UUID
     ) -> SkillRuntimePolicy:
-        await self._seed_runtime_policy(tenant_id=tenant_id)
-        row = await self.session.scalar(
-            sa.select(SkillRuntimePolicies).where(
-                SkillRuntimePolicies.tenant_id == tenant_id
-            )
-        )
+        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=False)
         if row is None:
-            raise RuntimeError("Skill runtime policy seed did not persist")
+            row = await self._seed_and_reload_runtime_policy(
+                tenant_id=tenant_id, for_update=False
+            )
         return self._to_runtime_policy(row)
 
     async def update_runtime_policy(
@@ -1991,14 +2006,11 @@ class SkillRepoImpl:
         tenant_id: UUID,
         policy: SkillRuntimePolicy,
     ) -> SkillRuntimePolicyChange:
-        await self._seed_runtime_policy(tenant_id=tenant_id)
-        row = await self.session.scalar(
-            sa.select(SkillRuntimePolicies)
-            .where(SkillRuntimePolicies.tenant_id == tenant_id)
-            .with_for_update()
-        )
+        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=True)
         if row is None:
-            raise RuntimeError("Skill runtime policy seed did not persist")
+            row = await self._seed_and_reload_runtime_policy(
+                tenant_id=tenant_id, for_update=True
+            )
         old = self._to_runtime_policy(row)
         row.selective_activation_enabled = policy.selective_activation_enabled
         row.max_attached_skills = policy.max_attached_skills

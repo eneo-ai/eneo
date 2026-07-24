@@ -517,11 +517,14 @@ same context accounting as runtime and reject a configuration that cannot fit.
 Runtime repeats this check defensively. No path silently truncates Skill
 instructions.
 
-`SKILL_MAX_BINDINGS` is a configurable operational and abuse guardrail, with a
-default of 100 and a minimum of 1. It is not a claim that 100 Skills fit every
-model, and it is not a fixed package-interoperability limit. Operators may lower
-or raise it; context-fit validation remains authoritative. Packages in S2
-validate the destination's configured guardrail during planning.
+The attached-Skill guardrail is the stored tenant runtime policy's
+`max_attached_skills` value, seeded at 100 with a 1–1,000 operational range.
+The historical `SKILL_MAX_BINDINGS` environment value is consumed once by the
+policy migration as a seed and has no runtime effect afterwards. The limit is
+not a claim that 100 Skills fit every model, and it is not a fixed
+package-interoperability limit. Administrators may lower or raise the stored
+value; context-fit validation remains authoritative. Packages in S2 validate
+the destination's stored guardrail during planning.
 
 The fixed limits are limited to stable schema/interoperability constraints:
 
@@ -1134,8 +1137,8 @@ invariants are:
   bounded entry/archive bytes and install planning validates model context fit;
 - the digest is recomputed from normalized content and may repeat across different
   Skills; it never triggers automatic reuse or merge;
-- the destination's configured `SKILL_MAX_BINDINGS` guardrail is checked during
-  planning, not encoded as a universal package limit; and
+- the destination's stored runtime-policy attachment guardrail is checked
+  during planning, not encoded as a universal package limit; and
 - the package content checksum covers exact Skill content, digests, references,
   binding positions, activation modes, and the parent payload.
 
@@ -1851,9 +1854,10 @@ are not hidden work inside another delivery.
   source Space, and position are concrete, ordered, and deletion-safe. Ordinary
   sibling-Space, draft, stale-published, foreign-tenant, and semantic/automatic
   reuse or merge are rejected.
-- `SKILL_MAX_BINDINGS` defaults to 100, can be configured, and acts only as an
-  operational guardrail. The effective model context check is the capacity
-  authority and never truncates Skill text.
+- The stored tenant runtime policy owns the attached-Skill guardrail (seeded
+  at 100; the historical `SKILL_MAX_BINDINGS` environment value only seeds
+  its migration). The effective model context check is the capacity authority
+  and never truncates Skill text.
 - Skill-library and Assistant/App binding GET APIs require a session and existing
   Space/parent permissions. No dedicated Assistant/App binding PUT/POST route
   ships.
