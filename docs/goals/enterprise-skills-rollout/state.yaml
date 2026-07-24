@@ -30,12 +30,12 @@ continuity:
   current_thread_id: "019f8f85-2ea6-7030-8c48-6d90143da5e0"
   previous_thread_id: "019f84c4-21db-7a00-b2cd-ae3d294d14ba"
   rotation_count: 1
-  completed_write_tasks_in_thread: 5
+  completed_write_tasks_in_thread: 6
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "d2651deeeb94d93e367aac41bfab7d477f1cf871"
+  last_verified_revision: "5d54e242a0edd878ef0768c00ea35b63c827e50a"
 
-active_task: T014
+active_task: T015
 
 tasks:
   - id: T001
@@ -880,7 +880,7 @@ tasks:
   - id: T014
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Close the execution-block configuration and visibility gap without deleting bindings or changing established runtime behavior."
     inputs:
@@ -920,12 +920,43 @@ tasks:
     stop_if:
       - "The change requires deleting bindings, stopping an entire Assistant, or changing queued App provenance."
       - "Block state cannot be derived without creating a second source of truth."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Closed the execution-block configuration and visibility gap at the canonical reference-resolution seam, preserved retained exact pins, passed local and GitHub gates, and squash-merged PR #593."
+      tracking_issue: "https://github.com/eneo-ai/eneo/issues/595"
+      merged_pr: 593
+      source_head: "6f228b47ae31e046fa79b8fd9e1efaab26447c65"
+      merge_commit: "5d54e242a0edd878ef0768c00ea35b63c827e50a"
+      merged_at: "2026-07-24T16:58:45Z"
+      github_checks: "All 19 non-skipped checks passed; one scope-dependent check was skipped."
+      final_review: "Review 3 confirmed F2-F3 resolved and found no current in-scope findings: https://github.com/eneo-ai/eneo/pull/593#issuecomment-5072051504"
+      changed_files:
+        - "backend/src/eneo/skills/"
+        - "backend/tests/"
+        - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+        - "frontend/apps/web/messages/"
+        - "frontend/apps/web/src/lib/features/skills/"
+        - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+        - "frontend/packages/eneo-js/"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/enterprise-skills-roadmap.md"
+        - "docs/goals/enterprise-skills-rollout/"
+      commands:
+        - cmd: "uv run pytest -n 2 -m 'not integration' tests/"
+          result: "pass: 2570 tests"
+        - cmd: "uv run pytest tests/integration/"
+          result: "pass: 1131 passed, 26 skipped, 52 deselected, 1 xfailed"
+        - cmd: "focused block-reference concurrency test repeated three times"
+          result: "pass: 9 behavior cases"
+        - cmd: "backend Ruff check/format, Pyright, frontend unit/check/lint/i18n, and hooks"
+          result: pass
+        - cmd: "required GitHub CI and final /review"
+          result: pass
 
   - id: T015
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Implement Task #553 slice 4: the trusted internal on-demand activation effect through the existing completion loop."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
@@ -1155,10 +1186,9 @@ checks:
   dirty_fingerprint: "main worktree contains unrelated user-owned changes; roadmap files are isolated"
   last_verification:
     result: pass
-    task: T006
+    task: T014
     commands:
-      - "GitHub: all 18 reported PR #577 checks reached a terminal non-failing state"
-      - "backend: 53 focused unit tests passed"
-      - "backend: 8 focused PostgreSQL execution-block integration tests passed"
-      - "backend: isolated migration test, Ruff, format, Pyright, and uv lock checks passed"
-      - "frontend: Prettier and docs-site production build passed"
+      - "GitHub: PR #593 merged after 19 successful checks, one scope skip, and Review 3 with no current findings"
+      - "backend: 2570 unit tests and 1131 integration tests passed"
+      - "backend: focused block-reference concurrency proof passed across three repeated runs"
+      - "backend/frontend: Ruff, format, Pyright, component tests, check, lint, i18n, and hooks passed"
