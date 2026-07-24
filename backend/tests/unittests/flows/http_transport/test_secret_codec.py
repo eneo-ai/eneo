@@ -21,6 +21,7 @@ from eneo.flows.http_transport.secret_codec import (
     merge_secrets_on_update,
     protect_authored_secrets,
     redact_authored_config,
+    redact_persisted_config,
     unresolved_secret_sentinel_fields,
 )
 
@@ -233,6 +234,44 @@ def test_unresolved_sentinel_fields_ignores_resolved_values() -> None:
     cfg = _config(auth=HttpAuthBearer(token="ENC:stored"))
 
     assert unresolved_secret_sentinel_fields(cfg) == ()
+
+
+def test_unresolved_sentinel_fields_covers_non_secret_headers() -> None:
+    """A sentinel resolved to nothing whatever the incoming secret flag says."""
+    cfg = _config(
+        custom_headers=[
+            CustomHeader(name="X-Public", value=SECRET_SENTINEL, secret=False)
+        ]
+    )
+
+    assert unresolved_secret_sentinel_fields(cfg) == ("custom_headers[0].value",)
+
+
+# --- redact_persisted_config ---
+
+
+def test_redact_persisted_config_turns_stored_secrets_into_sentinels() -> None:
+    stored = _config(
+        auth=HttpAuthBearer(token="ENC:stored"),
+        custom_headers=[
+            CustomHeader(name="X-Secret", value="ENC:hdr", secret=True),
+            CustomHeader(name="X-Public", value="public", secret=False),
+        ],
+    ).model_dump(mode="json")
+
+    result = redact_persisted_config(stored)
+
+    assert result is not None
+    assert result["auth"]["token"] == SECRET_SENTINEL
+    assert result["custom_headers"][0]["value"] == SECRET_SENTINEL
+    assert result["custom_headers"][1]["value"] == "public"
+
+
+def test_redact_persisted_config_passes_through_non_authored_payloads() -> None:
+    assert redact_persisted_config(None) is None
+    assert redact_persisted_config({"template_asset_id": "abc"}) == {
+        "template_asset_id": "abc"
+    }
 
 
 # --- decrypt_authored_config ---

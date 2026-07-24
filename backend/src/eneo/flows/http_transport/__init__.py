@@ -33,6 +33,7 @@ from eneo.flows.http_transport.secret_codec import (
     merge_secrets_on_update,
     protect_authored_secrets,
     redact_authored_config,
+    redact_persisted_config,
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.http_transport.validator import validate_authored_config
@@ -66,6 +67,7 @@ __all__ = [
     "merge_secrets_on_update",
     "protect_authored_secrets",
     "redact_authored_config",
+    "redact_persisted_config",
     "unresolved_secret_sentinel_fields",
     "validate_authored_config",
 ]

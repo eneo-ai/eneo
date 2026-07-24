@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol
 
 from eneo.flows.http_transport.authored_config import (
@@ -14,6 +15,7 @@ from eneo.flows.http_transport.authored_config import (
     is_secret_sentinel,
 )
 from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
+from eneo.flows.http_transport.normalizer import is_authored_config
 
 
 class SupportsEncryption(Protocol):
@@ -83,10 +85,12 @@ def unresolved_secret_sentinel_fields(config: HttpAuthoredConfig) -> tuple[str, 
         case HttpAuthNone():
             pass
 
+    # Checked regardless of the secret flag: a sentinel in a non-secret header
+    # still resolved to nothing, and would otherwise be stored as the value.
     fields.extend(
         f"custom_headers[{index}].value"
         for index, header in enumerate(config.custom_headers)
-        if header.secret and is_secret_sentinel(header.value)
+        if is_secret_sentinel(header.value)
     )
     return tuple(fields)
 
@@ -198,6 +202,23 @@ def redact_authored_config(config: HttpAuthoredConfig) -> HttpAuthoredConfig:
     return config.model_copy(update={"auth": auth, "custom_headers": custom_headers})
 
 
+def redact_persisted_config(
+    config: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Replace stored secrets with sentinels in a persisted config payload.
+
+    Use this wherever a persisted config is projected back out — to an API
+    response, or into an authoring spec that will be resubmitted. Handing a
+    stored credential back to a caller that will send it again makes the value
+    indistinguishable from newly authored input; a sentinel keeps it a
+    reference to the row it came from.
+    """
+    if config is None or not is_authored_config(config):
+        return dict(config) if config is not None else None
+    authored = HttpAuthoredConfig.model_validate(config)
+    return redact_authored_config(authored).model_dump(mode="json")
+
+
 def merge_secrets_on_update(
     incoming: HttpAuthoredConfig,
     stored: HttpAuthoredConfig,
@@ -229,7 +250,14 @@ def merge_secrets_on_update(
         case _:
             pass
 
-    stored_headers_by_name = {h.name: h for h in stored.custom_headers}
+    # Only a stored header that was itself secret can back a secret sentinel.
+    # Resolving from a non-secret stored header would promote a value that was
+    # never protected into a field the caller believes holds a stored secret.
+    stored_headers_by_name = {
+        h.name: h
+        for h in stored.custom_headers
+        if h.secret and isinstance(h.value, str)
+    }
     merged_headers: list[CustomHeader] = []
     for h in incoming.custom_headers:
         if h.secret and is_secret_sentinel(h.value):

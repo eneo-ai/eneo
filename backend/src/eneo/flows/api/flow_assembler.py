@@ -55,11 +55,7 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.enums import FlowOutputType, FlowRunStatus
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
-from eneo.flows.http_transport import (
-    HttpAuthoredConfig,
-    is_authored_config,
-    redact_authored_config,
-)
+from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
 )
@@ -255,8 +251,8 @@ class FlowAssembler:
         redacted_steps = [
             step.model_copy(
                 update={
-                    "input_config": _redact_config(step.input_config),
-                    "output_config": _redact_config(step.output_config),
+                    "input_config": redact_persisted_config(step.input_config),
+                    "output_config": redact_persisted_config(step.output_config),
                 },
                 deep=True,
             )
@@ -347,14 +343,6 @@ def _project_run_result(
     raise FlowRunResultProjectionError(
         "Completed payload run has an unsupported published output type."
     )
-
-
-def _redact_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
-    if config is None or not is_authored_config(config):
-        return config
-    authored = HttpAuthoredConfig.model_validate(config)
-    redacted = redact_authored_config(authored)
-    return redacted.model_dump(mode="json")
 
 
 def _project_step_diagnostics(

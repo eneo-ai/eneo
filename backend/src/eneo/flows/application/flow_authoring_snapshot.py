@@ -18,6 +18,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
 
 AssistantSnapshotProjector = Callable[[AssistantAuthoringSnapshot], AssistantSpec]
@@ -71,8 +72,11 @@ def flow_step_to_authoring_spec(
         input_bindings=step.input_bindings,
         input_contract=step.input_contract,
         output_contract=step.output_contract,
-        input_config=step.input_config,
-        output_config=step.output_config,
+        # Stored credentials become sentinels here: an authoring spec is
+        # resubmitted through update_flow, and a real secret coming back in
+        # would be indistinguishable from one the author just typed.
+        input_config=redact_persisted_config(step.input_config),
+        output_config=redact_persisted_config(step.output_config),
         review_policy=step.review_policy,
     )
 

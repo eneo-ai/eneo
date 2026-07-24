@@ -25,6 +25,7 @@ from eneo.flows.flow_authoring_variable_rewriting import (
 )
 from eneo.flows.flow_metadata import normalize_persisted_flow_metadata
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import BadRequestException
 
@@ -315,7 +316,9 @@ def preserve_modified_step_output_config(
         return step_spec
     if step_spec.output_type.value != existing_step.output_type:
         return step_spec
-    return step_spec.model_copy(update={"output_config": existing_step.output_config})
+    return step_spec.model_copy(
+        update={"output_config": redact_persisted_config(existing_step.output_config)}
+    )
 
 
 def build_flow_draft_metadata_json(
@@ -428,7 +431,7 @@ def _compile_modified_step(
         output_contract=effective_spec.output_contract,
         input_config=resolve_runtime_input_config(
             step_spec=effective_spec,
-            existing_input_config=existing_step.input_config,
+            existing_input_config=redact_persisted_config(existing_step.input_config),
         ),
         output_config=effective_spec.output_config,
         review_policy=effective_spec.review_policy,
