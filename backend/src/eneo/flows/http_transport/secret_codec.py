@@ -13,6 +13,7 @@ from eneo.flows.http_transport.authored_config import (
     SecretValue,
     is_secret_sentinel,
 )
+from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
 
 
 class SupportsEncryption(Protocol):
@@ -22,12 +23,61 @@ class SupportsEncryption(Protocol):
     def decrypt(self, ciphertext: str) -> str: ...
 
 
+def plaintext_secret_fields(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the secret fields holding an unencrypted value.
+
+    A stored secret sentinel is not a value, and an already-encrypted value is
+    already protected; neither counts. Without an encryption service nothing can
+    be recognized as ciphertext, so every non-empty secret counts as plaintext.
+    """
+
+    def _is_plaintext(value: SecretValue) -> bool:
+        if not isinstance(value, str) or not value:
+            return False
+        if encryption_service is None:
+            return True
+        return not encryption_service.is_encrypted(value)
+
+    fields: list[str] = []
+    match config.auth:
+        case HttpAuthBearer(token=token):
+            if _is_plaintext(token):
+                fields.append("auth.token")
+        case HttpAuthApiKey(key=key):
+            if _is_plaintext(key):
+                fields.append("auth.key")
+        case HttpAuthBasicAuth(password=password):
+            if _is_plaintext(password):
+                fields.append("auth.password")
+        case HttpAuthNone():
+            pass
+
+    fields.extend(
+        f"custom_headers[{header.name}]"
+        for header in config.custom_headers
+        if header.secret and _is_plaintext(header.value)
+    )
+    return tuple(fields)
+
+
 def encrypt_authored_config(
     config: HttpAuthoredConfig,
     encryption_service: SupportsEncryption | None,
 ) -> HttpAuthoredConfig:
-    """Encrypt sensitive fields for database storage."""
+    """Encrypt sensitive fields for database storage.
+
+    Raises:
+        AuthoredSecretEncryptionUnavailableError: the config carries a plaintext
+            secret and encryption is unavailable, so storing it would write the
+            credential to the database in the clear.
+    """
     if encryption_service is None or not encryption_service.is_active():
+        unprotected = plaintext_secret_fields(config, encryption_service)
+        if unprotected:
+            raise AuthoredSecretEncryptionUnavailableError(unprotected)
         return config
 
     def _encrypt(value: SecretValue) -> SecretValue:

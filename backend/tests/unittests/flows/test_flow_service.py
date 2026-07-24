@@ -47,6 +47,22 @@ class _FakeEncryptionService:
         return ciphertext.removeprefix("enc:")
 
 
+class _InactiveEncryptionService:
+    """Deployment without ENCRYPTION_KEY: ciphertext is still recognizable."""
+
+    def is_active(self) -> bool:
+        return False
+
+    def is_encrypted(self, value: str) -> bool:
+        return value.startswith("enc:")
+
+    def encrypt(self, plaintext: str) -> str:
+        raise AssertionError("should not be called")
+
+    def decrypt(self, ciphertext: str) -> str:
+        return ciphertext.removeprefix("enc:")
+
+
 def _step(step_order: int = 1) -> FlowStep:
     return FlowStep(
         id=uuid4(),
@@ -1384,6 +1400,76 @@ async def test_create_flow_encrypts_authored_http_secret_values(user):
     assert input_config["auth"]["token"] == "enc:Bearer topsecret"
     assert input_config["custom_headers"][0]["value"] == "visible"
     assert output_config["auth"]["key"] == "enc:abc123"
+
+
+@pytest.mark.asyncio
+async def test_create_flow_rejects_http_secret_when_encryption_inactive(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_InactiveEncryptionService(),
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://example.org/input",
+                "auth": {"mode": "bearer_token", "token": "Bearer topsecret"},
+            },
+        }
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+    assert "ENCRYPTION_KEY" in str(excinfo.value)
+    assert "topsecret" not in str(excinfo.value)
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_persists_secret_free_http_config_when_encryption_inactive(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_InactiveEncryptionService(),
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://example.org/input",
+                "auth": {"mode": "none"},
+                "custom_headers": [
+                    {"name": "X-Trace", "value": "visible", "secret": False}
+                ],
+            },
+        }
+    )
+
+    created = await service.create_flow(
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        metadata_json=None,
+    )
+
+    assert created.steps[0].input_config["custom_headers"][0]["value"] == "visible"
 
 
 @pytest.mark.asyncio

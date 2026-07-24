@@ -26,6 +26,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
+from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
@@ -45,6 +46,7 @@ from eneo.flows.flow_validators import (
     validate_variable_alias_collisions,
 )
 from eneo.flows.http_transport import (
+    AuthoredSecretEncryptionUnavailableError,
     HttpAuthoredConfig,
     contains_secret_sentinel,
     encrypt_authored_config,
@@ -656,8 +658,16 @@ class FlowService:
         return [
             step.model_copy(
                 update={
-                    "input_config": self._encrypt_config(step.input_config),
-                    "output_config": self._encrypt_config(step.output_config),
+                    "input_config": self._encrypt_config(
+                        step.input_config,
+                        step_order=step.step_order,
+                        label="input_config",
+                    ),
+                    "output_config": self._encrypt_config(
+                        step.output_config,
+                        step_order=step.step_order,
+                        label="output_config",
+                    ),
                 },
                 deep=True,
             )
@@ -665,15 +675,28 @@ class FlowService:
         ]
 
     def _encrypt_config(
-        self, config: FlowPersistedJsonObject | None
+        self,
+        config: FlowPersistedJsonObject | None,
+        *,
+        step_order: int,
+        label: str,
     ) -> FlowPersistedJsonObject | None:
         if config is None:
             return config
-        if is_authored_config(config):
-            authored = HttpAuthoredConfig.model_validate(config)
+        if not is_authored_config(config):
+            return config
+        authored = HttpAuthoredConfig.model_validate(config)
+        try:
             encrypted = encrypt_authored_config(authored, self.encryption_service)
-            return encrypted.model_dump(mode="json")
-        return config
+        except AuthoredSecretEncryptionUnavailableError as exc:
+            raise FlowStepValidationError(
+                f"Step {step_order}: {label} carries HTTP credentials "
+                f"({', '.join(exc.secret_fields)}) that cannot be stored while "
+                "credential encryption is inactive. Configure ENCRYPTION_KEY, or "
+                "remove the credentials, before saving this step.",
+                step_order=step_order,
+            ) from exc
+        return encrypted.model_dump(mode="json")
 
     def _merge_step_secrets(
         self,

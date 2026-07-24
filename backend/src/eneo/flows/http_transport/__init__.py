@@ -22,6 +22,7 @@ from eneo.flows.http_transport.compiler import (
     compile_http_config,
 )
 from eneo.flows.http_transport.errors import (
+    AuthoredSecretEncryptionUnavailableError,
     HttpTemplateInterpolationError,
     HttpTransportError,
 )
@@ -36,6 +37,7 @@ from eneo.flows.http_transport.secret_codec import (
 from eneo.flows.http_transport.validator import validate_authored_config
 
 __all__ = [
+    "AuthoredSecretEncryptionUnavailableError",
     "CustomHeader",
     "EffectiveHttpRequest",
     "HttpAuth",

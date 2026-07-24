@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -19,3 +20,20 @@ class HttpTransportError(str, Enum):
 
 class HttpTemplateInterpolationError(Exception):
     """Raised when authored HTTP template interpolation cannot resolve a value."""
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoredSecretEncryptionUnavailableError(Exception):
+    """Raised when a plaintext authored secret cannot be encrypted before storage.
+
+    ``secret_fields`` names the offending fields (never their values) so callers
+    can tell the operator which credentials blocked the write.
+    """
+
+    secret_fields: tuple[str, ...]
+
+    def __str__(self) -> str:
+        return (
+            "Authored HTTP secrets cannot be stored while encryption is inactive: "
+            f"{', '.join(self.secret_fields)}."
+        )

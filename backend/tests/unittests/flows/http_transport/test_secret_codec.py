@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
     CustomHeader,
@@ -13,6 +15,7 @@ from eneo.flows.http_transport.authored_config import (
     HttpBody,
     HttpBodyMode,
 )
+from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
 from eneo.flows.http_transport.secret_codec import (
     decrypt_authored_config,
     encrypt_authored_config,
@@ -42,11 +45,15 @@ class _FakeEncryption:
 
 @dataclass
 class _InactiveEncryption:
+    """No key configured. Ciphertext is still recognizable by its prefix."""
+
+    prefix: str = "ENC:"
+
     def is_active(self) -> bool:
         return False
 
     def is_encrypted(self, value: str) -> bool:
-        return False
+        return value.startswith(self.prefix)
 
     def encrypt(self, plaintext: str) -> str:
         raise AssertionError("should not be called")
@@ -124,20 +131,75 @@ def test_encrypt_skips_already_encrypted_values() -> None:
     assert result.auth.token == "ENC:already"  # not double-encrypted
 
 
-def test_encrypt_with_none_service_returns_unchanged() -> None:
+def test_encrypt_with_none_service_rejects_plaintext_secret() -> None:
     cfg = _config(auth=HttpAuthBearer(token="my-token"))
 
-    result = encrypt_authored_config(cfg, None)
+    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
+        encrypt_authored_config(cfg, None)
 
-    assert result.auth.token == "my-token"
+    assert excinfo.value.secret_fields == ("auth.token",)
+    assert "my-token" not in str(excinfo.value)
 
 
-def test_encrypt_with_inactive_service_returns_unchanged() -> None:
-    cfg = _config(auth=HttpAuthBearer(token="my-token"))
+@pytest.mark.parametrize(
+    ("auth", "expected_field"),
+    [
+        (HttpAuthBearer(token="my-token"), "auth.token"),
+        (HttpAuthApiKey(header_name="X-Key", key="my-key"), "auth.key"),
+        (HttpAuthBasicAuth(username="alice", password="my-pass"), "auth.password"),
+    ],
+)
+def test_encrypt_with_inactive_service_rejects_each_auth_mode(
+    auth: HttpAuthBearer | HttpAuthApiKey | HttpAuthBasicAuth,
+    expected_field: str,
+) -> None:
+    cfg = _config(auth=auth)
+
+    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
+        encrypt_authored_config(cfg, _InactiveEncryption())
+
+    assert excinfo.value.secret_fields == (expected_field,)
+
+
+def test_encrypt_with_inactive_service_rejects_secret_custom_header() -> None:
+    cfg = _config(
+        custom_headers=[
+            CustomHeader(name="X-Secret", value="secret-val", secret=True),
+            CustomHeader(name="X-Public", value="public-val", secret=False),
+        ]
+    )
+
+    with pytest.raises(AuthoredSecretEncryptionUnavailableError) as excinfo:
+        encrypt_authored_config(cfg, _InactiveEncryption())
+
+    assert excinfo.value.secret_fields == ("custom_headers[X-Secret]",)
+
+
+def test_encrypt_with_inactive_service_allows_secret_free_config() -> None:
+    cfg = _config(
+        auth=HttpAuthNone(),
+        custom_headers=[CustomHeader(name="X-Public", value="public", secret=False)],
+    )
 
     result = encrypt_authored_config(cfg, _InactiveEncryption())
 
-    assert result.auth.token == "my-token"
+    assert result == cfg
+
+
+def test_encrypt_with_inactive_service_allows_already_encrypted_secret() -> None:
+    cfg = _config(auth=HttpAuthBearer(token="ENC:stored"))
+
+    result = encrypt_authored_config(cfg, _InactiveEncryption())
+
+    assert result.auth.token == "ENC:stored"
+
+
+def test_encrypt_with_inactive_service_allows_unresolved_sentinel() -> None:
+    cfg = _config(auth=HttpAuthBearer(token=SECRET_SENTINEL))
+
+    result = encrypt_authored_config(cfg, _InactiveEncryption())
+
+    assert result.auth.token == SECRET_SENTINEL
 
 
 # --- decrypt_authored_config ---
