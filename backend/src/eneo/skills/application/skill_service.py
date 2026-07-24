@@ -31,8 +31,10 @@ from eneo.skills.domain.skill import (
     SkillRevisionConflictError,
     SkillRevisionPage,
     SkillRevisionRestore,
+    SkillRuntimeResolution,
     SkillSlugConflictError,
     SkillStatusChange,
+    SkillTurnPlan,
     compose_skill_instructions,
     parse_skill_revision_cursor,
     validate_skill_slug,
@@ -744,17 +746,24 @@ class SkillService:
             skill_ids=[binding.skill_id for binding in bindings],
         )
 
-    async def _exclude_execution_blocks(
+    async def _resolve_execution_blocks(
         self,
         *,
         tenant_id: UUID,
         bindings: list[ResolvedSkillBinding],
-    ) -> list[ResolvedSkillBinding]:
+    ) -> SkillRuntimeResolution:
         blocks = await self._active_execution_blocks(
             tenant_id=tenant_id,
             bindings=bindings,
         )
-        return [binding for binding in bindings if binding.skill_id not in blocks]
+        return SkillRuntimeResolution(
+            eligible=tuple(
+                binding for binding in bindings if binding.skill_id not in blocks
+            ),
+            blocked=tuple(
+                binding for binding in bindings if binding.skill_id in blocks
+            ),
+        )
 
     async def _require_execution_allowed(
         self,
@@ -774,27 +783,52 @@ class SkillService:
                     binding=binding,
                 )
 
-    async def list_governance_bindings_for_runtime(
+    async def resolve_governance_bindings_for_runtime(
         self,
         *,
         policy_id: UUID,
-    ) -> list[ResolvedSkillBinding]:
+    ) -> SkillRuntimeResolution:
         bindings = await self.repo.list_policy_bindings(policy_id=policy_id)
-        return await self._exclude_execution_blocks(
+        return await self._resolve_execution_blocks(
             tenant_id=self.user.tenant_id,
             bindings=bindings,
+        )
+
+    async def resolve_assistant_bindings_for_runtime(
+        self,
+        *,
+        assistant_id: UUID,
+    ) -> SkillRuntimeResolution:
+        bindings = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
+        return await self._resolve_execution_blocks(
+            tenant_id=self.user.tenant_id,
+            bindings=bindings,
+        )
+
+    async def create_turn_plan(
+        self,
+        *,
+        base_instructions: str,
+        resolution: SkillRuntimeResolution,
+    ) -> SkillTurnPlan:
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=self.user.tenant_id
+        )
+        return SkillTurnPlan.create_eager(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=policy,
         )
 
     async def compose_for_assistant(
         self, *, assistant_id: UUID, base_instructions: str
     ) -> SkillComposition:
-        bindings = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
-        bindings = await self._exclude_execution_blocks(
-            tenant_id=self.user.tenant_id,
-            bindings=bindings,
+        resolution = await self.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant_id
         )
         return compose_skill_instructions(
-            base_instructions=base_instructions, bindings=bindings
+            base_instructions=base_instructions,
+            bindings=list(resolution.eligible),
         )
 
     async def compose_for_app(
@@ -889,7 +923,10 @@ class SkillService:
     async def compose_for_policy(
         self, *, policy_id: UUID, base_instructions: str
     ) -> SkillComposition:
-        bindings = await self.list_governance_bindings_for_runtime(policy_id=policy_id)
+        resolution = await self.resolve_governance_bindings_for_runtime(
+            policy_id=policy_id
+        )
         return compose_skill_instructions(
-            base_instructions=base_instructions, bindings=bindings
+            base_instructions=base_instructions,
+            bindings=list(resolution.eligible),
         )

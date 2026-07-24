@@ -31,6 +31,9 @@ class Questions(BasePublic):
     skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(
         JSONB, nullable=True
     )
+    skill_activation: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(

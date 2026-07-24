@@ -5,11 +5,13 @@ from unittest.mock import patch
 from PIL import Image
 
 from eneo.tokens.token_utils import (
+    TokenCountSource,
     count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
     count_tool_tokens,
     log_token_count_drift,
+    measure_message_tokens,
 )
 
 
@@ -111,6 +113,24 @@ def test_count_message_tokens_fallback_when_litellm_fails():
 
     # len//4 for the text + flat image estimate + per-message overhead
     assert tokens == 100 + 4 + 1105 + 4
+
+
+def test_measure_message_tokens_reports_litellm_or_named_fallback_source():
+    messages = [{"role": "system", "content": "System instructions"}]
+
+    measured = measure_message_tokens(messages, "openai/gpt-4o")
+
+    assert measured.tokens == count_message_tokens(messages, "openai/gpt-4o")
+    assert measured.source is TokenCountSource.LITELLM
+
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ):
+        fallback = measure_message_tokens(messages, "openai/gpt-4o")
+
+    assert fallback.tokens > 0
+    assert fallback.source is TokenCountSource.FALLBACK_ESTIMATE
 
 
 def test_count_tool_tokens_fallback_when_litellm_fails():

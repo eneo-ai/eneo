@@ -273,7 +273,12 @@ class QuestionRepository:
         mcp_tool_references: list["McpToolReference"] | None = None,
     ):
         question_values = question.model_dump(
-            exclude={"info_blobs", "logging_details", "skill_provenance"}
+            exclude={
+                "info_blobs",
+                "logging_details",
+                "skill_provenance",
+                "skill_activation",
+            }
         )
         if question.skill_provenance:
             question_values["skill_provenance"] = question.model_dump(
@@ -281,6 +286,11 @@ class QuestionRepository:
             )["skill_provenance"]
         else:
             question_values["skill_provenance"] = None
+        question_values["skill_activation"] = (
+            question.skill_activation.model_dump(mode="json")
+            if question.skill_activation is not None
+            else None
+        )
         stmt = sa.insert(Questions).values(**question_values).returning(Questions)
 
         stmt = self._add_options(stmt)

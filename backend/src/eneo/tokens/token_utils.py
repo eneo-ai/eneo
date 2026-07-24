@@ -16,6 +16,8 @@ is expensive to build just for counting.
 import base64
 import io
 import logging
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Optional, cast
 
 import litellm
@@ -34,6 +36,17 @@ _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 # Fallback when an image's dimensions cannot be read: the cost of a 2048×1024
 # upload (files are stored downscaled to at most 2048px on the long edge).
 _FALLBACK_IMAGE_TOKENS = openai_image_tokens(2048, 1024)
+
+
+class TokenCountSource(StrEnum):
+    LITELLM = "litellm"
+    FALLBACK_ESTIMATE = "fallback_estimate"
+
+
+@dataclass(frozen=True)
+class TokenCount:
+    tokens: int
+    source: TokenCountSource
 
 
 def count_image_tokens(width: int, height: int, model_name: str = "") -> int:
@@ -144,27 +157,40 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
-def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -> int:
-    """Count tokens for OpenAI-format chat messages.
+def measure_message_tokens(
+    messages: list[dict[str, Any]], model_name: str = ""
+) -> TokenCount:
+    """Measure OpenAI-format chat messages and identify the counter used.
 
     Includes per-message scaffolding overhead and image_url content blocks,
     so the input must have the same shape as the payload sent to the provider.
     """
     if not messages:
-        return 0
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
     try:
         stripped, image_tokens = _split_image_blocks(messages, model_name)
         text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
             model=model_name, messages=stripped
         )
-        return text_tokens + image_tokens
+        return TokenCount(
+            tokens=text_tokens + image_tokens,
+            source=TokenCountSource.LITELLM,
+        )
     except Exception as e:
         logger.error(
             f"Message token counting failed for model '{model_name}' "
             f"({len(messages)} messages), using fallback estimate: {e}"
         )
-        return _fallback_message_tokens(messages)
+        return TokenCount(
+            tokens=_fallback_message_tokens(messages),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
+
+
+def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -> int:
+    """Count tokens for OpenAI-format chat messages."""
+    return measure_message_tokens(messages, model_name).tokens
 
 
 def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
