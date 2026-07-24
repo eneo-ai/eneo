@@ -435,9 +435,8 @@ async def get_space_applications(
     service = container.space_service()
     assembler = container.space_assembler()
 
-    space = await service.get_space(id)
-
-    return assembler.from_space_to_model(space).applications
+    projection = await service.get_applications_projection(id)
+    return assembler.from_applications_projection(projection)
 
 
 @router.post(

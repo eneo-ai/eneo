@@ -1,8 +1,18 @@
+from collections.abc import MutableMapping
+from typing import cast
 from unittest.mock import MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.actors import SpaceAction, SpaceActor, SpaceResourceType
+from eneo.actors import (
+    ActorFactory,
+    ActorManager,
+    SpaceAction,
+    SpaceActor,
+    SpaceResourceType,
+)
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.modules.module import Modules
 from eneo.roles.permissions import Permission
 
@@ -78,6 +88,119 @@ class MockPermission:
     SERVICES = "services"
 
 
+def _actor(user, space: MockSpace) -> SpaceActor:
+    facts = SpaceAccessFacts(
+        id=space.id,
+        user_id=space.user_id,
+        tenant_space_id=space.tenant_space_id,
+        members={
+            member.id: SpaceRoleFact(id=member.id, role=member.role)
+            for member in space.members.values()
+        },
+        group_members={
+            member.id: SpaceRoleFact(id=member.id, role=member.role)
+            for member in space.group_members.values()
+        },
+        default_assistant_id=None,
+        assistant_ids=frozenset(
+            assistant.id for assistant in getattr(space, "assistants", ())
+        ),
+        app_ids=frozenset(app.id for app in getattr(space, "apps", ())),
+    )
+    return SpaceActor(user, facts)
+
+
+def test_space_access_facts_seal_member_snapshots() -> None:
+    member_id = uuid4()
+    source_members = {member_id: SpaceRoleFact(id=member_id, role=MockSpaceRole.VIEWER)}
+    facts = SpaceAccessFacts(
+        id=uuid4(),
+        user_id=None,
+        tenant_space_id=uuid4(),
+        members=source_members,
+        group_members={},
+        default_assistant_id=None,
+        assistant_ids=frozenset(),
+        app_ids=frozenset(),
+    )
+
+    source_members[member_id] = SpaceRoleFact(
+        id=member_id,
+        role=MockSpaceRole.ADMIN,
+    )
+
+    assert facts.members[member_id].role == MockSpaceRole.VIEWER
+    mutable_view = cast(MutableMapping[UUID, SpaceRoleFact], facts.members)
+    with pytest.raises(TypeError):
+        mutable_view[member_id] = SpaceRoleFact(
+            id=member_id,
+            role=MockSpaceRole.ADMIN,
+        )
+
+
+def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
+    space_id = uuid4()
+    user_id = uuid4()
+    tenant_space_id = uuid4()
+    member_id = uuid4()
+    group_id = uuid4()
+    default_assistant_id = uuid4()
+    assistant_id = uuid4()
+    app_id = uuid4()
+    space = MagicMock(
+        id=space_id,
+        user_id=user_id,
+        tenant_space_id=tenant_space_id,
+        members={
+            member_id: MagicMock(id=member_id, role=MockSpaceRole.ADMIN),
+        },
+        group_members={
+            group_id: MagicMock(id=group_id, role=MockSpaceRole.EDITOR),
+        },
+        default_assistant=MagicMock(id=default_assistant_id),
+        assistants=[
+            MagicMock(id=default_assistant_id),
+            MagicMock(id=assistant_id),
+        ],
+        apps=[MagicMock(id=app_id), MagicMock(id=None)],
+    )
+
+    facts = SpaceAccessFacts.from_space(space)
+
+    assert facts.id == space_id
+    assert facts.user_id == user_id
+    assert facts.tenant_space_id == tenant_space_id
+    assert facts.members[member_id].role == MockSpaceRole.ADMIN
+    assert facts.group_members[group_id].role == MockSpaceRole.EDITOR
+    assert facts.default_assistant_id == default_assistant_id
+    assert facts.assistant_ids == frozenset({default_assistant_id, assistant_id})
+    assert facts.app_ids == frozenset({app_id})
+
+
+def test_actor_manager_adapts_full_space_to_canonical_access_facts() -> None:
+    user = MockUser(id=uuid4())
+    space = MagicMock(
+        id=uuid4(),
+        user_id=user.id,
+        tenant_space_id=uuid4(),
+        members={},
+        group_members={},
+        default_assistant=None,
+        assistants=[],
+        apps=[],
+    )
+    manager = ActorManager(user, ActorFactory())
+
+    actor_from_space = manager.get_space_actor_from_space(space)
+    direct_facts = SpaceAccessFacts.from_space(space)
+    actor_from_facts = manager.get_space_actor(direct_facts)
+
+    assert actor_from_space.space == direct_facts
+    assert actor_from_facts.space is direct_facts
+    assert actor_from_space.can_read_space()
+    assert actor_from_facts.can_read_space()
+
+
 @pytest.fixture()
 def owner_user():
     return MockUser(id=1)
@@ -125,7 +248,7 @@ def shared_space(organization_space, viewer_user, editor_user, admin_user):
 
 
 def test_owner_can_read_personal_space(owner_user: MockUser, personal_space: MockSpace):
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert actor.can_perform_action(
         action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
     )
@@ -134,7 +257,7 @@ def test_owner_can_read_personal_space(owner_user: MockUser, personal_space: Moc
 def test_owner_cannot_edit_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
@@ -144,7 +267,7 @@ def test_owner_cannot_edit_personal_space(
 
 
 def test_admin_can_edit_shared_space(admin_user: MockUser, shared_space: MockSpace):
-    actor = SpaceActor(admin_user, shared_space)
+    actor = _actor(admin_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
@@ -156,7 +279,7 @@ def test_admin_can_edit_shared_space(admin_user: MockUser, shared_space: MockSpa
 def test_editor_cannot_edit_shared_space(
     editor_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(editor_user, shared_space)
+    actor = _actor(editor_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
@@ -168,7 +291,7 @@ def test_editor_cannot_edit_shared_space(
 def test_viewer_cannot_edit_shared_space(
     editor_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(editor_user, shared_space)
+    actor = _actor(editor_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
@@ -181,7 +304,7 @@ def test_owner_can_not_create_services_without_services_permission(
     owner_user: MockUser, personal_space: MockSpace
 ):
     owner_user.modules.append(Modules.ENEO_APPLICATIONS)
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE, resource_type=SpaceResourceType.SERVICE
@@ -190,7 +313,7 @@ def test_owner_can_not_create_services_without_services_permission(
     )
 
     owner_user.permissions.add(MockPermission.SERVICES)
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE, resource_type=SpaceResourceType.SERVICE
@@ -203,7 +326,7 @@ def test_owner_can_not_create_services_without_applications_modules(
     owner_user: MockUser, personal_space: MockSpace
 ):
     owner_user.permissions.add(MockPermission.SERVICES)
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE, resource_type=SpaceResourceType.SERVICE
@@ -215,7 +338,7 @@ def test_owner_can_not_create_services_without_applications_modules(
 def test_no_one_can_publish_apps_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.PUBLISH, resource_type=SpaceResourceType.APP
@@ -228,7 +351,7 @@ def test_no_one_can_publish_services_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
     owner_user.modules.append(Modules.ENEO_APPLICATIONS)
-    actor = SpaceActor(owner_user, personal_space)
+    actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.PUBLISH, resource_type=SpaceResourceType.SERVICE
@@ -242,7 +365,7 @@ def test_viewers_can_only_read_published_resources(
 ):
     resource = MagicMock(published=False)
     viewer_user.modules.append(Modules.ENEO_APPLICATIONS)
-    viewer = SpaceActor(viewer_user, shared_space)
+    viewer = _actor(viewer_user, shared_space)
 
     assert (
         viewer.can_perform_action(
@@ -357,7 +480,7 @@ def test_user_can_access_space_via_group_membership(
     group_member_user: MockUser, space_with_group_admin: MockSpace
 ):
     """Test that a user can access a space through group membership."""
-    actor = SpaceActor(group_member_user, space_with_group_admin)
+    actor = _actor(group_member_user, space_with_group_admin)
     assert actor.can_perform_action(
         action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
     )
@@ -367,7 +490,7 @@ def test_group_admin_can_edit_space(
     group_member_user: MockUser, space_with_group_admin: MockSpace
 ):
     """Test that a user with admin role via group can edit the space."""
-    actor = SpaceActor(group_member_user, space_with_group_admin)
+    actor = _actor(group_member_user, space_with_group_admin)
     assert actor.can_perform_action(
         action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
     )
@@ -377,7 +500,7 @@ def test_group_editor_cannot_edit_space(
     group_member_user: MockUser, space_with_group_editor: MockSpace
 ):
     """Test that a user with editor role via group cannot edit the space."""
-    actor = SpaceActor(group_member_user, space_with_group_editor)
+    actor = _actor(group_member_user, space_with_group_editor)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT, resource_type=SpaceResourceType.SPACE
@@ -390,7 +513,7 @@ def test_group_viewer_can_only_read(
     group_member_user: MockUser, space_with_group_viewer: MockSpace
 ):
     """Test that a user with viewer role via group can only read."""
-    actor = SpaceActor(group_member_user, space_with_group_viewer)
+    actor = _actor(group_member_user, space_with_group_viewer)
 
     # Can read the space
     assert actor.can_perform_action(
@@ -411,7 +534,7 @@ def test_highest_role_is_used_with_multiple_groups(
 ):
     """Test that when a user is in multiple groups, the highest role is used."""
     # User is in groups 100 (viewer), 200 (editor), 300 (admin)
-    actor = SpaceActor(multi_group_user, space_with_multiple_groups)
+    actor = _actor(multi_group_user, space_with_multiple_groups)
 
     # Should have admin privileges (highest role)
     assert actor.can_perform_action(
@@ -435,7 +558,7 @@ def test_direct_membership_overrides_group_membership(organization_space):
         id="space-mixed",
     )
 
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
 
     # Should have admin privileges (highest from group)
     assert actor.can_perform_action(
@@ -448,7 +571,7 @@ def test_user_without_membership_cannot_access(
 ):
     """Test that a user without any membership cannot access the space."""
     # User is only in group 100, but shared_space has no group members
-    actor = SpaceActor(group_member_user, shared_space)
+    actor = _actor(group_member_user, shared_space)
 
     # Should not have any access (user 10 is not a direct member or in any group)
     assert (
@@ -463,7 +586,7 @@ def test_group_admin_can_manage_group_members(
     group_member_user: MockUser, space_with_group_admin: MockSpace
 ):
     """Test that admin via group can manage group members."""
-    actor = SpaceActor(group_member_user, space_with_group_admin)
+    actor = _actor(group_member_user, space_with_group_admin)
 
     assert actor.can_perform_action(
         action=SpaceAction.READ, resource_type=SpaceResourceType.GROUP_MEMBER
@@ -483,7 +606,7 @@ def test_group_editor_cannot_manage_group_members(
     group_member_user: MockUser, space_with_group_editor: MockSpace
 ):
     """Test that editor via group cannot manage group members."""
-    actor = SpaceActor(group_member_user, space_with_group_editor)
+    actor = _actor(group_member_user, space_with_group_editor)
 
     # Editors have no group member permissions
     assert (
@@ -542,7 +665,7 @@ def test_service_key_tenant_scoped_grants_viewer():
     key = MockServiceKey("tenant", None, "read")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
 
 
@@ -550,7 +673,7 @@ def test_service_key_tenant_scoped_admin_grants_edit():
     key = MockServiceKey("tenant", None, "admin")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_edit_space()
 
 
@@ -558,7 +681,7 @@ def test_service_key_space_scoped_matching():
     key = MockServiceKey("space", "s1", "read")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
 
 
@@ -566,7 +689,7 @@ def test_service_key_space_scoped_non_matching():
     key = MockServiceKey("space", "s1", "read")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="other")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert not actor.can_read_space()
 
 
@@ -580,7 +703,7 @@ def test_service_key_assistant_scoped_matching():
         id="s1",
         assistants=[MockAssistant("asst-1")],
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_read_assistants()
 
@@ -595,7 +718,7 @@ def test_service_key_assistant_scoped_non_matching():
         id="s1",
         assistants=[MockAssistant("asst-1")],
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert not actor.can_read_space()
 
 
@@ -604,7 +727,7 @@ def test_service_key_tenant_scoped_write_grants_editor():
     key = MockServiceKey("tenant", None, "write")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_read_assistants()
     assert actor.can_create_assistants()
@@ -624,7 +747,7 @@ def test_service_key_app_scoped_matching():
         id="s1",
         apps=[MockApp("app-1")],
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_read_apps()
 
@@ -639,7 +762,7 @@ def test_service_key_app_scoped_non_matching():
         id="s1",
         apps=[MockApp("app-1")],
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert not actor.can_read_space()
 
 
@@ -649,7 +772,7 @@ def test_user_key_does_not_trigger_service_role():
     key = MockServiceKey("tenant", None, "admin", ownership="user")
     user = MockServiceUser(id=99, active_api_key=key)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     # User has no membership → should be denied even though key has admin
     assert not actor.can_read_space()
 
@@ -658,7 +781,7 @@ def test_service_key_no_key_returns_none():
     """Regular user without active_api_key — actor should fall through."""
     user = MockUser(id=99)
     space = MockSpace(user_id=None, personal=False, tenant_space_id="org-1", id="s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     # No membership, no service key → can_read_space should be False
     assert not actor.can_read_space()
 
@@ -681,7 +804,7 @@ def test_user_key_read_caps_admin_member_to_viewer():
         members={admin_user.id: admin_user},
     )
     space.members = {user.id: MockUser(id=user.id, role="admin")}
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert not actor.can_edit_space()
     assert not actor.can_delete_space()
@@ -701,7 +824,7 @@ def test_user_key_admin_does_not_upgrade_viewer_member():
         id="s1",
         members={user.id: MockUser(id=user.id, role="viewer")},
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert not actor.can_edit_space()
     assert not actor.can_create_assistants()
@@ -718,7 +841,7 @@ def test_user_key_admin_matches_admin_member():
         id="s1",
         members={user.id: MockUser(id=user.id, role="admin")},
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_edit_space()
     assert actor.can_delete_space()
@@ -737,7 +860,7 @@ def test_user_key_scope_not_covering_space_denies_access():
         id="space-A",
         members={user.id: MockUser(id=user.id, role="admin")},
     )
-    actor = SpaceActor(user, space_a)
+    actor = _actor(user, space_a)
     assert not actor.can_read_space()
 
 
@@ -751,7 +874,7 @@ def test_bearer_user_without_key_keeps_full_membership_role():
         id="s1",
         members={user.id: MockUser(id=user.id, role="admin")},
     )
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_edit_space()
     assert actor.can_delete_space()
@@ -772,7 +895,7 @@ def test_personal_space_owner_with_read_key_can_still_read():
         ],
     )
     space = MockSpace(user_id=42, personal=True, id="personal-s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_space()
     assert actor.can_read_assistants()
     assert actor.can_read_apps()
@@ -798,7 +921,7 @@ def test_personal_space_owner_with_write_key_can_edit_but_not_delete():
         ],
     )
     space = MockSpace(user_id=42, personal=True, id="personal-s1")
-    actor = SpaceActor(user, space)
+    actor = _actor(user, space)
     assert actor.can_read_assistants()
     assert actor.can_create_assistants()
     assert actor.can_edit_assistants()
@@ -812,7 +935,7 @@ def test_viewer_cannot_create_integration_knowledge_in_shared_space(
     viewer_user: MockUser, shared_space: MockSpace
 ):
     """Viewers should only be able to read integration knowledge, not create."""
-    actor = SpaceActor(viewer_user, shared_space)
+    actor = _actor(viewer_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE,
@@ -825,7 +948,7 @@ def test_viewer_cannot_create_integration_knowledge_in_shared_space(
 def test_viewer_cannot_edit_integration_knowledge_in_shared_space(
     viewer_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(viewer_user, shared_space)
+    actor = _actor(viewer_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.EDIT,
@@ -838,7 +961,7 @@ def test_viewer_cannot_edit_integration_knowledge_in_shared_space(
 def test_viewer_cannot_delete_integration_knowledge_in_shared_space(
     viewer_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(viewer_user, shared_space)
+    actor = _actor(viewer_user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.DELETE,
@@ -851,7 +974,7 @@ def test_viewer_cannot_delete_integration_knowledge_in_shared_space(
 def test_viewer_can_read_integration_knowledge_in_shared_space(
     viewer_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(viewer_user, shared_space)
+    actor = _actor(viewer_user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.READ,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -861,7 +984,7 @@ def test_viewer_can_read_integration_knowledge_in_shared_space(
 def test_editor_can_create_integration_knowledge_in_shared_space(
     editor_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(editor_user, shared_space)
+    actor = _actor(editor_user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -871,7 +994,7 @@ def test_editor_can_create_integration_knowledge_in_shared_space(
 def test_editor_can_delete_integration_knowledge_in_shared_space(
     editor_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(editor_user, shared_space)
+    actor = _actor(editor_user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.DELETE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -881,7 +1004,7 @@ def test_editor_can_delete_integration_knowledge_in_shared_space(
 def test_admin_can_create_integration_knowledge_in_shared_space(
     admin_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(admin_user, shared_space)
+    actor = _actor(admin_user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -891,7 +1014,7 @@ def test_admin_can_create_integration_knowledge_in_shared_space(
 def test_admin_can_delete_integration_knowledge_in_shared_space(
     admin_user: MockUser, shared_space: MockSpace
 ):
-    actor = SpaceActor(admin_user, shared_space)
+    actor = _actor(admin_user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.DELETE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -905,7 +1028,7 @@ def test_viewer_cannot_create_integration_knowledge_in_org_space(
     viewer_user: MockUser, organization_space: MockSpace
 ):
     organization_space.members = {viewer_user.id: viewer_user}
-    actor = SpaceActor(viewer_user, organization_space)
+    actor = _actor(viewer_user, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE,
@@ -919,7 +1042,7 @@ def test_viewer_cannot_delete_integration_knowledge_in_org_space(
     viewer_user: MockUser, organization_space: MockSpace
 ):
     organization_space.members = {viewer_user.id: viewer_user}
-    actor = SpaceActor(viewer_user, organization_space)
+    actor = _actor(viewer_user, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.DELETE,
@@ -934,7 +1057,7 @@ def test_viewer_cannot_read_integration_knowledge_in_org_space(
 ):
     """Org spaces only grant permissions to admins, not viewers."""
     organization_space.members = {viewer_user.id: viewer_user}
-    actor = SpaceActor(viewer_user, organization_space)
+    actor = _actor(viewer_user, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.READ,
@@ -948,7 +1071,7 @@ def test_admin_can_read_integration_knowledge_in_org_space(
     admin_user: MockUser, organization_space: MockSpace
 ):
     organization_space.members = {admin_user.id: admin_user}
-    actor = SpaceActor(admin_user, organization_space)
+    actor = _actor(admin_user, organization_space)
     assert actor.can_perform_action(
         action=SpaceAction.READ,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -959,7 +1082,7 @@ def test_admin_can_create_integration_knowledge_in_org_space(
     admin_user: MockUser, organization_space: MockSpace
 ):
     organization_space.members = {admin_user.id: admin_user}
-    actor = SpaceActor(admin_user, organization_space)
+    actor = _actor(admin_user, organization_space)
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -973,7 +1096,7 @@ def test_group_viewer_cannot_create_integration_knowledge(
     group_member_user: MockUser, space_with_group_viewer: MockSpace
 ):
     """Viewer via group membership should not be able to create integration knowledge."""
-    actor = SpaceActor(group_member_user, space_with_group_viewer)
+    actor = _actor(group_member_user, space_with_group_viewer)
     assert (
         actor.can_perform_action(
             action=SpaceAction.CREATE,
@@ -987,7 +1110,7 @@ def test_group_editor_can_create_integration_knowledge(
     group_member_user: MockUser, space_with_group_editor: MockSpace
 ):
     """Editor via group membership should be able to create integration knowledge."""
-    actor = SpaceActor(group_member_user, space_with_group_editor)
+    actor = _actor(group_member_user, space_with_group_editor)
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -998,7 +1121,7 @@ def test_group_admin_can_create_integration_knowledge(
     group_member_user: MockUser, space_with_group_admin: MockSpace
 ):
     """Admin via group membership should be able to create integration knowledge."""
-    actor = SpaceActor(group_member_user, space_with_group_admin)
+    actor = _actor(group_member_user, space_with_group_admin)
     assert actor.can_perform_action(
         action=SpaceAction.CREATE,
         resource_type=SpaceResourceType.INTEGRATION_KNOWLEDGE,
@@ -1025,7 +1148,7 @@ def test_member_without_shared_spaces_can_read_shared_space(
         permissions=_permissions_without_shared_spaces(),
     )
     shared_space.members = {user.id: user}
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert actor.can_perform_action(
         action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
     )
@@ -1041,7 +1164,7 @@ def test_non_member_without_shared_spaces_has_no_role_on_shared_space(
         role=MockSpaceRole.ADMIN,
         permissions=_permissions_without_shared_spaces(),
     )
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
@@ -1061,7 +1184,7 @@ def test_admin_without_shared_spaces_retains_org_space_access(
         permissions=_permissions_without_shared_spaces(),
     )
     organization_space.members = {admin.id: admin}
-    actor = SpaceActor(admin, organization_space)
+    actor = _actor(admin, organization_space)
     assert actor.can_perform_action(
         action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
     )
@@ -1077,7 +1200,7 @@ def test_viewer_without_shared_spaces_has_no_org_space_access(
         permissions=_permissions_without_shared_spaces(),
     )
     organization_space.members = {viewer.id: viewer}
-    actor = SpaceActor(viewer, organization_space)
+    actor = _actor(viewer, organization_space)
     assert (
         actor.can_perform_action(
             action=SpaceAction.READ, resource_type=SpaceResourceType.SPACE
@@ -1106,7 +1229,7 @@ def test_editor_without_websites_cannot_create_website_in_shared_space(
         permissions=_permissions_without_websites(),
     )
     shared_space.members = {user.id: user}
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert actor.can_create_websites() is False
 
 
@@ -1119,7 +1242,7 @@ def test_admin_without_websites_cannot_create_website_in_shared_space(
         permissions=_permissions_without_websites(),
     )
     shared_space.members = {user.id: user}
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert actor.can_create_websites() is False
     assert actor.can_edit_websites() is False
     assert actor.can_delete_websites() is False
@@ -1136,7 +1259,7 @@ def test_editor_without_websites_can_still_read_websites_in_shared_space(
         permissions=_permissions_without_websites(),
     )
     shared_space.members = {user.id: user}
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert actor.can_read_websites() is True
 
 
@@ -1151,7 +1274,7 @@ def test_editor_with_websites_can_create_website_in_shared_space(
         permissions=ALL_PERMISSIONS,
     )
     shared_space.members = {user.id: user}
-    actor = SpaceActor(user, shared_space)
+    actor = _actor(user, shared_space)
     assert actor.can_create_websites() is True
 
 
@@ -1161,7 +1284,7 @@ def test_owner_without_websites_cannot_create_website_in_personal_space(
     """The same tenant gate also covers personal spaces."""
     owner = MockUser(id=54, permissions=_permissions_without_websites())
     personal_space.user_id = owner.id
-    actor = SpaceActor(owner, personal_space)
+    actor = _actor(owner, personal_space)
     assert actor.can_create_websites() is False
 
 
@@ -1176,7 +1299,7 @@ def test_owner_cannot_read_personal_default_assistant_without_personal_chat(
 ):
     owner = MockUser(id=60, permissions={Permission.ASSISTANTS})
     personal_space.user_id = owner.id
-    actor = SpaceActor(owner, personal_space)
+    actor = _actor(owner, personal_space)
     assert actor.can_read_default_assistant() is False
     assert actor.can_edit_default_assistant() is False
 
@@ -1186,7 +1309,7 @@ def test_owner_can_read_personal_default_assistant_with_personal_chat(
 ):
     owner = MockUser(id=61, permissions={Permission.PERSONAL_CHAT})
     personal_space.user_id = owner.id
-    actor = SpaceActor(owner, personal_space)
+    actor = _actor(owner, personal_space)
     assert actor.can_read_default_assistant() is True
     assert actor.can_edit_default_assistant() is True
 
@@ -1195,7 +1318,7 @@ def test_personal_chat_is_decoupled_from_assistants(personal_space: MockSpace):
     """PERSONAL_CHAT alone unlocks the chat; ASSISTANTS is not required."""
     owner = MockUser(id=62, permissions={Permission.PERSONAL_CHAT})
     personal_space.user_id = owner.id
-    actor = SpaceActor(owner, personal_space)
+    actor = _actor(owner, personal_space)
     assert actor.can_read_default_assistant() is True
     assert actor.can_read_assistants() is False
 
@@ -1206,7 +1329,7 @@ def test_assistants_permission_does_not_grant_personal_chat(
     """ASSISTANTS manages assistants but does not unlock the personal chat."""
     owner = MockUser(id=63, permissions={Permission.ASSISTANTS})
     personal_space.user_id = owner.id
-    actor = SpaceActor(owner, personal_space)
+    actor = _actor(owner, personal_space)
     assert actor.can_read_assistants() is True
     assert actor.can_read_default_assistant() is False
 
@@ -1219,7 +1342,7 @@ def test_personal_chat_does_not_gate_shared_space_default_assistant(
     of the PERSONAL_CHAT permission."""
     member = MockUser(id=64, role=MockSpaceRole.EDITOR, permissions=set())
     shared_space.members = {member.id: member}
-    actor = SpaceActor(member, shared_space)
+    actor = _actor(member, shared_space)
     assert actor.can_read_default_assistant() is True
 
 
@@ -1318,7 +1441,7 @@ def test_skill_actions_follow_space_role(
             members={user.id: user},
         )
 
-    assert _skill_actions(SpaceActor(user, space)) == expected
+    assert _skill_actions(_actor(user, space)) == expected
 
 
 @pytest.mark.parametrize(
@@ -1348,4 +1471,4 @@ def test_skill_actions_require_tenant_skill_permission(
             members={user.id: user},
         )
 
-    assert _skill_actions(SpaceActor(user, space)) == _NO_SKILL_ACTIONS
+    assert _skill_actions(_actor(user, space)) == _NO_SKILL_ACTIONS
