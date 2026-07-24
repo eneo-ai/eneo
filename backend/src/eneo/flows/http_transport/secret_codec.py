@@ -25,6 +25,33 @@ class SupportsEncryption(Protocol):
     def decrypt(self, ciphertext: str) -> str: ...
 
 
+def _secret_bearing_fields(
+    config: HttpAuthoredConfig,
+) -> list[tuple[str, SecretValue, bool]]:
+    """Every field that can hold a credential, as (path, value, is_declared_secret).
+
+    Custom headers appear whatever their ``secret`` flag says, because a
+    sentinel is invalid in a non-secret header too. Callers that only care
+    about declared secrets filter on the flag.
+    """
+    fields: list[tuple[str, SecretValue, bool]] = []
+    match config.auth:
+        case HttpAuthBearer(token=token):
+            fields.append(("auth.token", token, True))
+        case HttpAuthApiKey(key=key):
+            fields.append(("auth.key", key, True))
+        case HttpAuthBasicAuth(password=password):
+            fields.append(("auth.password", password, True))
+        case HttpAuthNone():
+            pass
+
+    fields.extend(
+        (f"custom_headers[{index}].value", header.value, header.secret)
+        for index, header in enumerate(config.custom_headers)
+    )
+    return fields
+
+
 def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
     """Name the declared secret fields holding a newly authored value.
 
@@ -38,61 +65,57 @@ def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
     credential through. Only the caller knows whether a value came from an
     author or from storage.
     """
-
-    def _is_authored_value(value: SecretValue) -> bool:
-        return isinstance(value, str) and bool(value)
-
-    fields: list[str] = []
-    match config.auth:
-        case HttpAuthBearer(token=token):
-            if _is_authored_value(token):
-                fields.append("auth.token")
-        case HttpAuthApiKey(key=key):
-            if _is_authored_value(key):
-                fields.append("auth.key")
-        case HttpAuthBasicAuth(password=password):
-            if _is_authored_value(password):
-                fields.append("auth.password")
-        case HttpAuthNone():
-            pass
-
-    fields.extend(
-        f"custom_headers[{index}].value"
-        for index, header in enumerate(config.custom_headers)
-        if header.secret and _is_authored_value(header.value)
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret and isinstance(value, str) and value
     )
-    return tuple(fields)
 
 
 def unresolved_secret_sentinel_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
-    """Name the declared secret fields still holding a sentinel.
+    """Name the fields still holding a sentinel.
 
     After stored secrets have been merged, a remaining sentinel resolved to
     nothing: it references a stored value that does not exist. Persisting it
     would store the sentinel itself as the credential.
     """
-    fields: list[str] = []
-    match config.auth:
-        case HttpAuthBearer(token=token):
-            if is_secret_sentinel(token):
-                fields.append("auth.token")
-        case HttpAuthApiKey(key=key):
-            if is_secret_sentinel(key):
-                fields.append("auth.key")
-        case HttpAuthBasicAuth(password=password):
-            if is_secret_sentinel(password):
-                fields.append("auth.password")
-        case HttpAuthNone():
-            pass
-
-    # Checked regardless of the secret flag: a sentinel in a non-secret header
-    # still resolved to nothing, and would otherwise be stored as the value.
-    fields.extend(
-        f"custom_headers[{index}].value"
-        for index, header in enumerate(config.custom_headers)
-        if is_secret_sentinel(header.value)
+    return tuple(
+        path
+        for path, value, _declared_secret in _secret_bearing_fields(config)
+        if is_secret_sentinel(value)
     )
-    return tuple(fields)
+
+
+def unprotected_stored_secret_fields(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the declared secret fields whose STORED value is not protected.
+
+    Unlike the authored-value checks, provenance is already known here: the
+    config was loaded from its row, so a value that carries the encryption
+    prefix really is ciphertext and the prefix is a legitimate signal. Without
+    a service nothing can be recognised as ciphertext, so every stored secret
+    counts as unprotected.
+
+    A sentinel is reported too: it is not a credential, and a definition built
+    from one would carry the sentinel where the secret belongs.
+    """
+
+    def _is_unprotected(value: SecretValue) -> bool:
+        if is_secret_sentinel(value):
+            return True
+        if not isinstance(value, str) or not value:
+            return False
+        if encryption_service is None:
+            return True
+        return not encryption_service.is_encrypted(value)
+
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret and _is_unprotected(value)
+    )
 
 
 def protect_authored_secrets(

@@ -2925,3 +2925,50 @@ async def test_create_flow_rejects_form_field_name_conflicting_with_step_name(us
                 }
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_unencrypted_stored_http_secret(user):
+    """Publishing copies stored config into an immutable version."""
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("legacy-plaintext-secret")]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    version_repo = AsyncMock()
+    version_repo.get_latest.return_value = None
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException) as excinfo:
+        await service.publish_flow(flow_id=stored.id)
+
+    assert "ENCRYPTION_KEY" in str(excinfo.value)
+    assert "legacy-plaintext-secret" not in str(excinfo.value)
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_allows_encrypted_stored_http_secret(user):
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("enc:stored-secret")]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    version_repo = AsyncMock()
+    version_repo.get_latest.return_value = None
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    await service.publish_flow(flow_id=stored.id)
+
+    version_repo.create.assert_awaited_once()

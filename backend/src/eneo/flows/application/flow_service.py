@@ -52,6 +52,7 @@ from eneo.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
     protect_authored_secrets,
+    unprotected_stored_secret_fields,
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -412,6 +413,7 @@ class FlowService:
             space_id=flow.space_id,
             steps=flow.steps,
         )
+        self._reject_unprotected_stored_secrets(flow.steps)
 
         latest = await self.flow_version_repo.get_latest(
             flow_id=flow_id,
@@ -706,6 +708,35 @@ class FlowService:
                 step_order=step_order,
             ) from exc
         return protected.model_dump(mode="json")
+
+    def _reject_unprotected_stored_secrets(self, steps: list[FlowStep]) -> None:
+        """Refuse to publish credentials that are not protected in storage.
+
+        Publishing copies the stored config into an immutable version, so an
+        unprotected credential would be duplicated into a second place it can
+        leak from. The published definition is what the runtime decrypts, so
+        the secret cannot simply be stripped here — the row has to be fixed.
+        """
+        for step in steps:
+            for label, config in (
+                ("input_config", step.input_config),
+                ("output_config", step.output_config),
+            ):
+                if config is None or not is_authored_config(config):
+                    continue
+                unprotected = unprotected_stored_secret_fields(
+                    HttpAuthoredConfig.model_validate(config),
+                    self.encryption_service,
+                )
+                if unprotected:
+                    raise FlowStepValidationError(
+                        f"Step {step.step_order}: {label} stores HTTP credentials "
+                        f"({', '.join(unprotected)}) that are not encrypted, so "
+                        "publishing would copy them into a published version. "
+                        "Configure ENCRYPTION_KEY and re-enter the credentials "
+                        "before publishing.",
+                        step_order=step.step_order,
+                    )
 
     def _reject_unresolved_secret_sentinels(self, steps: list[FlowStep]) -> None:
         """Refuse sentinels that resolved to no stored credential.
