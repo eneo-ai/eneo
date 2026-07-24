@@ -377,35 +377,39 @@ class ObjectContentService:
         range_header: str | None = None,
     ) -> AsyncGenerator[ContentRead]:
         async with self._database.session() as session, session.begin():
-            repository = ObjectContentRepository(session)
-            content = await repository.get_readable(
-                content_id=grant.content_id,
-                tenant_id=grant.tenant_id,
-                access_class=grant.access_class,
+            sources = await ObjectContentRepository(session).get_readable_sources(
+                [grant]
             )
-            inline_payload = (
-                await repository.get_inline_payload(content.content_id)
-                if content.storage_kind is StorageKind.POSTGRES_INLINE
-                else None
-            )
-            object_store_descriptor = (
-                await repository.get_object_store_descriptor(content.content_id)
-                if content.storage_kind is StorageKind.OBJECT_STORE
-                else None
-            )
+        source = sources[grant.content_id]
         byte_range = (
             None
             if range_header is None
-            else ByteRange.parse(range_header, size_bytes=content.size_bytes)
+            else ByteRange.parse(
+                range_header,
+                size_bytes=source.content.size_bytes,
+            )
         )
+        async with self._open_readable_source(
+            source,
+            byte_range=byte_range,
+        ) as opened:
+            yield opened
 
+    @asynccontextmanager
+    async def _open_readable_source(
+        self,
+        source: ReadableContentSource,
+        *,
+        byte_range: ByteRange | None = None,
+    ) -> AsyncGenerator[ContentRead]:
+        content = source.content
         match content.storage_kind:
             case StorageKind.POSTGRES_INLINE:
-                if inline_payload is None:
+                if source.inline_payload is None:
                     raise RuntimeError("Inline content dispatch lost its payload")
                 try:
                     async with self._inline_store.open_verified_read(
-                        inline_payload,
+                        source.inline_payload,
                         expected_sha256=content.sha256,
                         expected_size_bytes=content.size_bytes,
                         expected_media_type=content.media_type,
@@ -419,14 +423,14 @@ class ObjectContentService:
                     )
                     raise
             case StorageKind.OBJECT_STORE:
-                if object_store_descriptor is None:
+                if source.object_store_descriptor is None:
                     raise RuntimeError(
                         "Object-store content dispatch lost its descriptor"
                     )
                 _settings, store = self._require_object_store()
                 try:
                     async with store.open_verified_read(
-                        object_store_descriptor.object_key,
+                        source.object_store_descriptor.object_key,
                         expected_sha256=content.sha256,
                         expected_size_bytes=content.size_bytes,
                         expected_media_type=content.media_type,
@@ -458,11 +462,11 @@ class ObjectContentService:
         self,
         grants: Sequence[ContentReadGrant],
     ) -> dict[UUID, bytes]:
-        """Materialize authorized content with one inline query per bounded page.
+        """Materialize authorized content with one source query per bounded page.
 
-        PostgreSQL-inline controls and payloads are loaded and access-validated
-        together. Object-store content keeps the verified streaming path behind
-        ``open_content``; callers do not branch on storage placement.
+        Controls plus inline payloads or private object-store descriptors are
+        loaded and access-validated together. Both storage kinds then use the
+        same verified backend dispatch; callers do not branch on placement.
         """
         unique_grants: dict[UUID, ContentReadGrant] = {}
         for grant in grants:
@@ -485,37 +489,16 @@ class ObjectContentService:
             for grant in page:
                 source = sources[grant.content_id]
                 payloads[grant.content_id] = await self._read_source_bytes(
-                    grant,
                     source,
                 )
         return payloads
 
     async def _read_source_bytes(
         self,
-        grant: ContentReadGrant,
         source: ReadableContentSource,
     ) -> bytes:
-        content = source.content
-        if content.storage_kind is StorageKind.OBJECT_STORE:
-            async with self.open_content(grant) as opened:
-                return b"".join([chunk async for chunk in opened.chunks])
-
-        if source.inline_payload is None:
-            raise ObjectContentStateError("Inline content payload is missing")
-        try:
-            async with self._inline_store.open_verified_read(
-                source.inline_payload,
-                expected_sha256=content.sha256,
-                expected_size_bytes=content.size_bytes,
-                expected_media_type=content.media_type,
-            ) as opened:
-                return b"".join([chunk async for chunk in opened.chunks])
-        except ObjectContentIntegrityError:
-            await self._mark_backend_failure(
-                content.content_id,
-                ContentFailureCode.BACKEND_CORRUPT,
-            )
-            raise
+        async with self._open_readable_source(source) as opened:
+            return b"".join([chunk async for chunk in opened.chunks])
 
     async def apply_hold(
         self,

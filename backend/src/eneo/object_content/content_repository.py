@@ -57,15 +57,16 @@ class ReadableContent:
 
 
 @dataclass(frozen=True, slots=True)
-class ReadableContentSource:
-    content: ReadableContent
-    inline_payload: bytes | None
-
-
-@dataclass(frozen=True, slots=True)
 class ObjectStoreDescriptor:
     content_id: UUID
     object_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReadableContentSource:
+    content: ReadableContent
+    inline_payload: bytes | None
+    object_store_descriptor: ObjectStoreDescriptor | None
 
 
 class ObjectContentRepository:
@@ -528,7 +529,7 @@ class ObjectContentRepository:
         self,
         grants: Sequence[ContentReadGrant],
     ) -> dict[UUID, ReadableContentSource]:
-        """Read access-validated controls and inline payloads in one query."""
+        """Read access-validated controls and byte-source facts in one query."""
         if not grants:
             return {}
 
@@ -542,10 +543,18 @@ class ObjectContentRepository:
         }
         rows = (
             await self._session.execute(
-                select(ObjectContents, InlineContentPayloads.payload)
+                select(
+                    ObjectContents,
+                    InlineContentPayloads.payload,
+                    ObjectStoreObjects.object_key,
+                )
                 .outerjoin(
                     InlineContentPayloads,
                     InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .outerjoin(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
                 )
                 .where(
                     tuple_(
@@ -559,16 +568,26 @@ class ObjectContentRepository:
         ).all()
 
         sources: dict[UUID, ReadableContentSource] = {}
-        for row, inline_payload in rows:
+        for row, inline_payload, object_key in rows:
             content = self._readable(row)
             if (
                 content.storage_kind is StorageKind.POSTGRES_INLINE
                 and inline_payload is None
             ):
                 raise ObjectContentStateError("Inline content payload is missing")
+            if content.storage_kind is StorageKind.OBJECT_STORE and object_key is None:
+                raise ObjectContentStateError("Object-store descriptor is missing")
             sources[content.content_id] = ReadableContentSource(
                 content=content,
                 inline_payload=inline_payload,
+                object_store_descriptor=(
+                    ObjectStoreDescriptor(
+                        content_id=content.content_id,
+                        object_key=object_key,
+                    )
+                    if object_key is not None
+                    else None
+                ),
             )
 
         requested_ids = {grant.content_id for grant in grants}
