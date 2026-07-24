@@ -781,7 +781,41 @@ tasks:
     stop_if:
       - "The design requires provider-loop, frozen-plan, or UI mode-control changes owned by later slices."
       - "Policy storage cannot avoid the user-bound settings row without a generic settings framework."
-    receipt: null
+    receipt:
+      result: implemented
+      summary: "Stored the typed tenant Skill runtime policy in eneo.skills with migration backfill from SKILL_MAX_BINDINGS, moved binding-limit enforcement to the stored value, removed the obsolete runtime environment interface, and exposed admin-only get/replace/reset plus per-model allowance projections with typed audit. PR #583 opened for CI and fresh review; merge pending."
+      pr: 583
+      pr_status: "opened for CI and fresh review"
+      base_commit: "80b5f377d537f81d6da0bb4f600a464e59bf63b3"
+      changed_files:
+        - "backend/.env.template"
+        - "backend/README.md"
+        - "backend/alembic/versions/202607240310_add_skill_runtime_policies.py"
+        - "backend/src/eneo/database/tables/skill_table.py"
+        - "backend/src/eneo/main/config.py"
+        - "backend/src/eneo/settings/"
+        - "backend/src/eneo/skills/"
+        - "backend/tests/"
+        - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+        - "docs/enterprise-skills-roadmap.md"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      commands:
+        - cmd: "uv run pytest -n 2 -m 'not integration' tests/"
+          result: "pass: 3812 tests"
+        - cmd: "uv run pytest tests/integration/skills/ tests/integration/governance_policy/"
+          result: "pass: 46 tests incl. two-session concurrency proofs and SELECT-only query-spy"
+        - cmd: "uv run pytest -m migration_isolation ...test_skill_runtime_policy_migration_backfills_tenants_and_round_trips"
+          result: "pass: env-seeded backfill, CHECK rejections, downgrade, re-upgrade"
+        - cmd: "ruff check/format, pyright, uv lock --check, route metadata, prettier docs"
+          result: pass
+        - cmd: "OpenAPI dump + openapi-typescript regen of eneo-js schema.d.ts"
+          result: "pass: four new admin models committed intentionally"
+      review:
+        session: "eneo-t012-runtime-policy"
+        iteration_1: ".codex/artifacts/codex-peer-loop-t012-typed-skill-runtime-policy-plan-20260724T005815Z.md; changes_required, four P1s verified and applied"
+        iteration_2: "commit gate changes_required: SELECT-only reads, env-interface removal, typed audit; all applied"
+        iteration_3: ".codex/artifacts/codex-peer-loop-t012-runtime-policy-peer-gap-fixes-20260724T014046Z.md; changes_required: ADR closure + concurrency proofs; applied"
+        iteration_4: "final gate green, GREEN_LIGHT yes, score 8"
 
   - id: T999
     type: judge
