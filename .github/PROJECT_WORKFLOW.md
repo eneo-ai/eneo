@@ -288,8 +288,8 @@ or an internal exporter field never adds it to public JSON automatically.
 Schema version 1 exposes these item fields:
 
 - `number`, `url`, `title`, and the complete Epic `Summary`;
-- Project `status`, `roadmapVersion`, `area`, `priority`, `startDate`, and
-  `targetDate`;
+- Project `status`, `roadmapVersion`, `area`, `priority`, `sponsor`,
+  `startDate`, and `targetDate`;
 - `group`: `in_progress`, `next`, `later`, or `delivered`.
 
 The envelope also exposes `unpublishedItemCount`. It counts epic-level Project

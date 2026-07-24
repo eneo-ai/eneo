@@ -210,6 +210,7 @@ function renderPublicJson(epics, context) {
       priority: epic.priority,
       startDate: epic.startDate,
       targetDate: epic.targetDate,
+      sponsor: epic.sponsor,
       group: publicRoadmapGroup(epic, nextVersionRank),
     }))
     .sort((left, right) => (
@@ -1173,6 +1174,7 @@ function runSelfTest() {
     "number",
     "priority",
     "roadmapVersion",
+    "sponsor",
     "startDate",
     "status",
     "summary",
@@ -1203,6 +1205,10 @@ function runSelfTest() {
   assert.equal(publicJson.items.find((epic) => epic.number === 103).group, "later");
   assert.equal(publicJson.items.find((epic) => epic.number === 105).group, "delivered");
   assert.equal(publicJson.items.find((epic) => epic.number === 106).group, "later");
+  assert.equal(
+    publicJson.items.find((epic) => epic.number === 101).sponsor,
+    "Sundsvalls kommun verksamhetsstod",
+  );
   assert.equal(
     publicJson.items.find((epic) => epic.number === 101).summary,
     "People can use a safer personal chat.\n\nThe rollout remains controlled by administrators.",
