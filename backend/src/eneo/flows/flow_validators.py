@@ -685,6 +685,7 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
         parse_flow_step_review_policy(
             raw_policy=raw_policy,
             output_mode=FlowOutputMode(step.output_mode),
+            output_type=FlowOutputType(step.output_type),
         )
     except BadRequestException as exc:
         raise FlowStepValidationError(

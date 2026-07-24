@@ -31,16 +31,23 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.step_output import (
+    InlineStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
     FlowRunReviewCheckpointResumeResult,
 )
 from eneo.flows.output_processing import validate_against_contract
 from eneo.flows.principal import FlowPrincipal
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
@@ -50,6 +57,8 @@ from eneo.users.user import UserInDB
 _ReviewOperationResult = TypeVar("_ReviewOperationResult")
 _REVIEW_REJECT_REASON_MAX_LENGTH = 1024
 _REVIEW_RESUME_IDEMPOTENCY_KEY_MAX_LENGTH = 255
+_REVIEW_CHECKPOINT_SCHEMA_VERSION = 1
+_REVIEW_EDITABLE_PAYLOAD_KEYS = frozenset({"text", "structured"})
 
 
 def review_open_terminal_invariant_error(
@@ -172,11 +181,13 @@ class FlowRunReviewCheckpointService:
         *,
         user: UserInDB,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
+        flow_run_repo: FlowRunRepository,
         access_policy: FlowRunAccessPolicy,
         flow_run_terminalizer: FlowRunTerminalizer,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
+        self.flow_run_repo = flow_run_repo
         self.access_policy = access_policy
         self.flow_run_terminalizer = flow_run_terminalizer
 
@@ -234,8 +245,9 @@ class FlowRunReviewCheckpointService:
                 expected_revision=expected_checkpoint_revision,
             )
         )
-        self._validate_review_checkpoint_edit_payload(
+        await self._validate_review_checkpoint_edit_payload(
             checkpoint=checkpoint,
+            run_id=run.id,
             current_payload_json=current_payload_json,
         )
         return await self._with_review_lifecycle_translation(
@@ -250,12 +262,84 @@ class FlowRunReviewCheckpointService:
             )
         )
 
-    @staticmethod
-    def _validate_review_checkpoint_edit_payload(
+    async def _validate_review_checkpoint_edit_payload(
+        self,
         *,
         checkpoint: FlowRunReviewCheckpoint,
+        run_id: UUID,
         current_payload_json: FlowPersistedJsonObject,
     ) -> None:
+        if checkpoint.schema_version != _REVIEW_CHECKPOINT_SCHEMA_VERSION:
+            raise TypedIOValidationException(
+                "Review checkpoint schema_version is unsupported.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+                context={
+                    "schema_version": checkpoint.schema_version,
+                    "supported_schema_version": _REVIEW_CHECKPOINT_SCHEMA_VERSION,
+                },
+            )
+
+        try:
+            step_text = interpret_step_text(current_payload_json)
+        except StepOutputMetadataError as exc:
+            raise TypedIOValidationException(
+                f"Review checkpoint payload is invalid: {exc}",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            ) from exc
+
+        previous_payload = checkpoint.current_payload_json
+        if previous_payload is None:
+            raise TypedIOValidationException(
+                "Review checkpoint current payload is missing.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            )
+        runtime_owned_keys = set(previous_payload) - _REVIEW_EDITABLE_PAYLOAD_KEYS
+        if any(
+            key not in current_payload_json
+            or current_payload_json[key] != previous_payload[key]
+            for key in runtime_owned_keys
+        ) or any(
+            key not in previous_payload and key not in _REVIEW_EDITABLE_PAYLOAD_KEYS
+            for key in current_payload_json
+        ):
+            raise TypedIOValidationException(
+                "Review checkpoint runtime-owned payload fields must be preserved unchanged.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            )
+
+        if isinstance(step_text, InlineStepText):
+            max_inline_text_bytes = get_settings().flow_max_inline_text_bytes
+            if len(step_text.text.encode("utf-8")) > max_inline_text_bytes:
+                raise TypedIOValidationException(
+                    "Review checkpoint text exceeds the inline output size limit.",
+                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+                    context={"max_inline_text_bytes": max_inline_text_bytes},
+                )
+        else:
+            if previous_payload.get("text") != current_payload_json.get("text"):
+                raise TypedIOValidationException(
+                    "Review checkpoint overflow-backed text preview cannot be changed.",
+                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+                )
+            result_file = await self.flow_run_repo.get_result_file(
+                run_id=run_id,
+                tenant_id=self.user.tenant_id,
+                file_id=step_text.file_id,
+            )
+            if result_file is None or (
+                result_file.flow_run_id != run_id
+                or result_file.flow_id != checkpoint.flow_id
+                or result_file.tenant_id != self.user.tenant_id
+                or result_file.step_id != checkpoint.step_id
+                or result_file.attempt_no != checkpoint.attempt_no
+                or result_file.file_id != step_text.file_id
+                or result_file.source != "generated_output"
+            ):
+                raise TypedIOValidationException(
+                    "Review checkpoint text_overflow reference is missing or has invalid ownership.",
+                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+                )
+
         if checkpoint.output_contract_json is None:
             return
         context: dict[str, object] = {

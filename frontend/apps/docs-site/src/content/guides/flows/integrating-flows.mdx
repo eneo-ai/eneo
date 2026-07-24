@@ -304,10 +304,16 @@ Response:
   "revision": 1,
   "schema_version": 1,
   "original_payload_json": {
-    "transcription": "Hello and welcome to the annual review..."
+    "text": "Hello and welcome to the annual review...",
+    "structured": {
+      "transcription": "Hello and welcome to the annual review..."
+    }
   },
   "current_payload_json": {
-    "transcription": "Hello and welcome to the annual review..."
+    "text": "Hello and welcome to the annual review...",
+    "structured": {
+      "transcription": "Hello and welcome to the annual review..."
+    }
   },
   "step_label": "Review transcription",
   "review_mode": "edit",
@@ -349,7 +355,10 @@ Request:
 {
   "expected_checkpoint_revision": 1,
   "current_payload_json": {
-    "transcription": "Corrected transcription for the annual review."
+    "text": "Corrected transcription for the annual review.",
+    "structured": {
+      "transcription": "Corrected transcription for the annual review."
+    }
   }
 }
 ```
@@ -371,10 +380,16 @@ Response:
   "revision": 2,
   "schema_version": 1,
   "original_payload_json": {
-    "transcription": "Hello and welcome to the annual review..."
+    "text": "Hello and welcome to the annual review...",
+    "structured": {
+      "transcription": "Hello and welcome to the annual review..."
+    }
   },
   "current_payload_json": {
-    "transcription": "Corrected transcription for the annual review."
+    "text": "Corrected transcription for the annual review.",
+    "structured": {
+      "transcription": "Corrected transcription for the annual review."
+    }
   },
   "step_label": "Review transcription",
   "review_mode": "edit",
@@ -435,10 +450,16 @@ Response:
   "revision": 3,
   "schema_version": 1,
   "original_payload_json": {
-    "transcription": "Hello and welcome to the annual review..."
+    "text": "Hello and welcome to the annual review...",
+    "structured": {
+      "transcription": "Hello and welcome to the annual review..."
+    }
   },
   "current_payload_json": {
-    "transcription": "Corrected transcription for the annual review."
+    "text": "Corrected transcription for the annual review.",
+    "structured": {
+      "transcription": "Corrected transcription for the annual review."
+    }
   },
   "step_label": "Review transcription",
   "review_mode": "edit",
@@ -508,10 +529,16 @@ Response:
     "revision": 4,
     "schema_version": 1,
     "original_payload_json": {
-      "transcription": "Hello and welcome to the annual review..."
+      "text": "Hello and welcome to the annual review...",
+      "structured": {
+        "transcription": "Hello and welcome to the annual review..."
+      }
     },
     "current_payload_json": {
-      "transcription": "Corrected transcription for the annual review."
+      "text": "Corrected transcription for the annual review.",
+      "structured": {
+        "transcription": "Corrected transcription for the annual review."
+      }
     },
     "step_label": "Review transcription",
     "review_mode": "edit",
@@ -809,8 +836,12 @@ Runs pause only at review-marked steps and resume through review checkpoint endp
 1. Call `runtime_paths.run_contract` before run creation and inspect `steps_requiring_review`.
 2. Poll `runtime_paths.get_run_template`; when status is `awaiting_review`, show the review UI.
 3. Call `review_checkpoints.active_template` to get the open checkpoint and revision.
-4. Call `edit_template`, `approve_template`, or `reject_template`; the response returns the updated checkpoint.
-5. Call `resume_template` after approval so the worker continues the run.
+4. Read checkpoint `schema_version`; treat an unsupported version as non-editable and refresh or upgrade the client.
+5. For edit review, send the full payload with canonical string `text`; keep it within the ordinary inline UTF-8 limit and validate `structured` against `output_contract`.
+6. Preserve runtime-owned payload keys unchanged. Never create or change `text_overflow`; an existing value is accepted only while its generated-output file belongs to the same run, step, and attempt.
+7. Offer edit review only for editable text or structured outputs. PDF and DOCX artifact steps support view review, not edit review.
+8. Call `edit_template`, `approve_template`, or `reject_template`; the response returns the updated checkpoint.
+9. Call `resume_template` after approval so the worker continues the run.
 
 Endpoint facts:
 

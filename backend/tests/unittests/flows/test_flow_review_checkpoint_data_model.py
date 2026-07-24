@@ -23,6 +23,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
 )
 from eneo.flows.api.flow_models import (
+    FlowRunReviewCheckpointEditRequest,
     FlowRunReviewCheckpointEvidencePublic,
     FlowRunReviewCheckpointPublic,
 )
@@ -106,6 +107,20 @@ def _review_checkpoint_evidence_payload() -> dict[str, object]:
     payload["decision"] = None
     payload["resume_key_present"] = False
     return payload
+
+
+def test_review_checkpoint_edit_schema_documents_payload_integrity_contract() -> None:
+    edit_schema = FlowRunReviewCheckpointEditRequest.model_json_schema()
+    checkpoint_schema = FlowRunReviewCheckpointPublic.model_json_schema()
+
+    edit_description = edit_schema["properties"]["current_payload_json"]["description"]
+    assert "`text` is required" in edit_description
+    assert "`text_overflow` cannot be created or changed" in edit_description
+    assert "PDF and DOCX artifact steps cannot use edit review" in edit_description
+    assert (
+        "unsupported versions as non-editable"
+        in checkpoint_schema["properties"]["schema_version"]["description"]
+    )
 
 
 def test_review_checkpoint_status_values_are_canonical_enum_values() -> None:

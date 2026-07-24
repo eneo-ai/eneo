@@ -500,6 +500,21 @@ def _render_aggregate_er_diagram_sections(
                 "",
             )
         )
+        if aggregate is FlowSchemaAggregate.REVIEW_AND_RERUN:
+            parts.extend(
+                (
+                    "`flow_run_review_checkpoints.schema_version` versions the persisted review payload",
+                    "contract. For edit review, `current_payload_json.text` is the required canonical",
+                    "string and `structured`, when present, is checked against the snapshotted",
+                    "`output_contract_json`. Other payload keys are runtime-owned and must survive an",
+                    "edit unchanged. Existing `text_overflow` metadata remains usable only when its",
+                    "single `generated_output` result-file row belongs to the checkpoint's tenant,",
+                    "run, step, and attempt; clients cannot create or alter overflow metadata. PDF and",
+                    "DOCX artifact-producing steps may persist view checkpoints but cannot publish an",
+                    "edit review policy.",
+                    "",
+                )
+            )
 
     return "\n".join(parts).rstrip()
 

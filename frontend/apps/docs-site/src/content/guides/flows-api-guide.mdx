@@ -836,15 +836,21 @@ Consumer sequence:
 1. Poll the run until `status` is `awaiting_review`.
 2. Call `active_template` and render `current_payload_json`.
 3. Use `step_label`, `review_mode`, `output_type`, and `output_contract` to choose the review UI.
-4. For edits, send `expected_checkpoint_revision` and the full corrected `current_payload_json`; this is not a JSON Patch document.
-5. Approve or reject with the latest checkpoint `revision`.
-6. Resume an approved checkpoint with the latest `revision` and a new `Idempotency-Key` header.
+4. Read `schema_version`; if the client does not support it, do not edit the checkpoint.
+5. For edits, send `expected_checkpoint_revision` and the full corrected `current_payload_json`; this is not a JSON Patch document.
+6. Include canonical string `text` within the ordinary inline UTF-8 output limit. If `structured` is present, it must satisfy `output_contract`.
+7. Preserve every other runtime-owned payload key unchanged. Never create or change `text_overflow`; an existing value remains valid only while its single generated-output file belongs to this run, step, and attempt.
+8. Offer edit review only when `review_mode` is `edit`. PDF and DOCX artifact outputs can use view review but are not publishable with edit review.
+9. Approve or reject with the latest checkpoint `revision`.
+10. Resume an approved checkpoint with the latest `revision` and a new `Idempotency-Key` header.
 
 The revision is a compare token. If another reviewer changes the checkpoint
 first, the API returns `flow_review_stale_revision`; reload the active
 checkpoint and resubmit. Edits after `expires_at` return `flow_review_expired`.
 Structured edit payloads are validated against the checkpoint `output_contract`
-and can return `typed_io_contract_violation`.
+and can return `typed_io_contract_violation`. Malformed text, overflow, runtime
+metadata, and checkpoint-version edits fail with a typed validation response
+before the checkpoint, step result, audit outbox, or dispatch state changes.
 
 Resume returns `202 Accepted`. Reusing the same resume idempotency key returns
 the current checkpoint and run without dispatching duplicate work.

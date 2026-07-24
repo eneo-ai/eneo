@@ -160,6 +160,10 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             "Call `runtime_paths.run_contract` before run creation and inspect `steps_requiring_review`.",
             "Poll `runtime_paths.get_run_template`; when status is `awaiting_review`, show the review UI.",
             "Call `review_checkpoints.active_template` to get the open checkpoint and revision.",
+            "Read checkpoint `schema_version`; treat an unsupported version as non-editable and refresh or upgrade the client.",
+            "For edit review, send the full payload with canonical string `text`; keep it within the ordinary inline UTF-8 limit and validate `structured` against `output_contract`.",
+            "Preserve runtime-owned payload keys unchanged. Never create or change `text_overflow`; an existing value is accepted only while its generated-output file belongs to the same run, step, and attempt.",
+            "Offer edit review only for editable text or structured outputs. PDF and DOCX artifact steps support view review, not edit review.",
             "Call `edit_template`, `approve_template`, or `reject_template`; the response returns the updated checkpoint.",
             "Call `resume_template` after approval so the worker continues the run.",
         ),
@@ -461,10 +465,12 @@ WORKED_EXAMPLE_FINAL_OUTPUT = cast(
 WORKED_EXAMPLE_ARTIFACT_FILE_ID = "00000000-0000-0000-0000-000000000702"
 WORKED_EXAMPLE_FINAL_STEP_RESULT_ID = "00000000-0000-0000-0000-000000000504"
 WORKED_EXAMPLE_TRANSCRIPTION_ORIGINAL: dict[str, object] = {
-    "transcription": "Hello and welcome to the annual review..."
+    "text": "Hello and welcome to the annual review...",
+    "structured": {"transcription": "Hello and welcome to the annual review..."},
 }
 WORKED_EXAMPLE_TRANSCRIPTION_EDITED: dict[str, object] = {
-    "transcription": "Corrected transcription for the annual review."
+    "text": "Corrected transcription for the annual review.",
+    "structured": {"transcription": "Corrected transcription for the annual review."},
 }
 
 

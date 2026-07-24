@@ -31,6 +31,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
@@ -131,14 +132,32 @@ def _service(
     user,
     *,
     checkpoint_repo: AsyncMock,
+    flow_run_repo: AsyncMock | None = None,
     access_policy: AsyncMock | None = None,
     terminalizer: AsyncMock | None = None,
 ) -> FlowRunReviewCheckpointService:
     return FlowRunReviewCheckpointService(
         user=user,
         flow_run_review_checkpoint_repo=checkpoint_repo,
+        flow_run_repo=flow_run_repo or AsyncMock(),
         access_policy=access_policy or AsyncMock(),
         flow_run_terminalizer=terminalizer or AsyncMock(),
+    )
+
+
+async def _edit_payload(
+    *,
+    service: FlowRunReviewCheckpointService,
+    run: FlowRun,
+    checkpoint: FlowRunReviewCheckpoint,
+    payload: dict[str, object],
+) -> FlowRunReviewCheckpoint:
+    return await service.edit_review_checkpoint(
+        flow_id=run.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=checkpoint.revision,
+        current_payload_json=payload,
     )
 
 
@@ -609,12 +628,279 @@ async def test_edit_review_checkpoint_rejects_extra_structured_properties(user):
             checkpoint_id=checkpoint.id,
             expected_checkpoint_revision=checkpoint.revision,
             current_payload_json={
-                "structured": {"title": "Draft", "extra": "not allowed"}
+                "text": '{"title":"Draft","extra":"not allowed"}',
+                "structured": {"title": "Draft", "extra": "not allowed"},
             },
         )
 
     assert exc_info.value.code == "typed_io_contract_violation"
     assert "Additional properties are not allowed" in str(exc_info.value)
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_payload",
+    [{}, {"structured": {"answer": "missing text"}}, {"text": 42}],
+)
+async def test_edit_review_checkpoint_rejects_payload_without_canonical_text_before_write(
+    user,
+    invalid_payload,
+):
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(user, run)
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user, checkpoint_repo=checkpoint_repo, access_policy=access_policy
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload=invalid_payload,
+        )
+
+    assert exc_info.value.code == "typed_io_validation_failed"
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_rejects_utf8_text_over_inline_ceiling_before_write(
+    user,
+    monkeypatch,
+):
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(user, run)
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    monkeypatch.setattr(
+        "eneo.flows.application.flow_run_review_checkpoint_service.get_settings",
+        lambda: SimpleNamespace(flow_max_inline_text_bytes=4),
+    )
+    service = _service(
+        user, checkpoint_repo=checkpoint_repo, access_policy=access_policy
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload={"text": "ååå"},
+        )
+
+    assert exc_info.value.code == "typed_io_validation_failed"
+    assert exc_info.value.context == {"max_inline_text_bytes": 4}
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_rejects_forged_text_overflow_before_lookup_or_write(
+    user,
+):
+    checkpoint_repo = AsyncMock()
+    flow_run_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(user, run)
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user,
+        checkpoint_repo=checkpoint_repo,
+        flow_run_repo=flow_run_repo,
+        access_policy=access_policy,
+    )
+    overflow = build_text_overflow_metadata(
+        file_ids=[uuid4()], preview="Draft", full_text="Draft with overflow"
+    )
+
+    with pytest.raises(TypedIOValidationException):
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload={"text": "Draft", "text_overflow": overflow},
+        )
+
+    flow_run_repo.get_result_file.assert_not_awaited()
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reference_is_valid", [True, False, None])
+async def test_edit_review_checkpoint_validates_existing_overflow_reference(
+    user,
+    reference_is_valid,
+):
+    checkpoint_repo = AsyncMock()
+    flow_run_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    file_id = uuid4()
+    overflow = build_text_overflow_metadata(
+        file_ids=[file_id], preview="Draft", full_text="Draft with overflow"
+    )
+    payload = {"text": "Draft", "text_overflow": overflow}
+    checkpoint = _review_checkpoint(user, run).model_copy(
+        update={"original_payload_json": payload, "current_payload_json": payload}
+    )
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    checkpoint_repo.edit_review_checkpoint_payload.return_value = checkpoint
+    if reference_is_valid is None:
+        flow_run_repo.get_result_file.return_value = None
+    else:
+        flow_run_repo.get_result_file.return_value = SimpleNamespace(
+            flow_run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=user.tenant_id,
+            step_id=checkpoint.step_id if reference_is_valid else uuid4(),
+            attempt_no=checkpoint.attempt_no,
+            file_id=file_id,
+            source="generated_output",
+        )
+    service = _service(
+        user,
+        checkpoint_repo=checkpoint_repo,
+        flow_run_repo=flow_run_repo,
+        access_policy=access_policy,
+    )
+
+    if reference_is_valid is True:
+        assert (
+            await _edit_payload(
+                service=service,
+                run=run,
+                checkpoint=checkpoint,
+                payload=payload,
+            )
+            == checkpoint
+        )
+        checkpoint_repo.edit_review_checkpoint_payload.assert_awaited_once()
+    else:
+        with pytest.raises(TypedIOValidationException):
+            await _edit_payload(
+                service=service,
+                run=run,
+                checkpoint=checkpoint,
+                payload=payload,
+            )
+        checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+    flow_run_repo.get_result_file.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        file_id=file_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_rejects_changed_overflow_preview_before_lookup(
+    user,
+):
+    checkpoint_repo = AsyncMock()
+    flow_run_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    file_id = uuid4()
+    overflow = build_text_overflow_metadata(
+        file_ids=[file_id], preview="Draft", full_text="Draft with overflow"
+    )
+    checkpoint = _review_checkpoint(user, run).model_copy(
+        update={"current_payload_json": {"text": "Draft", "text_overflow": overflow}}
+    )
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user,
+        checkpoint_repo=checkpoint_repo,
+        flow_run_repo=flow_run_repo,
+        access_policy=access_policy,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload={"text": "Other", "text_overflow": overflow},
+        )
+
+    assert "overflow-backed text preview cannot be changed" in str(exc_info.value)
+    flow_run_repo.get_result_file.assert_not_awaited()
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "edited_payload",
+    [
+        {"text": "Edited"},
+        {"text": "Edited", "template_provenance": {"template_id": "changed"}},
+    ],
+)
+async def test_edit_review_checkpoint_rejects_runtime_owned_key_destruction_or_change(
+    user,
+    edited_payload,
+):
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(user, run).model_copy(
+        update={
+            "current_payload_json": {
+                "text": "Draft",
+                "template_provenance": {"template_id": "original"},
+            }
+        }
+    )
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user, checkpoint_repo=checkpoint_repo, access_policy=access_policy
+    )
+
+    with pytest.raises(TypedIOValidationException):
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload=edited_payload,
+        )
+
+    checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_rejects_unsupported_checkpoint_schema_version(
+    user,
+):
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    run = _run(user=user, flow_id=uuid4())
+    checkpoint = _review_checkpoint(user, run).model_copy(update={"schema_version": 2})
+    access_policy.load_run.return_value = run
+    checkpoint_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user, checkpoint_repo=checkpoint_repo, access_policy=access_policy
+    )
+
+    with pytest.raises(TypedIOValidationException):
+        await _edit_payload(
+            service=service,
+            run=run,
+            checkpoint=checkpoint,
+            payload={"text": "Edited"},
+        )
+
     checkpoint_repo.edit_review_checkpoint_payload.assert_not_awaited()
 
 

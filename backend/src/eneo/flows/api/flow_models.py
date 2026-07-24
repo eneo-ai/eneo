@@ -1021,9 +1021,21 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     attempt_no: int
     state: FlowRunReviewCheckpointState
     revision: int
-    schema_version: int
+    schema_version: int = Field(
+        description=(
+            "Version of the persisted checkpoint payload contract. Clients must "
+            "treat unsupported versions as non-editable."
+        ),
+    )
     original_payload_json: dict[str, Any] | None = None
-    current_payload_json: dict[str, Any] | None = None
+    current_payload_json: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Current reviewed step payload. `text` is the canonical string form; "
+            "`structured`, when present, conforms to `output_contract`. Other keys "
+            "are runtime-owned metadata and are not independently editable."
+        ),
+    )
     step_label: str | None = Field(
         default=None,
         description=(
@@ -1114,7 +1126,12 @@ class FlowRunReviewCheckpointEditRequest(BaseModel):
     current_payload_json: dict[str, Any] = Field(
         description=(
             "Full corrected payload for the reviewed step. Send the complete payload, "
-            "not a JSON Patch document."
+            "not a JSON Patch document. `text` is required, must be a string, and must "
+            "fit the ordinary inline UTF-8 output limit. Preserve every runtime-owned "
+            "key unchanged. `text_overflow` cannot be created or changed and is accepted "
+            "only when its existing generated-output file still belongs to this exact "
+            "run step attempt. `structured`, when present, must satisfy the checkpoint "
+            "output contract. PDF and DOCX artifact steps cannot use edit review."
         )
     )
 

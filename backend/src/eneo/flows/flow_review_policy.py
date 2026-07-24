@@ -6,7 +6,11 @@ from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from eneo.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    flow_output_mode_has_outbound_delivery,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
@@ -70,6 +74,7 @@ def parse_flow_step_review_policy(
     *,
     raw_policy: object,
     output_mode: FlowOutputMode,
+    output_type: FlowOutputType,
 ) -> FlowStepReviewPolicy | None:
     if raw_policy is None:
         return None
@@ -79,17 +84,26 @@ def parse_flow_step_review_policy(
             code=FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
         )
     if isinstance(raw_policy, FlowStepReviewPolicy):
-        return raw_policy
-    if not isinstance(raw_policy, Mapping):
+        policy = raw_policy
+    elif not isinstance(raw_policy, Mapping):
         raise BadRequestException(
             "Step review_policy must be an object.",
             code=FLOW_REVIEW_POLICY_INVALID,
         )
-    try:
-        policy = FlowStepReviewPolicy.model_validate(raw_policy)
-    except ValidationError as exc:
+    else:
+        try:
+            policy = FlowStepReviewPolicy.model_validate(raw_policy)
+        except ValidationError as exc:
+            raise BadRequestException(
+                "Step review_policy is invalid.",
+                code=FLOW_REVIEW_POLICY_INVALID,
+            ) from exc
+    if policy.mode is FlowStepReviewMode.EDIT and output_type in {
+        FlowOutputType.PDF,
+        FlowOutputType.DOCX,
+    }:
         raise BadRequestException(
-            "Step review_policy is invalid.",
+            "Edit review is not supported for artifact-producing PDF or DOCX steps.",
             code=FLOW_REVIEW_POLICY_INVALID,
-        ) from exc
+        )
     return policy

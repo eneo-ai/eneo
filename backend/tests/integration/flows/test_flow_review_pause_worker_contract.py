@@ -51,6 +51,7 @@ from eneo.flows.published_definition import build_published_definition_json
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -966,6 +967,15 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         )
         assert checkpoint is not None
         assert checkpoint.current_payload_json == original_payload
+        run_before_invalid = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == context.run_id)
+        )
+        assert run_before_invalid is not None
+        run_state_before_invalid = (
+            run_before_invalid.status,
+            run_before_invalid.revision,
+            run_before_invalid.output_payload_json,
+        )
 
         with pytest.raises(TypedIOValidationException) as exc_info:
             await review_service.edit_review_checkpoint(
@@ -985,6 +995,53 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
                 current_payload_json=missing_structured_payload,
             )
 
+        rejected_payloads: list[FlowPersistedJsonObject] = [
+            {},
+            {"structured": {"summary": "Missing canonical text."}},
+            {"text": "x" * (get_settings().flow_max_inline_text_bytes + 1)},
+            {**original_payload, "template_provenance": {"forged": True}},
+            {
+                **original_payload,
+                "text_overflow": {
+                    "schema_version": 1,
+                    "storage": "result_file",
+                    "generated_file_ids": [str(uuid4())],
+                    "preview_utf8_bytes": 1,
+                    "full_utf8_bytes": 2,
+                },
+            },
+        ]
+        rejected_exceptions: list[TypedIOValidationException] = []
+        for rejected_payload in rejected_payloads:
+            with pytest.raises(TypedIOValidationException) as rejected_exc:
+                await review_service.edit_review_checkpoint(
+                    flow_id=context.flow_id,
+                    run_id=context.run_id,
+                    checkpoint_id=checkpoint.id,
+                    expected_checkpoint_revision=checkpoint.revision,
+                    current_payload_json=rejected_payload,
+                )
+            rejected_exceptions.append(rejected_exc.value)
+
+        await session.execute(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint.id)
+            .values(schema_version=2)
+        )
+        with pytest.raises(TypedIOValidationException) as schema_version_exc:
+            await review_service.edit_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=checkpoint.revision,
+                current_payload_json=valid_payload,
+            )
+        await session.execute(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint.id)
+            .values(schema_version=1)
+        )
+
         checkpoint_after_invalid = await session.scalar(
             sa.select(FlowRunReviewCheckpoints).where(
                 FlowRunReviewCheckpoints.id == checkpoint.id
@@ -995,6 +1052,9 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
                 FlowStepResults.flow_run_id == context.run_id,
                 FlowStepResults.step_id == context.first_step_id,
             )
+        )
+        run_after_invalid = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == context.run_id)
         )
         outbox_actions_after_invalid = (
             (
@@ -1012,6 +1072,12 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
         assert checkpoint_after_invalid.current_payload_json == original_payload
         assert step_result_after_invalid is not None
         assert step_result_after_invalid.output_payload_json == original_payload
+        assert run_after_invalid is not None
+        assert (
+            run_after_invalid.status,
+            run_after_invalid.revision,
+            run_after_invalid.output_payload_json,
+        ) == run_state_before_invalid
         assert outbox_actions_after_invalid == ["flow_run_review_checkpoint_opened"]
 
         edited = await review_service.edit_review_checkpoint(
@@ -1050,6 +1116,10 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
     assert missing_structured_exc.value.code == "typed_io_contract_violation"
     assert "field `structured` is required" in str(missing_structured_exc.value)
     assert missing_structured_exc.value.context == exc_info.value.context
+    assert [exc.code for exc in rejected_exceptions] == [
+        "typed_io_validation_failed"
+    ] * len(rejected_payloads)
+    assert schema_version_exc.value.code == "typed_io_validation_failed"
     assert edited.revision == checkpoint.revision + 1
     assert edited.current_payload_json == valid_payload
     assert step_result_after_valid is not None

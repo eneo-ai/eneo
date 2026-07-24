@@ -17994,7 +17994,7 @@ export interface components {
       expected_checkpoint_revision: number;
       /**
        * Current Payload Json
-       * @description Full corrected payload for the reviewed step. Send the complete payload, not a JSON Patch document.
+       * @description Full corrected payload for the reviewed step. Send the complete payload, not a JSON Patch document. `text` is required, must be a string, and must fit the ordinary inline UTF-8 output limit. Preserve every runtime-owned key unchanged. `text_overflow` cannot be created or changed and is accepted only when its existing generated-output file still belongs to this exact run step attempt. `structured`, when present, must satisfy the checkpoint output contract. PDF and DOCX artifact steps cannot use edit review.
        */
       current_payload_json: {
         [key: string]: unknown;
@@ -18217,13 +18217,19 @@ export interface components {
       state: components["schemas"]["FlowRunReviewCheckpointState"];
       /** Revision */
       revision: number;
-      /** Schema Version */
+      /**
+       * Schema Version
+       * @description Version of the persisted checkpoint payload contract. Clients must treat unsupported versions as non-editable.
+       */
       schema_version: number;
       /** Original Payload Json */
       original_payload_json?: {
         [key: string]: unknown;
       } | null;
-      /** Current Payload Json */
+      /**
+       * Current Payload Json
+       * @description Current reviewed step payload. `text` is the canonical string form; `structured`, when present, conforms to `output_contract`. Other keys are runtime-owned metadata and are not independently editable.
+       */
       current_payload_json?: {
         [key: string]: unknown;
       } | null;

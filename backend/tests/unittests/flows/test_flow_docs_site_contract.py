@@ -2749,6 +2749,23 @@ def test_flow_consumer_guides_are_generated_from_contract_catalogs() -> None:
         assert PLACEHOLDER_DOC_PATTERN.search(page) is None
 
 
+def test_flow_review_edit_docs_define_the_payload_integrity_contract() -> None:
+    integrating_guide = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
+    api_guide = _read(FLOW_API_GUIDE)
+    data_schema = _read(FLOW_DEVELOPER_DOCS_DATA_SCHEMA)
+
+    for phrase in (
+        "canonical string `text`",
+        "Never create or change `text_overflow`",
+        "PDF and DOCX artifact",
+        "schema_version",
+    ):
+        assert phrase in integrating_guide
+        assert phrase in api_guide
+    assert "runtime-owned and must survive an\nedit unchanged" in data_schema
+    assert "single `generated_output` result-file row" in data_schema
+
+
 def test_flow_consumer_section_index_is_generated_from_nav_catalog() -> None:
     generator = _load_flow_consumer_section_docs_generator()
     page = _read(FLOW_CONSUMER_SECTION_INDEX)
@@ -3346,10 +3363,13 @@ def test_flow_consumer_guides_pin_create_and_review_edit_examples() -> None:
         )
         == generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST
     )
-    assert (
-        "transcription"
-        in generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST["current_payload_json"]
+    edit_payload = cast(
+        dict[str, object],
+        generator.WORKED_EXAMPLE_CHECKPOINT_EDIT_REQUEST["current_payload_json"],
     )
+    assert "text" in edit_payload
+    assert "structured" in edit_payload
+    assert "transcription" not in edit_payload
     assert "edited_output" not in integrating
     assert "run-level `error_code`" not in integrating
     assert "run-level `error.code`" in integrating
@@ -3507,10 +3527,10 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     assert checkpoint["step_label"] == review_step["label"]
     assert checkpoint["output_contract"] == review_step["output_contract"]
     assert checkpoint["next_step_ids"] == [final_output["step_id"]]
-    assert "transcription" in cast(
-        dict[str, object], checkpoint["current_payload_json"]
-    )
-    assert "text" not in cast(dict[str, object], checkpoint["current_payload_json"])
+    checkpoint_payload = cast(dict[str, object], checkpoint["current_payload_json"])
+    assert "text" in checkpoint_payload
+    assert "structured" in checkpoint_payload
+    assert "transcription" not in checkpoint_payload
 
     edited = generator.WORKED_EXAMPLE_CHECKPOINT_EDITED_RESPONSE
     approved = generator.WORKED_EXAMPLE_CHECKPOINT_APPROVED_RESPONSE
@@ -3533,8 +3553,9 @@ def test_flow_consumer_integrating_guide_renders_source_backed_worked_example() 
     assert resumed_checkpoint["resumed_at"] is not None
     for checkpoint_document in (checkpoint, edited, approved, resumed_checkpoint):
         payload = cast(dict[str, object], checkpoint_document["current_payload_json"])
-        assert "transcription" in payload
-        assert "text" not in payload
+        assert "text" in payload
+        assert "structured" in payload
+        assert "transcription" not in payload
 
     _assert_json_object_present(
         FLOW_CONSUMER_INTEGRATING_GUIDE,

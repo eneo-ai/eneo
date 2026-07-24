@@ -19,7 +19,7 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.enums import FlowOutputMode
+from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.input_binding_contract_rules import (
@@ -599,6 +599,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             review_policy = parse_flow_step_review_policy(
                 raw_policy=item_dict.get("review_policy"),
                 output_mode=FlowOutputMode(output_fields.output_mode),
+                output_type=FlowOutputType(output_fields.output_type),
             )
             optional_fields = _parse_optional_fields(
                 item_dict,
