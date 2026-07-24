@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 from celery import Celery  # pyright: ignore[reportMissingTypeStubs]
 from celery.signals import (  # pyright: ignore[reportMissingTypeStubs]
@@ -91,6 +91,36 @@ def create_flow_celery_app() -> Celery:
 
 
 celery_app = create_flow_celery_app()
+
+
+def flow_maintenance_queue_has_live_consumer(*, timeout_seconds: float = 1.0) -> bool:
+    """Return whether any responding Celery worker consumes Flow maintenance work."""
+    try:
+        raw_active_queues = cast(
+            object,
+            celery_app.control.inspect(  # pyright: ignore[reportUnknownMemberType]
+                timeout=timeout_seconds
+            ).active_queues(),  # pyright: ignore[reportUnknownMemberType]
+        )
+    except Exception:
+        logger.warning("Flow maintenance queue consumer inspection unavailable")
+        return False
+
+    if not isinstance(raw_active_queues, dict):
+        return False
+    active_queues = cast(dict[object, object], raw_active_queues)
+    maintenance_queue = get_settings().flow_celery_maintenance_queue
+    for worker_queues in active_queues.values():
+        if not isinstance(worker_queues, list):
+            continue
+        queues = cast(list[object], worker_queues)
+        for queue in queues:
+            if not isinstance(queue, dict):
+                continue
+            queue_data = cast(dict[object, object], queue)
+            if queue_data.get("name") == maintenance_queue:
+                return True
+    return False
 
 
 def _close_flow_worker_resources() -> None:

@@ -1,5 +1,67 @@
 # Flows Operations Runbook
 
+## Runtime health endpoint
+
+`GET /api/healthz/flows` is an operator diagnostic endpoint, not a public
+liveness probe. It requires the configured Eneo super API key and does not
+accept ordinary user, tenant API, service, or super-duper credentials. Keep the
+key in the deployment secret manager and invoke the endpoint without printing
+the value:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  "${ENEO_BASE_URL}/api/healthz/flows" | jq .
+```
+
+The response combines bounded database diagnostics with a bounded Celery
+control inspection. `UNKNOWN` means the database query timed out or failed.
+`MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE` means no responding worker reported
+consuming the configured Flow maintenance queue; broker/control failure and an
+inspection timeout are deliberately treated as unavailable. Verify the broker,
+Flow worker process, worker queue subscription, and worker logs, then restart or
+correct the worker deployment and repeat the check.
+
+Recovery and health use the same staleness predicate for running runs. A stale
+run with a pending or claimed webhook delivery is excluded from both surfaces:
+the webhook worker still owns an external effect whose outcome may be in
+progress. Do not terminalize it manually. Resolve or let the bounded webhook
+claim/retry lifecycle converge, then repeat the health check.
+
+### Health flags, effective thresholds, and recovery
+
+Timing values are returned in `thresholds`; code-owned defaults are shown below.
+Any positive count triggers a flag unless an age condition is stated.
+
+| Flag | Effective threshold | Recovery action |
+| --- | --- | --- |
+| `MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE` | The 1-second Celery inspection finds no live worker consuming the configured maintenance queue, including unavailable broker/control replies. | Restore broker/control connectivity and a Flow worker subscribed to the maintenance queue, then repeat the endpoint check. |
+| `STALE_QUEUED_RUNS` | A queued run remains dispatch-pending for at least `stale_queued_after_seconds` (30 seconds). | Verify broker and execution-worker health; allow bounded redispatch to converge and inspect dispatch diagnosis if it does not. |
+| `ACCEPTED_DISPATCH_EXHAUSTED` | At least one queued run has exhausted dispatch after broker acceptance or an outcome-unknown send. | Check for delayed claims, then use the generation-fenced redispatch operation described below; never clear fields with SQL. |
+| `STALE_RUNNING_RUNS` | A recovery-eligible running run is at least `stale_running_after_seconds` old (task timeout plus 60 seconds) but has not exceeded the unhealthy threshold. | Verify the execution worker and wait for the maintenance reconciler; investigate if the age keeps increasing. |
+| `STALE_RUNNING_RECONCILER_LAG` | The oldest recovery-eligible running run exceeds `stale_running_unhealthy_after_seconds` (task timeout plus 180 seconds). | Restore the maintenance consumer and broker, inspect reconciler errors, and confirm the run terminalizes through normal recovery. |
+| `EXPIRED_REVIEW_CHECKPOINTS` | A reconcilable checkpoint is expired, but its age has not exceeded `review_expiry_unhealthy_after_seconds` (120 seconds). | Verify the maintenance consumer and allow review-expiry reconciliation to terminalize the checkpoint. |
+| `REVIEW_EXPIRY_RECONCILER_LAG` | The oldest reconcilable expired checkpoint is more than 120 seconds past expiry. | Restore the maintenance consumer, inspect review-expiry task failures, and verify the checkpoint reaches its normal terminal state. |
+| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Any terminal run updated in the 24-hour integrity lookback still has an open attempt. | Stop further mutation, preserve evidence, and investigate terminalization transaction ownership before repairing through the canonical lifecycle owner. |
+| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Any terminal run updated in the 24-hour integrity lookback still has an active step result. | Stop further mutation, preserve evidence, and investigate terminalization transaction ownership before repairing through the canonical lifecycle owner. |
+| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | A pending audit row is still eligible after the 300-second backlog grace. | Restore audit storage and the maintenance consumer; let bounded delivery retry and verify the backlog clears. |
+| `AUDIT_OUTBOX_DEAD_LETTERS` | Any lifecycle-audit delivery exhausted its bounded attempts. | Follow the generation-fenced audit dead-letter redrive procedure below after restoring audit storage. |
+| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and the maintenance consumer; inspect sanitized delivery diagnosis and let bounded retry converge. |
+| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker is gone or no longer owns the effect, then let the maintenance delivery loop reclaim it. |
+| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Inspect the sanitized failure and destination contract; preserve the dead letter for operator diagnosis rather than editing it with SQL. |
+
+## Evidence export controls (D5)
+
+Raw evidence export remains exceptional. It keeps the existing explicit
+non-default reason gate and the audit-before-response contract: if the audit
+write or commit fails, export fails closed before protected response bytes are
+returned. Raw evidence export also requires active encryption. Enforcement of
+that encryption precondition is owned by M2.9; this runbook does not create a
+second policy owner. Until M2.9 enforcement is active and verified in the
+deployment, do not enable or perform raw export. Redacted export remains the
+default. Never place encryption keys, super API keys, or exported evidence in
+incident tickets or command history.
+
 ## Accepted Flow Dispatch Exhaustion
 
 A queued run with `dispatch_exhausted_at` set remains queued when at least one

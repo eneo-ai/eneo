@@ -34,8 +34,9 @@ Eneo provides dedicated health check endpoints for monitoring:
 # Backend API health (includes worker status)
 curl http://localhost:8123/api/healthz
 
-# Flow runtime diagnostics
-curl http://localhost:8123/api/healthz/flows
+# Flow runtime diagnostics (operator-only Eneo super API key)
+curl --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  http://localhost:8123/api/healthz/flows
 
 # Frontend web health
 curl http://localhost:3000/web/healthz
@@ -100,7 +101,10 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 - `unhealthy`: Worker health check key expired (worker down)
 - `unknown`: Redis connection error or worker status unclear
 
-Flow-specific stuck queued/running and terminalization integrity incidents are covered in [Flow Runtime Runbook](runbooks/flows.md).
+Flow-specific queue-consumer, stuck queued/running, reconciliation, outbox, and
+terminalization-integrity incidents are covered in the
+[Flow Runtime Runbook](runbooks/flows.md). The Flow endpoint requires the Eneo
+super API key and must not be used as an unauthenticated platform liveness probe.
 
 ---
 

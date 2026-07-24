@@ -8622,7 +8622,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, and webhook-outbox state.
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and maintenance-queue consumer state.
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -19047,6 +19047,7 @@ export interface components {
      * @enum {string}
      */
     FlowRuntimeHealthFlag:
+      | "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
       | "STALE_QUEUED_RUNS"
       | "ACCEPTED_DISPATCH_EXHAUSTED"
       | "STALE_RUNNING_RUNS"
@@ -19251,7 +19252,7 @@ export interface components {
     FlowRuntimeProbe: {
       /**
        * Scope
-       * @default db_only
+       * @default db_and_maintenance_consumer
        */
       scope?: string;
       /** Db Query Ok */
@@ -19259,6 +19260,17 @@ export interface components {
       /** Db Query Duration Ms */
       db_query_duration_ms?: number | null;
       db_query_failure?: components["schemas"]["FlowRuntimeProbeFailure"] | null;
+      /**
+       * Maintenance Queue Inspection Timeout Seconds
+       * @description Celery control inspection timeout used by the HTTP adapter.
+       * @default 1
+       */
+      maintenance_queue_inspection_timeout_seconds?: number;
+      /**
+       * Maintenance Queue Consumer Ok
+       * @description Whether a responding Celery worker reports consuming the configured Flow maintenance queue. False includes unavailable broker/control replies.
+       */
+      maintenance_queue_consumer_ok: boolean;
     };
     /**
      * FlowRuntimeProbeFailure
@@ -58293,6 +58305,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["FlowRuntimeHealthResponse"];
         };
+      };
+      /** @description Missing or invalid Eneo super API key. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

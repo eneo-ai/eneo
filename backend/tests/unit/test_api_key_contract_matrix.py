@@ -164,7 +164,7 @@ class TestPublicEndpoints:
         assert crawler_route is not None, "/api/healthz/crawler route not found"
         assert not route_has_dependency_named(crawler_route, "get_current_active_user")
 
-    def test_flow_healthz_endpoint_exists_without_auth(self):
+    def test_flow_healthz_endpoint_requires_only_super_api_key(self):
         from eneo.server.main import get_application
 
         app = get_application()
@@ -175,13 +175,8 @@ class TestPublicEndpoints:
                 break
 
         assert flow_route is not None, "/api/healthz/flows route not found"
-        deps = getattr(flow_route, "dependencies", [])
-        dep_names = [
-            getattr(d.dependency, "__name__", "")
-            for d in deps
-            if hasattr(d, "dependency")
-        ]
-        assert "get_current_active_user" not in dep_names
+        assert route_has_dependency_named(flow_route, "authenticate_super_api_key")
+        assert not route_has_dependency_named(flow_route, "get_current_active_user")
 
 
 class TestAuthPrecedence:

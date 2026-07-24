@@ -47,6 +47,14 @@ def _policy() -> FlowRuntimeHealthPolicy:
     )
 
 
+def _live_probe(*, duration_ms: int) -> FlowRuntimeProbe:
+    return FlowRuntimeProbe(
+        db_query_ok=True,
+        db_query_duration_ms=duration_ms,
+        maintenance_queue_consumer_ok=True,
+    )
+
+
 def _build_flow(
     *,
     tenant_id: UUID,
@@ -188,12 +196,27 @@ async def _create_webhook_delivery_attempt(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_runtime_health_endpoint_returns_db_only_probe(client):
-    response = await client.get("/api/healthz/flows")
+async def test_flow_runtime_health_endpoint_requires_super_key_and_returns_probe(
+    client,
+    super_admin_token,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.server.main.flow_maintenance_queue_has_live_consumer",
+        lambda **_kwargs: True,
+    )
 
+    unauthorized = await client.get("/api/healthz/flows")
+    response = await client.get(
+        "/api/healthz/flows",
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert unauthorized.status_code == 401
     assert response.status_code == 200
     payload = response.json()
-    assert payload["probe"]["scope"] == "db_only"
+    assert payload["probe"]["scope"] == "db_and_maintenance_consumer"
+    assert payload["probe"]["maintenance_queue_consumer_ok"] is True
     assert "tenant_id" not in payload
     assert "flow_id" not in payload
     assert "run_id" not in payload
@@ -216,12 +239,107 @@ async def test_flow_runtime_health_snapshot_is_healthy_without_runs(db_container
             snapshot=snapshot,
             now=now,
             policy=policy,
-            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=1),
+            probe=_live_probe(duration_ms=1),
         )
 
     assert response.status == FlowRuntimeHealthStatus.HEALTHY
     assert response.runs.queued_count == 0
     assert response.status_flags == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_recovery_and_health_share_webhook_protected_stale_running_family(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        flow = await _create_published_flow(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_repo = FlowRunRepository(session=session)
+        policy = _policy()
+        now = datetime.now(timezone.utc)
+        stale_before = now - timedelta(seconds=policy.stale_running_after_seconds)
+        unprotected = await _create_run(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="stale-running-unprotected",
+        )
+        pending_protected = await _create_webhook_delivery_attempt(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="stale-running-pending-webhook",
+        )
+        claimed_protected = await _create_webhook_delivery_attempt(
+            run_repo=run_repo,
+            flow=flow,
+            admin_user=admin_user,
+            case="stale-running-claimed-webhook",
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(
+                FlowRuns.id.in_(
+                    (unprotected.id, pending_protected.id, claimed_protected.id)
+                )
+            )
+            .values(
+                status=FlowRunStatus.RUNNING.value,
+                updated_at=stale_before - timedelta(seconds=5),
+            )
+        )
+        for run, claim_token in (
+            (pending_protected, None),
+            (claimed_protected, uuid4()),
+        ):
+            await session.execute(
+                sa.insert(FlowRunWebhookDeliveries).values(
+                    tenant_id=admin_user.tenant_id,
+                    flow_id=flow.id,
+                    flow_run_id=run.id,
+                    step_id=flow.steps[0].id,
+                    step_order=1,
+                    attempt_no=1,
+                    idempotency_key=f"stale-running-protection-{run.id}",
+                    payload_ref=f"stale-running-protection-{run.id}",
+                    delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                    delivery_attempts=1 if claim_token else 0,
+                    next_delivery_at=now,
+                    claim_token=claim_token,
+                    claimed_at=now if claim_token else None,
+                    claim_expires_at=(
+                        now + timedelta(minutes=5) if claim_token else None
+                    ),
+                )
+            )
+        await session.flush()
+
+        recoverable = await run_repo.list_stale_running_runs(
+            tenant_id=admin_user.tenant_id,
+            stale_before=stale_before,
+        )
+        snapshot = await load_flow_runtime_health_snapshot(
+            session=session,
+            now=now,
+            policy=policy,
+        )
+
+    assert [run.id for run in recoverable] == [unprotected.id]
+    assert snapshot.stale_running_count == 1
+    assert snapshot.oldest_stale_running_updated_at == stale_before - timedelta(
+        seconds=5
+    )
 
 
 @pytest.mark.asyncio
@@ -373,7 +491,7 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             snapshot=snapshot,
             now=now,
             policy=policy,
-            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+            probe=_live_probe(duration_ms=8),
         )
 
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
@@ -494,7 +612,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             snapshot=snapshot,
             now=now,
             policy=policy,
-            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+            probe=_live_probe(duration_ms=8),
         )
 
         delivery_service = FlowRunAuditOutboxDeliveryService(
@@ -517,7 +635,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             snapshot=recovered_snapshot,
             now=now,
             policy=policy,
-            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+            probe=_live_probe(duration_ms=8),
         )
 
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
@@ -640,7 +758,7 @@ async def test_flow_runtime_health_snapshot_reports_webhook_outbox_delivery_stat
             snapshot=snapshot,
             now=now,
             policy=policy,
-            probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=8),
+            probe=_live_probe(duration_ms=8),
         )
 
     assert response.status == FlowRuntimeHealthStatus.UNHEALTHY

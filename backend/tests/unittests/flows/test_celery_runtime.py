@@ -427,6 +427,87 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     )
 
 
+def test_maintenance_consumer_probe_recognizes_configured_queue(monkeypatch):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    app = MagicMock()
+    app.control.inspect.return_value.active_queues.return_value = {
+        "celery@flow-worker": [
+            {"name": "flows.execute"},
+            {"name": "flows.maintenance"},
+        ]
+    }
+    monkeypatch.setattr(celery_app_module, "celery_app", app)
+    monkeypatch.setattr(
+        celery_app_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+    )
+
+    assert celery_app_module.flow_maintenance_queue_has_live_consumer(
+        timeout_seconds=0.25
+    )
+    app.control.inspect.assert_called_once_with(timeout=0.25)
+
+
+def test_maintenance_consumer_probe_rejects_execution_queues_only(monkeypatch):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    app = MagicMock()
+    app.control.inspect.return_value.active_queues.return_value = {
+        "celery@flow-worker": [{"name": "flows.execute"}]
+    }
+    monkeypatch.setattr(celery_app_module, "celery_app", app)
+    monkeypatch.setattr(
+        celery_app_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+    )
+
+    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
+        timeout_seconds=0.25
+    )
+
+
+@pytest.mark.parametrize(
+    "active_queues",
+    [None, [], {"celery@flow-worker": None}, {"celery@flow-worker": ["invalid"]}],
+)
+def test_maintenance_consumer_probe_rejects_malformed_replies(
+    monkeypatch, active_queues
+):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    app = MagicMock()
+    app.control.inspect.return_value.active_queues.return_value = active_queues
+    monkeypatch.setattr(celery_app_module, "celery_app", app)
+    monkeypatch.setattr(
+        celery_app_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+    )
+
+    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
+        timeout_seconds=0.25
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", [TimeoutError(), RuntimeError("broker unavailable")]
+)
+def test_maintenance_consumer_probe_translates_inspection_failure(monkeypatch, failure):
+    celery_app_module = importlib.import_module("eneo.flows.runtime.celery_app")
+    app = MagicMock()
+    app.control.inspect.return_value.active_queues.side_effect = failure
+    monkeypatch.setattr(celery_app_module, "celery_app", app)
+    monkeypatch.setattr(
+        celery_app_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_celery_maintenance_queue="flows.maintenance"),
+    )
+
+    assert not celery_app_module.flow_maintenance_queue_has_live_consumer(
+        timeout_seconds=0.25
+    )
+
+
 def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
     cli_module = importlib.import_module("eneo.flows.runtime.cli")
     app_module_name, _, app_attr = cli_module.FLOW_CELERY_APP.partition(":")

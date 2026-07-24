@@ -38,6 +38,9 @@ from eneo.flows.enums import (
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_UNHEALTHY_AFTER_SECONDS,
 )
+from eneo.flows.infrastructure.flow_run_staleness import (
+    stale_running_flow_run_predicate,
+)
 
 TERMINAL_INTEGRITY_LOOKBACK_HOURS = 24
 
@@ -50,6 +53,7 @@ class FlowRuntimeHealthStatus(str, Enum):
 
 
 class FlowRuntimeHealthFlag(str, Enum):
+    MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE = "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
     STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
     ACCEPTED_DISPATCH_EXHAUSTED = "ACCEPTED_DISPATCH_EXHAUSTED"
     STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
@@ -113,10 +117,21 @@ class FlowRuntimeHealthSnapshot:
 
 
 class FlowRuntimeProbe(BaseModel):
-    scope: str = "db_only"
+    scope: str = "db_and_maintenance_consumer"
     db_query_ok: bool
     db_query_duration_ms: int | None = None
     db_query_failure: FlowRuntimeProbeFailure | None = None
+    maintenance_queue_inspection_timeout_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        description="Celery control inspection timeout used by the HTTP adapter.",
+    )
+    maintenance_queue_consumer_ok: bool = Field(
+        description=(
+            "Whether a responding Celery worker reports consuming the configured "
+            "Flow maintenance queue. False includes unavailable broker/control replies."
+        )
+    )
 
 
 class FlowRuntimeRunSummary(BaseModel):
@@ -374,6 +389,7 @@ def classify_flow_runtime_health(
     )
     status_flags = _flow_runtime_health_flags(
         snapshot=snapshot,
+        probe=probe,
         stale_running_age_seconds=stale_running_age,
         expired_review_checkpoint_age_seconds=expired_review_checkpoint_age,
         policy=policy,
@@ -462,6 +478,7 @@ def flow_runtime_health_probe_failure_response(
     policy: FlowRuntimeHealthPolicy,
     query_duration_ms: int | None,
     failure: FlowRuntimeProbeFailure,
+    maintenance_queue_consumer_ok: bool,
 ) -> FlowRuntimeHealthResponse:
     return classify_flow_runtime_health(
         snapshot=FlowRuntimeHealthSnapshot(),
@@ -471,6 +488,7 @@ def flow_runtime_health_probe_failure_response(
             db_query_ok=False,
             db_query_duration_ms=query_duration_ms,
             db_query_failure=failure,
+            maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
         ),
     )
 
@@ -538,14 +556,14 @@ async def _load_stale_run_summary(
         if status == FlowRunStatus.QUEUED
         else FlowRuns.updated_at
     )
-    count, oldest_anchor_at = (
-        await session.execute(
-            sa.select(sa.func.count(), sa.func.min(age_anchor))
-            .select_from(FlowRuns)
-            .where(FlowRuns.status == status.value)
-            .where(age_anchor <= stale_before)
+    stmt = sa.select(sa.func.count(), sa.func.min(age_anchor)).select_from(FlowRuns)
+    if status == FlowRunStatus.RUNNING:
+        stmt = stmt.where(stale_running_flow_run_predicate(stale_before=stale_before))
+    else:
+        stmt = stmt.where(FlowRuns.status == status.value).where(
+            age_anchor <= stale_before
         )
-    ).one()
+    count, oldest_anchor_at = (await session.execute(stmt)).one()
     return _RunSummary(
         count=int(count or 0),
         oldest_anchor_at=_normalize_datetime(oldest_anchor_at),
@@ -795,11 +813,14 @@ async def _load_webhook_outbox_summary(
 def _flow_runtime_health_flags(
     *,
     snapshot: FlowRuntimeHealthSnapshot,
+    probe: FlowRuntimeProbe,
     stale_running_age_seconds: int | None,
     expired_review_checkpoint_age_seconds: int | None,
     policy: FlowRuntimeHealthPolicy,
 ) -> list[FlowRuntimeHealthFlag]:
     flags: list[FlowRuntimeHealthFlag] = []
+    if not probe.maintenance_queue_consumer_ok:
+        flags.append(FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE)
     if snapshot.stale_queued_count > 0:
         flags.append(FlowRuntimeHealthFlag.STALE_QUEUED_RUNS)
     if snapshot.accepted_dispatch_exhausted_count > 0:
@@ -843,9 +864,8 @@ def _flow_runtime_health_status(
     probe: FlowRuntimeProbe,
     status_flags: list[FlowRuntimeHealthFlag],
 ) -> FlowRuntimeHealthStatus:
-    if not probe.db_query_ok:
-        return FlowRuntimeHealthStatus.UNKNOWN
     unhealthy_flags = {
+        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE,
         FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
@@ -856,6 +876,8 @@ def _flow_runtime_health_status(
     }
     if any(flag in unhealthy_flags for flag in status_flags):
         return FlowRuntimeHealthStatus.UNHEALTHY
+    if not probe.db_query_ok:
+        return FlowRuntimeHealthStatus.UNKNOWN
     if status_flags:
         return FlowRuntimeHealthStatus.DEGRADED
     return FlowRuntimeHealthStatus.HEALTHY
@@ -863,9 +885,9 @@ def _flow_runtime_health_status(
 
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
-        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB signals are healthy.",
+        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB and maintenance-consumer signals are healthy.",
         FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has accepted dispatch exhaustion, stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has no maintenance-queue consumer, accepted dispatch exhaustion, stale reconciliation lag, review expiry lag, terminal-run integrity issues, or outbox dead letters.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

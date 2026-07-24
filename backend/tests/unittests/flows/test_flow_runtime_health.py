@@ -32,7 +32,11 @@ def _classify(snapshot: FlowRuntimeHealthSnapshot):
         snapshot=snapshot,
         now=datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc),
         policy=_policy(),
-        probe=FlowRuntimeProbe(db_query_ok=True, db_query_duration_ms=12),
+        probe=FlowRuntimeProbe(
+            db_query_ok=True,
+            db_query_duration_ms=12,
+            maintenance_queue_consumer_ok=True,
+        ),
     )
 
 
@@ -42,6 +46,34 @@ def test_flow_runtime_health_is_healthy_without_db_signals() -> None:
     assert response.status == FlowRuntimeHealthStatus.HEALTHY
     assert response.status_flags == []
     assert response.probe.db_query_ok is True
+
+
+def test_missing_maintenance_queue_consumer_is_typed_and_unhealthy() -> None:
+    response = classify_flow_runtime_health(
+        snapshot=FlowRuntimeHealthSnapshot(),
+        now=datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc),
+        policy=_policy(),
+        probe=FlowRuntimeProbe(
+            db_query_ok=True,
+            db_query_duration_ms=12,
+            maintenance_queue_consumer_ok=False,
+        ),
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE
+    ]
+    assert response.probe.maintenance_queue_inspection_timeout_seconds == 1.0
+
+
+def test_live_maintenance_queue_consumer_emits_no_liveness_flag() -> None:
+    response = _classify(FlowRuntimeHealthSnapshot())
+
+    assert (
+        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE
+        not in response.status_flags
+    )
 
 
 def test_stale_queued_runs_degrade_health() -> None:
@@ -271,9 +303,27 @@ def test_db_probe_failure_makes_health_unknown() -> None:
         policy=_policy(),
         query_duration_ms=2000,
         failure=FlowRuntimeProbeFailure.TIMEOUT,
+        maintenance_queue_consumer_ok=True,
     )
 
     assert response.status == FlowRuntimeHealthStatus.UNKNOWN
     assert response.status_flags == []
+    assert response.probe.db_query_ok is False
+    assert response.probe.db_query_failure == FlowRuntimeProbeFailure.TIMEOUT
+
+
+def test_missing_maintenance_consumer_stays_unhealthy_when_db_probe_fails() -> None:
+    response = flow_runtime_health_probe_failure_response(
+        now=datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc),
+        policy=_policy(),
+        query_duration_ms=2000,
+        failure=FlowRuntimeProbeFailure.TIMEOUT,
+        maintenance_queue_consumer_ok=False,
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.UNHEALTHY
+    assert response.status_flags == [
+        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE
+    ]
     assert response.probe.db_query_ok is False
     assert response.probe.db_query_failure == FlowRuntimeProbeFailure.TIMEOUT

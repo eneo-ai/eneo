@@ -7,19 +7,23 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Protocol, cast
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.authentication import auth
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
 from eneo.flows.ai_builder.ai_builder_router import (
     AIBuilderEnvelopedError,
     ai_builder_enveloped_error_handler,
+)
+from eneo.flows.runtime.celery_app import (
+    flow_maintenance_queue_has_live_consumer,
 )
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
@@ -627,9 +631,11 @@ def get_application():
     @app.get(
         "/api/healthz/flows",
         response_model=FlowRuntimeHealthResponse,
+        dependencies=[Security(auth.authenticate_super_api_key)],
         description=(
-            "Return Flow runtime readiness signals derived from persisted run, review, "
-            "data-integrity, audit-outbox, and webhook-outbox state."
+            "Return super-key-protected Flow runtime readiness signals derived from "
+            "persisted run, review, data-integrity, audit-outbox, webhook-outbox, and "
+            "maintenance-queue consumer state."
         ),
         responses={
             200: {
@@ -637,7 +643,8 @@ def get_application():
                     "Flow runtime health payload. Inspect the response status and flags "
                     "for healthy, degraded, unhealthy, or unknown runtime signals."
                 )
-            }
+            },
+            401: {"description": "Missing or invalid Eneo super API key."},
         },
     )
     async def flow_runtime_health() -> FlowRuntimeHealthResponse:
@@ -646,6 +653,10 @@ def get_application():
         settings = get_settings()
         policy = build_flow_runtime_health_policy(
             task_timeout_seconds=settings.flow_task_timeout_seconds
+        )
+        maintenance_queue_consumer_ok = await asyncio.to_thread(
+            flow_maintenance_queue_has_live_consumer,
+            timeout_seconds=1.0,
         )
         query_started_at = time.perf_counter()
         query_now = datetime.now(timezone.utc)
@@ -668,6 +679,7 @@ def get_application():
                 policy=policy,
                 query_duration_ms=query_duration_ms,
                 failure=FlowRuntimeProbeFailure.TIMEOUT,
+                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
             )
         except Exception as exc:
             query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
@@ -680,6 +692,7 @@ def get_application():
                 policy=policy,
                 query_duration_ms=query_duration_ms,
                 failure=FlowRuntimeProbeFailure.ERROR,
+                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
             )
 
         query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
@@ -690,6 +703,7 @@ def get_application():
             probe=FlowRuntimeProbe(
                 db_query_ok=True,
                 db_query_duration_ms=query_duration_ms,
+                maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
             ),
         )
 

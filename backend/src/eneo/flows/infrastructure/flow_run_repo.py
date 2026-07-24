@@ -14,11 +14,9 @@ from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    FlowOutboxDeliveryStatus,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
-    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -74,6 +72,9 @@ from eneo.flows.flow_run_step_result_file import (
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_staleness import (
+    stale_running_flow_run_predicate,
 )
 from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
     build_step_input_file_rows,
@@ -392,18 +393,7 @@ class FlowRunRepository:
         stmt = (
             sa.select(FlowRuns)
             .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
-            .where(FlowRuns.updated_at <= stale_before)
-            .where(
-                ~sa.select(FlowRunWebhookDeliveries.id)
-                .where(FlowRunWebhookDeliveries.flow_run_id == FlowRuns.id)
-                .where(FlowRunWebhookDeliveries.tenant_id == FlowRuns.tenant_id)
-                .where(
-                    FlowRunWebhookDeliveries.delivery_status
-                    == FlowOutboxDeliveryStatus.PENDING.value
-                )
-                .exists()
-            )
+            .where(stale_running_flow_run_predicate(stale_before=stale_before))
             .order_by(FlowRuns.updated_at.asc())
             .limit(limit)
         )
