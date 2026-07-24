@@ -4,7 +4,7 @@ goal:
   title: "Enterprise Skills rollout"
   slug: "enterprise-skills-rollout"
   kind: specific
-  tranche: "Close O1 and turn the remaining non-Marketplace Skills roadmap into an ordered implementation blueprint."
+  tranche: "Finish selective activation, close execution-block integrity, and deliver controlled organisation revision rollout before O2 and portability."
   status: active
 
 rules:
@@ -33,7 +33,7 @@ continuity:
   completed_write_tasks_in_thread: 4
   handoff_note: null
   last_handoff_at: null
-  last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
+  last_verified_revision: "cba9d0386c4b003a794c211c0e5a8ae6a45a410d"
 
 active_task: T013
 
@@ -528,43 +528,6 @@ tasks:
         - "The Skill and revision rows are deleted while body-free ID/revision/digest/position provenance remains readable."
         - "The fresh full-coverage review found no current in-scope findings on the merged head."
 
-  - id: T008
-    type: worker
-    assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract."
-    constraints:
-      - "Do not broaden this into a generic error framework."
-      - "Preserve current HTTP semantics and dirty-editor recovery."
-    verify:
-      - "Generated conflict payloads"
-      - "Publish, revision, restore, and delete conflict behavior"
-      - "English and Swedish recovery copy"
-    stop_if:
-      - "The cleanup changes accepted lifecycle behavior."
-    receipt: null
-
-  - id: T009
-    type: worker
-    assignee: Worker
-    status: queued
-    reasoning_hint: medium
-    objective: "Add an explicit catalogue source filter when evidence shows builders need it at 200+ available Skills."
-    inputs:
-      - "O1 picker telemetry or usability evidence"
-      - "Tagged space and organisation catalogue source contract"
-    constraints:
-      - "Keep server-owned pagination and search."
-      - "Do not preload or advertise every organisation Skill to the model."
-      - "Do not implement without evidence that search plus source labels are insufficient."
-    verify:
-      - "Source-filter pagination and cursor behavior"
-      - "Keyboard, responsive, loading, empty, and error states"
-    stop_if:
-      - "There is no measured or observed need beyond the existing source labels and search."
-    receipt: null
-
   - id: T010
     type: pm
     assignee: PM
@@ -829,7 +792,7 @@ tasks:
     objective: "Implement Task #553 slice 3: route every eager turn through one immutable SkillTurnPlan and persist typed, body-free activation evidence while behavior remains all-always."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
     inputs:
-      - "develop at e681171f691b70801b8059435906ff3f0d96f7d8 (merged PR #583)"
+      - "develop at cba9d0386c4b003a794c211c0e5a8ae6a45a410d (merged PR #584)"
       - "docs/enterprise-skills-roadmap.md slice 3 contract and evidence section"
       - "Issue #553 evidence section (Question.skill_provenance stays; one nullable skill_activation JSONB via a strict versioned model)"
       - "Existing completion context, streaming and non-streaming provider loops, placeholder/success/failure/stream-abort finalisation owners"
@@ -838,12 +801,15 @@ tasks:
       - "backend/src/eneo/assistants/"
       - "backend/src/eneo/completion_models/"
       - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/governance_policy/"
       - "backend/src/eneo/questions/"
       - "backend/src/eneo/sessions/"
       - "backend/src/eneo/skills/"
+      - "backend/src/eneo/tokens/"
       - "backend/tests/"
       - "docs/enterprise-skills-roadmap.md"
       - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
       - "frontend/packages/eneo-js/"
     constraints:
       - "Do not begin until a bounded plan with file:line evidence exists and the Codex plan gate has run."
@@ -851,7 +817,7 @@ tasks:
       - "Exact revision IDs and digests are retained; instruction bodies and prompts never enter analytics evidence."
       - "Reuse the canonical audit/history/debug owners; no event table."
       - "Do not add the activation tool, public on_demand writes, or UI controls."
-      - "Settle the roadmap's open retention decision with current product owners or stop and ask the user; do not invent a second retention system."
+      - "Question.skill_activation follows the owning Question row's existing assistant, Space, or tenant retention and deletion lifecycle; do not invent a second retention system."
     verify:
       - "Byte-equivalent all-always payloads through the frozen plan"
       - "Evidence finalisation across success, failure, timeout, cancellation, and client disconnect"
@@ -861,6 +827,261 @@ tasks:
     stop_if:
       - "The design requires the reserved activation function or provider-loop dispatch owned by slice 4."
       - "The retention decision cannot be settled without user product authority."
+    receipt: null
+
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Close the execution-block configuration and visibility gap without deleting bindings or changing established runtime behavior."
+    inputs:
+      - "Completed T013 receipt"
+      - "docs/enterprise-skills-roadmap.md execution-block contract"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md execution-block integrity contract"
+      - "docs/goals/enterprise-skills-rollout/notes/T014-mcp-rollout-blocking-plan.md"
+      - ".codex/artifacts/enterprise-skills-mcp-rollout-blocking-blueprint-20260724.md"
+      - "Current SkillService reference resolvers, execution-block owner, organisation projections, and SkillBindingsEditor"
+    allowed_files:
+      - "backend/src/eneo/skills/"
+      - "backend/src/eneo/settings/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Write behavior tests first at the common reference-resolution seam."
+      - "Reject newly added or revision-changed blocked references for Assistant, App, and Governance Policy."
+      - "Preserve an unchanged exact blocked pin during unrelated parent saves and reorder."
+      - "Keep established runtime semantics: Assistant and Personal Chat omit the Skill; Apps fail before provider work."
+      - "Derive block state in organisation and binding read projections; do not add a duplicate persisted boolean."
+      - "Keep publication and block as separate typed dimensions while making Blocked the dominant operational UI state."
+      - "Never expose the admin incident reason to non-admin users."
+      - "Use installed shadcn-svelte components only for new UI."
+    verify:
+      - "Assistant, App, and Governance new/change/retained/reorder/unblock behavior tests"
+      - "Tenant-safe organisation and binding projection tests"
+      - "Generic non-admin App error and incident-reason redaction tests"
+      - "Generated contract drift, Swedish/English component tests, keyboard and narrow-screen browser checks"
+      - "Backend Ruff, format, Pyright, focused suites, frontend checks, docs build, CI, and fresh /review"
+    stop_if:
+      - "The change requires deleting bindings, stopping an entire Assistant, or changing queued App provenance."
+      - "Block state cannot be derived without creating a second source of truth."
+    receipt: null
+
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 4: the trusted internal on-demand activation effect through the existing completion loop."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "Completed T014 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 4 contract"
+      - "Completed T013 frozen SkillTurnPlan and activation evidence"
+      - "Current streaming and non-streaming completion loops and external MCP dispatch"
+    allowed_files:
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/questions/"
+      - "backend/src/eneo/sessions/"
+      - "backend/src/eneo/skills/"
+      - "backend/src/eneo/tokens/"
+      - "backend/tests/"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/packages/eneo-js/"
+    constraints:
+      - "Use one reserved Eneo built-in identity and recognize it before external MCP dispatch."
+      - "Do not use loopback HTTP, FastMCP, a generic effect registry, a one-method port, or an external tool result as activation authority."
+      - "Map only plan-local activation keys back to the frozen exact revision; never advertise revision IDs or digests to the model."
+      - "Apply accepted Skills in saved binding order, rerun canonical token checks, and keep streaming/non-streaming parity."
+      - "Models without tool calling remain always_only; Apps remain eager."
+      - "Preempt sibling external calls in the same round with protocol-valid deferred results."
+    verify:
+      - "Should-trigger and should-not-trigger behavior with exact pinned activation"
+      - "Unknown/repeated/over-limit keys, hostile collisions, sibling calls, optional overflow, and external forgery"
+      - "Streaming/non-streaming, abort/error evidence, model fallback, block, and zero-Skill behavior"
+      - "Backend Ruff, format, Pyright, focused and relevant full suites, generated contracts, CI, and fresh /review"
+    stop_if:
+      - "The implementation requires PR #538's loopback transport, knowledge stack, or a generic plugin framework."
+      - "The provider adapter must import the Skills module or a mutable binding lookup occurs after plan construction."
+    receipt: null
+
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 5: public binding-mode save contracts, admin runtime-policy UI, honest activation controls, and one shared fit/activatability owner."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "Completed T015 receipt"
+      - "docs/enterprise-skills-roadmap.md slice 5 contract"
+      - "Current typed Skill runtime policy and generated per-model projections"
+      - "Current Assistant and Governance Policy parent-save owners and shared SkillBindingsEditor"
+    allowed_files:
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/settings/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/admin/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Expose mode writes only after T015 runtime semantics are merged."
+      - "Distinguish an omitted mode from an explicit mode change; preserve retained modes."
+      - "Apps expose no mode and remain eager."
+      - "One concrete typed fit/activatability function must own ordinary save, API/UI projection, future rollout preview/apply, and tests."
+      - "Reuse stored admin policy; platform model-window and safety ceilings remain fixed invariants while tenant values remain admin-configurable."
+      - "Use existing admin and binding-editor surfaces with installed shadcn-svelte components; no new dashboard or form store."
+    verify:
+      - "Assistant and Governance mode saves, omitted/explicit distinction, model changes, policy precedence, and rollback"
+      - "Small and large context windows, LiteLLM estimate, provider-selected Governance models, and unsupported model fallback"
+      - "Admin bounds/reset/audit and natural Swedish/English UI copy"
+      - "Keyboard, invalid-focus, loading/stale/estimated/error/narrow-screen states"
+      - "Generated contracts, backend/frontend suites, docs build, CI, and fresh /review"
+    stop_if:
+      - "Fit or activatability would be calculated in more than one owner."
+      - "The UI needs a second design system or Apps would gain on-demand behavior."
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Consolidate Skill lifecycle and revision conflicts into the existing typed API conflict contract after Task #553 owners are stable."
+    inputs:
+      - "Completed T016 receipt"
+      - "Current publish, revision, restore, delete, and binding-mode conflict outcomes"
+    constraints:
+      - "Do not broaden this into a generic error framework."
+      - "Preserve current HTTP semantics and dirty-editor recovery."
+      - "Complete before controlled rollout adds new conflict outcomes."
+    verify:
+      - "Generated conflict payloads"
+      - "Publish, revision, restore, delete, and binding-mode conflict behavior"
+      - "English and Swedish recovery copy"
+    stop_if:
+      - "The cleanup changes accepted lifecycle behavior."
+    receipt: null
+
+  - id: T017
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add tenant-admin controlled rollout of one published organisation Skill revision to existing Assistant and Personal Chat pins."
+    inputs:
+      - "Completed T008 and T016 receipts"
+      - "docs/enterprise-skills-roadmap.md controlled rollout contract"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md R1 contract"
+      - "docs/goals/enterprise-skills-rollout/notes/T014-mcp-rollout-blocking-plan.md"
+      - ".codex/artifacts/enterprise-skills-mcp-rollout-blocking-blueprint-20260724.md"
+      - "Current organisation Skill detail/adoption projection, audit owner, and T016 shared fit function"
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/audit/"
+      - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/governance_policy/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "OrganizationSkillService owns tenant-admin authorization and lifecycle; SkillRepo owns target discovery, guarded pin writes, and concrete operation persistence."
+      - "Change only the expected old revision pin for existing same-Skill bindings; preserve order, activation mode, source identity, other bindings, and every parent field."
+      - "Never call parent-save commands, impersonate builders, attach missing bindings, or create a parallel full binding API."
+      - "Use T016's exact fit/activatability function; stop instead of duplicating compatibility calculations."
+      - "Keep one Skill-specific resumable operation; do not create a generic jobs or bulk-operation framework."
+      - "Do not store Skill bodies, prompts, tool results, credentials, or incident reasons in operation/audit data."
+      - "Use server pagination/search and installed shadcn-svelte; never render all targets."
+    verify:
+      - "Tenant-admin bearer access; scoped API keys and synthetic service principals denied"
+      - "Exact ready preview, provisional preparation counts, exclusions, idempotent retry, cancellation, and resumability"
+      - "Ten-thousand-target bounded memory, lock scope, stable cursor, and no N+1 target loading"
+      - "Concurrent edit skip; block, unpublish, publication change, missing target, context incompatibility, and partial failure"
+      - "Only exact pins change; operation/audit payloads remain body-free"
+      - "Migration round-trip, generated contracts, Swedish/English, a11y, responsive UI, CI, and fresh /review"
+    stop_if:
+      - "A second fit calculation, a generic jobs framework, or a parent-save impersonation path is required."
+      - "Exact preview cannot remain stable without copying parent or Skill content into operation rows."
+    receipt: null
+
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Extend controlled organisation Skill revision rollout to Apps as an explicit eager-only scope."
+    inputs:
+      - "Completed T017 receipt and production-like scale evidence"
+      - "Current App binding, context-fit, queue snapshot, and pre-provider execution-block owners"
+    allowed_files:
+      - "backend/src/eneo/apps/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "frontend/apps/web/messages/"
+      - "frontend/apps/web/src/lib/features/skills/"
+      - "frontend/apps/web/src/routes/(app)/spaces/organization/skills/"
+      - "frontend/apps/docs-site/src/content/guides/skills.mdx"
+      - "frontend/packages/eneo-js/"
+      - "docs/adr/marketplace-hub-package-portability-and-skills.md"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+    constraints:
+      - "Apps remain eager and gain no activation mode."
+      - "App scope is explicit, default off, and requires acknowledgement of new-run behavior."
+      - "Queued App snapshots and their exact provenance never change."
+      - "Reuse the T017 operation and T016 fit owner without widening pin-update authority."
+    verify:
+      - "App-specific preview compatibility and bounded scale"
+      - "New runs use the updated pin only after commit"
+      - "Queued snapshots keep their original revision"
+      - "Concurrent block, unpublication, context conflict, retry, and recovery fail closed"
+      - "Generated contracts, Swedish/English UI, CI, and fresh /review"
+    stop_if:
+      - "The extension requires rewriting queued runs or adding App on-demand activation."
+      - "App rollout cannot remain an explicit narrow scope on the existing operation."
+    receipt: null
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add an explicit catalogue source filter only when evidence shows builders need it at 200+ available Skills."
+    inputs:
+      - "O1 picker telemetry or usability evidence"
+      - "Tagged space and organisation catalogue source contract"
+    constraints:
+      - "Keep server-owned pagination and search."
+      - "Do not preload or advertise every organisation Skill to the model."
+      - "Do not implement without evidence that search plus source labels are insufficient."
+    verify:
+      - "Source-filter pagination and cursor behavior"
+      - "Keyboard, responsive, loading, empty, and error states"
+    stop_if:
+      - "There is no measured or observed need beyond the existing source labels and search."
     receipt: null
 
   - id: T999
