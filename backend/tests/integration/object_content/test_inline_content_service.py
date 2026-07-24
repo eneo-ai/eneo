@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select
@@ -18,6 +19,7 @@ from eneo.object_content.content import (
     ContentIntent,
     ContentReadGrant,
     ContentState,
+    ObjectContentStateError,
     StorageKind,
     capture_content,
 )
@@ -95,6 +97,17 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
             ranged = b"".join([chunk async for chunk in opened.chunks])
         assert ranged == payload[9:15]
         assert opened.content_range == f"bytes 9-14/{len(payload)}"
+
+        with pytest.raises(ObjectContentStateError, match="not available"):
+            await service.read_content_bytes(
+                [
+                    ContentReadGrant(
+                        content_id=prepared.id,
+                        tenant_id=uuid4(),
+                        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                    )
+                ]
+            )
 
         async with object_content_database.session() as session, session.begin():
             await session.execute(

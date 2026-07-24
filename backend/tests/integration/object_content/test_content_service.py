@@ -527,6 +527,9 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
         assert received_size == size_bytes
         assert received_digest.digest() == captured.sha256
 
+        materialized = await service.read_content_bytes([grant])
+        assert materialized[prepared.id] == b"x" * size_bytes
+
         async with service.open_content(grant, range_header="bytes=100-199") as opened:
             ranged = b"".join([chunk async for chunk in opened.chunks])
         assert ranged == b"x" * 100

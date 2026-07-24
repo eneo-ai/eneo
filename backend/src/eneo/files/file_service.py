@@ -1,7 +1,7 @@
 from collections import defaultdict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -50,6 +50,10 @@ class FileDownload:
     media_type: str
     filename: str
     content_range: str | None
+    _close: Callable[[], Awaitable[None]] = field(repr=False)
+
+    async def aclose(self) -> None:
+        await self._close()
 
 
 async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
@@ -312,39 +316,60 @@ class FileService:
         if range_header is not None and metadata.file_type is not FileType.AUDIO:
             raise BadRequestException("Range is only supported for audio files")
 
-        byte_range = (
-            None
-            if range_header is None
-            else ByteRange.parse(range_header, size_bytes=reference.size_bytes)
-        )
+        if range_header is not None:
+            ByteRange.parse(range_header, size_bytes=reference.size_bytes)
         grant = ContentReadGrant(
             content_id=reference.content_id,
             tenant_id=metadata.tenant_id,
             access_class=reference.access_class,
         )
 
+        read_context = self._object_content.open_content(
+            grant,
+            range_header=range_header,
+        )
+        opened = await read_context.__aenter__()
+        closed = False
+
+        async def exit_read_context(
+            error: BaseException | None = None,
+        ) -> bool | None:
+            nonlocal closed
+            if closed:
+                return None
+            closed = True
+            if error is None:
+                return await read_context.__aexit__(None, None, None)
+            return await read_context.__aexit__(
+                type(error),
+                error,
+                error.__traceback__,
+            )
+
         async def stream() -> AsyncGenerator[bytes]:
-            async with self._object_content.open_content(
-                grant,
-                range_header=range_header,
-            ) as opened:
+            try:
                 async for chunk in opened.chunks:
                     yield chunk
+            except BaseException as error:
+                if not await exit_read_context(error):
+                    raise
+            else:
+                await exit_read_context()
+
+        async def close() -> None:
+            await exit_read_context()
 
         return FileDownload(
             chunks=stream(),
-            content_length=(
-                reference.size_bytes
-                if byte_range is None
-                else byte_range.content_length
-            ),
-            media_type=reference.media_type,
+            content_length=opened.content_length,
+            media_type=opened.media_type,
             filename=(
                 self._legacy_text_filename(metadata.name)
                 if reference.variant is FileContentVariant.EXTRACTED_TEXT
                 else metadata.name
             ),
-            content_range=(None if byte_range is None else byte_range.response_header),
+            content_range=opened.content_range,
+            _close=close,
         )
 
     @staticmethod
@@ -364,20 +389,34 @@ class FileService:
             [file.id for file in metadata]
         )
         by_file = self._references_by_file(references)
+        transcription_by_file: dict[UUID, FileContentReferenceRecord] = {}
+        grants: list[ContentReadGrant] = []
+        for file in metadata:
+            transcription_reference = self._first_reference(
+                by_file[file.id],
+                FileContentVariant.TRANSCRIPTION,
+            )
+            if transcription_reference is None:
+                continue
+            transcription_by_file[file.id] = transcription_reference
+            grants.append(
+                ContentReadGrant(
+                    content_id=transcription_reference.content_id,
+                    tenant_id=file.tenant_id,
+                    access_class=transcription_reference.access_class,
+                )
+            )
+        payloads = await self._object_content.read_content_bytes(grants)
+
         projected: list[FilePublic] = []
         for file in metadata:
             file_references = by_file[file.id]
             info = project_file_info(file, file_references)
-            transcription_reference = self._first_reference(
-                file_references,
-                FileContentVariant.TRANSCRIPTION,
-            )
+            transcription_reference = transcription_by_file.get(file.id)
             transcription = (
                 None
                 if transcription_reference is None
-                else (await self._read_bytes(file, transcription_reference)).decode(
-                    "utf-8"
-                )
+                else payloads[transcription_reference.content_id].decode("utf-8")
             )
             projected.append(
                 FilePublic(

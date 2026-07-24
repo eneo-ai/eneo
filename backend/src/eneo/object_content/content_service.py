@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from secrets import token_hex
@@ -23,6 +23,7 @@ from eneo.object_content.content import (
     ObjectContentBusyError,
     ObjectContentConfigurationError,
     ObjectContentIntegrityError,
+    ObjectContentStateError,
     ObjectContentUnavailableError,
     StorageKind,
     capture_content,
@@ -32,6 +33,7 @@ from eneo.object_content.content_repository import (
     ObjectContentRepository,
     PreparedContent,
     ReadableContent,
+    ReadableContentSource,
     UploadLease,
 )
 from eneo.object_content.inline_content_store import InlineContentStore
@@ -59,6 +61,11 @@ def retry_delay_seconds(
         raise ValueError("Invalid reconciliation retry bounds")
     exponent = min(attempt_count - 1, 30)
     return min(maximum_seconds, base_seconds * (2**exponent))
+
+
+# This is an internal PostgreSQL bind/query chunk, not a user-visible content
+# limit. Larger requests are processed across multiple bounded pages.
+_READ_BATCH_MAX_ITEMS = 500
 
 
 class ObjectContentService:
@@ -446,6 +453,69 @@ class ObjectContentService:
                     raise ObjectContentUnavailableError(
                         "Durable object content is temporarily unavailable"
                     ) from error
+
+    async def read_content_bytes(
+        self,
+        grants: Sequence[ContentReadGrant],
+    ) -> dict[UUID, bytes]:
+        """Materialize authorized content with one inline query per bounded page.
+
+        PostgreSQL-inline controls and payloads are loaded and access-validated
+        together. Object-store content keeps the verified streaming path behind
+        ``open_content``; callers do not branch on storage placement.
+        """
+        unique_grants: dict[UUID, ContentReadGrant] = {}
+        for grant in grants:
+            existing = unique_grants.get(grant.content_id)
+            if existing is not None and existing != grant:
+                raise ObjectContentStateError(
+                    "Conflicting access grants target the same object content"
+                )
+            unique_grants[grant.content_id] = grant
+
+        ordered_grants = list(unique_grants.values())
+        payloads: dict[UUID, bytes] = {}
+        for offset in range(0, len(ordered_grants), _READ_BATCH_MAX_ITEMS):
+            page = ordered_grants[offset : offset + _READ_BATCH_MAX_ITEMS]
+            async with self._database.session() as session, session.begin():
+                sources = await ObjectContentRepository(session).get_readable_sources(
+                    page
+                )
+
+            for grant in page:
+                source = sources[grant.content_id]
+                payloads[grant.content_id] = await self._read_source_bytes(
+                    grant,
+                    source,
+                )
+        return payloads
+
+    async def _read_source_bytes(
+        self,
+        grant: ContentReadGrant,
+        source: ReadableContentSource,
+    ) -> bytes:
+        content = source.content
+        if content.storage_kind is StorageKind.OBJECT_STORE:
+            async with self.open_content(grant) as opened:
+                return b"".join([chunk async for chunk in opened.chunks])
+
+        if source.inline_payload is None:
+            raise ObjectContentStateError("Inline content payload is missing")
+        try:
+            async with self._inline_store.open_verified_read(
+                source.inline_payload,
+                expected_sha256=content.sha256,
+                expected_size_bytes=content.size_bytes,
+                expected_media_type=content.media_type,
+            ) as opened:
+                return b"".join([chunk async for chunk in opened.chunks])
+        except ObjectContentIntegrityError:
+            await self._mark_backend_failure(
+                content.content_id,
+                ContentFailureCode.BACKEND_CORRUPT,
+            )
+            raise
 
     async def apply_hold(
         self,

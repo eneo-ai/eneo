@@ -8,6 +8,7 @@ from io import BytesIO
 from uuid import UUID
 
 import pytest
+import sqlalchemy as sa
 from fastapi import UploadFile
 from sqlalchemy import select
 
@@ -160,6 +161,78 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
     assert hydrated.blob is None
     assert downloaded == payload
     assert download.media_type == "text/plain"
+
+
+@pytest.mark.asyncio
+async def test_file_hydration_batches_multiple_inline_payloads_in_one_query(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    file_ids: list[UUID] = []
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=FileProtocol(
+                file_size_service=FileSizeService(),
+                text_extractor=TextExtractor(),
+                image_extractor=ImageExtractor(),
+            ),
+            object_content=_content_service(object_content_database),
+        )
+        for index in range(3):
+            saved = await service.save_file(
+                UploadFile(
+                    file=BytesIO(f"policy {index}".encode()),
+                    filename=f"policy-{index}.txt",
+                    headers={"content-type": "text/plain"},
+                )
+            )
+            file_ids.append(saved.id)
+
+    inline_payload_queries: list[str] = []
+
+    def capture_inline_payload_query(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if "inline_content_payloads" in statement.lower():
+            inline_payload_queries.append(statement)
+
+    async with object_content_database.session() as session, session.begin():
+        user = await _user(session)
+        service = FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=FileProtocol(
+                file_size_service=FileSizeService(),
+                text_extractor=TextExtractor(),
+                image_extractor=ImageExtractor(),
+            ),
+            object_content=_content_service(object_content_database),
+        )
+        assert session.bind is not None
+        sync_engine = session.bind.sync_engine
+        sa.event.listen(
+            sync_engine,
+            "before_cursor_execute",
+            capture_inline_payload_query,
+        )
+        try:
+            hydrated = await service.get_files_by_ids(file_ids)
+        finally:
+            sa.event.remove(
+                sync_engine,
+                "before_cursor_execute",
+                capture_inline_payload_query,
+            )
+
+    assert [file.text for file in hydrated] == ["policy 0", "policy 1", "policy 2"]
+    assert len(inline_payload_queries) == 1
 
 
 @pytest.mark.asyncio

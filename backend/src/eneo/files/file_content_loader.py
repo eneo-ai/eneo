@@ -45,6 +45,26 @@ class FileContentTenantMismatchError(RuntimeError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _FileContentSelection:
+    hydrated_reference: FileContentReferenceRecord
+    text_reference: FileContentReferenceRecord | None
+    blob_reference: FileContentReferenceRecord | None
+    transcription_reference: FileContentReferenceRecord | None
+
+    @property
+    def readable_references(self) -> tuple[FileContentReferenceRecord, ...]:
+        return tuple(
+            reference
+            for reference in (
+                self.text_reference,
+                self.blob_reference,
+                self.transcription_reference,
+            )
+            if reference is not None
+        )
+
+
 class FileContentLoader:
     """Hydrate already-authorized File metadata through object content."""
 
@@ -78,16 +98,11 @@ class FileContentLoader:
         for reference in references:
             by_file[reference.file_id].append(reference)
 
-        payloads: dict[UUID, bytes] = {}
-        hydrated: dict[UUID, File] = {}
+        selections: dict[UUID, _FileContentSelection] = {}
+        grants: list[ContentReadGrant] = []
         for file in unique_metadata.values():
             file_references = by_file[file.id]
             primary = self._primary_reference(file, file_references)
-            text: str | None = None
-            blob: bytes | None = None
-            transcription: str | None = None
-            hydrated_reference = primary
-
             if file.file_type is FileType.TEXT:
                 text_reference = self._first_reference(
                     file_references,
@@ -99,40 +114,72 @@ class FileContentLoader:
                     raise NotFoundException(
                         f"File {file.id} has no readable text content"
                     )
-                text = (await self._read_bytes(file, text_reference, payloads)).decode(
-                    "utf-8"
-                )
                 hydrated_reference = text_reference
+                blob_reference = None
             else:
-                content_reference = self._preferred_binary_reference(
+                text_reference = None
+                blob_reference = self._preferred_binary_reference(
                     file,
                     file_references,
                 )
-                blob = await self._read_bytes(file, content_reference, payloads)
-                hydrated_reference = content_reference
+                hydrated_reference = blob_reference
 
-            if include_transcription:
-                transcription_reference = self._first_reference(
+            transcription_reference = (
+                self._first_reference(
                     file_references,
                     FileContentVariant.TRANSCRIPTION,
                 )
-                if transcription_reference is not None:
-                    transcription = (
-                        await self._read_bytes(
-                            file,
-                            transcription_reference,
-                            payloads,
-                        )
-                    ).decode("utf-8")
+                if include_transcription
+                else None
+            )
+            selection = _FileContentSelection(
+                hydrated_reference=hydrated_reference,
+                text_reference=text_reference,
+                blob_reference=blob_reference,
+                transcription_reference=transcription_reference,
+            )
+            selections[file.id] = selection
+            grants.extend(
+                ContentReadGrant(
+                    content_id=reference.content_id,
+                    tenant_id=file.tenant_id,
+                    access_class=reference.access_class,
+                )
+                for reference in selection.readable_references
+            )
 
+        payloads = await self._object_content.read_content_bytes(grants)
+        hydrated: dict[UUID, File] = {}
+        for file in unique_metadata.values():
+            selection = selections[file.id]
+            text = (
+                None
+                if selection.text_reference is None
+                else payloads[selection.text_reference.content_id].decode("utf-8")
+            )
+            blob = (
+                None
+                if selection.blob_reference is None
+                else payloads[selection.blob_reference.content_id]
+            )
+            transcription = (
+                None
+                if selection.transcription_reference is None
+                else payloads[selection.transcription_reference.content_id].decode(
+                    "utf-8"
+                )
+            )
             hydrated[file.id] = File(
                 id=file.id,
                 created_at=file.created_at,
                 updated_at=file.updated_at,
                 name=file.name,
-                checksum=hydrated_reference.sha256.hex(),
-                size=hydrated_reference.size_bytes,
-                mimetype=project_file_media_type(file, hydrated_reference),
+                checksum=selection.hydrated_reference.sha256.hex(),
+                size=selection.hydrated_reference.size_bytes,
+                mimetype=project_file_media_type(
+                    file,
+                    selection.hydrated_reference,
+                ),
                 file_type=file.file_type,
                 text=text,
                 blob=blob,
@@ -172,26 +219,6 @@ class FileContentLoader:
             key: [loaded[file_id] for file_id in file_ids]
             for key, file_ids in ids_by_group.items()
         }
-
-    async def _read_bytes(
-        self,
-        file: FileMetadata,
-        reference: FileContentReferenceRecord,
-        payloads: dict[UUID, bytes],
-    ) -> bytes:
-        cached = payloads.get(reference.content_id)
-        if cached is not None:
-            return cached
-
-        grant = ContentReadGrant(
-            content_id=reference.content_id,
-            tenant_id=file.tenant_id,
-            access_class=reference.access_class,
-        )
-        async with self._object_content.open_content(grant) as opened:
-            payload = b"".join([chunk async for chunk in opened.chunks])
-        payloads[reference.content_id] = payload
-        return payload
 
     @staticmethod
     def _first_reference(

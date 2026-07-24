@@ -1,9 +1,10 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentFailureCode,
     ContentIntent,
+    ContentReadGrant,
     ContentState,
     ObjectContentBusyError,
     ObjectContentIdempotencyConflictError,
@@ -52,6 +54,12 @@ class ReadableContent:
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+
+
+@dataclass(frozen=True, slots=True)
+class ReadableContentSource:
+    content: ReadableContent
+    inline_payload: bytes | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -515,6 +523,58 @@ class ObjectContentRepository:
         if row is None or row.state != ContentState.AVAILABLE.value:
             raise ObjectContentStateError("Object content is not available")
         return self._readable(row)
+
+    async def get_readable_sources(
+        self,
+        grants: Sequence[ContentReadGrant],
+    ) -> dict[UUID, ReadableContentSource]:
+        """Read access-validated controls and inline payloads in one query."""
+        if not grants:
+            return {}
+
+        requested = {
+            (
+                grant.content_id,
+                grant.tenant_id,
+                grant.access_class.value,
+            )
+            for grant in grants
+        }
+        rows = (
+            await self._session.execute(
+                select(ObjectContents, InlineContentPayloads.payload)
+                .outerjoin(
+                    InlineContentPayloads,
+                    InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .where(
+                    tuple_(
+                        ObjectContents.id,
+                        ObjectContents.tenant_id,
+                        ObjectContents.access_class,
+                    ).in_(requested),
+                    ObjectContents.state == ContentState.AVAILABLE.value,
+                )
+            )
+        ).all()
+
+        sources: dict[UUID, ReadableContentSource] = {}
+        for row, inline_payload in rows:
+            content = self._readable(row)
+            if (
+                content.storage_kind is StorageKind.POSTGRES_INLINE
+                and inline_payload is None
+            ):
+                raise ObjectContentStateError("Inline content payload is missing")
+            sources[content.content_id] = ReadableContentSource(
+                content=content,
+                inline_payload=inline_payload,
+            )
+
+        requested_ids = {grant.content_id for grant in grants}
+        if sources.keys() != requested_ids:
+            raise ObjectContentStateError("Object content is not available")
+        return sources
 
     async def get_available_by_id(self, content_id: UUID) -> ReadableContent:
         row = (

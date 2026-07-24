@@ -245,10 +245,13 @@ async def download_file_signed(
         download = await service.get_download_no_auth(id, range_header=range)
     except InvalidContentRangeError:
         whole = await service.get_download_no_auth(id)
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{whole.content_length}"},
-        )
+        try:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{whole.content_length}"},
+            )
+        finally:
+            await whole.aclose()
 
     headers = {
         "Content-Disposition": (
