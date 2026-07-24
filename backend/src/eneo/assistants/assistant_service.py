@@ -19,7 +19,6 @@ from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
-from eneo.completion_models.domain.skill_context import measure_skill_context
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
@@ -63,8 +62,10 @@ from eneo.roles.permissions import (
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
     SkillBindingReference,
     SkillComposition,
+    SkillExecutionReference,
     SkillRuntimeResolution,
     SkillTurnPlan,
     compose_skill_instructions,
@@ -92,6 +93,9 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.completion_models.application import CompletionModelCRUDService
     from eneo.completion_models.domain.completion_model import CompletionModel
+    from eneo.completion_models.domain.skill_activation import (
+        SkillActivationRuntime,
+    )
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
@@ -1308,6 +1312,10 @@ class AssistantService:
         stream: bool,
         assistant_id: UUID,
         question_id: UUID,
+        skill_plan: SkillTurnPlan,
+        skill_runtime: "SkillActivationRuntime",
+        selected_model_route: str,
+        initial_skill_context_tokens: int,
         version: int = 1,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
@@ -1315,6 +1323,22 @@ class AssistantService:
         # Capture tenant_id outside the generator so the abort-path background save
         # doesn't depend on self.user being safely accessible during teardown.
         tenant_id = self.user.tenant_id
+
+        def _final_skill_runtime_state() -> tuple[
+            tuple[SkillExecutionReference, ...],
+            SkillActivationEvidenceV1,
+        ]:
+            assert completion_model is not None
+            snapshot = skill_runtime.snapshot()
+            return (
+                skill_plan.active_provenance(snapshot),
+                skill_plan.activation_evidence(
+                    selected_model_id=completion_model.id,
+                    selected_model_route=selected_model_route,
+                    snapshot=snapshot,
+                ),
+            )
+
         if stream:
 
             async def response_stream() -> AsyncGenerator[Completion, None]:
@@ -1524,8 +1548,14 @@ class AssistantService:
                             actual=stream_usage.prompt_tokens,
                         )
                     else:
+                        final_skill_tokens = skill_runtime.snapshot().measurement.tokens
                         num_tokens_question = (
-                            response.total_token_count + assistant_selector_tokens
+                            response.total_token_count
+                            + max(
+                                final_skill_tokens - initial_skill_context_tokens,
+                                0,
+                            )
+                            + assistant_selector_tokens
                         )
                         input_source = "litellm"
 
@@ -1546,6 +1576,7 @@ class AssistantService:
                         f"output={num_tokens_answer} ({output_source})"
                     )
 
+                    skill_provenance, skill_activation = _final_skill_runtime_state()
                     await self.session_service.complete_question_with_answer(
                         question_id=question_id,
                         answer=response_string,
@@ -1560,6 +1591,8 @@ class AssistantService:
                         tool_calls=tool_calls if tool_calls else None,
                         mcp_tool_references=mcp_tool_references or None,
                         reasoning=reasoning_string or None,
+                        skill_provenance=skill_provenance,
+                        skill_activation=skill_activation,
                     )
                     completed = True
 
@@ -1581,7 +1614,11 @@ class AssistantService:
                     # abort) must be saved via a fresh DB session because the
                     # request-scoped AsyncSession may already be torn down and
                     # `await` across GeneratorExit is fragile.
-                    if not completed and (response_string or reasoning_string):
+                    if not completed and (
+                        response_string
+                        or reasoning_string
+                        or skill_runtime.snapshot().changed
+                    ):
                         from eneo.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
@@ -1597,6 +1634,9 @@ class AssistantService:
                             safe_count_tokens(response_string, model_name)
                             + reasoning_token_count
                         )
+                        skill_provenance, skill_activation = (
+                            _final_skill_runtime_state()
+                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -1604,6 +1644,8 @@ class AssistantService:
                                 answer=response_string,
                                 num_tokens_answer=partial_tokens_answer,
                                 reasoning=reasoning_string or None,
+                                skill_provenance=skill_provenance,
+                                skill_activation=skill_activation,
                             )
                         )
                         logger.info(
@@ -1667,6 +1709,7 @@ class AssistantService:
                 f"output={num_tokens_answer} ({output_source})"
             )
 
+            skill_provenance, skill_activation = _final_skill_runtime_state()
             await self.session_service.complete_question_with_answer(
                 question_id=question_id,
                 answer=final_answer,
@@ -1680,6 +1723,8 @@ class AssistantService:
                 web_search_results=list(web_search_results or []),
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
 
             return final_answer
@@ -1903,23 +1948,23 @@ class AssistantService:
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
-        skill_composition = skill_plan.composition
-        if skill_composition.provenance:
-            prompt_override = skill_composition.prompt
         model_route = effective_completion_model.get_model_route()
-        skill_context = measure_skill_context(
-            base_instructions=skill_plan.base_instructions,
-            composed_instructions=skill_composition.prompt,
-            model_name=model_route,
+        skill_runtime = skill_plan.to_activation_runtime(
+            selected_model_route=model_route,
             max_input_tokens=effective_completion_model.max_input_tokens,
-            context_share_percent=skill_plan.policy.context_share_percent,
+            supports_tool_calling=effective_completion_model.supports_tool_calling,
         )
+        initial_skill_snapshot = skill_runtime.snapshot()
+        skill_composition = SkillComposition(
+            prompt=skill_runtime.prompt,
+            provenance=skill_plan.active_provenance(initial_skill_snapshot),
+        )
+        if skill_runtime.prompt != skill_plan.base_instructions:
+            prompt_override = skill_runtime.prompt
         skill_activation = skill_plan.activation_evidence(
             selected_model_id=effective_completion_model.id,
             selected_model_route=model_route,
-            skill_context_tokens=skill_context.tokens,
-            skill_context_token_limit=skill_context.limit,
-            token_count_source=skill_context.source.value,
+            snapshot=initial_skill_snapshot,
         )
 
         # Per-request MCP opt-out from the composer toolbar: narrow whatever set
@@ -2036,21 +2081,42 @@ class AssistantService:
         else:
             web_search_results = []
 
-        response, datastore_result = await assistant_to_ask.ask(
-            question=cleaned_question,
-            completion_service=self.completion_service,
-            references_service=self.references_service,
-            session=session,
-            files=completion_file_inputs.completion_message_files,
-            stream=stream,
-            version=version,
-            web_search_results=web_search_results,
-            require_tool_approval=require_tool_approval,
-            completion_model_override=completion_model_override,
-            mcp_servers_override=mcp_servers_override,
-            prompt_override=prompt_override,
-            completion_prompt_files=completion_file_inputs.completion_prompt_files,
-        )
+        try:
+            response, datastore_result = await assistant_to_ask.ask(
+                question=cleaned_question,
+                completion_service=self.completion_service,
+                references_service=self.references_service,
+                session=session,
+                files=completion_file_inputs.completion_message_files,
+                stream=stream,
+                version=version,
+                web_search_results=web_search_results,
+                require_tool_approval=require_tool_approval,
+                completion_model_override=completion_model_override,
+                mcp_servers_override=mcp_servers_override,
+                prompt_override=prompt_override,
+                completion_prompt_files=completion_file_inputs.completion_prompt_files,
+                skill_runtime=skill_runtime,
+            )
+        except Exception:
+            failed_snapshot = skill_runtime.snapshot()
+            if failed_snapshot.changed:
+                try:
+                    await self.session_service.update_question_skill_runtime_state(
+                        question_id=question_id,
+                        skill_provenance=skill_plan.active_provenance(failed_snapshot),
+                        skill_activation=skill_plan.activation_evidence(
+                            selected_model_id=effective_completion_model.id,
+                            selected_model_route=model_route,
+                            snapshot=failed_snapshot,
+                        ),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not persist final Skill activation evidence after "
+                        "completion failure"
+                    )
+            raise
 
         # TODO: Separate the response based on stream true or false
 
@@ -2064,6 +2130,10 @@ class AssistantService:
             stream=stream,
             assistant_id=assistant_to_ask.id,
             question_id=question_id,
+            skill_plan=skill_plan,
+            skill_runtime=skill_runtime,
+            selected_model_route=model_route,
+            initial_skill_context_tokens=(initial_skill_snapshot.measurement.tokens),
             version=version,
             web_search_results=web_search_results,
             assistant_selector_tokens=assistant_selector_tokens,

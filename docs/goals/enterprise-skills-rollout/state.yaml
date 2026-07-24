@@ -966,6 +966,8 @@ tasks:
       - "Completed T013 frozen SkillTurnPlan and activation evidence"
       - "Current streaming and non-streaming completion loops and external MCP dispatch"
     allowed_files:
+      - "backend/src/eneo/assistants/assistant.py"
+      - "backend/src/eneo/assistants/assistant_service.py"
       - "backend/src/eneo/completion_models/"
       - "backend/src/eneo/questions/"
       - "backend/src/eneo/sessions/"

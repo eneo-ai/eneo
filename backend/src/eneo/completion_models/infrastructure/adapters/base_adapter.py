@@ -8,6 +8,7 @@ if TYPE_CHECKING:
         Context,
         ModelKwargs,
     )
+    from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.logging.logging import LoggingDetails
 
 
@@ -37,6 +38,7 @@ class CompletionModelAdapter(ABC):
         context: "Context",
         model_kwargs: "ModelKwargs | dict[str, Any] | None",
         mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
         **kwargs: Any,
     ) -> "Completion":
         raise NotImplementedError()
@@ -61,6 +63,7 @@ class CompletionModelAdapter(ABC):
         context: "Context",
         model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
         mcp_proxy: Any | None = None,
+        skill_runtime: "SkillActivationRuntime | None" = None,
         **kwargs: Any,
     ) -> Any:
         """

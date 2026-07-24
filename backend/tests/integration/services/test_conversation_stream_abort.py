@@ -31,7 +31,6 @@ from eneo.skills.domain.skill import (
     SkillRuntimeResolution,
     SkillTurnPlan,
 )
-from eneo.tokens.token_utils import TokenCountSource
 
 
 @dataclass
@@ -291,7 +290,7 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
         position=0,
         source=SkillBindingSource.SPACE,
     )
-    plan = SkillTurnPlan.create_eager(
+    plan = SkillTurnPlan.create(
         base_instructions="Base",
         resolution=SkillRuntimeResolution(eligible=(binding,), blocked=()),
         policy=SkillRuntimePolicy(
@@ -301,12 +300,15 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
             max_activations_per_turn=10,
         ),
     )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
     evidence = plan.activation_evidence(
         selected_model_id=uuid4(),
         selected_model_route="openai/gpt-4o",
-        skill_context_tokens=12,
-        skill_context_token_limit=100,
-        token_count_source=TokenCountSource.LITELLM,
+        snapshot=runtime.snapshot(),
     )
 
     async with db_container() as container:

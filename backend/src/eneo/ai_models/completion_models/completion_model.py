@@ -56,6 +56,22 @@ class FunctionDefinition:
     schema: dict[str, object]
 
 
+def function_definition_to_tool(
+    definition: FunctionDefinition,
+) -> dict[str, object]:
+    """Serialize one built-in function exactly as it is sent to providers."""
+
+    return {
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.schema,
+            "strict": True,
+        },
+    }
+
+
 @dataclass
 class FunctionCall:
     name: Optional[str] = None

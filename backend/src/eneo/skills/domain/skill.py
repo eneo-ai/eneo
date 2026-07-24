@@ -8,13 +8,19 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.main.exceptions import BadRequestException
 from eneo.model_providers.domain.model_route import MAX_MODEL_ROUTE_LENGTH
+
+if TYPE_CHECKING:
+    from eneo.completion_models.domain.skill_activation import (
+        SkillActivationRuntime,
+        SkillActivationSnapshot,
+    )
 
 MAX_SKILL_SLUG_LENGTH = 64
 MAX_SKILL_DISPLAY_NAME_LENGTH = 200
@@ -25,6 +31,7 @@ DEFAULT_SKILL_CATALOG_PAGE_LIMIT = 25
 MAX_SKILL_ADOPTION_PAGE_LIMIT = 100
 DEFAULT_SKILL_ADOPTION_PAGE_LIMIT = 25
 MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH = 1000
+MAX_RETAINED_SKILL_ACTIVATION_REJECTIONS = 50
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -706,15 +713,17 @@ class SkillTurnEffectiveMode(str, Enum):
 class SkillActivationFallbackReason(str, Enum):
     MODEL_LACKS_TOOL_CALLING = "model_lacks_tool_calling"
     CATALOG_BUDGET_EXCEEDED = "catalog_budget_exceeded"
+    TOKEN_MEASUREMENT_UNAVAILABLE = "token_measurement_unavailable"
     SELECTIVE_ACTIVATION_DISABLED = "selective_activation_disabled"
 
 
 class SkillActivationRejectionReason(str, Enum):
     UNKNOWN_KEY = "unknown_key"
     BLOCKED = "blocked"
-    REPEATED = "repeated"
     ACTIVATION_LIMIT_EXCEEDED = "activation_limit_exceeded"
     CONTEXT_LIMIT_EXCEEDED = "context_limit_exceeded"
+    MODEL_CONTEXT_LIMIT_EXCEEDED = "model_context_limit_exceeded"
+    TOKEN_MEASUREMENT_UNAVAILABLE = "token_measurement_unavailable"
     RESERVED_TOOL_COLLISION = "reserved_tool_collision"
 
 
@@ -818,6 +827,13 @@ class SkillActivationEvidenceV1(BaseModel):
                 raise ValueError(
                     f"{field_name} contains an unknown Skill activation key"
                 )
+        rejection_identities = [
+            (rejection.activation_key, rejection.reason) for rejection in self.rejected
+        ]
+        if len(rejection_identities) > MAX_RETAINED_SKILL_ACTIVATION_REJECTIONS:
+            raise ValueError("Too many retained Skill activation rejections")
+        if len(rejection_identities) != len(set(rejection_identities)):
+            raise ValueError("Skill activation rejections must be unique")
         return self
 
 
@@ -834,12 +850,12 @@ class SkillTurnPlan:
     base_instructions: str
     policy: SkillRuntimePolicy
     available: tuple[SkillTurnBinding, ...]
-    blocked: tuple[ResolvedSkillBinding, ...]
+    blocked: tuple[SkillTurnBinding, ...]
     initially_active_keys: tuple[str, ...]
     composition: SkillComposition
 
     @classmethod
-    def create_eager(
+    def create(
         cls,
         *,
         base_instructions: str,
@@ -853,30 +869,86 @@ class SkillTurnPlan:
             SkillTurnBinding(activation_key=f"skill-{index}", binding=binding)
             for index, binding in enumerate(ordered, start=1)
         )
+        blocked = tuple(
+            SkillTurnBinding(
+                activation_key=f"blocked-skill-{index}",
+                binding=binding,
+            )
+            for index, binding in enumerate(
+                sorted(resolution.blocked, key=lambda binding: binding.position),
+                start=1,
+            )
+        )
+        initially_active = tuple(
+            binding
+            for binding in available
+            if binding.binding.activation_mode is SkillActivationMode.ALWAYS
+        )
         return cls(
             base_instructions=base_instructions,
             policy=policy,
             available=available,
-            blocked=tuple(
-                sorted(resolution.blocked, key=lambda binding: binding.position)
-            ),
+            blocked=blocked,
             initially_active_keys=tuple(
-                binding.activation_key for binding in available
+                binding.activation_key for binding in initially_active
             ),
             composition=compose_skill_instructions(
                 base_instructions=base_instructions,
-                bindings=list(ordered),
+                bindings=[binding.binding for binding in initially_active],
             ),
         )
+
+    def to_activation_runtime(
+        self,
+        *,
+        selected_model_route: str,
+        max_input_tokens: int,
+        supports_tool_calling: bool,
+    ) -> "SkillActivationRuntime":
+        from eneo.completion_models.domain.skill_activation import (
+            FrozenSkillInstruction,
+            SkillActivationRuntime,
+        )
+
+        initially_active = set(self.initially_active_keys)
+        return SkillActivationRuntime.create(
+            base_instructions=self.base_instructions,
+            skills=tuple(
+                FrozenSkillInstruction(
+                    activation_key=binding.activation_key,
+                    binding=binding.binding,
+                    initially_active=binding.activation_key in initially_active,
+                )
+                for binding in self.available
+            ),
+            blocked_keys=frozenset(binding.activation_key for binding in self.blocked),
+            selective_activation_enabled=self.policy.selective_activation_enabled,
+            max_activations_per_turn=self.policy.max_activations_per_turn,
+            context_share_percent=self.policy.context_share_percent,
+            model_route=selected_model_route,
+            max_input_tokens=max_input_tokens,
+            supports_tool_calling=supports_tool_calling,
+        )
+
+    def active_provenance(
+        self, snapshot: "SkillActivationSnapshot"
+    ) -> tuple[SkillExecutionReference, ...]:
+        active_keys = set(snapshot.active)
+        return compose_skill_instructions(
+            base_instructions=self.base_instructions,
+            bindings=[
+                binding.binding
+                for binding in self.available
+                if binding.activation_key in active_keys
+            ],
+        ).provenance
 
     def activation_evidence(
         self,
         *,
         selected_model_id: UUID,
         selected_model_route: str,
-        skill_context_tokens: int,
-        skill_context_token_limit: int,
-        token_count_source: Literal["litellm", "fallback_estimate"],
+        snapshot: "SkillActivationSnapshot",
     ) -> SkillActivationEvidenceV1:
         available = tuple(
             SkillActivationReference.from_binding(
@@ -886,16 +958,31 @@ class SkillTurnPlan:
             for binding in self.available
         )
         return SkillActivationEvidenceV1(
-            effective_mode=SkillTurnEffectiveMode.EAGER,
+            effective_mode=snapshot.effective_mode,
+            fallback_reason=snapshot.fallback_reason,
             available=available,
             blocked=tuple(
-                SkillActivationReference.from_binding(binding)
+                SkillActivationReference.from_binding(
+                    binding.binding,
+                    activation_key=binding.activation_key,
+                )
                 for binding in self.blocked
             ),
-            initially_active=self.initially_active_keys,
+            initially_active=snapshot.initially_active,
+            accepted=snapshot.accepted,
+            repeated=snapshot.repeated,
+            rejected=tuple(
+                SkillActivationRejection(
+                    activation_key=rejection.activation_key,
+                    reason=rejection.reason,
+                )
+                for rejection in snapshot.rejected
+            ),
             selected_model_id=selected_model_id,
             selected_model_route=selected_model_route,
-            skill_context_tokens=skill_context_tokens,
-            skill_context_token_limit=skill_context_token_limit,
-            token_count_source=token_count_source,
+            skill_context_tokens=snapshot.measurement.tokens,
+            skill_context_token_limit=snapshot.measurement.limit,
+            token_count_source=snapshot.measurement.source.value,
+            activation_rounds=snapshot.activation_rounds,
+            selection_latency_ms=snapshot.selection_latency_ms,
         )

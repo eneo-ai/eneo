@@ -92,6 +92,8 @@ async def persist_partial_question_answer(
     num_tokens_answer: int,
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
+    skill_provenance: Sequence[SkillExecutionReference] | None = None,
+    skill_activation: SkillActivationEvidenceV1 | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
@@ -111,6 +113,8 @@ async def persist_partial_question_answer(
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
                 reasoning=reasoning,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
@@ -473,6 +477,8 @@ class SessionService:
         tool_calls: list[ToolCallInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None
@@ -493,6 +499,25 @@ class SessionService:
                 else None,
                 logging_details=logging_details,
                 mcp_tool_references=mcp_tool_references,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
+            )
+
+    async def update_question_skill_runtime_state(
+        self,
+        *,
+        question_id: UUID,
+        skill_provenance: Sequence[SkillExecutionReference],
+        skill_activation: SkillActivationEvidenceV1,
+    ) -> None:
+        """Persist final Skill evidence when completion fails before finalization."""
+
+        async with self._write_transaction():
+            await self.question_repo.update_skill_runtime_state(
+                question_id=question_id,
+                tenant_id=self.user.tenant_id,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
 
     async def leave_feedback(

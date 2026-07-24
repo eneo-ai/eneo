@@ -15,6 +15,7 @@ is expensive to build just for counting.
 
 import base64
 import io
+import json
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
@@ -157,6 +158,10 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+def _fallback_tool_tokens(tools: list[dict[str, Any]]) -> int:
+    return len(json.dumps(tools)) // 4
+
+
 def _measure_messages_with_litellm(
     messages: list[dict[str, Any]],
     model_name: str,
@@ -234,10 +239,12 @@ def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -
     return measure_message_tokens(messages, model_name).tokens
 
 
-def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
-    """Count tokens consumed by tool/function definitions sent with a request."""
+def measure_tool_tokens(
+    tools: list[dict[str, Any]], model_name: str = ""
+) -> TokenCount:
+    """Measure tool definitions and identify the counter used."""
     if not tools:
-        return 0
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
     try:
         with_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
@@ -248,16 +255,57 @@ def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
         without_tools = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
             model=model_name, messages=[{"role": "user", "content": ""}]
         )
-        return max(with_tools - without_tools, 0)
+        return TokenCount(
+            tokens=max(with_tools - without_tools, 0),
+            source=TokenCountSource.LITELLM,
+        )
     except Exception as e:
-        import json
-
-        serialized = json.dumps(tools)
         logger.error(
             f"Tool token counting failed for model '{model_name}' "
             f"({len(tools)} tools), falling back to len//4: {e}"
         )
-        return len(serialized) // 4
+        return TokenCount(
+            tokens=_fallback_tool_tokens(tools),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
+
+
+def measure_provider_input_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model_name: str = "",
+) -> TokenCount:
+    """Measure the exact chat messages and tools proposed for one provider call."""
+
+    stripped_messages, image_tokens = _split_image_blocks(messages, model_name)
+    try:
+        payload_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+            model=model_name,
+            messages=stripped_messages,
+            tools=tools,  # pyright: ignore[reportArgumentType]  # litellm accepts plain dicts
+        )
+        return TokenCount(
+            tokens=payload_tokens + image_tokens,
+            source=TokenCountSource.LITELLM,
+        )
+    except Exception as error:
+        logger.error(
+            "Provider input token counting failed for model '%s' "
+            "(%d messages, %d tools), using one fallback estimate: %s",
+            model_name,
+            len(messages),
+            len(tools),
+            error,
+        )
+        return TokenCount(
+            tokens=_fallback_message_tokens(messages) + _fallback_tool_tokens(tools),
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        )
+
+
+def count_tool_tokens(tools: list[dict[str, Any]], model_name: str = "") -> int:
+    """Count tokens consumed by tool/function definitions sent with a request."""
+    return measure_tool_tokens(tools, model_name).tokens
 
 
 def count_assistant_prompt_tokens(prompt: Optional[str], model_name: str) -> int:
