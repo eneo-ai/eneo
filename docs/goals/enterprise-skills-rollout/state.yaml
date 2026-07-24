@@ -35,7 +35,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "c642da4953102718c4031c4004e3c6a83d956f4a"
 
-active_task: T012
+active_task: T013
 
 tasks:
   - id: T001
@@ -731,7 +731,7 @@ tasks:
   - id: T012
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement Task #553 slice 2: the typed organisation Skill runtime policy with admin management, audit, and read-only per-model projections, without exposing binding modes or changing runtime behavior."
     tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
@@ -782,10 +782,14 @@ tasks:
       - "The design requires provider-loop, frozen-plan, or UI mode-control changes owned by later slices."
       - "Policy storage cannot avoid the user-bound settings row without a generic settings framework."
     receipt:
-      result: implemented
-      summary: "Stored the typed tenant Skill runtime policy in eneo.skills with migration backfill from SKILL_MAX_BINDINGS, moved binding-limit enforcement to the stored value, removed the obsolete runtime environment interface, and exposed admin-only get/replace/reset plus per-model allowance projections with typed audit. PR #583 opened for CI and fresh review; merge pending."
-      pr: 583
-      pr_status: "opened for CI and fresh review"
+      result: done
+      summary: "Stored the typed tenant Skill runtime policy in eneo.skills with migration backfill from SKILL_MAX_BINDINGS, moved binding-limit enforcement to the stored value, removed the obsolete runtime environment interface, exposed admin-only get/replace/reset plus per-model allowance projections with typed audit, and serialized binding writes against concurrent policy changes. Squash-merged PR #583."
+      merged_pr: 583
+      source_head: "f1fe73f62b9e72668b00ebe69fc8d48f1bce51e9"
+      merge_commit: "e681171f691b70801b8059435906ff3f0d96f7d8"
+      merged_at: "2026-07-24T03:24:07Z"
+      github_checks: "All 16 required checks passed on f1fe73f after one rerun of an unrelated object_content PostgreSQL-restart flake"
+      final_review: "Review 2 on f1fe73f confirmed F1 (superseded attachment limit race) resolved with no current findings: https://github.com/eneo-ai/eneo/pull/583#issuecomment-5065538134"
       base_commit: "80b5f377d537f81d6da0bb4f600a464e59bf63b3"
       changed_files:
         - "backend/.env.template"
@@ -816,6 +820,48 @@ tasks:
         iteration_2: "commit gate changes_required: SELECT-only reads, env-interface removal, typed audit; all applied"
         iteration_3: ".codex/artifacts/codex-peer-loop-t012-runtime-policy-peer-gap-fixes-20260724T014046Z.md; changes_required: ADR closure + concurrency proofs; applied"
         iteration_4: "final gate green, GREEN_LIGHT yes, score 8"
+
+  - id: T013
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement Task #553 slice 3: route every eager turn through one immutable SkillTurnPlan and persist typed, body-free activation evidence while behavior remains all-always."
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    inputs:
+      - "develop at e681171f691b70801b8059435906ff3f0d96f7d8 (merged PR #583)"
+      - "docs/enterprise-skills-roadmap.md slice 3 contract and evidence section"
+      - "Issue #553 evidence section (Question.skill_provenance stays; one nullable skill_activation JSONB via a strict versioned model)"
+      - "Existing completion context, streaming and non-streaming provider loops, placeholder/success/failure/stream-abort finalisation owners"
+    allowed_files:
+      - "backend/alembic/versions/"
+      - "backend/src/eneo/assistants/"
+      - "backend/src/eneo/completion_models/"
+      - "backend/src/eneo/database/tables/"
+      - "backend/src/eneo/questions/"
+      - "backend/src/eneo/sessions/"
+      - "backend/src/eneo/skills/"
+      - "backend/tests/"
+      - "docs/enterprise-skills-roadmap.md"
+      - "docs/goals/enterprise-skills-rollout/"
+      - "frontend/packages/eneo-js/"
+    constraints:
+      - "Do not begin until a bounded plan with file:line evidence exists and the Codex plan gate has run."
+      - "Preserve all-always runtime behavior; streaming and non-streaming paths use the same frozen plan and evidence."
+      - "Exact revision IDs and digests are retained; instruction bodies and prompts never enter analytics evidence."
+      - "Reuse the canonical audit/history/debug owners; no event table."
+      - "Do not add the activation tool, public on_demand writes, or UI controls."
+      - "Settle the roadmap's open retention decision with current product owners or stop and ask the user; do not invent a second retention system."
+    verify:
+      - "Byte-equivalent all-always payloads through the frozen plan"
+      - "Evidence finalisation across success, failure, timeout, cancellation, and client disconnect"
+      - "Strict versioned round-trip of the skill_activation value"
+      - "Focused suites, migration round-trip if schema changes, Ruff, Pyright, generated contracts"
+      - "Required GitHub CI, fresh /review, same-session Codex verification"
+    stop_if:
+      - "The design requires the reserved activation function or provider-loop dispatch owned by slice 4."
+      - "The retention decision cannot be settled without user product authority."
+    receipt: null
 
   - id: T999
     type: judge

@@ -109,6 +109,7 @@ The delivery graph was last verified on 2026-07-23:
 | [#580](https://github.com/eneo-ai/eneo/pull/580)         | O1 deletion and retained-provenance closure     | Merged as `c642da49`; PostgreSQL behavior proof, documentation, required CI, and final full-coverage review passed. |
 | [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint         | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
 | [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode         | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
+| [#583](https://github.com/eneo-ai/eneo/pull/583)         | Task #553 slice 2: typed runtime policy         | Merged as `e681171f`; required CI passed and the final review found no current findings.                            |
 | [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
 | [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                              |
 | [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge   | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
@@ -879,27 +880,27 @@ flowchart LR
 
 ## Risks and edge cases
 
-| Risk or case                                    | Required handling                                                                                                           |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| A Skill changes after attachment                | Exact revision pin stays unchanged; UI shows update drift.                                                                  |
-| Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                          |
-| Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                     |
-| Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.            |
+| Risk or case                                    | Required handling                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A Skill changes after attachment                | Exact revision pin stays unchanged; UI shows update drift.                                                                                                                |
+| Published revision changes                      | Existing resources do not advance. A builder approves each update.                                                                                                        |
+| Skill is unpublished                            | New attachments stop; retained exact pins keep running.                                                                                                                   |
+| Published Skill is found harmful                | Tenant admin blocks the Skill identity. New turns and not-started App runs stop; pins and audit evidence remain.                                                          |
 | Blocked source has installed local copies       | Copies keep their independent identity. Admins see affected copies, block each unsafe local identity explicitly, and install/update from the blocked source fails closed. |
-| Skill deletion could invalidate a queued run    | Bindings and retained queued/running App-run evidence block deletion; terminal runs retain body-free IDs and digests.       |
-| Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                          |
-| End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                        |
-| Two Skills contradict each other                | Saved order is visible. The author resolves the conflict; Eneo does not invent semantic precedence.                         |
-| Two Skills share a display name                 | Stable IDs and revision IDs govern activation; UI includes owner/Space context.                                             |
-| Descriptor matches too broadly                  | Task #553 evaluation catches false positives; admins can set the binding to `always`, remove it, or revise the description. |
-| Descriptor language differs from the user query | Evaluate trigger cases in the languages the Assistant serves. Record the model used for the test.                           |
-| Descriptor budget is exceeded                   | Preserve required content, disable optional catalogue for the turn, and record the reason.                                  |
-| Model cannot call tools                         | Run `always_only`; never change `on_demand` into eager loading.                                                             |
-| Model requests an unbound or blocked Skill      | Reject it and record a bounded reason code.                                                                                 |
-| Policy changes during a stream                  | The frozen turn plan completes; the next turn sees the new policy.                                                          |
-| Analytics could expose instructions             | Store IDs, counts, digests, and reason codes. Keep bodies and prompts out of aggregate rows.                                |
-| Admin raises limits beyond useful values        | Show measured impact and warnings; the selected model's hard context validation remains final.                              |
-| Imported Skill contains code or tools           | S1/O1 stay instruction-only. S2 rejects executable content until a separate security contract exists.                       |
+| Skill deletion could invalidate a queued run    | Bindings and retained queued/running App-run evidence block deletion; terminal runs retain body-free IDs and digests.                                                     |
+| Author loses permission during a draft          | Parent save reauthorises and commits atomically or fails without partial bindings.                                                                                        |
+| End user lacks catalogue permission             | Parent-resource access still runs its approved pins.                                                                                                                      |
+| Two Skills contradict each other                | Saved order is visible. The author resolves the conflict; Eneo does not invent semantic precedence.                                                                       |
+| Two Skills share a display name                 | Stable IDs and revision IDs govern activation; UI includes owner/Space context.                                                                                           |
+| Descriptor matches too broadly                  | Task #553 evaluation catches false positives; admins can set the binding to `always`, remove it, or revise the description.                                               |
+| Descriptor language differs from the user query | Evaluate trigger cases in the languages the Assistant serves. Record the model used for the test.                                                                         |
+| Descriptor budget is exceeded                   | Preserve required content, disable optional catalogue for the turn, and record the reason.                                                                                |
+| Model cannot call tools                         | Run `always_only`; never change `on_demand` into eager loading.                                                                                                           |
+| Model requests an unbound or blocked Skill      | Reject it and record a bounded reason code.                                                                                                                               |
+| Policy changes during a stream                  | The frozen turn plan completes; the next turn sees the new policy.                                                                                                        |
+| Analytics could expose instructions             | Store IDs, counts, digests, and reason codes. Keep bodies and prompts out of aggregate rows.                                                                              |
+| Admin raises limits beyond useful values        | Show measured impact and warnings; the selected model's hard context validation remains final.                                                                            |
+| Imported Skill contains code or tools           | S1/O1 stay instruction-only. S2 rejects executable content until a separate security contract exists.                                                                     |
 
 ### Recovery and rollback
 
