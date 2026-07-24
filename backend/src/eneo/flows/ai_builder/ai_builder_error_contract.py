@@ -321,7 +321,7 @@ def classify_ai_builder_provider_failure(
     """Classify only adapter types whose semantics are part of our dependency."""
 
     status_code: int | None = None
-    known_rejection = isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS)
+    exception_class = _provider_exception_class(error)
     if isinstance(error, RateLimitError):
         kind: AIBuilderProviderFailureKind = "rate_limited"
         status_code = _bounded_provider_status(error.status_code)
@@ -333,13 +333,22 @@ def classify_ai_builder_provider_failure(
     elif isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS):
         kind = "rejected"
         status_code = _bounded_provider_status(getattr(error, "status_code", None))
+    # Named subclasses above retain their stronger disposition; only the generic
+    # APIError class reaches this status-based fallback.
+    elif exception_class == "api_error":
+        status_code = _bounded_provider_status(getattr(error, "status_code", None))
+        kind = (
+            "rejected"
+            if _provider_status_class(status_code) == "4xx"
+            else "transport_ambiguous"
+        )
     elif isinstance(error, _AMBIGUOUS_PROVIDER_ERRORS):
         kind = "transport_ambiguous"
         status_code = _bounded_provider_status(getattr(error, "status_code", None))
     else:
         kind = "unknown"
 
-    exception_class = _provider_exception_class(error)
+    known_rejection = kind in {"rejected", "rate_limited"}
     turn_state: AIBuilderProviderTurnState = (
         "committed" if known_rejection else "provider_outcome_unknown"
     )

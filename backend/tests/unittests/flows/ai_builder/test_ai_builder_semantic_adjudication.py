@@ -21,12 +21,14 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderKnownProviderRejectionException,
     AIBuilderProviderOutcomeUnknownException,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
 )
@@ -80,7 +82,7 @@ def _pending_question_conversation() -> list[ConversationMessage]:
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_committed"),
+    ("error", "expected_kind", "expected_status_class", "expected_committed"),
     [
         (
             BadRequestError(
@@ -88,6 +90,8 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "rejected",
+            "4xx",
             True,
         ),
         (
@@ -96,6 +100,19 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "rate_limited",
+            "4xx",
+            True,
+        ),
+        (
+            APIError(
+                400,
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+            "4xx",
             True,
         ),
         (
@@ -104,6 +121,8 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "timeout",
+            "4xx",
             False,
         ),
         (
@@ -112,6 +131,8 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "transport_ambiguous",
+            None,
             False,
         ),
         (
@@ -121,19 +142,28 @@ def _pending_question_conversation() -> list[ConversationMessage]:
                 model="private-model",
                 llm_provider="private-provider",
             ),
+            "transport_ambiguous",
+            "5xx",
             False,
         ),
-        (RuntimeError("sensitive-provider-material"), False),
+        (RuntimeError("sensitive-provider-material"), "unknown", None, False),
     ],
 )
 @pytest.mark.asyncio
 async def test_semantic_adjudication_provider_failure_uses_typed_disposition(
     error: Exception,
+    expected_kind: str,
+    expected_status_class: str | None,
     expected_committed: bool,
 ) -> None:
     litellm_client = MagicMock()
     litellm_client.acompletion = AsyncMock(side_effect=error)
     before_provider_call = AsyncMock()
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-semantic-failure",
+        model="openai/gpt-test",
+        target_kind=TargetKind.CREATE,
+    )
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         await adjudicate_pending_question_answer(
@@ -141,6 +171,7 @@ async def test_semantic_adjudication_provider_failure_uses_typed_disposition(
             completion_model_route=_route(),
             conversation=_pending_question_conversation(),
             user_message="PDF",
+            usage_tracker=usage_tracker,
             before_provider_call=before_provider_call,
         )
 
@@ -150,27 +181,38 @@ async def test_semantic_adjudication_provider_failure_uses_typed_disposition(
         else AIBuilderProviderOutcomeUnknownException
     )
     assert isinstance(exc_info.value, expected_exception)
-    assert isinstance(
-        exc_info.value,
-        (
-            AIBuilderKnownProviderRejectionException,
-            AIBuilderProviderOutcomeUnknownException,
-        ),
-    )
     assert exc_info.value.public_error is not None
     assert exc_info.value.public_error.details is not None
     assert exc_info.value.public_error.details["another_call_permitted"] is False
     assert exc_info.value.public_error.details["provider_disposition"] == (
         "known_rejection" if expected_committed else "provider_outcome_unknown"
     )
-    assert isinstance(
-        exc_info.value.public_error.details["provider_exception_class"], str
-    )
+    exception_class = exc_info.value.public_error.details["provider_exception_class"]
+    if isinstance(error, APIError):
+        assert exception_class == "api_error"
+    else:
+        assert isinstance(exception_class, str)
     assert exc_info.value.public_error.details["retry_scope"] == (
         "new_turn" if expected_committed else "acknowledged_same_turn"
     )
     before_provider_call.assert_awaited_once_with()
     assert litellm_client.acompletion.await_count == 1
+    telemetry = usage_tracker.build_planner_telemetry()
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["auxiliary_llm_call_count"] == 1
+    assert telemetry["used_auxiliary_llm"] is True
+    assert len(telemetry["call_records"]) == 1
+    call_record = telemetry["call_records"][0]
+    assert call_record["call_kind"] == "semantic_adjudication"
+    assert call_record["provider_failure_kind"] == expected_kind
+    assert call_record.get("provider_status_class") == expected_status_class
+    assert call_record["provider_turn_state"] == (
+        "committed" if expected_committed else "provider_outcome_unknown"
+    )
+    assert "prompt_tokens" not in call_record
+    assert "completion_tokens" not in call_record
+    assert "total_tokens" not in call_record
+    assert "sensitive-provider-material" not in json.dumps(telemetry)
 
 
 @pytest.mark.asyncio

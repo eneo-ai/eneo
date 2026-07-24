@@ -40,6 +40,12 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        AIBuilderProviderFailure,
+        AIBuilderProviderFailureKind,
+        AIBuilderProviderStatusClass,
+        AIBuilderProviderTurnState,
+    )
     from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
 
 ToolProcessingFailureKind = Literal[
@@ -175,6 +181,9 @@ class ProposalCallRecord:
     usage: CompletionTokenUsage
     request_id: str
     attempt: int
+    provider_failure_kind: AIBuilderProviderFailureKind | None = None
+    provider_status_class: AIBuilderProviderStatusClass | None = None
+    provider_turn_state: AIBuilderProviderTurnState | None = None
 
 
 @dataclass
@@ -233,6 +242,25 @@ class ProposalTurnTelemetry:
             usage=usage,
             request_id=call.request_id,
             attempt=call.attempt,
+        )
+
+    def fail_call(
+        self,
+        *,
+        call: ProposalCallRecord,
+        failure: AIBuilderProviderFailure,
+    ) -> None:
+        index = call.attempt - 1
+        if index >= len(self.call_records) or self.call_records[index] != call:
+            raise ValueError("Call record does not belong to this turn")
+        self.call_records[index] = ProposalCallRecord(
+            call_kind=call.call_kind,
+            usage=CompletionTokenUsage(),
+            request_id=call.request_id,
+            attempt=call.attempt,
+            provider_failure_kind=failure.kind,
+            provider_status_class=failure.status_class,
+            provider_turn_state=failure.turn_state,
         )
 
     def start_attempt(
@@ -389,6 +417,21 @@ class ProposalTurnTelemetry:
                 "attempt": record.attempt,
                 "token_usage_source": record.usage.source,
                 "token_usage_estimated": record.usage.estimated,
+                **(
+                    {"provider_failure_kind": record.provider_failure_kind}
+                    if record.provider_failure_kind is not None
+                    else {}
+                ),
+                **(
+                    {"provider_status_class": record.provider_status_class}
+                    if record.provider_status_class is not None
+                    else {}
+                ),
+                **(
+                    {"provider_turn_state": record.provider_turn_state}
+                    if record.provider_turn_state is not None
+                    else {}
+                ),
                 **(
                     {"prompt_tokens": record.usage.prompt_tokens}
                     if record.usage.prompt_tokens is not None

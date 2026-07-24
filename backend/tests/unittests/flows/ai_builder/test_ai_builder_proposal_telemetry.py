@@ -224,6 +224,69 @@ def test_every_closed_call_kind_is_aggregated(call_kind: ProposalCallKind) -> No
     assert payload["total_tokens"] == 3
 
 
+def test_failed_auxiliary_call_is_finished_once_with_bounded_disposition() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-auxiliary-failure",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    call = telemetry.begin_call(call_kind="semantic_adjudication")
+    failure = classify_ai_builder_provider_failure(
+        APIError(
+            503,
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="semantic_adjudication",
+    )
+
+    telemetry.fail_call(call=call, failure=failure)
+
+    payload = telemetry.build_planner_telemetry()
+    assert payload["llm_calls_made"] == 1
+    assert payload["auxiliary_llm_call_count"] == 1
+    assert payload["used_auxiliary_llm"] is True
+    assert payload["call_records"] == [
+        {
+            "call_kind": "semantic_adjudication",
+            "request_id": "req-auxiliary-failure",
+            "attempt": 1,
+            "token_usage_source": "none",
+            "token_usage_estimated": False,
+            "provider_failure_kind": "transport_ambiguous",
+            "provider_status_class": "5xx",
+            "provider_turn_state": "provider_outcome_unknown",
+        }
+    ]
+    assert "sensitive-provider-material" not in json.dumps(payload)
+
+
+def test_failed_auxiliary_call_rejects_a_foreign_record() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-auxiliary-failure",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    foreign_call = ProposalTurnTelemetry(
+        request_id="req-foreign",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    ).begin_call(call_kind="semantic_adjudication")
+    failure = classify_ai_builder_provider_failure(
+        APIError(
+            503,
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="semantic_adjudication",
+    )
+
+    with pytest.raises(ValueError, match="does not belong to this turn"):
+        telemetry.fail_call(call=foreign_call, failure=failure)
+
+
 def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
     telemetry = ProposalTurnTelemetry(
         request_id="req-attempts",
@@ -431,6 +494,19 @@ def test_proposal_attempt_payload_forbids_raw_content_fields() -> None:
             "5xx",
             "service_unavailable",
             "provider_outcome_unknown",
+        ),
+        (
+            APIError(
+                400,
+                "sensitive-provider-material",
+                model="private-model",
+                llm_provider="private-provider",
+            ),
+            "rejected",
+            400,
+            "4xx",
+            "api_error",
+            "committed",
         ),
         (
             APIError(

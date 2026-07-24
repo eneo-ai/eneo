@@ -122,6 +122,8 @@ async def adjudicate_pending_question_answer(
             error,
             stage="semantic_adjudication",
         )
+        if call is not None and usage_tracker is not None:
+            usage_tracker.fail_call(call=call, failure=failure)
         raise failure.as_exception() from error
 
     if call is not None and usage_tracker is not None:

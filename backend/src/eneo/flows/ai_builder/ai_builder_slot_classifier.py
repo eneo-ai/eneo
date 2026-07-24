@@ -230,6 +230,8 @@ async def classify_slots(
             stage="slot_classification",
             tenant_id=tenant_id,
         )
+        if call is not None and usage_tracker is not None:
+            usage_tracker.fail_call(call=call, failure=failure)
         raise failure.as_exception() from error
 
     if call is not None and usage_tracker is not None:
