@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.apps.apps.app_factory import AppFactory
 from eneo.collections.domain.collection import Collection
 from eneo.database.tables.app_table import Apps
@@ -25,6 +27,13 @@ from eneo.security_classifications.domain.entities.security_classification impor
 from eneo.services.service import Service
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import (
+    AppApplicationsProjection,
+    AssistantApplicationsProjection,
+    GroupChatApplicationsProjection,
+    ServiceApplicationsProjection,
+    SpaceApplicationsProjection,
+)
 from eneo.user_groups.user_group import UserGroupState
 from eneo.users.user import UserInDBBase, UserSparse
 from eneo.websites.domain.website import Website
@@ -134,6 +143,146 @@ class SpaceFactory:
             collections=[],
             members={},
             group_members={},
+        )
+
+    def create_applications_projection(
+        self,
+        *,
+        space_in_db: Spaces,
+        member_roles: Mapping[UUID, str],
+        group_member_roles: Mapping[UUID, str],
+        assistants_in_db: Sequence[Assistants],
+        group_chats_in_db: Sequence[GroupChatsTable],
+        apps_in_db: Sequence[Apps],
+        services_in_db: Sequence[Services],
+        completion_models: Sequence["CompletionModel"],
+    ) -> SpaceApplicationsProjection:
+        completion_models_by_id = {model.id: model for model in completion_models}
+
+        def _assistant_projection(
+            assistant: Assistants,
+        ) -> AssistantApplicationsProjection:
+            kwargs = (
+                ModelKwargs()
+                if assistant.completion_model_kwargs is None
+                else ModelKwargs.model_validate(assistant.completion_model_kwargs)
+            )
+            completion_model = (
+                completion_models_by_id.get(assistant.completion_model_id)
+                if assistant.completion_model_id is not None
+                else None
+            )
+            if completion_model is not None:
+                kwargs = kwargs.filter_unsupported(
+                    completion_model.get_supported_model_kwargs()
+                )
+            return AssistantApplicationsProjection(
+                id=assistant.id,
+                created_at=assistant.created_at,
+                updated_at=assistant.updated_at,
+                name=assistant.name,
+                completion_model_kwargs=kwargs,
+                logging_enabled=assistant.logging_enabled,
+                user_id=assistant.user_id,
+                published=assistant.published,
+                description=assistant.description,
+                metadata_json=assistant.metadata_json,
+                icon_id=assistant.icon_id,
+                completion_model_id=(
+                    completion_model.id if completion_model is not None else None
+                ),
+                insight_enabled=assistant.insight_enabled,
+            )
+
+        all_assistants = _build_or_skip(
+            assistants_in_db,
+            item_kind="assistant_applications_projection",
+            build_fn=_assistant_projection,
+        )
+        default_assistant_row = next(
+            (assistant for assistant in assistants_in_db if assistant.is_default),
+            None,
+        )
+        assistants = tuple(
+            assistant
+            for assistant in all_assistants
+            if default_assistant_row is None or assistant.id != default_assistant_row.id
+        )
+
+        def _service_projection(service: Services) -> ServiceApplicationsProjection:
+            kwargs = (
+                ModelKwargs()
+                if service.completion_model_kwargs is None
+                else ModelKwargs.model_validate(service.completion_model_kwargs)
+            )
+            return ServiceApplicationsProjection(
+                id=service.id,
+                created_at=service.created_at,
+                updated_at=service.updated_at,
+                name=service.name,
+                prompt=service.prompt,
+                completion_model_kwargs=kwargs,
+                user_id=service.user_id,
+            )
+
+        services = tuple(
+            _build_or_skip(
+                services_in_db,
+                item_kind="service_applications_projection",
+                build_fn=_service_projection,
+            )
+        )
+        apps = tuple(
+            AppApplicationsProjection(
+                id=app.id,
+                created_at=app.created_at,
+                updated_at=app.updated_at,
+                name=app.name,
+                description=app.description,
+                published=app.published,
+                user_id=app.user_id,
+                icon_id=app.icon_id,
+            )
+            for app in apps_in_db
+        )
+        return SpaceApplicationsProjection(
+            access=SpaceAccessFacts(
+                id=space_in_db.id,
+                user_id=space_in_db.user_id,
+                tenant_space_id=space_in_db.tenant_space_id,
+                members={
+                    user_id: SpaceRoleFact(id=user_id, role=role)
+                    for user_id, role in member_roles.items()
+                },
+                group_members={
+                    group_id: SpaceRoleFact(id=group_id, role=role)
+                    for group_id, role in group_member_roles.items()
+                },
+                default_assistant_id=(
+                    default_assistant_row.id
+                    if default_assistant_row is not None
+                    else None
+                ),
+                assistant_ids=frozenset(item.id for item in assistants),
+                app_ids=frozenset(item.id for item in apps),
+            ),
+            assistants=assistants,
+            group_chats=tuple(
+                GroupChatApplicationsProjection(
+                    id=group_chat.id,
+                    created_at=group_chat.created_at,
+                    updated_at=group_chat.updated_at,
+                    name=group_chat.name,
+                    user_id=group_chat.user_id,
+                    published=group_chat.published,
+                    metadata_json=group_chat.metadata_json,
+                    icon_id=group_chat.icon_id,
+                    insight_enabled=group_chat.insight_enabled,
+                )
+                for group_chat in group_chats_in_db
+            ),
+            apps=apps,
+            services=services,
         )
 
     def create_space_from_db(

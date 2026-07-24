@@ -80,9 +80,9 @@ For a download button, keep the File ID and mint the URL when the user clicks:
 const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
   fileId,
   contentDisposition: "attachment",
-})
+});
 
-window.location.assign(url)
+window.location.assign(url);
 ```
 
 Do not persist the returned URL or send it to analytics. It is a temporary
@@ -105,6 +105,11 @@ When a view genuinely needs several attachment payloads, Eneo validates their
 database records as a bounded batch and then verifies each byte stream. Remote
 objects still require one content read each, but they do not add one database
 transaction per attachment.
+
+Views that only show names, icons, publication state, and permissions do not
+retrieve attachment bodies. For example, the Space applications list reads
+metadata without opening PostgreSQL-inline or object-store bytes. This reduces
+storage work without changing the response or requiring object storage.
 
 ## What happens when a File is deleted?
 

@@ -1,8 +1,10 @@
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantType, DefaultAssistant
 from eneo.files.file_models import FileRestrictions, Limit
@@ -11,6 +13,10 @@ from eneo.questions.question import UseTools
 from eneo.spaces.api.space_assembler import SpaceAssembler
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import (
+    AssistantApplicationsProjection,
+    SpaceApplicationsProjection,
+)
 from tests.fixtures import (
     TEST_EMBEDDING_MODEL,
     TEST_MODEL_CHATGPT,
@@ -190,3 +196,55 @@ def test_applications_included_in_space_sparse(
     )
 
     assert space_sparse.applications != None
+
+
+def test_from_applications_projection_maps_authorized_sparse_items(
+    space_assembler: SpaceAssembler,
+):
+    assistant_id = uuid4()
+    now = datetime.now(UTC)
+    projection = SpaceApplicationsProjection(
+        access=SpaceAccessFacts(
+            id=uuid4(),
+            user_id=None,
+            tenant_space_id=uuid4(),
+            members={},
+            group_members={},
+            default_assistant_id=None,
+            assistant_ids=frozenset({assistant_id}),
+            app_ids=frozenset(),
+        ),
+        assistants=(
+            AssistantApplicationsProjection(
+                id=assistant_id,
+                created_at=now,
+                updated_at=now,
+                name="Sparse assistant",
+                completion_model_kwargs=ModelKwargs(),
+                logging_enabled=True,
+                user_id=uuid4(),
+                published=True,
+                description=None,
+                metadata_json=None,
+                icon_id=None,
+                completion_model_id=None,
+                insight_enabled=False,
+            ),
+        ),
+        group_chats=(),
+        apps=(),
+        services=(),
+    )
+    actor = space_assembler.actor_manager.get_space_actor.return_value
+    actor.can_read_assistant.return_value = True
+    actor.get_assistant_permissions.return_value = [ResourcePermission.READ]
+
+    applications = space_assembler.from_applications_projection(projection)
+
+    assert [assistant.id for assistant in applications.assistants.items] == [
+        assistant_id
+    ]
+    assert applications.assistants.items[0].permissions == [ResourcePermission.READ]
+    space_assembler.actor_manager.get_space_actor.assert_called_once_with(
+        projection.access
+    )
