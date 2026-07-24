@@ -1,7 +1,7 @@
 """normalize File and Icon bytes into object content
 
 Revision ID: 202607231700
-Revises: 202607231330
+Revises: 202607240310
 Create Date: 2026-07-23 17:00:00.000000
 
 The copy phase is resumable and bounded by both
@@ -24,7 +24,7 @@ from sqlalchemy.engine import Connection
 from alembic import op
 
 revision: str = "202607231700"
-down_revision: str | None = "202607231330"
+down_revision: str | None = "202607240310"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
