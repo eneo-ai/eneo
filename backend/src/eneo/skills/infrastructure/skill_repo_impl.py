@@ -1957,17 +1957,19 @@ class SkillRepoImpl:
         )
 
     async def _runtime_policy_row(
-        self, *, tenant_id: UUID, for_update: bool
+        self, *, tenant_id: UUID, for_update: bool, shared_lock: bool = False
     ) -> SkillRuntimePolicies | None:
         query = sa.select(SkillRuntimePolicies).where(
             SkillRuntimePolicies.tenant_id == tenant_id
         )
         if for_update:
             query = query.with_for_update()
+        elif shared_lock:
+            query = query.with_for_update(read=True)
         return await self.session.scalar(query)
 
     async def _seed_and_reload_runtime_policy(
-        self, *, tenant_id: UUID, for_update: bool
+        self, *, tenant_id: UUID, for_update: bool, shared_lock: bool = False
     ) -> SkillRuntimePolicies:
         # Tenants created after the backfill migration receive their row on
         # first access; ON CONFLICT keeps concurrent first reads race-safe.
@@ -1985,18 +1987,25 @@ class SkillRepoImpl:
             )
             .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
-        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=for_update)
+        row = await self._runtime_policy_row(
+            tenant_id=tenant_id, for_update=for_update, shared_lock=shared_lock
+        )
         if row is None:
             raise RuntimeError("Skill runtime policy seed did not persist")
         return row
 
     async def get_or_seed_runtime_policy(
-        self, *, tenant_id: UUID
+        self, *, tenant_id: UUID, shared_lock: bool = False
     ) -> SkillRuntimePolicy:
-        row = await self._runtime_policy_row(tenant_id=tenant_id, for_update=False)
+        # shared_lock takes FOR SHARE so a binding write serializes against a
+        # concurrent admin FOR UPDATE and re-reads the committed limit instead
+        # of validating against a superseded policy.
+        row = await self._runtime_policy_row(
+            tenant_id=tenant_id, for_update=False, shared_lock=shared_lock
+        )
         if row is None:
             row = await self._seed_and_reload_runtime_policy(
-                tenant_id=tenant_id, for_update=False
+                tenant_id=tenant_id, for_update=False, shared_lock=shared_lock
             )
         return self._to_runtime_policy(row)
 

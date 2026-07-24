@@ -1159,7 +1159,9 @@ async def test_binding_abuse_guardrail_comes_from_stored_runtime_policy():
             references=references,
         )
 
-    repo.get_or_seed_runtime_policy.assert_awaited_once_with(tenant_id=space.tenant_id)
+    repo.get_or_seed_runtime_policy.assert_awaited_once_with(
+        tenant_id=space.tenant_id, shared_lock=True
+    )
     repo.resolve_bound_references_for_binding_update.assert_not_awaited()
     repo.resolve_local_references_for_binding_update.assert_not_awaited()
 

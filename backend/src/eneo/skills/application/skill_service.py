@@ -398,8 +398,12 @@ class SkillService:
     ) -> None:
         # The stored organisation policy is the source of truth for the
         # attachment guard; the SKILL_MAX_BINDINGS environment value only
-        # seeded it during migration.
-        policy = await self.repo.get_or_seed_runtime_policy(tenant_id=tenant_id)
+        # seeded it during migration. The shared lock serializes this write
+        # against a concurrent admin policy change so the guard never
+        # validates against a superseded limit.
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=tenant_id, shared_lock=True
+        )
         if len(references) > policy.max_attached_skills:
             raise BadRequestException(
                 f"A resource cannot use more than {policy.max_attached_skills} Skills"

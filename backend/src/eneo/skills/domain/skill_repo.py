@@ -184,7 +184,7 @@ class SkillRepo(Protocol):
     ) -> SkillExecutionBlockChange | None: ...
 
     async def get_or_seed_runtime_policy(
-        self, *, tenant_id: UUID
+        self, *, tenant_id: UUID, shared_lock: bool = False
     ) -> SkillRuntimePolicy: ...
 
     async def update_runtime_policy(
