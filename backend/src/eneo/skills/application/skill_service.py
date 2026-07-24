@@ -437,21 +437,6 @@ class SkillService:
             raise BadRequestException(
                 "One or more existing Skill bindings are no longer available"
             )
-        # Re-resolution rebuilds bindings from catalogue state, which would
-        # silently reset a stored activation mode; a retained binding must
-        # keep the mode the parent already saved.
-        existing_by_reference = {
-            self._binding_reference(binding): binding for binding in existing
-        }
-        retained = [
-            replace(
-                binding,
-                activation_mode=existing_by_reference[
-                    self._binding_reference(binding)
-                ].activation_mode,
-            )
-            for binding in retained
-        ]
         return (
             {self._binding_reference(binding): binding for binding in retained},
             [
@@ -467,6 +452,7 @@ class SkillService:
         *,
         references: list[SkillBindingReference],
         resolved_groups: tuple[list[ResolvedSkillBinding], ...],
+        existing: list[ResolvedSkillBinding],
         missing_error: Exception,
     ) -> list[ResolvedSkillBinding]:
         resolved_by_reference = {
@@ -476,8 +462,23 @@ class SkillService:
         }
         if any(reference not in resolved_by_reference for reference in references):
             raise missing_error
+        # Re-resolution rebuilds bindings from catalogue state, which would
+        # silently reset a stored activation mode. A parent carries at most one
+        # binding per Skill, so a Skill already bound to the parent keeps its
+        # saved mode even when the request pins a different revision; only a
+        # genuinely new Skill takes the resolver default.
+        existing_mode_by_skill_id = {
+            binding.skill_id: binding.activation_mode for binding in existing
+        }
         return [
-            replace(resolved_by_reference[reference], position=position)
+            replace(
+                resolved_by_reference[reference],
+                position=position,
+                activation_mode=existing_mode_by_skill_id.get(
+                    reference.skill_id,
+                    resolved_by_reference[reference].activation_mode,
+                ),
+            )
             for position, reference in enumerate(references)
         ]
 
@@ -528,6 +529,7 @@ class SkillService:
                 local,
                 published,
             ),
+            existing=existing,
             missing_error=NotFoundException(
                 "One or more Skill revisions are unavailable for this resource"
             ),
@@ -558,6 +560,7 @@ class SkillService:
         return self._order_resolved_bindings(
             references=references,
             resolved_groups=(list(retained_by_reference.values()), published),
+            existing=existing,
             missing_error=BadRequestException(
                 "Personal Chat can only use published organisation Skill versions"
             ),
