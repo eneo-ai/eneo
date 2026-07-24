@@ -905,7 +905,7 @@ class SkillService:
         policy = await self.repo.get_or_seed_runtime_policy(
             tenant_id=self.user.tenant_id
         )
-        return SkillTurnPlan.create_eager(
+        return SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
             policy=policy,

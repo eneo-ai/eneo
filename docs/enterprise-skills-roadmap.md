@@ -96,26 +96,29 @@ The foundation merged into `develop` before this roadmap was written:
   squash-merged as `b186f175` on 2026-07-23.
 - PR #580 locked the deletion and retained-provenance recovery contract. It
   squash-merged as `c642da49` on 2026-07-23.
+- PR #593 closed the execution-block configuration and visibility gap while
+  preserving retained exact pins. It squash-merged as `5d54e242` on 2026-07-24.
 
 The delivery graph was last verified on 2026-07-24:
 
-| Work item                                                | Purpose                                         | State and next action                                                                                               |
-| -------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                     | Merged as `a29e9464`; required CI and final review passed.                                                          |
-| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                          | Merged as `8ef96390`; required CI and final review passed.                                                          |
-| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                       | Merged as `71de15e5`; required CI, final review, and product review passed.                                         |
-| [#574](https://github.com/eneo-ai/eneo/pull/574)         | O1 adoption and drift evidence                  | Merged as `dfe9dbe7`; required CI and final review passed.                                                          |
-| [#577](https://github.com/eneo-ai/eneo/pull/577)         | O1 emergency execution block                    | Merged as `b186f175`; required CI passed and the final review found no current findings.                            |
-| [#580](https://github.com/eneo-ai/eneo/pull/580)         | O1 deletion and retained-provenance closure     | Merged as `c642da49`; PostgreSQL behavior proof, documentation, required CI, and final full-coverage review passed. |
-| [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint         | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
-| [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode         | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
-| [#583](https://github.com/eneo-ai/eneo/pull/583)         | Task #553 slice 2: typed runtime policy         | Merged as `e681171f`; required CI passed and the final review found no current findings.                            |
-| [#590](https://github.com/eneo-ai/eneo/pull/590)         | Task #553 slice 3: frozen plan and evidence     | Merged as `d2651dee`; required CI passed and Review 2 found no current findings.                                    |
-| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
-| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                             | Open and conflict-marked. It belongs to the object-content/file track.                                              |
-| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge   | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
-| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                         | Draft. It does not gate Skills.                                                                                     |
-| `refactor/flows-clean`                                   | Flow package export/import vertical             | Active at `77202b4f`; it must land on `develop` before S2 extracts any shared package mechanics.                    |
+| Work item                                                | Purpose                                          | State and next action                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| [#552](https://github.com/eneo-ai/eneo/pull/552)         | S1 first-class local Skills                      | Merged as `a29e9464`; required CI and final review passed.                                                          |
+| [#559](https://github.com/eneo-ai/eneo/pull/559)         | Skill revision restore                           | Merged as `8ef96390`; required CI and final review passed.                                                          |
+| [#560](https://github.com/eneo-ai/eneo/pull/560)         | O1 organisation catalogue                        | Merged as `71de15e5`; required CI, final review, and product review passed.                                         |
+| [#574](https://github.com/eneo-ai/eneo/pull/574)         | O1 adoption and drift evidence                   | Merged as `dfe9dbe7`; required CI and final review passed.                                                          |
+| [#577](https://github.com/eneo-ai/eneo/pull/577)         | O1 emergency execution block                     | Merged as `b186f175`; required CI passed and the final review found no current findings.                            |
+| [#580](https://github.com/eneo-ai/eneo/pull/580)         | O1 deletion and retained-provenance closure      | Merged as `c642da49`; PostgreSQL behavior proof, documentation, required CI, and final full-coverage review passed. |
+| [#581](https://github.com/eneo-ai/eneo/pull/581)         | Selective activation planning blueprint          | Merged as `677c54ca`; required CI passed and the final review found no current findings.                            |
+| [#582](https://github.com/eneo-ai/eneo/pull/582)         | Task #553 slice 1: dormant binding mode          | Merged as `80b5f377`; required CI passed and the final review found no current findings.                            |
+| [#583](https://github.com/eneo-ai/eneo/pull/583)         | Task #553 slice 2: typed runtime policy          | Merged as `e681171f`; required CI passed and the final review found no current findings.                            |
+| [#590](https://github.com/eneo-ai/eneo/pull/590)         | Task #553 slice 3: frozen plan and evidence      | Merged as `d2651dee`; required CI passed and Review 2 found no current findings.                                    |
+| [#593](https://github.com/eneo-ai/eneo/pull/593)         | Execution-block binding integrity and visibility | Merged as `5d54e242`; required CI passed and Review 3 found no current findings.                                    |
+| [Issue #551](https://github.com/eneo-ai/eneo/issues/551) | File, InfoBlob, and Icon object-content cutover  | Open. This gates the fallback file-reference path, not the preferred internal-MCP core split.                       |
+| [#464](https://github.com/eneo-ai/eneo/pull/464)         | MCP file references                              | Open and conflict-marked. It belongs to the object-content/file track.                                              |
+| [#538](https://github.com/eneo-ai/eneo/pull/538)         | Loopback internal MCP and on-demand knowledge    | Open and coupled to #464. It is useful comparison evidence, not a merge dependency for selective Skills.            |
+| [#541](https://github.com/eneo-ai/eneo/pull/541)         | Web search MCP provider                          | Draft. It does not gate Skills.                                                                                     |
+| `refactor/flows-clean`                                   | Flow package export/import vertical              | Active at `77202b4f`; it must land on `develop` before S2 extracts any shared package mechanics.                    |
 
 Passing checks on an old PR head do not remove the need to rebase and rerun the
 full checks against the current `develop` branch.
@@ -721,10 +724,10 @@ on-demand loading ineffective without adding a second event source.
    existing Skill and App-run owners and merged as `c642da49`.
 5. **Completed:** T013 froze one immutable eager plan per turn and added
    body-free activation evidence; PR #590 merged as `d2651dee`.
-6. **Active:** land T014 block integrity and visibility before the trusted runtime:
-   reject new or changed pins while blocked, retain unchanged pins, and expose
-   the derived block state in catalogue and binding projections.
-7. Finish Task #553 through T015 trusted runtime and T016 save contract/UI.
+6. **Completed:** T014/PR #593 rejects new or changed pins while blocked,
+   retains unchanged pins, and exposes the derived block state in catalogue and
+   binding projections.
+7. **Active:** finish Task #553 through T015 trusted runtime and T016 save contract/UI.
    T016 must leave one concrete fit/activatability function shared by save,
    preview, apply, API/UI projections, and tests.
 8. Consolidate T008 typed lifecycle conflicts after the #553 backend core and

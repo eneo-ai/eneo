@@ -6,12 +6,17 @@ from uuid import uuid4
 import pytest
 
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+    ProviderToolCall,
+)
 from eneo.completion_models.domain.skill_context import SkillContextMeasurement
 from eneo.main.exceptions import BadRequestException
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
+    SkillActivationMode,
     SkillBindingSource,
     SkillRuntimePolicy,
     SkillRuntimeResolution,
@@ -39,7 +44,7 @@ def _empty_skill_service():
         SkillRuntimeResolution(eligible=(), blocked=())
     )
     service.create_turn_plan.side_effect = (
-        lambda *, base_instructions, resolution: SkillTurnPlan.create_eager(
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
             policy=SkillRuntimePolicy(
@@ -668,7 +673,12 @@ async def test_get_effective_completion_model_allows_personal_default_for_baseli
     assert model is TEST_MODEL_CHATGPT
 
 
-def _resolved_skill(*, position: int = 0, name: str = "Payroll"):
+def _resolved_skill(
+    *,
+    position: int = 0,
+    name: str = "Payroll",
+    activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS,
+):
     return ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
@@ -682,6 +692,7 @@ def _resolved_skill(*, position: int = 0, name: str = "Payroll"):
         content_digest="a" * 64,
         position=position,
         source=SkillBindingSource.SPACE,
+        activation_mode=activation_mode,
     )
 
 
@@ -776,7 +787,7 @@ async def test_ordinary_assistant_uses_composed_prompt_and_persists_provenance()
         binding.skill_revision_id
     )
     activation = placeholder["skill_activation"]
-    assert activation.effective_mode == "eager"
+    assert activation.effective_mode == "always_only"
     assert activation.available[0].skill_revision_id == binding.skill_revision_id
     assert activation.initially_active == ("skill-1",)
     assert activation.selected_model_id == TEST_MODEL_CHATGPT.id
@@ -796,7 +807,7 @@ async def test_skill_measurement_and_evidence_use_the_provider_route():
     expected_route = f"azure/{TEST_MODEL_CHATGPT.name}"
 
     with patch(
-        "eneo.assistants.assistant_service.measure_skill_context",
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
         return_value=SkillContextMeasurement(
             tokens=12,
             limit=100,
@@ -810,6 +821,111 @@ async def test_skill_measurement_and_evidence_use_the_provider_route():
         session_service.create_session_with_question_placeholder.await_args.kwargs
     )
     assert placeholder["skill_activation"].selected_model_route == expected_route
+
+
+async def test_provider_failure_persists_activation_that_happened_before_error():
+    binding = _resolved_skill(activation_mode=SkillActivationMode.ON_DEMAND)
+    skill_service = _skill_service_with_resolution(eligible=(binding,))
+    skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+    assistant.completion_model = TEST_MODEL_CHATGPT.model_copy(
+        update={"supports_tool_calling": True}
+    )
+
+    async def activate_then_fail(**kwargs):
+        runtime = kwargs["skill_runtime"]
+        runtime.apply_provider_tool_calls(
+            calls=(
+                ProviderToolCall(
+                    call_id="activation-1",
+                    name=SKILL_ACTIVATION_TOOL_NAME,
+                    arguments='{"skill_key":"skill-1"}',
+                ),
+            ),
+            messages=[{"role": "system", "content": runtime.prompt}],
+        )
+        raise RuntimeError("provider failed")
+
+    assistant.ask.side_effect = activate_then_fail
+
+    with (
+        patch(
+            "eneo.sessions.session_service.persist_final_skill_runtime_state",
+            AsyncMock(),
+        ) as persist_final_state,
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
+        await service.ask(question="hello", assistant_id=assistant.id)
+
+    state = persist_final_state.await_args.kwargs
+    assert state["tenant_id"] == TEST_USER.tenant_id
+    assert state["skill_activation"].accepted == ("skill-1",)
+    assert state["skill_activation"].activation_rounds == 1
+    assert state["skill_provenance"][0].skill_revision_id == (binding.skill_revision_id)
+    session_service.update_question_skill_runtime_state.assert_not_awaited()
+
+
+async def test_evidence_write_failure_does_not_mask_provider_failure():
+    binding = _resolved_skill(activation_mode=SkillActivationMode.ON_DEMAND)
+    skill_service = _skill_service_with_resolution(eligible=(binding,))
+    skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+    assistant.completion_model = TEST_MODEL_CHATGPT.model_copy(
+        update={"supports_tool_calling": True}
+    )
+
+    async def activate_then_fail(**kwargs):
+        runtime = kwargs["skill_runtime"]
+        runtime.apply_provider_tool_calls(
+            calls=(
+                ProviderToolCall(
+                    call_id="activation-1",
+                    name=SKILL_ACTIVATION_TOOL_NAME,
+                    arguments='{"skill_key":"skill-1"}',
+                ),
+            ),
+            messages=[{"role": "system", "content": runtime.prompt}],
+        )
+        raise RuntimeError("provider failed")
+
+    assistant.ask.side_effect = activate_then_fail
+
+    with (
+        patch(
+            "eneo.sessions.session_service.persist_final_skill_runtime_state",
+            AsyncMock(side_effect=RuntimeError("evidence write failed")),
+        ),
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
+        await service.ask(question="hello", assistant_id=assistant.id)
 
 
 async def test_existing_session_persists_composed_skill_provenance():

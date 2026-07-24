@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter
 from sqlalchemy.orm import selectinload, undefer
 
 from eneo.database.database import AsyncSession
@@ -28,12 +30,19 @@ from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.logging.logging import LoggingDetails
     from eneo.questions.question import ToolCallInfo
+
+
+_SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
 
 
 class QuestionRepository:
@@ -217,6 +226,8 @@ class QuestionRepository:
         web_search_results: list["WebSearchResult"] | None = None,
         logging_details: "LoggingDetails | None" = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
+        skill_provenance: Sequence[SkillExecutionReference] | None = None,
+        skill_activation: SkillActivationEvidenceV1 | None = None,
     ) -> None:
         """Update an existing placeholder Question row with the final or partial answer.
 
@@ -250,6 +261,12 @@ class QuestionRepository:
             update_values["reasoning"] = reasoning
         if logging_details_id is not None:
             update_values["logging_details_id"] = logging_details_id
+        update_values.update(
+            self._serialize_skill_runtime_state(
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
+            )
+        )
 
         update_stmt = (
             sa.update(Questions)
@@ -280,6 +297,48 @@ class QuestionRepository:
                 mcp_tool_references=mcp_tool_references,
                 question_id=question_id,
             )
+
+    @staticmethod
+    def _serialize_skill_runtime_state(
+        *,
+        skill_provenance: Sequence[SkillExecutionReference] | None,
+        skill_activation: SkillActivationEvidenceV1 | None,
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        if skill_provenance is not None:
+            values["skill_provenance"] = cast(
+                "list[dict[str, object]]",
+                _SKILL_PROVENANCE_ADAPTER.dump_python(
+                    tuple(skill_provenance),
+                    mode="json",
+                ),
+            )
+        if skill_activation is not None:
+            values["skill_activation_data"] = skill_activation.model_dump(mode="json")
+        return values
+
+    async def update_skill_runtime_state(
+        self,
+        *,
+        question_id: UUID,
+        tenant_id: UUID,
+        skill_provenance: Sequence[SkillExecutionReference],
+        skill_activation: SkillActivationEvidenceV1,
+    ) -> None:
+        """Persist final Skill state when provider work fails before an answer."""
+
+        update_stmt = (
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .where(Questions.tenant_id == tenant_id)
+            .values(
+                **self._serialize_skill_runtime_state(
+                    skill_provenance=skill_provenance,
+                    skill_activation=skill_activation,
+                )
+            )
+        )
+        await self.session.execute(update_stmt)
 
     async def add(
         self,

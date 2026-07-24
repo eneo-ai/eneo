@@ -28,6 +28,15 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
+    function_definition_to_tool,
+)
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+    InvalidSkillToolCallError,
+    ProviderToolCall,
+    SkillActivationRuntime,
+    SkillPromptOwnershipError,
+    SkillToolCallApplication,
 )
 from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
@@ -49,6 +58,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
+from eneo.tokens.token_utils import measure_provider_input_tokens
 
 logger = get_logger(__name__)
 
@@ -310,6 +320,7 @@ class PreparedModelStream:
     kwargs: dict[str, Any]
     mcp_proxy: "MCPProxySession | None"
     has_tools: bool
+    skill_runtime: SkillActivationRuntime | None = None
     # Eneo built-in tools (web search, etc.) kept so iterate_stream can
     # re-merge with refreshed MCP tools after a tools/list_changed without
     # recomputing the built-ins.
@@ -512,6 +523,35 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return cast(dict[str, Any], parsed)
 
+    @staticmethod
+    def _apply_skill_activation_tool_calls(
+        *,
+        runtime: SkillActivationRuntime | None,
+        calls: tuple[ProviderToolCall, ...],
+        messages: list[dict[str, object]],
+        provider_tools: list[dict[str, object]],
+        assistant_content: str | None,
+    ) -> SkillToolCallApplication | None:
+        if runtime is None:
+            return None
+        try:
+            return runtime.apply_provider_tool_calls(
+                calls=calls,
+                messages=messages,
+                provider_tools=provider_tools,
+                assistant_content=assistant_content,
+            )
+        except SkillPromptOwnershipError as error:
+            raise OpenAIException(
+                str(error),
+                code="skill_prompt_ownership",
+            ) from error
+        except InvalidSkillToolCallError as error:
+            raise OpenAIException(
+                str(error),
+                code="invalid_tool_call",
+            ) from error
+
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -551,6 +591,25 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
         )
 
+    def _resolve_request_input_tokens(
+        self,
+        *,
+        response: _LiteLLMHasUsage,
+        messages: list[dict[str, Any]],
+        provider_tools: list[dict[str, Any]],
+    ) -> tuple[int, bool]:
+        """Return one provider request's input count and whether it is estimated."""
+
+        usage = self._extract_usage(response)
+        if usage is not None and usage.prompt_tokens is not None:
+            return usage.prompt_tokens, False
+        measurement = measure_provider_input_tokens(
+            messages,
+            provider_tools,
+            self.litellm_model,
+        )
+        return measurement.tokens, True
+
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
         Build tools/functions array from context function definitions.
@@ -564,27 +623,16 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not context.function_definitions:
             return []
 
-        # Use OpenAI format (compatible with most providers via LiteLLM)
-        tools: list[dict[str, Any]] = []
-        for func_def in context.function_definitions:
-            func_def_any = cast(Any, func_def)
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": func_def_any.name,
-                        "description": func_def_any.description,
-                        "parameters": cast(dict[str, Any], func_def_any.schema),
-                        "strict": True,
-                    },
-                }
-            )
-        return tools
+        return [
+            cast(dict[str, Any], function_definition_to_tool(func_def))
+            for func_def in context.function_definitions
+        ]
 
     def _merge_mcp_tools(
         self,
         eneo_tools: list[dict[str, Any]],
         mcp_proxy: "MCPProxySession | None",
+        skill_runtime: SkillActivationRuntime | None = None,
     ) -> list[dict[str, Any]]:
         """Merge Eneo built-in tools with MCP proxy tools.
 
@@ -600,7 +648,29 @@ class TenantModelAdapter(CompletionModelAdapter):
                 )
             return []
         mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
-        return eneo_tools + mcp_tools
+        built_in_names = {
+            tool.get("function", {}).get("name")
+            for tool in eneo_tools
+            if isinstance(tool.get("function"), dict)
+        }
+        filtered_mcp_tools = [
+            tool
+            for tool in mcp_tools
+            if not (
+                isinstance(tool.get("function"), dict)
+                and (
+                    tool["function"].get("name") in built_in_names
+                    or tool["function"].get("name") == SKILL_ACTIVATION_TOOL_NAME
+                )
+            )
+        ]
+        if skill_runtime is not None and any(
+            isinstance(tool.get("function"), dict)
+            and tool["function"].get("name") == SKILL_ACTIVATION_TOOL_NAME
+            for tool in mcp_tools
+        ):
+            skill_runtime.record_reserved_tool_collision()
+        return eneo_tools + filtered_mcp_tools
 
     async def _refresh_mcp_tools_after_round(
         self,
@@ -609,6 +679,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         tool_names: list[str],
         litellm_kwargs: dict[str, Any],
         allowed_tools: set[str],
+        skill_runtime: SkillActivationRuntime | None = None,
     ) -> set[str]:
         """Re-list MCP tools after a tool round; update the advertised set if changed.
 
@@ -629,7 +700,11 @@ class TenantModelAdapter(CompletionModelAdapter):
         if not tools_changed:
             return allowed_tools
 
-        refreshed_tools = self._merge_mcp_tools(eneo_tools, mcp_proxy)
+        refreshed_tools = self._merge_mcp_tools(
+            eneo_tools,
+            mcp_proxy,
+            skill_runtime,
+        )
         if refreshed_tools:
             litellm_kwargs["tools"] = refreshed_tools
         return mcp_proxy.get_allowed_tool_names()
@@ -743,6 +818,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None,
         mcp_proxy: "MCPProxySession | None" = None,
+        skill_runtime: SkillActivationRuntime | None = None,
         **kwargs: Any,
     ) -> Completion:
         """
@@ -769,7 +845,11 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Build combined tools (Eneo built-in + MCP)
         eneo_tools = self._build_tools_from_context(context)
-        all_tools = self._merge_mcp_tools(eneo_tools, mcp_proxy)
+        all_tools = self._merge_mcp_tools(
+            eneo_tools,
+            mcp_proxy,
+            skill_runtime,
+        )
         if all_tools:
             litellm_kwargs["tools"] = all_tools
 
@@ -782,6 +862,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
 
         try:
+            cumulative_input_tokens = 0
+            used_input_estimate = False
             # Call LiteLLM with drop_params=True to handle unsupported params gracefully
             response = cast(
                 _LiteLLMResponse,
@@ -793,6 +875,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                     **litellm_kwargs,
                 ),
             )
+            request_input_tokens, request_was_estimated = (
+                self._resolve_request_input_tokens(
+                    response=response,
+                    messages=messages,
+                    provider_tools=cast(
+                        "list[dict[str, Any]]",
+                        litellm_kwargs.get("tools") or [],
+                    ),
+                )
+            )
+            cumulative_input_tokens += request_input_tokens
+            used_input_estimate = used_input_estimate or request_was_estimated
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
@@ -809,7 +903,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
-                while msg.tool_calls and mcp_proxy:
+                activation_available = (
+                    skill_runtime is not None
+                    and skill_runtime.tool_definition is not None
+                )
+                while msg.tool_calls and (mcp_proxy or activation_available):
                     if tool_round >= self.MAX_TOOL_ROUNDS:
                         raise OpenAIException(
                             "The model exceeded the maximum number of tool rounds.",
@@ -817,44 +915,75 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
                     tool_round += 1
 
-                    allowed_tools = mcp_proxy.get_allowed_tool_names()
-                    for tc in msg.tool_calls:
-                        if tc.function.name not in allowed_tools:
-                            raise OpenAIException(
-                                "The model requested an unauthorized tool.",
-                                code="unauthorized_tool",
-                            )
-
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": msg.content,
-                            "tool_calls": [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments,
-                                    },
-                                }
-                                for tc in msg.tool_calls
-                            ],
-                        }
+                    provider_calls = tuple(
+                        ProviderToolCall(
+                            call_id=tc.id,
+                            name=tc.function.name,
+                            arguments=tc.function.arguments,
+                        )
+                        for tc in msg.tool_calls
                     )
+                    activation = self._apply_skill_activation_tool_calls(
+                        runtime=skill_runtime,
+                        calls=provider_calls,
+                        messages=cast("list[dict[str, object]]", messages),
+                        provider_tools=cast(
+                            "list[dict[str, object]]",
+                            litellm_kwargs.get("tools") or [],
+                        ),
+                        assistant_content=msg.content,
+                    )
+                    external_calls = (
+                        activation.external_calls
+                        if activation is not None
+                        else provider_calls
+                    )
+                    if external_calls and mcp_proxy is None:
+                        break
+                    if not activation or not activation.assistant_message_appended:
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": msg.content,
+                                "tool_calls": [
+                                    {
+                                        "id": call.call_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": call.name,
+                                            "arguments": call.arguments,
+                                        },
+                                    }
+                                    for call in provider_calls
+                                ],
+                            }
+                        )
 
-                    proxy_calls: list[tuple[str, dict[str, Any]]] = []
-                    for tc in msg.tool_calls:
-                        arguments = self._parse_tool_arguments(tc.function.arguments)
-                        proxy_calls.append((tc.function.name, arguments))
-                    results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                    results: list[dict[str, Any]] = []
+                    if external_calls:
+                        assert mcp_proxy is not None
+                        allowed_tools = mcp_proxy.get_allowed_tool_names()
+                        for call in external_calls:
+                            if call.name not in allowed_tools:
+                                raise OpenAIException(
+                                    "The model requested an unauthorized tool.",
+                                    code="unauthorized_tool",
+                                )
+                        proxy_calls = [
+                            (
+                                call.name,
+                                self._parse_tool_arguments(call.arguments),
+                            )
+                            for call in external_calls
+                        ]
+                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
                     # Add tool results to messages. Resource content blocks are
                     # captured as McpToolReferences (buffered on completion for
                     # later persistence) and woven into the LLM-facing text via
                     # a structured MCP source context so the model can emit
                     # <inref/> markers without relying on server-specific shapes.
-                    for tc, result in zip(msg.tool_calls, results):
+                    for call, result in zip(external_calls, results):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
                         )
@@ -864,8 +993,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                             refs_for_call,
                         ) = _build_tool_result_with_references(
                             content_list=content_list,
-                            tool_call_id=tc.id,
-                            mcp_tool_name=tc.function.name,
+                            tool_call_id=call.call_id,
+                            mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
                         captured_refs.extend(refs_for_call)
@@ -876,7 +1005,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         messages.append(
                             {
                                 "role": "tool",
-                                "tool_call_id": tc.id,
+                                "tool_call_id": call.call_id,
                                 "content": llm_text,
                             }
                         )
@@ -890,6 +1019,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                             **litellm_kwargs,
                         ),
                     )
+                    request_input_tokens, request_was_estimated = (
+                        self._resolve_request_input_tokens(
+                            response=response,
+                            messages=messages,
+                            provider_tools=cast(
+                                "list[dict[str, Any]]",
+                                litellm_kwargs.get("tools") or [],
+                            ),
+                        )
+                    )
+                    cumulative_input_tokens += request_input_tokens
+                    used_input_estimate = used_input_estimate or request_was_estimated
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -902,6 +1043,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
 
+            if used_input_estimate:
+                completion.input_token_estimate = cumulative_input_tokens
+                if usage is not None:
+                    usage = usage.model_copy(update={"prompt_tokens": None})
             completion.usage = usage
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
@@ -932,6 +1077,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         mcp_proxy: "MCPProxySession | None" = None,
+        skill_runtime: SkillActivationRuntime | None = None,
         **kwargs: Any,
     ) -> PreparedModelStream:
         """
@@ -959,7 +1105,11 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Build combined tools (Eneo built-in + MCP)
         eneo_tools = self._build_tools_from_context(context)
-        all_tools = self._merge_mcp_tools(eneo_tools, mcp_proxy)
+        all_tools = self._merge_mcp_tools(
+            eneo_tools,
+            mcp_proxy,
+            skill_runtime,
+        )
         if all_tools:
             litellm_kwargs["tools"] = all_tools
 
@@ -995,6 +1145,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 messages=messages,
                 kwargs=litellm_kwargs,
                 mcp_proxy=mcp_proxy,
+                skill_runtime=skill_runtime,
                 has_tools=bool(all_tools),
                 eneo_tools=eneo_tools,
             )
@@ -1059,6 +1210,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 else cast(AsyncIterator[_LiteLLMStreamChunk], stream)
             )
             mcp_proxy = prepared.mcp_proxy if prepared else None
+            skill_runtime = prepared.skill_runtime if prepared else None
+            activation_available = (
+                skill_runtime is not None and skill_runtime.tool_definition is not None
+            )
             mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
             pending_allowed_tools: set[str] = (
                 mcp_proxy.get_allowed_tool_names()
@@ -1081,20 +1236,30 @@ class TenantModelAdapter(CompletionModelAdapter):
                     super().__init__()
                     self.has_tool_calls: bool = False
                     self.tool_calls_acc: dict[int, _AccumulatedToolCall] = {}
+                    self.assistant_content: list[str] = []
                     self.usage: TokenUsage | None = None
+                    self.cumulative_input_tokens = 0
+                    self.used_input_estimate = False
 
             result = _StreamResult()
 
             async def _drain_stream(
-                s: AsyncIterator[_LiteLLMStreamChunk], res: _StreamResult
+                s: AsyncIterator[_LiteLLMStreamChunk],
+                res: _StreamResult,
+                *,
+                request_messages: list[dict[str, Any]] | None = None,
+                provider_tools: list[dict[str, Any]] | None = None,
             ) -> AsyncIterator[Completion]:
                 """Drain a stream: yield text Completions, accumulate tool calls into res."""
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                request_prompt_tokens = 0
+                provider_reported_prompt_tokens = False
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
+                res.assistant_content = []
 
                 async for chunk in s:
                     logger.debug(f"[DEBUG] Raw chunk: {chunk}")
@@ -1104,6 +1269,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if chunk_usage_obj:
                         chunk_usage = self._extract_usage(chunk)
                         if chunk_usage:
+                            if chunk_usage.prompt_tokens is not None:
+                                request_prompt_tokens += chunk_usage.prompt_tokens
+                                provider_reported_prompt_tokens = True
                             res.usage = (
                                 self._accumulate_usage(res.usage, chunk)
                                 if res.usage
@@ -1191,6 +1359,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     content = delta.content or ""
 
                     if content:
+                        res.assistant_content.append(content)
                         buffer += content
 
                         if "<think>" in buffer and not inside_thinking:
@@ -1224,16 +1393,46 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 yield Completion(text=cleaned)
                         buffer = ""
 
+                if provider_reported_prompt_tokens:
+                    res.cumulative_input_tokens += request_prompt_tokens
+                elif request_messages is not None:
+                    measurement = measure_provider_input_tokens(
+                        request_messages,
+                        provider_tools or [],
+                        self.litellm_model,
+                    )
+                    res.cumulative_input_tokens += measurement.tokens
+                    res.used_input_estimate = True
+
             # --- Drain initial stream ---
-            async for comp in _drain_stream(source_stream, result):
+            async for comp in _drain_stream(
+                source_stream,
+                result,
+                request_messages=list(prepared.messages) if prepared else None,
+                provider_tools=cast(
+                    "list[dict[str, Any]]",
+                    prepared.kwargs.get("tools") or [],
+                )
+                if prepared
+                else None,
+            ):
                 yield comp
 
-            # --- MCP tool call loop ---
-            if result.has_tool_calls and mcp_proxy and prepared and prepared.has_tools:
+            # --- Built-in activation and MCP tool call loop ---
+            if (
+                result.has_tool_calls
+                and prepared
+                and prepared.has_tools
+                and (mcp_proxy or activation_available)
+            ):
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
                 eneo_tools: list[dict[str, Any]] = prepared.eneo_tools
-                allowed_tools = mcp_proxy.get_allowed_tool_names()
+                allowed_tools: set[str] = (
+                    mcp_proxy.get_allowed_tool_names()
+                    if mcp_proxy is not None
+                    else set()
+                )
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
@@ -1247,8 +1446,100 @@ class TenantModelAdapter(CompletionModelAdapter):
                         result.tool_calls_acc[idx]
                         for idx in sorted(result.tool_calls_acc.keys())
                     ]
+                    if any(
+                        not tool_call["id"] or not tool_call["function"]["name"]
+                        for tool_call in tool_calls
+                    ):
+                        raise OpenAIException(
+                            "The model produced an invalid tool call.",
+                            code="invalid_tool_call",
+                        )
+
+                    provider_calls = tuple(
+                        ProviderToolCall(
+                            call_id=cast(str, tool_call["id"]),
+                            name=tool_call["function"]["name"],
+                            arguments=tool_call["function"]["arguments"],
+                        )
+                        for tool_call in tool_calls
+                    )
+                    activation = self._apply_skill_activation_tool_calls(
+                        runtime=skill_runtime,
+                        calls=provider_calls,
+                        messages=cast("list[dict[str, object]]", messages),
+                        provider_tools=cast(
+                            "list[dict[str, object]]",
+                            litellm_kwargs.get("tools") or [],
+                        ),
+                        assistant_content="".join(result.assistant_content) or None,
+                    )
+                    external_calls = (
+                        activation.external_calls
+                        if activation is not None
+                        else provider_calls
+                    )
+                    external_call_ids = {call.call_id for call in external_calls}
+                    tool_calls = [
+                        tool_call
+                        for tool_call in tool_calls
+                        if tool_call["id"] in external_call_ids
+                    ]
+                    if tool_calls and mcp_proxy is None:
+                        break
+
+                    if not tool_calls:
+                        if activation and activation.deferred_calls:
+                            deferred_metadata: list[ToolCallMetadata] = []
+                            for call in activation.deferred_calls:
+                                server_name, tool_name, title = _resolve_tool_names(
+                                    call.name
+                                )
+                                deferred_metadata.append(
+                                    ToolCallMetadata(
+                                        server_name=server_name,
+                                        tool_name=tool_name,
+                                        title=title,
+                                        tool_call_id=call.call_id,
+                                        result_status="deferred",
+                                        result=json.dumps(
+                                            {
+                                                "deferred": True,
+                                                "reason": "skill_context_updated",
+                                                "retryable": True,
+                                            }
+                                        ),
+                                        mcp_tool_name=call.name,
+                                    )
+                                )
+                            yield Completion(
+                                response_type=ResponseType.TOOL_CALL,
+                                tool_calls_metadata=deferred_metadata,
+                            )
+                        follow_up = cast(
+                            AsyncIterator[_LiteLLMStreamChunk],
+                            await _acompletion_call(
+                                model=self.litellm_model,
+                                messages=messages,
+                                stream=True,
+                                drop_params=True,
+                                stream_options={"include_usage": True},
+                                **litellm_kwargs,
+                            ),
+                        )
+                        async for comp in _drain_stream(
+                            follow_up,
+                            result,
+                            request_messages=list(messages),
+                            provider_tools=cast(
+                                "list[dict[str, Any]]",
+                                litellm_kwargs.get("tools") or [],
+                            ),
+                        ):
+                            yield comp
+                        continue
 
                     # Security validation
+                    assert mcp_proxy is not None
                     for tc in tool_calls:
                         name = tc["function"]["name"]
                         if name not in allowed_tools:
@@ -1409,23 +1700,24 @@ class TenantModelAdapter(CompletionModelAdapter):
                         denied_tcs: list[_AccumulatedToolCall] = []
 
                     # Add assistant message with tool calls to conversation
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": tc["id"],
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc["function"]["name"],
-                                        "arguments": tc["function"]["arguments"],
-                                    },
-                                }
-                                for tc in tool_calls
-                            ],
-                        }
-                    )
+                    if not activation or not activation.assistant_message_appended:
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": tc["id"],
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc["function"]["name"],
+                                            "arguments": tc["function"]["arguments"],
+                                        },
+                                    }
+                                    for tc in tool_calls
+                                ],
+                            }
+                        )
 
                     # Execute approved tools
                     if approved_tcs:
@@ -1571,6 +1863,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         tool_names=[tc["function"]["name"] for tc in tool_calls],
                         litellm_kwargs=litellm_kwargs,
                         allowed_tools=allowed_tools,
+                        skill_runtime=skill_runtime,
                     )
 
                     # Follow-up streaming request (keep tools for next round)
@@ -1587,7 +1880,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                     # Drain follow-up stream
-                    async for comp in _drain_stream(follow_up, result):
+                    async for comp in _drain_stream(
+                        follow_up,
+                        result,
+                        request_messages=list(messages),
+                        provider_tools=cast(
+                            "list[dict[str, Any]]",
+                            litellm_kwargs.get("tools") or [],
+                        ),
+                    ):
                         yield comp
 
                 if result.has_tool_calls and tool_round >= max_rounds:
@@ -1597,8 +1898,22 @@ class TenantModelAdapter(CompletionModelAdapter):
                         code="tool_round_limit",
                     )
 
-            # Final stop — attach accumulated usage
-            yield Completion(text="", stop=True, usage=result.usage)
+            # Final stop — attach accumulated usage. If any request lacked
+            # provider prompt usage, keep that field unset and expose the
+            # cumulative request-payload estimate separately.
+            final_usage = result.usage
+            if result.used_input_estimate and final_usage is not None:
+                final_usage = final_usage.model_copy(update={"prompt_tokens": None})
+            yield Completion(
+                text="",
+                stop=True,
+                usage=final_usage,
+                input_token_estimate=(
+                    result.cumulative_input_tokens
+                    if result.used_input_estimate
+                    else None
+                ),
+            )
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"

@@ -56,6 +56,22 @@ class FunctionDefinition:
     schema: dict[str, object]
 
 
+def function_definition_to_tool(
+    definition: FunctionDefinition,
+) -> dict[str, object]:
+    """Serialize one built-in function exactly as it is sent to providers."""
+
+    return {
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.schema,
+            "strict": True,
+        },
+    }
+
+
 @dataclass
 class FunctionCall:
     name: Optional[str] = None
@@ -122,6 +138,9 @@ class Completion:
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
+    # Cumulative request-payload count when at least one provider round omitted
+    # prompt usage. Provider-reported usage remains separate and authoritative.
+    input_token_estimate: Optional[int] = None
 
 
 class CompletionModelBase(BaseModel):

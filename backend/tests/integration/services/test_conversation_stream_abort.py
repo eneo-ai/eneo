@@ -19,19 +19,26 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+    ProviderToolCall,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.questions.questions_repo import QuestionRepository
-from eneo.sessions.session_service import persist_partial_question_answer
+from eneo.sessions.session_service import (
+    persist_final_skill_runtime_state,
+    persist_partial_question_answer,
+)
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
+    SkillActivationMode,
     SkillBindingSource,
     SkillRuntimePolicy,
     SkillRuntimeResolution,
     SkillTurnPlan,
 )
-from eneo.tokens.token_utils import TokenCountSource
 
 
 @dataclass
@@ -291,7 +298,7 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
         position=0,
         source=SkillBindingSource.SPACE,
     )
-    plan = SkillTurnPlan.create_eager(
+    plan = SkillTurnPlan.create(
         base_instructions="Base",
         resolution=SkillRuntimeResolution(eligible=(binding,), blocked=()),
         policy=SkillRuntimePolicy(
@@ -301,12 +308,15 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
             max_activations_per_turn=10,
         ),
     )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
     evidence = plan.activation_evidence(
         selected_model_id=uuid4(),
         selected_model_route="openai/gpt-4o",
-        skill_context_tokens=12,
-        skill_context_token_limit=100,
-        token_count_source=TokenCountSource.LITELLM,
+        snapshot=runtime.snapshot(),
     )
 
     async with db_container() as container:
@@ -403,6 +413,116 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
     assert after_abort is not None
     assert after_abort.answer == "Partial answer"
     assert after_abort.skill_activation == evidence
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_provider_failure_evidence_survives_request_transaction_rollback(
+    client,
+    db_container,
+    default_user,
+    default_user_token,
+):
+    space_id = await _create_space(client, default_user_token)
+    assistant_id = await _create_assistant(client, default_user_token, space_id)
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=3,
+        current_revision_number=3,
+        display_name="Payroll",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.SPACE,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(binding,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=100,
+            context_share_percent=100,
+            max_activations_per_turn=10,
+        ),
+    )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    model_id = uuid4()
+    initial_snapshot = runtime.snapshot()
+
+    async with db_container() as container:
+        session_service = container.session_service()
+        chat_session = await session_service.create_session(
+            name="provider-failure-evidence",
+            assistant_id=UUID(assistant_id),
+        )
+        question_id = await session_service.create_question_placeholder(
+            question="Use the payroll procedure",
+            session=chat_session,
+            files=None,
+            assistant_id=UUID(assistant_id),
+            completion_model=None,
+            skill_provenance=plan.active_provenance(initial_snapshot),
+            skill_activation=plan.activation_evidence(
+                selected_model_id=model_id,
+                selected_model_route="openai/gpt-4o",
+                snapshot=initial_snapshot,
+            ),
+        )
+
+    runtime.apply_provider_tool_calls(
+        calls=(
+            ProviderToolCall(
+                call_id="activation-1",
+                name=SKILL_ACTIVATION_TOOL_NAME,
+                arguments='{"skill_key":"skill-1"}',
+            ),
+        ),
+        messages=[{"role": "system", "content": runtime.prompt}],
+    )
+    final_snapshot = runtime.snapshot()
+
+    # Model the request dependency: a provider error unwinds and rolls back the
+    # request transaction after the failure handler has persisted final evidence.
+    with pytest.raises(RuntimeError, match="provider failed"):
+        async with sessionmanager.session() as request_session:
+            async with request_session.begin():
+                await request_session.execute(
+                    sa.select(Questions.id).where(Questions.id == question_id)
+                )
+                await persist_final_skill_runtime_state(
+                    tenant_id=default_user.tenant_id,
+                    question_id=question_id,
+                    skill_provenance=plan.active_provenance(final_snapshot),
+                    skill_activation=plan.activation_evidence(
+                        selected_model_id=model_id,
+                        selected_model_route="openai/gpt-4o",
+                        snapshot=final_snapshot,
+                    ),
+                )
+                raise RuntimeError("provider failed")
+
+    async with db_container() as container:
+        persisted = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
+
+    assert persisted is not None
+    assert persisted.skill_activation is not None
+    assert persisted.skill_activation.accepted == ("skill-1",)
+    assert persisted.skill_activation.activation_rounds == 1
+    assert persisted.skill_provenance[0].skill_revision_id == (
+        binding.skill_revision_id
+    )
 
 
 @pytest.mark.integration

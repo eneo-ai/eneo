@@ -13,6 +13,7 @@ from eneo.tokens.token_utils import (
     log_token_count_drift,
     measure_message_token_delta,
     measure_message_tokens,
+    measure_provider_input_tokens,
 )
 
 
@@ -172,6 +173,43 @@ def test_measure_message_token_delta_short_circuits_identical_messages():
     counter.assert_not_called()
     assert measurement.tokens == 0
     assert measurement.source is TokenCountSource.LITELLM
+
+
+def test_measure_provider_input_tokens_counts_one_combined_provider_payload():
+    messages = [{"role": "user", "content": "Question"}]
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        return_value=47,
+    ) as counter:
+        measurement = measure_provider_input_tokens(
+            messages,
+            _TOOLS,
+            "openai/gpt-4o",
+        )
+
+    assert measurement.tokens == 47
+    assert measurement.source is TokenCountSource.LITELLM
+    counter.assert_called_once_with(
+        model="openai/gpt-4o",
+        messages=messages,
+        tools=_TOOLS,
+    )
+
+
+def test_measure_provider_input_tokens_falls_back_for_the_whole_payload():
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ) as counter:
+        measurement = measure_provider_input_tokens(
+            [{"role": "user", "content": "Question"}],
+            _TOOLS,
+            "custom/unknown",
+        )
+
+    assert measurement.tokens > 0
+    assert measurement.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert counter.call_count == 1
 
 
 def test_count_tool_tokens_fallback_when_litellm_fails():
