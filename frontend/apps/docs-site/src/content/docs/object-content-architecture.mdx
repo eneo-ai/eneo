@@ -8,9 +8,21 @@ private S3-compatible endpoint.
 import { Callout } from "nextra/components";
 
 <Callout type="info">
-  Looking for deployment steps? Start with the [Object Content Storage
-  guide](/guides/object-content-storage).
+  Looking for a quick decision or deployment steps? Start with [Choose Content
+  Storage](/guides/object-content-storage). This page is the deeper engineering
+  reference.
 </Callout>
+
+## Current adoption
+
+File and Icon are the first product owners using this contract. New content is
+stored inline by default, so Eneo still needs no S3-compatible service. Their
+exact originals and named derivatives use typed references; a bounded upgrade
+migration copies and verifies legacy bytes before removing duplicate columns.
+
+InfoBlob knowledge generations, administrator-controlled placement/migration,
+and Flow artifacts remain separate slices. Configuring an endpoint alone never
+moves content.
 
 ## Ownership boundary
 

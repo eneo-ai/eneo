@@ -23,9 +23,11 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.web_search_results_table import (
     WebSearchResult as WebSearchResultsTable,
 )
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.questions.question import Question, QuestionAdd
+from eneo.questions.question_file_projection import attach_question_files
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
@@ -35,7 +37,11 @@ if TYPE_CHECKING:
 
 
 class QuestionRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        file_content_loader: FileContentLoader | None = None,
+    ) -> None:
         super().__init__()
         self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
             session,
@@ -44,6 +50,21 @@ class QuestionRepository:
             with_options=self._get_options(),
         )
         self.session = session
+        self.file_content_loader = file_content_loader
+
+    async def _hydrate_questions(
+        self,
+        questions: list[Question],
+    ) -> list[Question]:
+        if self.file_content_loader is None:
+            if any(question.questions_files for question in questions):
+                raise RuntimeError("Question files require FileContentLoader")
+            return questions
+        await attach_question_files(
+            questions,
+            loader=self.file_content_loader,
+        )
+        return questions
 
     def _get_options(self):
         return [
@@ -157,7 +178,10 @@ class QuestionRepository:
         await self.session.execute(stmt)
 
     async def get(self, id: UUID):
-        return await self.delegate.get(id)
+        question = await self.delegate.get(id)
+        if question is None:
+            return None
+        return (await self._hydrate_questions([question]))[0]
 
     async def update_with_answer(
         self,
@@ -318,7 +342,8 @@ class QuestionRepository:
             .order_by(Questions.created_at)
         )
 
-        return await self.delegate.get_models_from_query(stmt)
+        questions = await self.delegate.get_models_from_query(stmt)
+        return await self._hydrate_questions(questions)
 
     async def get_by_tenant(
         self, tenant_id: UUID, start_date: datetime, end_date: datetime
@@ -342,4 +367,5 @@ class QuestionRepository:
             .order_by(Questions.created_at)
         )
 
-        return await self.delegate.get_models_from_query(stmt)
+        questions = await self.delegate.get_models_from_query(stmt)
+        return await self._hydrate_questions(questions)

@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -14,12 +13,18 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
 
     monkeypatch.setattr(file_router, "verify_signed_token", lambda _: payload)
 
-    file_repo = SimpleNamespace(
-        get_by_id=AsyncMock(return_value=SimpleNamespace(text=None, blob=None))
+    service = AsyncMock()
+    service.get_download_no_auth.side_effect = NotFoundException(
+        "File content not found"
     )
-    container = SimpleNamespace(file_repo=lambda: file_repo)
+
+    class Container:
+        @staticmethod
+        def file_service(*, user):
+            assert user is None
+            return service
 
     with pytest.raises(NotFoundException, match="File content not found"):
         await file_router.download_file_signed(
-            id=file_id, token="token", range=None, container=container
+            id=file_id, token="token", range=None, container=Container()
         )

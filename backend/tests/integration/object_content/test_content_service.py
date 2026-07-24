@@ -258,13 +258,8 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
                 user_id = (await session.scalars(select(Users.id))).one()
                 owner = Files(
                     name=f"{uuid4().hex}.bin",
-                    text=None,
-                    blob=None,
-                    checksum=captured.sha256.hex(),
-                    size=captured.size_bytes,
                     mimetype=captured.verified_media_type,
                     file_type="text",
-                    transcription=None,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     parent_file_id=None,
@@ -382,13 +377,8 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
                 user_id = (await session.scalars(select(Users.id))).one()
                 owner = Files(
                     name=f"{uuid4().hex}.bin",
-                    text=None,
-                    blob=None,
-                    checksum=captured.sha256.hex(),
-                    size=captured.size_bytes,
                     mimetype=captured.verified_media_type,
                     file_type="text",
-                    transcription=None,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     parent_file_id=None,
@@ -481,13 +471,8 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
             user_id = (await session.scalars(select(Users.id))).one()
             owner = Files(
                 name=f"{idempotency_key}.bin",
-                text=None,
-                blob=None,
-                checksum=captured.sha256.hex(),
-                size=captured.size_bytes,
                 mimetype=captured.verified_media_type,
                 file_type="text",
-                transcription=None,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 parent_file_id=None,
@@ -541,6 +526,9 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
                 received_size += len(chunk)
         assert received_size == size_bytes
         assert received_digest.digest() == captured.sha256
+
+        materialized = await service.read_content_bytes([grant])
+        assert materialized[prepared.id] == b"x" * size_bytes
 
         async with service.open_content(grant, range_header="bytes=100-199") as opened:
             ranged = b"".join([chunk async for chunk in opened.chunks])
@@ -622,13 +610,8 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
             user_id = (await session.scalars(select(Users.id))).one()
             owner = Files(
                 name=f"{uuid4().hex}.bin",
-                text=None,
-                blob=None,
-                checksum=sha256(original).hexdigest(),
-                size=len(original),
                 mimetype="application/octet-stream",
                 file_type="text",
-                transcription=None,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 parent_file_id=None,

@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Optional
 from uuid import UUID
 
@@ -16,6 +16,17 @@ class FileType(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
+
+
+class FileContentVariant(StrEnum):
+    ORIGINAL = "original"
+    EXTRACTED_TEXT = "extracted_text"
+    TRANSCRIPTION = "transcription"
+    DERIVED_PAGE = "derived_page"
+    MODEL_INPUT = "model_input"
+    GENERATED_ARTIFACT = "generated_artifact"
+    LEGACY_IMAGE = "legacy_image"
+    PREVIEW = "preview"
 
 
 class FileBase(BaseModel):
@@ -45,14 +56,23 @@ class FileInfo(InDB, FileBase):
     tenant_id: UUID
 
 
-class FileCreate(FileBaseWithContent):
+class FileMetadataCreate(BaseModel):
+    name: str
+    file_type: FileType
+    mimetype: Optional[str] = None
     user_id: UUID
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
 
 
-class File(InDB, FileCreate):
+class FileMetadata(InDB, FileMetadataCreate):
     pass
+
+
+class File(InDB, FileBaseWithContent):
+    user_id: UUID
+    tenant_id: UUID
+    parent_file_id: Optional[UUID] = None
 
 
 class FilePublic(InDB):

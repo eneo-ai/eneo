@@ -18,6 +18,7 @@ def service():
     return IconService(
         icon_repo=AsyncMock(),
         file_size_service=MagicMock(),
+        object_content=AsyncMock(),
     )
 
 
@@ -41,22 +42,6 @@ def test_validate_mimetype_invalid_raises():
         IconService.validate_mimetype("application/pdf")
 
 
-def test_validate_size_under_limit_ok():
-    data = b"x" * (ICON_MAX_SIZE - 1)
-    IconService.validate_size(data)
-
-
-def test_validate_size_at_limit_ok():
-    data = b"x" * ICON_MAX_SIZE
-    IconService.validate_size(data)
-
-
-def test_validate_size_over_limit_raises():
-    data = b"x" * (ICON_MAX_SIZE + 1)
-    with pytest.raises(FileTooLargeException):
-        IconService.validate_size(data)
-
-
 async def test_create_icon_rejects_invalid_mimetype(service: IconService):
     upload_file = UploadFile(
         file=BytesIO(b"test"),
@@ -65,7 +50,11 @@ async def test_create_icon_rejects_invalid_mimetype(service: IconService):
     )
 
     with pytest.raises(BadRequestException):
-        await service.create_icon(upload_file, tenant_id=uuid4())
+        await service.create_icon(
+            upload_file,
+            tenant_id=uuid4(),
+            created_by_user_id=uuid4(),
+        )
 
 
 async def test_create_icon_rejects_oversized_file(service: IconService):
@@ -78,4 +67,8 @@ async def test_create_icon_rejects_oversized_file(service: IconService):
     )
 
     with pytest.raises(FileTooLargeException):
-        await service.create_icon(upload_file, tenant_id=uuid4())
+        await service.create_icon(
+            upload_file,
+            tenant_id=uuid4(),
+            created_by_user_id=uuid4(),
+        )

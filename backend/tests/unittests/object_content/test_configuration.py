@@ -29,7 +29,7 @@ def test_absent_object_store_environment_keeps_inline_defaults(
     _clear_object_content_environment(monkeypatch)
 
     assert load_object_content_settings() is None
-    assert load_object_content_core_settings().inline_maximum_bytes == 10 * 1024**2
+    assert load_object_content_core_settings().inline_maximum_bytes == 200 * 1024**2
 
 
 def test_inline_tuning_does_not_require_object_store_configuration(

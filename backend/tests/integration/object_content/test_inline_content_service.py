@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from hashlib import sha256
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select
@@ -19,6 +19,7 @@ from eneo.object_content.content import (
     ContentIntent,
     ContentReadGrant,
     ContentState,
+    ObjectContentStateError,
     StorageKind,
     capture_content,
 )
@@ -55,13 +56,8 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
             user_id = (await session.scalars(select(Users.id))).one()
             owner = Files(
                 name="inline.txt",
-                text=None,
-                blob=None,
-                checksum=sha256(payload).hexdigest(),
-                size=len(payload),
                 mimetype="text/plain",
                 file_type="text",
-                transcription=None,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 parent_file_id=None,
@@ -101,6 +97,17 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
             ranged = b"".join([chunk async for chunk in opened.chunks])
         assert ranged == payload[9:15]
         assert opened.content_range == f"bytes 9-14/{len(payload)}"
+
+        with pytest.raises(ObjectContentStateError, match="not available"):
+            await service.read_content_bytes(
+                [
+                    ContentReadGrant(
+                        content_id=prepared.id,
+                        tenant_id=uuid4(),
+                        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                    )
+                ]
+            )
 
         async with object_content_database.session() as session, session.begin():
             await session.execute(

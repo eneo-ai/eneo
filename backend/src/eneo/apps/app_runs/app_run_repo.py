@@ -3,7 +3,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
-from sqlalchemy.orm import defer, selectinload
+from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.base import ExecutableOption
 
@@ -11,8 +11,8 @@ from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.app_runs.app_run_factory import AppRunFactory
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles
-from eneo.database.tables.files_table import Files
 from eneo.files.file_models import FileInfo
+from eneo.files.file_repo import FileRepository
 from eneo.skills.domain.skill import SkillExecutionReference
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
@@ -30,18 +30,53 @@ def _serialize_skill_provenance(
 
 
 class AppRunRepository:
-    def __init__(self, session: AsyncSession, factory: AppRunFactory):
+    def __init__(
+        self,
+        session: AsyncSession,
+        factory: AppRunFactory,
+        file_repo: FileRepository,
+    ):
         super().__init__()
         self.session = session
         self.factory = factory
+        self.file_repo = file_repo
 
     def _options(self) -> list[ExecutableOption]:
         return [
             selectinload(AppRuns.user),
-            selectinload(AppRuns.input_files)
-            .selectinload(AppRunsFiles.file)
-            .options(defer(Files.blob)),
+            selectinload(AppRuns.input_files),
             selectinload(AppRuns.job),
+        ]
+
+    async def _to_domain(self, app_run: AppRuns) -> AppRun:
+        file_ids = [association.file_id for association in app_run.input_files]
+        infos = await self.file_repo.get_infos_by_ids(file_ids)
+        by_id = {file.id: file for file in infos}
+        return self.factory.create_app_run_from_db(
+            app_run,
+            input_files=[by_id[file_id] for file_id in file_ids if file_id in by_id],
+        )
+
+    async def _to_domain_many(self, app_runs: list[AppRuns]) -> list[AppRun]:
+        file_ids = list(
+            dict.fromkeys(
+                association.file_id
+                for app_run in app_runs
+                for association in app_run.input_files
+            )
+        )
+        infos = await self.file_repo.get_infos_by_ids(file_ids)
+        by_id = {file.id: file for file in infos}
+        return [
+            self.factory.create_app_run_from_db(
+                app_run,
+                input_files=[
+                    by_id[association.file_id]
+                    for association in app_run.input_files
+                    if association.file_id in by_id
+                ],
+            )
+            for app_run in app_runs
         ]
 
     async def _get_with_options(
@@ -73,7 +108,7 @@ class AppRunRepository:
             return None
 
         assert isinstance(app_run_in_db, AppRuns)
-        return self.factory.create_app_run_from_db(app_run_in_db)
+        return await self._to_domain(app_run_in_db)
 
     async def get_for_app(self, app_id: UUID, user_id: UUID) -> list[AppRun]:
         stmt = (
@@ -88,10 +123,7 @@ class AppRunRepository:
             await self._get_with_options(stmt, multiple=True),
         )
 
-        return [
-            self.factory.create_app_run_from_db(app_run_in_db)
-            for app_run_in_db in app_runs_in_db
-        ]
+        return await self._to_domain_many(app_runs_in_db)
 
     async def add(self, app_run: AppRun) -> AppRun:
         stmt = (
@@ -116,7 +148,10 @@ class AppRunRepository:
         if app_run.input_files:
             await self._set_input_files(app_run_in_db, app_run.input_files)
 
-        return self.factory.create_app_run_from_db(app_run_in_db)
+        return self.factory.create_app_run_from_db(
+            app_run_in_db,
+            input_files=app_run.input_files,
+        )
 
     async def update(self, app_run: AppRun) -> AppRun:
         stmt = (
@@ -135,7 +170,7 @@ class AppRunRepository:
         app_run_in_db = await self._get_with_options(stmt)
         assert isinstance(app_run_in_db, AppRuns)
 
-        return self.factory.create_app_run_from_db(app_run_in_db)
+        return await self._to_domain(app_run_in_db)
 
     async def delete(self, id: UUID) -> None:
         stmt = sa.delete(AppRuns).where(AppRuns.id == id)

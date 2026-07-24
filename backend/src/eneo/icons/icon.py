@@ -11,9 +11,13 @@ class IconBase(BaseModel):
     size: int
 
 
-class IconCreate(IconBase):
+class Icon(InDB, IconBase):
     tenant_id: UUID
 
 
-class Icon(InDB, IconCreate):
+class IconMetadataCreate(BaseModel):
+    tenant_id: UUID
+
+
+class IconMetadata(InDB, IconMetadataCreate):
     pass

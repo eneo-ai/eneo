@@ -4,6 +4,19 @@ The primary, navigable operator guide is [Choose Content
 Storage](https://docs.eneo.ai/guides/object-content-storage). This file is the
 offline reference shipped beside the Compose templates.
 
+## TL;DR
+
+- Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
+  default.
+- File and Icon now use the shared content identity, typed variants, integrity,
+  and lifecycle owner. New writes in this slice remain PostgreSQL inline.
+- PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
+  and lifecycle. Exactly one selected backend owns each payload.
+- Enabling SeaweedFS, MinIO, or another endpoint does not move existing bytes.
+  Placement and migration are explicit later workflows.
+- Use the docs-site guide above to choose and configure a path. Continue here
+  only for the full offline operations and recovery reference.
+
 Eneo keeps one common content identity and lifecycle in PostgreSQL. Each content
 record then names exactly one byte authority:
 
@@ -23,9 +36,12 @@ availability requirements justify it. There is no production filesystem
 backend, automatic fallback, dual write, public object URL, provider registry,
 or provider-specific product branch.
 
-This slice establishes the shared storage foundation. Existing File, InfoBlob,
-Icon, and Flow byte producers are not migrated by this change; each producer
-will adopt the common service in a separate, copy-and-verify cutover.
+File and Icon are the first adopted product owners. Their legacy bytes are
+copied in bounded batches, verified against PostgreSQL-owned SHA-256 and size,
+switched to concrete typed references, and only then removed from the old
+columns. New File and Icon content remains PostgreSQL inline in this slice.
+InfoBlob generations, Flow artifacts, and administrator-selected placement are
+separate follow-up work.
 
 ## Choose the endpoint
 
@@ -74,7 +90,10 @@ external endpoint.
 
 Do not route either endpoint through the public reverse proxy. Give Eneo access
 to one dedicated bucket; do not use bucket-per-tenant or cross-deployment
-deduplication.
+deduplication. Keep versioning and Object Lock disabled for the active content
+bucket: the current deletion contract removes one opaque key and does not claim
+to purge retained historical versions. Use paired storage snapshots/backups for
+recovery instead.
 
 ### External MinIO example
 
@@ -167,10 +186,10 @@ Before production traffic, validate a staging Eneo deployment against the exact
 MinIO version and configuration you will operate. Exercise single and multipart
 upload (including ordered part listing), full and range read, delete visibility,
 bucket isolation, TLS trust, and paired restore; Eneo's object-content
-integration suite defines those expected behaviors. Align MinIO object
-versioning, lifecycle rules, snapshots, and immutable retention with Eneo's
-deletion and legal-retention policy; an object-store rule must not silently keep
-purged content longer than approved.
+integration suite defines those expected behaviors. Keep versioning, Object
+Lock, and object-store lifecycle retention disabled for the active-content
+bucket. Use paired storage snapshots/backups for recovery; an object-store rule
+must not silently keep purged content longer than approved.
 
 ## Configuration states
 
@@ -229,7 +248,10 @@ Inline capacity and common reconciliation tuning live in `env_backend.env`.
 bounds PostgreSQL row and process memory exposure; it is documented and
 configurable, not a hidden business limit. Lowering it affects new writes, not
 reads of existing rows. User-facing upload limits remain business settings
-owned by application/admin configuration.
+owned by application/admin configuration. Keep this ceiling at least as large
+as the largest File upload limit; backend and worker fail during startup when
+those settings conflict, before an upload can be accepted and then rejected by
+storage.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -414,6 +436,17 @@ image digests. Upgrade the byte plane without changing endpoint semantics,
 credentials, bucket, or deployment ID. Verify liveness, readiness, single and
 multipart upload, range read, delete visibility, and reconciliation before
 reopening traffic.
+
+For the File/Icon normalization upgrade, stop backend and worker producers
+before Alembic starts and do not restart them until the migration succeeds. If
+it stops, retry the migration before accepting new uploads; intervening writes
+make the retry fail closed rather than guess which authority is valid.
+
+The migration copies in row- and byte-bounded batches and hashes copied content
+before its final write fence. While that fence is held, PostgreSQL compares the
+copied payloads with the legacy File/Icon columns once and contracts the old
+schema. Measure this pass on a restored production-size database and reserve a
+maintenance window proportional to total File/Icon bytes.
 
 Rollback means restoring the previous application/image version and the matching
 database/object backup pair. Do not roll back only Alembic or only the object

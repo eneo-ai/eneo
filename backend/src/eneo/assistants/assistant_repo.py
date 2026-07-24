@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -38,7 +39,8 @@ from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlRuns, Websites
-from eneo.files.file_models import File
+from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.prompt import Prompt
 
@@ -83,14 +85,35 @@ class AssistantRepository:
         self,
         session: AsyncSession,
         factory: AssistantFactory,
+        file_content_loader: FileContentLoader,
         completion_model_repo: "CompletionModelRepository",
         user: "UserInDB",
     ):
         super().__init__()
         self.session = session
         self.factory = factory
+        self.file_content_loader = file_content_loader
         self.completion_model_repo = completion_model_repo
         self.user = user
+
+    async def _load_attachments(
+        self,
+        records: Sequence[Assistants],
+    ) -> dict[UUID, list[File]]:
+        groups = [
+            FileAttachmentGroup(
+                owner_kind="assistant",
+                owner_id=record.id,
+                tenant_id=record.user.tenant_id,
+                files=tuple(
+                    FileMetadata.model_validate(attachment.file)
+                    for attachment in record.attachments
+                ),
+            )
+            for record in records
+        ]
+        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        return {record.id: loaded[("assistant", record.id)] for record in records}
 
     @staticmethod
     def _options():
@@ -464,13 +487,16 @@ class AssistantRepository:
 
         query = _exclude_helper_assistants(query)
 
-        records = await self.get_records_with_options(query)
+        records = list(await self.get_records_with_options(query))
+        attachments = await self._load_attachments(records)
 
         completion_models = await self.completion_model_repo.all()
 
         return [
             self.factory.create_assistant_from_db(
-                record, completion_model_list=completion_models
+                record,
+                attachments=attachments[record.id],
+                completion_model_list=completion_models,
             )
             for record in records
         ]
@@ -500,12 +526,15 @@ class AssistantRepository:
 
         query = _exclude_helper_assistants(query)
 
-        records = await self.get_records_with_options(query)
+        records = list(await self.get_records_with_options(query))
+        attachments = await self._load_attachments(records)
         completion_models = await self.completion_model_repo.all()
 
         return [
             self.factory.create_assistant_from_db(
-                record, completion_model_list=completion_models
+                record,
+                attachments=attachments[record.id],
+                completion_model_list=completion_models,
             )
             for record in records
         ]
@@ -558,10 +587,12 @@ class AssistantRepository:
             assistant_id: prompt for prompt, assistant_id in prompt_rows
         }
         completion_models = await self.completion_model_repo.all()
+        attachments = await self._load_attachments(records)
 
         return [
             self.factory.create_assistant_from_db(
                 record,
+                attachments=attachments[record.id],
                 completion_model_list=completion_models,
                 prompt=prompts_by_assistant.get(record.id),
             )
