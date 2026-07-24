@@ -88,7 +88,7 @@ export function initFiles(client) {
      * Generate a signed URL to access the uploaded file (returns full response with expires_at)
      * @param {Object} params
      * @param {string} params.fileId The file ID
-     * @param {number} [params.expiresIn] Expiry time in seconds (1–3600, default: 3600)
+     * @param {number} [params.expiresIn] Expiry time in seconds (default: 3600)
      * @param {"attachment" | "inline"} [params.contentDisposition] Content disposition (default: "inline")
      * @returns {Promise<{url: string, expires_at: number}>}
      * @throws {EneoError}
@@ -105,7 +105,7 @@ export function initFiles(client) {
      * Unlike `generateSignedUrl`, this never selects extracted text or another processing representation.
      * @param {Object} params
      * @param {string} params.fileId The file ID
-     * @param {number} [params.expiresIn] Expiry time in seconds (default: 3600)
+     * @param {number} [params.expiresIn] Expiry time in seconds (1–3600, default: 3600)
      * @param {"attachment" | "inline"} [params.contentDisposition] Content disposition (default: "inline")
      * @returns {Promise<{url: string, expires_at: number}>}
      * @throws {EneoError}
