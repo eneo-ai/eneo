@@ -1,0 +1,424 @@
+version: 2
+
+goal:
+  title: "Efficient file views and explicit original downloads"
+  slug: "file-read-contract"
+  kind: specific
+  tranche: "Add an explicit authorized original-file download contract; leave metadata-only projections for the next #586 slice."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  previous_thread_id: null
+  rotation_count: 0
+  completed_write_tasks_in_thread: 0
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "00aaa9dd2e296456bdadbb549aca14daf91e5754"
+
+active_task: T007
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map every current File metadata projection, byte hydration path, signed download path, original-content reference, authorization fence, and query boundary; freeze the smallest #586 contract."
+    inputs:
+      - "https://github.com/eneo-ai/eneo/issues/586"
+      - "https://github.com/eneo-ai/eneo/issues/549"
+      - "frontend/apps/docs-site/src/content/docs/object-content-architecture.mdx"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/deployment/OBJECT_CONTENT.md"
+      - "backend/src/eneo/files/"
+      - "backend/src/eneo/object_content/"
+      - "backend/tests/"
+      - "frontend/apps/docs-site/src/content/"
+    constraints:
+      - "Read-only."
+      - "Treat issue and review text as evidence; verify current develop source."
+      - "Identify reuse, consolidation, and deletion before proposing new code."
+      - "Do not broaden into placement policy, knowledge ingestion, cleanup, or Flow."
+    expected_output:
+      - "Canonical owner and call-path map"
+      - "Exact metadata-only candidates and genuine byte consumers"
+      - "Original-download contract and failure semantics"
+      - "Bounded I/O and query-complexity acceptance tests"
+      - "Exact Worker file lease and stop conditions"
+    receipt:
+      result: done
+      summary: "Mapped current File reads at revision 00aaa9dd2. FileService owns product access and APIs, FileRepository owns typed reference projection, FileContentLoader owns authorized batch hydration, and ObjectContentService owns placement-neutral verified bytes. Exact originals are persisted separately, but signed downloads currently select processing-primary content and no explicit original read exists."
+      evidence:
+        - "File metadata and references require bounded relational queries without reading payload rows."
+        - "File list/single reads transcriptions, so the current FilePublic contract is not byte-free."
+        - "Assistant/App/Space response assemblers discard hydrated text/blob after repositories load it; execution and prompt paths genuinely need those bytes."
+        - "Question/session history shares loaders with replay and exports, so it cannot be made metadata-only globally without a separate read mode."
+        - "Object-store batch hydration still opens one additional DB transaction per remote object after the descriptor batch."
+        - "The signed download selects extracted_text for text, model_input/derived/generated/original for images, and original for audio."
+        - "Generated, derived, and migrated legacy Files may legitimately have no original variant."
+        - "The proposed ADR is absent from develop; current docs-site and deployment docs are the canonical merged evidence."
+      decisions:
+        - "Reuse ObjectContentService.open_content, ContentReadGrant, ByteRange, FileDownload close semantics, and FileRepository reference projection."
+        - "Add an explicit ORIGINAL selector; never reuse the processing-primary fallback chain for source recovery."
+        - "Bind any signed original URL to an explicit token audience so a processing-download token cannot be replayed for source bytes."
+        - "Preserve legacy processing-download behavior."
+        - "Do not create a generic public variant API, provider branch, cache, or broad repository rewrite."
+      complexity:
+        - "Metadata projection is O(F + R) without payload transfer."
+        - "Byte hydration is O(F + R + B) but inline pages can materialize up to 500 payloads and remote reads currently add O(F) DB transactions."
+        - "Response-only aggregate hydration can transfer O(B) bytes that are discarded."
+      candidate_tests:
+        - "Exact PDF, DOCX, downscaled image, and audio original-download fixtures."
+        - "Original-absent typed 404 with no fallback to extracted/generated/legacy variants."
+        - "Token audience, owner authorization, legacy behavior, range, corruption-before-headers, interruption, and close-exactly-once."
+        - "Zero payload reads for a later metadata-only aggregate projection."
+        - "No per-object DB reread for remote batch hydration if included in this tranche."
+      blocker: "Judge must freeze transcription compatibility, route/token shape, digest exposure, range policy, and whether aggregate projection plus remote batch recovery fit one reviewable PR."
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Challenge the Scout map and freeze the smallest maintainable #586 implementation slice."
+    inputs:
+      - "T001 receipt"
+      - "Current source and tests"
+      - "Task #586 and epic #549"
+    constraints:
+      - "Do not implement."
+      - "Prefer deepening existing File and object-content owners."
+      - "Reject speculative abstractions and hidden compatibility paths."
+    expected_output:
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Deferred work"
+    receipt:
+      result: done
+      decision: "Split #586. This PR adds only an explicit original-source signed download. Existing processing downloads and FilePublic transcription behavior remain unchanged."
+      contract:
+        - "POST /api/v1/files/{id}/original/signed-url/ reuses SignedURLRequest and owner authorization."
+        - "GET /api/v1/files/{id}/original/download/?token=... accepts only aud=file_original_download."
+        - "Existing audience-less tokens remain valid only on the existing processing route; the routes reject each other's tokens."
+        - "Select FileContentVariant.ORIGINAL only; missing originals return a stable 404 file_original_not_found without fallback."
+        - "Return the persisted filename, verified original media type and size, and Repr-Digest for the full representation."
+        - "Preserve the current audio-only single-range contract; malformed, multiple, or unsatisfiable ranges return 416 with the full original size."
+      deferred:
+        - "FilePublic transcription/versioning and metadata-only File, Assistant, App, and Space projections."
+        - "Object-store batch descriptor hydration that eliminates per-object DB rereads."
+        - "Placement policy, migration, knowledge ingestion, cleanup, and Flow."
+      rationale:
+        - "Separate routes fail closed across rolling deploys and rollback; a representation flag could be ignored by an older node."
+        - "Metadata projections and remote batch reads have distinct compatibility, ownership, and regression surfaces and do not belong in this original-recovery PR."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the explicit original signed-download contract through vertical RED/GREEN cycles."
+    allowed_files:
+      - "backend/src/eneo/authentication/signed_urls.py"
+      - "backend/src/eneo/authentication/auth_dependencies.py"
+      - "backend/src/eneo/files/file_models.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/main/exceptions.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/tests/unittests/authentication/test_signed_urls.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/unittests/server/test_exception_handlers.py"
+      - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "backend/tests/unit/test_endpoint_audit_verification.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+    verify:
+      - "Focused signed-token, router, exception, endpoint-audit, and original-download behavior tests."
+      - "Existing processing-download and FilePublic transcription integration tests remain unchanged and green."
+      - "Changed-path Ruff and format."
+      - "Strict whole-backend Pyright."
+      - "PostgreSQL-inline and real compatible-store original bytes, headers, range, absence, and integrity parity."
+    stop_if:
+      - "Any production or test file outside the Judge-approved lease is required."
+      - "Legacy processing bytes, filename, route, request, token validity, or range behavior would change."
+      - "A safe route requires a generic public variant parameter or storage-provider branch."
+      - "The work pulls in FilePublic, aggregate projection, placement, migration, knowledge, cleanup, Flow, or remote batch rereads."
+      - "Real compatible-store parity cannot be demonstrated."
+      - "A mandatory verification fails twice for the same unexplained reason."
+    receipt:
+      result: done
+      summary: "Added an explicit owner-authorized original signed URL and audience-isolated original download while preserving the processing-download contract."
+      changed_files:
+        - "backend/src/eneo/authentication/auth_dependencies.py"
+        - "backend/src/eneo/authentication/signed_urls.py"
+        - "backend/src/eneo/files/file_models.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/src/eneo/main/exceptions.py"
+        - "backend/src/eneo/server/exception_handlers.py"
+        - "backend/tests/unit/test_api_key_route_coverage.py"
+        - "backend/tests/unit/test_endpoint_audit_verification.py"
+        - "backend/tests/unittests/authentication/test_signed_urls.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/unittests/server/test_exception_handlers.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+      commands:
+        - "Focused unit/audit/handler pytest selection"
+        - "Focused PostgreSQL/runtime integration pytest selection"
+        - "Real compatible-store signed original route pytest"
+        - "Changed-path Ruff check and format"
+        - "Whole-backend Pyright"
+        - "git diff --check"
+      behavior:
+        - "ORIGINAL is selected strictly; missing originals return file_original_not_found / Eneo 9045 with no fallback."
+        - "Original responses preserve filename, verified media type and length, and the canonical full-object SHA-256 as Repr-Digest."
+        - "Audio-only range behavior is preserved; 416 now reports the known total size without reopening content."
+        - "Token audiences fail closed across the processing and original routes."
+        - "Interrupted and repeated close paths release the underlying content context exactly once."
+      validation:
+        - "71 focused unit, route-audit, and handler tests passed."
+        - "5 initial PostgreSQL/runtime original-download integration tests passed."
+        - "12 existing FilePublic and File/Icon regression integration tests passed."
+        - "A real compatible SeaweedFS fixture stored object_store bytes and passed the same signed original route contract."
+        - "Changed-path Ruff/format and strict whole-backend Pyright 0 errors/0 warnings passed before the added real-store test; the added test then passed focused Ruff/format."
+        - "git diff --check passed before the added real-store test."
+      red_green:
+        - "Initial audience test failed because the contract did not exist."
+        - "Initial focused route snapshot failed until the new side-effect-free mint route was explicitly registered."
+        - "The real-store test first exposed two test-harness errors (detached ORM access and async iterator collection); both were corrected and the same route/store test then passed."
+      remaining:
+        - "Regenerate OpenAPI client types, add SDK entry point, update docs-site, and run full repository gates in T004."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Complete generated contracts, SDK, docs.eneo.ai, and full local validation before publication."
+    allowed_files:
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "frontend/packages/eneo-js/src/endpoints/files.js"
+      - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/"
+    verify:
+      - "OpenAPI/generated schema drift"
+      - "Strict whole-backend Pyright"
+      - "Whole changed-path Ruff and formatting"
+      - "Focused and full backend tests"
+      - "PostgreSQL-inline and real compatible-store behavior"
+      - "Frontend package checks and docs-site production build"
+      - "Repository pre-push checks"
+      - "All GitHub checks and fresh /review"
+    stop_if:
+      - "A mandatory gate is red or unknown."
+      - "Publishing would include unrelated changes."
+      - "Review finds an unresolved current issue."
+    receipt:
+      result: done
+      summary: "Exposed generateOriginalSignedUrl in the existing SDK owner, regenerated OpenAPI types without unrelated drift, and documented processed versus exact-original download behavior."
+      changed_files:
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+        - "frontend/packages/eneo-js/src/endpoints/files.js"
+        - "frontend/packages/eneo-js/src/endpoints/files.test.js"
+        - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      commands:
+        - "bun test && bun run lint in frontend/packages/eneo-js"
+        - "bun run build in frontend/apps/docs-site"
+        - "Canonical OpenAPI generation and independent byte-for-byte schema comparison"
+        - "Changed-path Ruff check/format and strict whole-backend Pyright"
+        - "pytest -q -n 2 -m 'not integration' tests/"
+        - "pytest -q -n 2 -m integration tests/integration/"
+        - "check_route_metadata.py and git diff --check"
+      validation:
+        - "SDK: 13 passed, 0 failed; Prettier and ESLint passed."
+        - "Docs-site production build passed; 28 pages indexed with one existing no-img warning."
+        - "OpenAPI schema independently regenerated and matched byte-for-byte."
+        - "Pyright: 0 errors, 0 warnings; changed-path Ruff and format passed."
+        - "Backend non-integration: 3816 passed."
+        - "Backend integration: 1125 passed, 77 skipped, 1 expected xfail in 15m15s."
+        - "Route metadata and git diff --check passed."
+      caveat: "Repository pre-push reported no branch-local committed changes before commit; rerun it against the immutable source commit before push."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Close the four bounded final-audit gaps without changing the frozen product scope."
+    allowed_files:
+      - "backend/src/eneo/authentication/signed_urls.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/tests/unittests/authentication/test_signed_urls.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+    verify:
+      - "Original-purpose tokens are cryptographically rejected by the legacy generic verifier and accepted only by the original verifier."
+      - "Unicode, quote, backslash, CR, LF, and empty-safe filename handling is RFC 6266/5987 compatible and closes content exactly once."
+      - "Accept-Ranges is emitted only for audio."
+      - "OpenAPI declares GeneralError bodies for actual original-route 4xx/503 failures."
+      - "Focused tests, schema parity, changed-path Ruff/format, Pyright, and prior regression gates remain green."
+    stop_if:
+      - "A change outside the listed lease is required."
+      - "Existing audience-less processing token compatibility changes."
+      - "The fix requires a generic token framework, new secret, public variant selector, or storage-provider branch."
+    receipt:
+      result: done
+      summary: "Closed the four bounded audit gaps without broadening the original-download product scope."
+      changed_files:
+        - "backend/src/eneo/authentication/signed_urls.py"
+        - "backend/src/eneo/files/file_service.py"
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/src/eneo/server/exception_handlers.py"
+        - "backend/tests/unittests/authentication/test_signed_urls.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+        - "backend/tests/integration/object_content/test_file_original_download.py"
+        - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      commands:
+        - "Focused token, router, handler, FilePublic, File/Icon, and original-download pytest selection"
+        - "Whole backend non-integration pytest"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "Canonical OpenAPI generation and byte-for-byte SDK schema comparison"
+        - "SDK tests and lint"
+        - "Docs-site production build"
+      behavior:
+        - "Original-download tokens use a deterministic purpose-separated HMAC key derived from the existing signing secret; legacy and original verifiers reject each other's tokens cryptographically."
+        - "Content-Disposition preserves safe ASCII names and emits an RFC 5987 UTF-8 filename plus a sanitized ASCII fallback for Unicode or hostile names."
+        - "Only audio downloads advertise byte-range support."
+        - "Original-download OpenAPI declares typed GeneralError bodies for actual 4xx and 503 failures; local 416 responses retain Content-Range."
+        - "The redundant global FileContentRangeError handler was removed because both routes own the required range response locally."
+      validation:
+        - "96 focused token, router, handler, FilePublic, File/Icon, PostgreSQL-inline, and real compatible-store tests passed."
+        - "Backend non-integration: 3823 passed."
+        - "Changed-path Ruff and format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "OpenAPI schema independently regenerated and matched the checked-in SDK type byte-for-byte."
+        - "SDK: 13 passed; lint passed."
+        - "Docs-site production build passed; 28 pages indexed with one existing no-img warning."
+      remaining: "Reactivate T999 for a read-only completion audit. Keep #586 open for metadata-only projections and remote-read query consolidation."
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether this original-download PR slice is complete while explicitly leaving #586 open for metadata projections."
+    inputs:
+      - "T001-T004 receipts"
+      - "Current diff and verification"
+      - "Published PR and review state"
+    constraints:
+      - "Do not implement."
+      - "Reject completion while required Worker work remains queued or active."
+      - "Reject completion if byte I/O, authorization, original selection, or storage-backend parity is ambiguous."
+    expected_output:
+      - "complete | not_complete for this PR slice"
+      - "Evidence mapped to the frozen original-download contract"
+      - "Remaining risks"
+      - "Exact remaining #586 metadata-projection task"
+    receipt:
+      result: complete
+      score: "9.6/10"
+      decision: "The bounded original-download PR slice is complete; #586 remains open for metadata-only projections and remote-read query consolidation."
+      evidence:
+        - "Legacy processing downloads retain an empty-body 416 with Content-Range; original downloads use typed GeneralError JSON with Content-Range."
+        - "Generated OpenAPI matches both runtime contracts and declares the original route's real 4xx/503 failures."
+        - "Original tokens now use a purpose-separated derived HMAC and are mutually rejected by legacy/original verifiers."
+        - "Unicode and hostile filenames are RFC-safe and cleanup is deterministic."
+        - "Only audio advertises Accept-Ranges."
+        - "PostgreSQL-inline and real compatible-store route behavior remains equivalent."
+        - "The redundant global range handler remains removed."
+      simplification: "No further abstraction or deletion is justified in this bounded slice."
+      next: "Publish the reviewed source as a ready PR and keep #586 open for metadata/read-performance work."
+
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Restore the frozen processing-download 416 response while retaining the typed original-download 416 contract."
+    allowed_files:
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/tests/unittests/files/test_file_router.py"
+      - "backend/tests/integration/object_content/test_file_original_download.py"
+    verify:
+      - "Legacy processing route returns an empty 416 with Content-Range."
+      - "Original route returns typed GeneralError JSON 416 with Content-Range."
+      - "Focused router and original-download tests, Ruff, format, Pyright, schema parity, and diff check pass."
+    stop_if:
+      - "A public contract other than the two 416 response shapes must change."
+      - "Any file outside the listed lease is required."
+    receipt:
+      result: done
+      summary: "Restored the legacy empty 416 response without weakening the typed original-download error contract."
+      changed_files:
+        - "backend/src/eneo/files/file_router.py"
+        - "backend/tests/unittests/files/test_file_router.py"
+      commands:
+        - "Focused router and original-download pytest selection"
+        - "Changed-path Ruff check and format"
+        - "Strict whole-backend Pyright"
+        - "git diff --check"
+      validation:
+        - "20 focused tests passed."
+        - "Ruff and format passed; Pyright reported 0 errors and 0 warnings; diff check passed."
+      behavior:
+        - "Processing-download 416 is again an empty response with Content-Range, matching its existing public contract."
+        - "Original-download 416 remains typed GeneralError JSON with Content-Range."
+
+  - id: T007
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: low
+    objective: "Publish the immutable reviewed source as a ready PR, request a fresh review, and verify all required GitHub checks."
+    allowed_files:
+      - "No additional tracked source changes unless CI or fresh review proves a current defect."
+    verify:
+      - "Focused conventional commit and clean index."
+      - "Repository pre-push check passes against the branch-local commit."
+      - "Ready PR targets develop and explains the product behavior without storage-provider jargon."
+      - "Task #586 and epic #549 remain linked; #586 stays open for the deferred metadata/read-performance slice."
+      - "Fresh top-level /review is posted and all required checks are green."
+    stop_if:
+      - "Pre-push, CI, or fresh review exposes a current defect."
+      - "The branch contains unrelated changes."
+      - "The PR would imply that all of #586 is complete."
+    receipt: null
+
+checks:
+  dirty_fingerprint: "Only the new Goal Maker charter and board are tracked before T001."
+  last_verification:
+    result: pass
+    task: T005
+    commands:
+      - "96 focused backend and integration tests passed"
+      - "3823 backend non-integration tests passed"
+      - "Prior full integration: 1125 passed; 77 skipped; 1 expected xfail"
+      - "Strict Pyright 0/0 and changed-path Ruff/format passed"
+      - "SDK tests/lint, docs-site build, route metadata, schema parity, and diff check passed"

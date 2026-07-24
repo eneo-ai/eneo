@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.main.exceptions import (
     BadRequestException,
     EncryptionNotConfiguredException,
@@ -134,6 +135,24 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert body["message"] == "Bad input"
     assert body["eneo_error_code"] == ErrorCodes.BAD_REQUEST
     assert "details" not in body
+
+
+def test_original_not_found_has_stable_public_contract():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/original")
+    async def original():
+        raise FileOriginalNotFoundError()
+
+    response = TestClient(app).get("/original")
+
+    assert response.status_code == 404
+    assert response.json()["eneo_error_code"] == ErrorCodes.FILE_ORIGINAL_NOT_FOUND
+    assert response.json()["code"] == "file_original_not_found"
+    assert response.json()["message"] == (
+        "The exact original is not available for this file."
+    )
 
 
 def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):

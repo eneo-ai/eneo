@@ -240,6 +240,7 @@ APPS_READ_OVERRIDES: frozenset[str] = frozenset(
 FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "generate_signed_url",
+        "generate_original_signed_url",
     }
 )
 

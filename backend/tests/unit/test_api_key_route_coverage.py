@@ -1025,6 +1025,11 @@ class TestScopeCheckPathParamSafety:
         "before a signed URL is minted.",
         (
             "POST",
+            "/files/{id}/original/signed-url/",
+        ): "file_service.ensure_original_available() performs the owner and exact-original "
+        "checks before a signed URL is minted.",
+        (
+            "POST",
             "/info-blobs/{id}/",
         ): "info_blob_service.update_info_blob() performs space-membership authorization "
         "via the actor-based space authorization layer; scope=info_blob limits which blobs "
@@ -1137,6 +1142,7 @@ class TestReadOverrideSnapshot:
             "run_service",
         ],
         "FILES_READ_OVERRIDES": [
+            "generate_original_signed_url",
             "generate_signed_url",
         ],
         "KNOWLEDGE_READ_OVERRIDES": [

@@ -9,12 +9,14 @@ from fastapi import UploadFile
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
+    FileContentRangeError,
     FileContentVariant,
     FileDeletionPreview,
     FileInfo,
     FileInUseError,
     FileMetadata,
     FileMetadataCreate,
+    FileOriginalNotFoundError,
     FilePublic,
     FileType,
     FileUsageKind,
@@ -42,6 +44,7 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentIntent,
     ContentReadGrant,
+    InvalidContentRangeError,
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
@@ -54,7 +57,9 @@ class FileDownload:
     content_length: int
     media_type: str
     filename: str
+    sha256: bytes
     content_range: str | None
+    range_supported: bool
     _close: Callable[[], Awaitable[None]] = field(repr=False)
 
     async def aclose(self) -> None:
@@ -374,12 +379,51 @@ class FileService:
         metadata = await self.repo.get_by_id(file_id=file_id)
         references = await self.repo.get_content_references([file_id])
         reference = self._primary_reference(metadata, references)
+        return await self._open_download(
+            metadata,
+            reference,
+            range_header=range_header,
+        )
 
+    async def ensure_original_available(self, file_id: UUID) -> None:
+        metadata = await self.repo.get_by_id(file_id=file_id)
+        self._require_owner(metadata, action="read")
+        references = await self.repo.get_content_references([file_id])
+        self._original_reference(references)
+
+    async def get_original_download_no_auth(
+        self,
+        file_id: UUID,
+        *,
+        range_header: str | None = None,
+    ) -> FileDownload:
+        metadata = await self.repo.get_by_id(file_id=file_id)
+        references = await self.repo.get_content_references([file_id])
+        reference = self._original_reference(references)
+        return await self._open_download(
+            metadata,
+            reference,
+            range_header=range_header,
+        )
+
+    async def _open_download(
+        self,
+        metadata: FileMetadata,
+        reference: FileContentReferenceRecord,
+        *,
+        range_header: str | None,
+    ) -> FileDownload:
         if range_header is not None and metadata.file_type is not FileType.AUDIO:
             raise BadRequestException("Range is only supported for audio files")
 
         if range_header is not None:
-            ByteRange.parse(range_header, size_bytes=reference.size_bytes)
+            try:
+                ByteRange.parse(range_header, size_bytes=reference.size_bytes)
+            except InvalidContentRangeError as exc:
+                raise FileContentRangeError(
+                    str(exc),
+                    total_size=reference.size_bytes,
+                ) from exc
         grant = ContentReadGrant(
             content_id=reference.content_id,
             tenant_id=metadata.tenant_id,
@@ -430,7 +474,9 @@ class FileService:
                 if reference.variant is FileContentVariant.EXTRACTED_TEXT
                 else metadata.name
             ),
+            sha256=reference.sha256,
             content_range=opened.content_range,
+            range_supported=metadata.file_type is FileType.AUDIO,
             _close=close,
         )
 
@@ -541,6 +587,18 @@ class FileService:
         if reference is not None:
             return reference
         raise NotFoundException(f"File {file.id} has no durable content")
+
+    @staticmethod
+    def _original_reference(
+        references: list[FileContentReferenceRecord],
+    ) -> FileContentReferenceRecord:
+        reference = FileService._first_reference(
+            references,
+            FileContentVariant.ORIGINAL,
+        )
+        if reference is None:
+            raise FileOriginalNotFoundError()
+        return reference
 
     def _require_owner(self, file: FileMetadata, *, action: str) -> None:
         if file.user_id == self._authenticated_user().id:

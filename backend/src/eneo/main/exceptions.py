@@ -67,6 +67,7 @@ class ErrorCodes(int, Enum):
     ENCRYPTION_NOT_CONFIGURED = 9042
     SKILL_REVISION_CONFLICT = 9043
     FILE_IN_USE = 9044
+    FILE_ORIGINAL_NOT_FOUND = 9045
 
 
 class NotFoundException(Exception):

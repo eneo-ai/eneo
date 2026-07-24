@@ -200,6 +200,7 @@ class TestSignedUrlReadOverride:
 
     def test_generate_signed_url_in_files_read_overrides(self):
         assert "generate_signed_url" in FILES_READ_OVERRIDES
+        assert "generate_original_signed_url" in FILES_READ_OVERRIDES
 
     def test_files_router_has_read_overrides(self):
         """The /files router mount should have FILES_READ_OVERRIDES wired."""
