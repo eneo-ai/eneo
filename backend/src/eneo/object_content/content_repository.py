@@ -505,26 +505,6 @@ class ObjectContentRepository:
         self._clear_lease(row)
         await self._session.flush()
 
-    async def get_readable(
-        self,
-        *,
-        content_id: UUID,
-        tenant_id: UUID,
-        access_class: ContentAccessClass,
-    ) -> ReadableContent:
-        row = (
-            await self._session.scalars(
-                select(ObjectContents).where(
-                    ObjectContents.id == content_id,
-                    ObjectContents.tenant_id == tenant_id,
-                    ObjectContents.access_class == access_class.value,
-                )
-            )
-        ).one_or_none()
-        if row is None or row.state != ContentState.AVAILABLE.value:
-            raise ObjectContentStateError("Object content is not available")
-        return self._readable(row)
-
     async def get_readable_sources(
         self,
         grants: Sequence[ContentReadGrant],
@@ -623,22 +603,6 @@ class ObjectContentRepository:
             row.failure_detail = "durable object bytes are unavailable or untrusted"
             row.next_attempt_at = None
             await self._session.flush()
-
-    async def get_inline_payload(self, content_id: UUID) -> bytes:
-        payload = await self._session.get(InlineContentPayloads, content_id)
-        if payload is None:
-            raise ObjectContentStateError("Inline content payload is missing")
-        return payload.payload
-
-    async def get_object_store_descriptor(
-        self,
-        content_id: UUID,
-    ) -> ObjectStoreDescriptor:
-        descriptor = await self._object_store_descriptor(content_id)
-        return ObjectStoreDescriptor(
-            content_id=descriptor.content_id,
-            object_key=descriptor.object_key,
-        )
 
     async def apply_hold(
         self,
