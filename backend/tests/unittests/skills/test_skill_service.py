@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -15,6 +15,7 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
+    SKILL_RUNTIME_POLICY_DEFAULTS,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingReference,
@@ -134,6 +135,7 @@ def _service(*, space, actor=None, repo=None, permissions=None, active_api_key=N
     repo = repo or AsyncMock()
     repo.lock_assistant_space_for_update.return_value = space.id
     repo.lock_app_for_binding_update.return_value = True
+    repo.get_or_seed_runtime_policy.return_value = SKILL_RUNTIME_POLICY_DEFAULTS
     return SkillService(
         user=user,
         repo=repo,
@@ -1137,29 +1139,27 @@ async def test_skill_user_without_tenant_admin_cannot_replace_governance_binding
     repo.list_policy_bindings.assert_not_awaited()
 
 
-async def test_binding_abuse_guardrail_comes_from_deployment_settings():
+async def test_binding_abuse_guardrail_comes_from_stored_runtime_policy():
     space = _space()
     repo = AsyncMock()
     repo.list_app_bindings.return_value = []
     service = _service(space=space, repo=repo)
+    repo.get_or_seed_runtime_policy.return_value = replace(
+        SKILL_RUNTIME_POLICY_DEFAULTS, max_attached_skills=1
+    )
     references = [
         SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
         SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
     ]
 
-    with (
-        patch(
-            "eneo.skills.application.skill_service.get_settings",
-            return_value=SimpleNamespace(skill_max_bindings=1),
-        ),
-        pytest.raises(BadRequestException, match="more than 1 Skills"),
-    ):
+    with pytest.raises(BadRequestException, match="more than 1 Skills"):
         await service.replace_app_bindings(
             space_id=space.id,
             app_id=space.app.id,
             references=references,
         )
 
+    repo.get_or_seed_runtime_policy.assert_awaited_once_with(tenant_id=space.tenant_id)
     repo.resolve_bound_references_for_binding_update.assert_not_awaited()
     repo.resolve_local_references_for_binding_update.assert_not_awaited()
 
