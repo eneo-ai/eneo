@@ -13,6 +13,7 @@ from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.signed_urls import generate_signed_token, verify_signed_token
 from eneo.files.file_models import (
     ContentDisposition,
+    FileDeletionPreview,
     FilePublic,
     SignedURLRequest,
     SignedURLResponse,
@@ -116,7 +117,7 @@ async def get_file(
         204: {
             "description": "File deleted successfully. No response body is returned."
         },
-        **responses.get_responses([403, 404]),
+        **responses.get_responses([403, 404, 409]),
     },
 )
 async def delete_file(
@@ -156,6 +157,23 @@ async def delete_file(
             extra=extra,
         ),
     )
+
+
+@router.get(
+    "/{id}/deletion-preview/",
+    response_model=FileDeletionPreview,
+    status_code=200,
+    responses=responses.get_responses([403, 404]),
+    description=(
+        "Preview whether deleting this File would remove active chat, Assistant, "
+        "App, or App-run attachments."
+    ),
+)
+async def get_file_deletion_preview(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FileDeletionPreview:
+    return await container.file_service().get_deletion_preview(id)
 
 
 @router.post(

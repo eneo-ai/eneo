@@ -125,6 +125,8 @@ class AssistantsFiles(BaseCrossReference):
     # Relationships
     file: Mapped[Files] = relationship()
 
+    __table_args__ = (Index("ix_assistants_files_file_id", "file_id"),)
+
 
 class AssistantIntegrationKnowledge(BasePublic):
     __tablename__ = "assistant_integration_knowledge"  # type: ignore[assignment]

@@ -13,6 +13,8 @@ from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
 )
+from eneo.database.tables.questions_table import Questions, QuestionsFiles
+from eneo.database.tables.sessions_table import Sessions
 
 
 def _opaque_png(*, width: int, height: int) -> bytes:
@@ -22,6 +24,74 @@ def _opaque_png(*, width: int, height: int) -> bytes:
         format="PNG",
     )
     return buffer.getvalue()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_used_file_delete_returns_the_typed_preview_before_mutation(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    headers = {"X-API-Key": admin_user_api_key.key}
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("policy.txt", b"durable policy", "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    file_id = UUID(upload.json()["id"])
+
+    async with db_container() as container:
+        user = container.user()
+        session = container.session()
+        chat_session = Sessions(user_id=user.id, name="Deletion preview")
+        session.add(chat_session)
+        await session.flush()
+        question = Questions(
+            question="Use the policy",
+            answer="",
+            num_tokens_question=0,
+            num_tokens_answer=0,
+            tenant_id=user.tenant_id,
+            session_id=chat_session.id,
+        )
+        session.add(question)
+        await session.flush()
+        question_id = question.id
+        session.add(
+            QuestionsFiles(
+                question_id=question_id,
+                file_id=file_id,
+                type="user",
+            )
+        )
+
+    expected_preview = {
+        "file_id": str(file_id),
+        "can_delete": False,
+        "affected_file_count": 1,
+        "blockers": [{"kind": "chat_attachment", "count": 1}],
+    }
+    preview = await client.get(
+        f"/api/v1/files/{file_id}/deletion-preview/",
+        headers=headers,
+    )
+    deletion = await client.delete(
+        f"/api/v1/files/{file_id}/",
+        headers=headers,
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == expected_preview
+    assert deletion.status_code == 409, deletion.text
+    assert deletion.json()["code"] == "file_in_use"
+    assert deletion.json()["eneo_error_code"] == 9044
+    assert deletion.json()["details"] == expected_preview
+
+    async with db_container() as container:
+        session = container.session()
+        assert await session.get(QuestionsFiles, (question_id, file_id)) is not None
 
 
 @pytest.mark.integration

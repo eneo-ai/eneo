@@ -19,6 +19,7 @@ def _service() -> tuple[FileService, AsyncMock, SimpleNamespace]:
         protocol=AsyncMock(),
         object_content=AsyncMock(),
     )
+    service._usage = AsyncMock()
     return service, repo, user
 
 
@@ -30,17 +31,39 @@ async def test_delete_non_owned_and_missing_files_share_the_404_path() -> None:
     with pytest.raises(NotFoundException):
         await service.delete_file(uuid4())
 
+    service._usage.lock_family.assert_not_awaited()
     repo.delete_by_owner.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_delete_uses_one_owner_bound_lookup_and_delete() -> None:
+async def test_deletion_preview_returns_404_if_the_file_disappears_during_read() -> (
+    None
+):
+    service, repo, user = _service()
+    file_id = uuid4()
+    repo.get_by_id_and_owner.return_value = SimpleNamespace(id=file_id)
+    service._usage.list_family.return_value = []
+
+    with pytest.raises(NotFoundException):
+        await service.get_deletion_preview(file_id)
+
+    service._usage.list_family.assert_awaited_once_with(
+        root_file_id=file_id,
+        tenant_id=user.tenant_id,
+    )
+    service._usage.count_product_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_rechecks_usage_under_the_family_lock() -> None:
     service, repo, user = _service()
     file_id = uuid4()
     metadata = SimpleNamespace(id=file_id)
     public_info = SimpleNamespace(id=file_id)
     repo.get_by_id_and_owner.return_value = metadata
     repo.delete_by_owner.return_value = metadata
+    service._usage.lock_family.return_value = [file_id]
+    service._usage.count_product_usage.return_value = []
     service._file_info = AsyncMock(return_value=public_info)
 
     result = await service.delete_file(file_id)
@@ -51,6 +74,11 @@ async def test_delete_uses_one_owner_bound_lookup_and_delete() -> None:
         user_id=user.id,
         tenant_id=user.tenant_id,
     )
+    service._usage.lock_family.assert_awaited_once_with(
+        root_file_id=file_id,
+        tenant_id=user.tenant_id,
+    )
+    service._usage.count_product_usage.assert_awaited_once_with([file_id])
     repo.delete_by_owner.assert_awaited_once_with(
         id=file_id,
         user_id=user.id,

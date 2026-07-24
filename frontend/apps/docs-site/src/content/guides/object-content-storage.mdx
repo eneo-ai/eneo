@@ -21,13 +21,13 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## How content flows
 
-File and Icon own the product meaning: filename, purpose, authorization, and
-which variant is needed. The shared object-content module owns durable bytes,
-SHA-256, exact size and media type, placement, lifecycle, and deletion.
+File and Icon own the product meaning: filename, authorization, and where the
+content is used. The shared object-content module owns durable bytes, SHA-256,
+exact size and media type, placement, lifecycle, and physical deletion.
 
 ```mermaid
 flowchart LR
-  upload["File or Icon"] --> owner["Product owner\nname · purpose · access"]
+  upload["File or Icon"] --> owner["Product owner\nname · use · access"]
   owner --> control["PostgreSQL control\nidentity · digest · references · lifecycle"]
   control --> bytes{"One byte authority"}
   bytes --> inline["PostgreSQL inline\ndefault"]
@@ -58,6 +58,27 @@ Object storage and RAG solve different problems:
 
 Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself.
+
+## What happens when a File is deleted?
+
+Eneo first checks the File and its generated derivatives against concrete
+product relations. A File cannot be deleted while it is attached to a chat,
+Assistant, App, or App run. The preview returns a short count for each blocking
+use; it never exposes storage keys or endpoint details.
+
+```mermaid
+flowchart LR
+  request["Delete File"] --> preview["Check current uses"]
+  preview -->|still used| blocked["Keep File\nexplain what blocks deletion"]
+  preview -->|unused| delete["Delete File identity"]
+  delete --> lifecycle["Object content handles\nfinal byte deletion"]
+```
+
+Preview is advisory. Eneo repeats the same check while holding database locks
+before deletion, so a concurrent attachment cannot be silently removed.
+Removing a File from a chat or Assistant only removes that use; the reusable
+File remains until its owner deletes it. Organization or user offboarding keeps
+its existing database-cascade behavior.
 
 ## Choose the right deployment
 
@@ -262,6 +283,12 @@ content item live either inline or in the configured endpoint.
 
 No. Placement changes require an explicit copy, full verification, authority
 switch, and cleanup workflow.
+
+### Why can I not delete an uploaded File?
+
+The File is still used by a chat, Assistant, App, or App run. Check its deletion
+preview, remove those uses deliberately, and try again. Eneo blocks the delete
+instead of silently breaking those resources.
 
 ### What happens when an endpoint is down?
 

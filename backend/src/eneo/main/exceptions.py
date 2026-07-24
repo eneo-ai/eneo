@@ -66,6 +66,7 @@ class ErrorCodes(int, Enum):
     # Deployment configuration errors
     ENCRYPTION_NOT_CONFIGURED = 9042
     SKILL_REVISION_CONFLICT = 9043
+    FILE_IN_USE = 9044
 
 
 class NotFoundException(Exception):

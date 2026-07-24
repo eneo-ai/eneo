@@ -3836,6 +3836,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/files/{id}/deletion-preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get File Deletion Preview
+     * @description Preview whether deleting this File would remove active chat, Assistant, App, or App-run attachments.
+     */
+    get: operations["get_file_deletion_preview_api_v1_files__id__deletion_preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/files/{id}/signed-url/": {
     parameters: {
       query?: never;
@@ -11464,7 +11484,8 @@ export interface components {
       | 9040
       | 9041
       | 9042
-      | 9043;
+      | 9043
+      | 9044;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11718,6 +11739,20 @@ export interface components {
        */
       status?: string;
     };
+    /** FileDeletionPreview */
+    FileDeletionPreview: {
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Can Delete */
+      can_delete: boolean;
+      /** Affected File Count */
+      affected_file_count: number;
+      /** Blockers */
+      blockers: components["schemas"]["FileUsageSummary"][];
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -11745,6 +11780,17 @@ export interface components {
       /** Accepted File Types */
       accepted_file_types: components["schemas"]["AcceptedFileType"][];
       limit: components["schemas"]["Limit"];
+    };
+    /**
+     * FileUsageKind
+     * @enum {string}
+     */
+    FileUsageKind: "chat_attachment" | "assistant_attachment" | "app_attachment" | "app_run_input";
+    /** FileUsageSummary */
+    FileUsageSummary: {
+      kind: components["schemas"]["FileUsageKind"];
+      /** Count */
+      count: number;
     };
     /** FormatLimit */
     FormatLimit: {
@@ -33343,6 +33389,64 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_file_deletion_preview_api_v1_files__id__deletion_preview__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDeletionPreview"];
+        };
       };
       /** @description Forbidden */
       403: {

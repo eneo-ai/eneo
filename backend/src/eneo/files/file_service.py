@@ -10,11 +10,15 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
     FileContentVariant,
+    FileDeletionPreview,
     FileInfo,
+    FileInUseError,
     FileMetadata,
     FileMetadataCreate,
     FilePublic,
     FileType,
+    FileUsageKind,
+    FileUsageSummary,
 )
 from eneo.files.file_protocol import (
     FileProtocol,
@@ -27,6 +31,7 @@ from eneo.files.file_repo import (
     project_file_info,
     select_primary_file_reference,
 )
+from eneo.files.file_usage import FileUsageRepository
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -75,6 +80,7 @@ class FileService:
         self.protocol = protocol
         self._object_content = object_content
         self._content_loader = FileContentLoader(repo, object_content)
+        self._usage = FileUsageRepository(repo.session)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -238,24 +244,80 @@ class FileService:
         by_file = self._references_by_file(references)
         return [project_file_info(file, by_file[file.id]) for file in metadata]
 
-    async def delete_file(self, id: UUID) -> FileInfo:
+    async def get_deletion_preview(self, file_id: UUID) -> FileDeletionPreview:
         user = self._authenticated_user()
         metadata = await self.repo.get_by_id_and_owner(
-            file_id=id,
+            file_id=file_id,
             user_id=user.id,
             tenant_id=user.tenant_id,
         )
         if metadata is None:
             raise NotFoundException()
-        info = await self._file_info(metadata)
-        deleted = await self.repo.delete_by_owner(
-            id=id,
-            user_id=user.id,
+        family_ids = await self._usage.list_family(
+            root_file_id=file_id,
             tenant_id=user.tenant_id,
         )
-        if deleted is None:
+        if not family_ids:
             raise NotFoundException()
-        return info
+        return await self._deletion_preview(
+            file_id=file_id,
+            family_ids=family_ids,
+        )
+
+    async def delete_file(self, id: UUID) -> FileInfo:
+        user = self._authenticated_user()
+        async with self._write_transaction():
+            metadata = await self.repo.get_by_id_and_owner(
+                file_id=id,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+            )
+            if metadata is None:
+                raise NotFoundException()
+            family_ids = await self._usage.lock_family(
+                root_file_id=id,
+                tenant_id=user.tenant_id,
+            )
+            if not family_ids:
+                raise NotFoundException()
+            preview = await self._deletion_preview(
+                file_id=id,
+                family_ids=family_ids,
+            )
+            if not preview.can_delete:
+                raise FileInUseError(preview)
+
+            info = await self._file_info(metadata)
+            deleted = await self.repo.delete_by_owner(
+                id=id,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+            )
+            if deleted is None:
+                raise NotFoundException()
+            return info
+
+    async def _deletion_preview(
+        self,
+        *,
+        file_id: UUID,
+        family_ids: list[UUID],
+    ) -> FileDeletionPreview:
+        usage = {
+            item.kind: item.count
+            for item in await self._usage.count_product_usage(family_ids)
+        }
+        blockers = [
+            FileUsageSummary(kind=kind, count=usage[kind])
+            for kind in FileUsageKind
+            if kind in usage
+        ]
+        return FileDeletionPreview(
+            file_id=file_id,
+            can_delete=not blockers,
+            affected_file_count=len(family_ids),
+            blockers=blockers,
+        )
 
     async def get_file_content(self, file_id: UUID) -> File:
         metadata = await self.repo.get_by_id(file_id=file_id)

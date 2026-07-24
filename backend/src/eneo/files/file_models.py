@@ -29,6 +29,34 @@ class FileContentVariant(StrEnum):
     PREVIEW = "preview"
 
 
+class FileUsageKind(StrEnum):
+    CHAT_ATTACHMENT = "chat_attachment"
+    ASSISTANT_ATTACHMENT = "assistant_attachment"
+    APP_ATTACHMENT = "app_attachment"
+    APP_RUN_INPUT = "app_run_input"
+
+
+class FileUsageSummary(BaseModel):
+    kind: FileUsageKind
+    count: int
+
+
+class FileDeletionPreview(BaseModel):
+    file_id: UUID
+    can_delete: bool
+    affected_file_count: int
+    blockers: list[FileUsageSummary]
+
+
+class FileInUseError(Exception):
+    code = "file_in_use"
+
+    def __init__(self, preview: FileDeletionPreview) -> None:
+        self.preview = preview
+        self.details = preview.model_dump(mode="json")
+        super().__init__("File is still used and cannot be deleted.")
+
+
 class FileBase(BaseModel):
     name: str
     checksum: str
