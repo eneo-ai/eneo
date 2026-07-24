@@ -10,14 +10,15 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| I want to…                                      | Go to                                              |
-| ----------------------------------------------- | -------------------------------------------------- |
-| Run the simplest supported deployment           | [PostgreSQL only](#set-up-your-choice)             |
-| Use the bundled private reference store         | [Bundled SeaweedFS](#set-up-your-choice)           |
-| Connect MinIO or another compatible service     | [External endpoint](#set-up-your-choice)           |
-| Understand ownership and RAG                    | [How content flows](#how-content-flows)            |
-| Plan backup, recovery, and failure handling      | [Operate it safely](#operate-it-safely)            |
-| Review lifecycle and integrity implementation   | [Architecture](/docs/object-content-architecture)  |
+| I want to…                                        | Go to                                              |
+| ------------------------------------------------- | -------------------------------------------------- |
+| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)             |
+| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)           |
+| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)           |
+| Understand ownership and RAG                      | [How content flows](#how-content-flows)            |
+| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file) |
+| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)            |
+| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)  |
 
 ## How content flows
 
@@ -49,15 +50,56 @@ Object storage and RAG solve different problems:
 
 ### What is adopted now?
 
-| Product content | Current behavior |
-| --------------- | ---------------- |
-| New File and Icon bytes | Use the shared lifecycle and PostgreSQL-inline byte backend |
-| Existing File and Icon bytes | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
-| InfoBlob knowledge generations and Flow artifacts | Remain separate follow-up work |
-| Admin-selected placement and inline ↔ object-store migration | Remain a separate, verified migration workflow |
+| Product content                                              | Current behavior                                                                                        |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| New File and Icon bytes                                      | Use the shared lifecycle and PostgreSQL-inline byte backend                                             |
+| Existing File and Icon bytes                                 | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
+| InfoBlob knowledge generations and Flow artifacts            | Remain separate follow-up work                                                                          |
+| Admin-selected placement and inline ↔ object-store migration | Remain a separate, verified migration workflow                                                          |
 
 Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself.
+
+## Download or recover a File
+
+Eneo keeps processing views and original recovery explicit:
+
+| Use               | What Eneo returns                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| Normal download   | The representation Eneo uses for the File, such as extracted text or an image prepared for model input |
+| Original download | The exact persisted upload, with its original filename, media type, and byte length                    |
+
+Both use signed access. Original-recovery links are deliberately short-lived:
+callers can request between one second and one hour. Original recovery is
+strict: Eneo never substitutes a processed representation when the original is
+absent. Instead it returns `404 file_original_not_found` (Eneo error `9045`).
+
+For a download button, keep the File ID and mint the URL when the user clicks:
+
+```js
+const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
+  fileId,
+  contentDisposition: "attachment",
+})
+
+window.location.assign(url)
+```
+
+Do not persist the returned URL or send it to analytics. It is a temporary
+bearer credential; use `expires_at` to decide when the application must request
+a new one. Eneo records who created an original-recovery link, its expiry, and
+whether it was intended for download or inline display; the bearer token itself
+is never written to the audit log.
+
+The original response includes `Repr-Digest` for the SHA-256 of the complete
+original. That value stays the same on an audio `206` range response because it
+describes the full representation, not only the returned range. Range requests
+remain audio-only; other file types use a complete download.
+
+This contract is independent of placement. It behaves the same whether the
+bytes are stored inline in PostgreSQL or in an optional configured
+S3-compatible endpoint. Callers do not receive bucket, object-key, or provider
+details, and Eneo does not require S3-compatible storage.
 
 ## What happens when a File is deleted?
 
@@ -82,10 +124,10 @@ its existing database-cascade behavior.
 
 ## Choose the right deployment
 
-| Choice | Start here when… | Additional responsibility |
-| ------ | ---------------- | ------------------------- |
-| **PostgreSQL inline** (default) | You want the fewest moving parts | Monitor database growth, WAL, and backup time |
-| **Bundled SeaweedFS** | A single-node private reference store is enough | Operate its volume and pair its backup with PostgreSQL |
+| Choice                           | Start here when…                                            | Additional responsibility                                       |
+| -------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------- |
+| **PostgreSQL inline** (default)  | You want the fewest moving parts                            | Monitor database growth, WAL, and backup time                   |
+| **Bundled SeaweedFS**            | A single-node private reference store is enough             | Operate its volume and pair its backup with PostgreSQL          |
 | **External compatible endpoint** | You already operate storage or need multi-node availability | Own endpoint security, TLS, capacity, credentials, and recovery |
 
 Start inline unless measured volume, backup duration, database growth, or
@@ -256,12 +298,12 @@ File/Icon bytes.
 
 ### Failure rule
 
-| Situation | Eneo behavior |
-| --------- | ------------- |
-| No endpoint configured and no remote rows | Healthy inline operation |
-| Endpoint temporarily unavailable | Inline work continues; remote operations return a typed temporary failure |
-| Remote rows exist but configuration is missing | Fails closed with `configuration_required` |
-| Bucket does not match this PostgreSQL database | Fails closed; Eneo does not adopt or mutate it |
+| Situation                                      | Eneo behavior                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| No endpoint configured and no remote rows      | Healthy inline operation                                                  |
+| Endpoint temporarily unavailable               | Inline work continues; remote operations return a typed temporary failure |
+| Remote rows exist but configuration is missing | Fails closed with `configuration_required`                                |
+| Bucket does not match this PostgreSQL database | Fails closed; Eneo does not adopt or mutate it                            |
 
 Monitor PostgreSQL growth, endpoint capacity and latency, failed/pending
 content, delete backlog, reconciliation lag, temporary spool space, and stale

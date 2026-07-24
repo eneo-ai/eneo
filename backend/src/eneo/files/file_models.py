@@ -2,7 +2,7 @@ from enum import Enum, StrEnum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from eneo.main.models import InDB
 
@@ -55,6 +55,21 @@ class FileInUseError(Exception):
         self.preview = preview
         self.details = preview.model_dump(mode="json")
         super().__init__("File is still used and cannot be deleted.")
+
+
+class FileOriginalNotFoundError(Exception):
+    code = "file_original_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("The exact original is not available for this file.")
+
+
+class FileContentRangeError(Exception):
+    code = "object_content_range_invalid"
+
+    def __init__(self, message: str, *, total_size: int) -> None:
+        self.total_size = total_size
+        super().__init__(message)
 
 
 class FileBase(BaseModel):
@@ -129,6 +144,17 @@ class FileRestrictions(BaseModel):
 class SignedURLRequest(BaseModel):
     expires_in: int = 3600  # Default expiration time in seconds (1 hour)
     content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
+
+
+FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
+
+
+class OriginalSignedURLRequest(SignedURLRequest):
+    expires_in: int = Field(
+        default=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        ge=1,
+        le=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+    )
 
 
 class SignedURLResponse(BaseModel):
