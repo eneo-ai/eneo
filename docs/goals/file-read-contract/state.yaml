@@ -678,7 +678,7 @@ tasks:
   - id: T010
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Make GET /api/v1/spaces/{id}/applications/ use an explicit sparse applications read projection with zero File/reference/payload/object-store reads and no response change."
     inputs:
@@ -732,11 +732,45 @@ tasks:
       - "Complete-Space and SpaceAccessFacts actor adapters differ for any existing role/scope case."
       - "A public response/status/error value changes or a mandatory verification fails twice without explanation."
       - "Work expands to include_applications, dashboard, other routes, public schemas, #569, #571, or Flow."
+    receipt:
+      result: done
+      summary: "GET /api/v1/spaces/{id}/applications/ now returns the unchanged Applications contract from a typed, authorized sparse projection without reading File or object-content bytes."
+      source_commit: "8e3053bf1ba6bab1cae0d0d79e477636a12de639"
+      changed_owners:
+        - "SpaceAccessFacts is the immutable authorization input shared by complete Space reads and the sparse projection."
+        - "SpaceRepository performs a fixed set of sparse queries; SpaceFactory maps rows; SpaceService authorizes; SpaceAssembler remains the one response and permission owner."
+      behavior:
+        - "The existing response, ordering, published filtering, item/list permissions, and API-key caps remain unchanged."
+        - "The route performs no File, reference, object-content, inline-payload, object-descriptor, or object-store read."
+        - "Complete Space and genuine byte consumers retain their existing hydration behavior."
+        - "Storage placement remains transparent: PostgreSQL-inline is still the default and compatible object storage remains optional."
+      complexity:
+        - "A fixed seven relational statements plus the existing completion-model list read replace full aggregate hydration."
+        - "Projection and response mapping are O(resources + models); model, membership, and scoped-resource checks use O(1) maps or sets."
+        - "No cache, generic projection framework, provider branch, partially hydrated domain object, or new fallback was added."
+      validation:
+        - "114 focused actor/factory/service/assembler unit tests passed after rebasing onto develop."
+        - "31 focused PostgreSQL authorization and zero-byte-read integration tests passed; 14 opt-in matrix tests skipped."
+        - "Whole backend: 3,877 non-integration tests passed."
+        - "Whole backend integration: 1,133 passed, 78 skipped, and 1 expected xfail in 15m31s."
+        - "Changed-path Ruff/format passed; strict whole-backend Pyright reported 0 errors and 0 warnings."
+        - "Repository pre-push route metadata and schema drift passed."
+        - "Docs-site production build passed and Pagefind indexed 28 pages."
+      peer_review:
+        session: "eneo-t010-sparse-applications-projection"
+        model: "Claude Opus 5"
+        effort: "xhigh"
+        prior_verdict: "changes_required at score 7; every concrete finding was independently verified and addressed."
+        final_verification: "Attempted twice in the same resumable session but the Claude CLI rejected its logged-in OAuth token as revoked; no final verdict is claimed."
+        merge_gate: "A fresh repository review must find no current issue before merge."
+        artifacts:
+          - ".codex/artifacts/claude-peer-loop-t010-sparse-applications-plan-review-20260724T184151Z.md"
+          - ".codex/artifacts/claude-peer-loop-t010-sparse-applications-plan-review-20260724T190531Z.md"
 
   - id: T013
     type: judge
     assignee: Judge
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Audit the byte-free sparse applications slice, its public compatibility, and the remaining #586 gap before any additive metadata contract is proposed."
     inputs:
@@ -751,7 +785,18 @@ tasks:
       - "complete | not_complete for the narrowed T010 slice"
       - "Evidence mapped to the frozen contract"
       - "Exact remaining #586 work and product decision"
-    receipt: null
+    receipt:
+      result: done
+      decision: "The narrowed T010 slice is complete and public-compatible. The broader #586 metadata-projection outcome is not complete."
+      evidence:
+        - "The integration test compares the complete sparse Applications JSON with the prior full-Space response and proves zero byte/content SQL."
+        - "The full backend regression suites protect complete-Space, execution, authorization, File, and object-content consumers."
+        - "No public response model, OpenAPI schema, storage placement, model-selection behavior, or provider contract changed."
+      remaining:
+        - "Direct File GET/list and existing Assistant/App/default-Assistant Space responses intentionally retain persisted transcription behavior."
+        - "Making those views byte-free requires an additive product-approved response with a concrete migration consumer; populated transcription may not silently become null."
+        - "Placement policy (#569), lifecycle cleanup (#571), InfoBlob/knowledge generations, and Flow remain separate roadmap work."
+      next_step: "Publish T010 as the reviewable #586 partial slice; do not start another public metadata contract without a product decision."
 
 checks:
   dirty_fingerprint: "T010 begins with PM-owned state/notes plus an untrusted RED draft in backend/tests/integration/object_content/test_file_aggregate_hydration.py; production is unchanged."
