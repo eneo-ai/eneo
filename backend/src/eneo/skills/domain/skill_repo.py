@@ -16,6 +16,8 @@ from eneo.skills.domain.skill import (
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionSummary,
+    SkillRuntimePolicy,
+    SkillRuntimePolicyChange,
     SkillStatusChange,
     SkillSummary,
 )
@@ -180,6 +182,17 @@ class SkillRepo(Protocol):
         unblocked_by_user_id: UUID,
         reason: str,
     ) -> SkillExecutionBlockChange | None: ...
+
+    async def get_or_seed_runtime_policy(
+        self, *, tenant_id: UUID
+    ) -> SkillRuntimePolicy: ...
+
+    async def update_runtime_policy(
+        self,
+        *,
+        tenant_id: UUID,
+        policy: SkillRuntimePolicy,
+    ) -> SkillRuntimePolicyChange: ...
 
     async def resolve_references_for_execution_snapshot(
         self,

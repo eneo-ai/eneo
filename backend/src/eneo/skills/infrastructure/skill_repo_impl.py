@@ -2,6 +2,7 @@ from typing import TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
@@ -17,12 +18,14 @@ from eneo.database.tables.skill_table import (
     GovernancePolicySkillBindings,
     SkillExecutionBlocks,
     SkillRevisions,
+    SkillRuntimePolicies,
     Skills,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.main.models import Status
 from eneo.skills.domain.skill import (
+    SKILL_RUNTIME_POLICY_DEFAULTS,
     PublishedSkill,
     PublishedSkillDeactivationError,
     PublishedSkillDeletionError,
@@ -51,6 +54,8 @@ from eneo.skills.domain.skill import (
     SkillRevisionChange,
     SkillRevisionConflictError,
     SkillRevisionSummary,
+    SkillRuntimePolicy,
+    SkillRuntimePolicyChange,
     SkillSlugConflictError,
     SkillStatusChange,
     SkillSummary,
@@ -1941,3 +1946,63 @@ class SkillRepoImpl:
                     for position, binding in enumerate(bindings)
                 ],
             )
+
+    @staticmethod
+    def _to_runtime_policy(row: SkillRuntimePolicies) -> SkillRuntimePolicy:
+        return SkillRuntimePolicy(
+            selective_activation_enabled=row.selective_activation_enabled,
+            max_attached_skills=row.max_attached_skills,
+            context_share_percent=row.context_share_percent,
+            max_activations_per_turn=row.max_activations_per_turn,
+        )
+
+    async def _seed_runtime_policy(self, *, tenant_id: UUID) -> None:
+        # Tenants created after the backfill migration receive their row on
+        # first access; ON CONFLICT keeps concurrent first reads race-safe.
+        seed = SKILL_RUNTIME_POLICY_DEFAULTS
+        await self.session.execute(
+            pg_insert(SkillRuntimePolicies)
+            .values(
+                tenant_id=tenant_id,
+                selective_activation_enabled=seed.selective_activation_enabled,
+                max_attached_skills=seed.max_attached_skills,
+                context_share_percent=seed.context_share_percent,
+                max_activations_per_turn=seed.max_activations_per_turn,
+            )
+            .on_conflict_do_nothing(index_elements=["tenant_id"])
+        )
+
+    async def get_or_seed_runtime_policy(
+        self, *, tenant_id: UUID
+    ) -> SkillRuntimePolicy:
+        await self._seed_runtime_policy(tenant_id=tenant_id)
+        row = await self.session.scalar(
+            sa.select(SkillRuntimePolicies).where(
+                SkillRuntimePolicies.tenant_id == tenant_id
+            )
+        )
+        if row is None:
+            raise RuntimeError("Skill runtime policy seed did not persist")
+        return self._to_runtime_policy(row)
+
+    async def update_runtime_policy(
+        self,
+        *,
+        tenant_id: UUID,
+        policy: SkillRuntimePolicy,
+    ) -> SkillRuntimePolicyChange:
+        await self._seed_runtime_policy(tenant_id=tenant_id)
+        row = await self.session.scalar(
+            sa.select(SkillRuntimePolicies)
+            .where(SkillRuntimePolicies.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if row is None:
+            raise RuntimeError("Skill runtime policy seed did not persist")
+        old = self._to_runtime_policy(row)
+        row.selective_activation_enabled = policy.selective_activation_enabled
+        row.max_attached_skills = policy.max_attached_skills
+        row.context_share_percent = policy.context_share_percent
+        row.max_activations_per_turn = policy.max_activations_per_turn
+        await self.session.flush()
+        return SkillRuntimePolicyChange(old=old, new=policy)
