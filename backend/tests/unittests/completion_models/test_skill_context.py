@@ -6,11 +6,8 @@ from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 def test_measure_skill_context_uses_system_message_delta_and_policy_share():
     with patch(
-        "eneo.completion_models.domain.skill_context.measure_message_tokens",
-        side_effect=[
-            TokenCount(tokens=20, source=TokenCountSource.LITELLM),
-            TokenCount(tokens=145, source=TokenCountSource.LITELLM),
-        ],
+        "eneo.completion_models.domain.skill_context.measure_message_token_delta",
+        return_value=TokenCount(tokens=125, source=TokenCountSource.LITELLM),
     ) as counter:
         measurement = measure_skill_context(
             base_instructions="Base",
@@ -20,11 +17,8 @@ def test_measure_skill_context_uses_system_message_delta_and_policy_share():
             context_share_percent=15,
         )
 
-    assert counter.call_args_list[0].args == (
+    assert counter.call_args.args == (
         [{"role": "system", "content": "Base"}],
-        "openai/gpt-4o",
-    )
-    assert counter.call_args_list[1].args == (
         [{"role": "system", "content": "Base plus Skills"}],
         "openai/gpt-4o",
     )
@@ -33,13 +27,13 @@ def test_measure_skill_context_uses_system_message_delta_and_policy_share():
     assert measurement.source is TokenCountSource.LITELLM
 
 
-def test_measure_skill_context_names_fallback_when_either_count_is_estimated():
+def test_measure_skill_context_preserves_the_atomic_counters_source():
     with patch(
-        "eneo.completion_models.domain.skill_context.measure_message_tokens",
-        side_effect=[
-            TokenCount(tokens=20, source=TokenCountSource.LITELLM),
-            TokenCount(tokens=145, source=TokenCountSource.FALLBACK_ESTIMATE),
-        ],
+        "eneo.completion_models.domain.skill_context.measure_message_token_delta",
+        return_value=TokenCount(
+            tokens=125,
+            source=TokenCountSource.FALLBACK_ESTIMATE,
+        ),
     ):
         measurement = measure_skill_context(
             base_instructions="Base",

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from eneo.tokens.token_utils import (
     TokenCountSource,
-    measure_message_tokens,
+    measure_message_token_delta,
 )
 
 
@@ -29,21 +29,13 @@ def measure_skill_context(
 ) -> SkillContextMeasurement:
     """Measure the prompt cost added by Skills using the completion counter."""
 
-    base = measure_message_tokens(_system_message(base_instructions), model_name)
-    composed = measure_message_tokens(
+    delta = measure_message_token_delta(
+        _system_message(base_instructions),
         _system_message(composed_instructions),
         model_name,
     )
-    source = (
-        TokenCountSource.LITELLM
-        if (
-            base.source is TokenCountSource.LITELLM
-            and composed.source is TokenCountSource.LITELLM
-        )
-        else TokenCountSource.FALLBACK_ESTIMATE
-    )
     return SkillContextMeasurement(
-        tokens=max(composed.tokens - base.tokens, 0),
+        tokens=delta.tokens,
         limit=max_input_tokens * context_share_percent // 100,
-        source=source,
+        source=delta.source,
     )

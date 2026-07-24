@@ -165,7 +165,7 @@ async def test_question_placeholder_persists_selected_skill_revision(
         blocked=(),
         initially_active=(),
         selected_model_id=uuid4(),
-        selected_model_name="gpt-4o",
+        selected_model_route="gpt-4o",
         skill_context_tokens=0,
         skill_context_token_limit=12_800,
         token_count_source="litellm",

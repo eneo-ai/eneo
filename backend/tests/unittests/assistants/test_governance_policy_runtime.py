@@ -1,22 +1,23 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.skill_context import SkillContextMeasurement
 from eneo.main.exceptions import BadRequestException
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillBindingSource,
-    SkillComposition,
     SkillRuntimePolicy,
     SkillRuntimeResolution,
     SkillTurnPlan,
 )
+from eneo.tokens.token_utils import TokenCountSource
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_MODEL_GPT4, TEST_USER
 
 
@@ -34,11 +35,6 @@ def _not_helper_history_repo():
 
 def _empty_skill_service():
     service = AsyncMock()
-    service.compose_for_assistant.side_effect = (
-        lambda *, assistant_id, base_instructions: SkillComposition(
-            prompt=base_instructions, provenance=()
-        )
-    )
     service.resolve_assistant_bindings_for_runtime.return_value = (
         SkillRuntimeResolution(eligible=(), blocked=())
     )
@@ -782,9 +778,38 @@ async def test_ordinary_assistant_uses_composed_prompt_and_persists_provenance()
     activation = placeholder["skill_activation"]
     assert activation.effective_mode == "eager"
     assert activation.available[0].skill_revision_id == binding.skill_revision_id
-    assert activation.initially_active == activation.available
+    assert activation.initially_active == ("skill-1",)
     assert activation.selected_model_id == TEST_MODEL_CHATGPT.id
-    assert activation.selected_model_name == TEST_MODEL_CHATGPT.name
+    assert activation.selected_model_route == TEST_MODEL_CHATGPT.get_model_route()
+
+
+async def test_skill_measurement_and_evidence_use_the_provider_route():
+    binding = _resolved_skill()
+    skill_service = _skill_service_with_resolution(eligible=(binding,))
+    service, assistant, session_service = _runtime_service(
+        personal_default=False,
+        skill_service=skill_service,
+    )
+    assistant.completion_model = TEST_MODEL_CHATGPT.model_copy(
+        update={"provider_type": "azure"}
+    )
+    expected_route = f"azure/{TEST_MODEL_CHATGPT.name}"
+
+    with patch(
+        "eneo.assistants.assistant_service.measure_skill_context",
+        return_value=SkillContextMeasurement(
+            tokens=12,
+            limit=100,
+            source=TokenCountSource.LITELLM,
+        ),
+    ) as measure:
+        await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert measure.call_args.kwargs["model_name"] == expected_route
+    placeholder = (
+        session_service.create_session_with_question_placeholder.await_args.kwargs
+    )
+    assert placeholder["skill_activation"].selected_model_route == expected_route
 
 
 async def test_existing_session_persists_composed_skill_provenance():
@@ -866,7 +891,7 @@ async def test_frozen_evidence_is_persisted_before_runtime_failure_or_disconnect
     )
     activation = placeholder["skill_activation"]
     assert activation.available[0].skill_revision_id == binding.skill_revision_id
-    assert activation.initially_active == activation.available
+    assert activation.initially_active == ("skill-1",)
 
 
 async def test_personal_default_rejects_invalid_direct_bindings_before_history():
@@ -895,6 +920,28 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
     session_service.create_session_with_question_placeholder.assert_not_awaited()
     session_service.create_question_placeholder.assert_not_awaited()
     assistant.ask.assert_not_awaited()
+
+
+async def test_personal_default_preflight_rejects_blocked_direct_bindings():
+    binding = _resolved_skill()
+    skill_service = _skill_service_with_resolution(blocked=(binding,))
+    effective_config = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=skill_service,
+        effective_config=effective_config,
+    )
+
+    with pytest.raises(BadRequestException, match="invalid direct Skill bindings"):
+        await service.get_preflight_baseline(assistant.id)
 
 
 async def test_governance_skill_composes_after_enforced_prompt():

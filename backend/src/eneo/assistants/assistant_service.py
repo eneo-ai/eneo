@@ -282,31 +282,41 @@ class AssistantService:
         base_instructions = self._governed_base_instructions(
             assistant, effective_config
         )
-        governance_bindings = ()
-        if effective_config is not None:
-            governance_bindings = effective_config.governance_skill_resolution.eligible
+        resolution = await self._resolve_assistant_skill_runtime(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space_is_personal,
+        )
+        return compose_skill_instructions(
+            base_instructions=base_instructions,
+            bindings=list(resolution.eligible),
+        )
 
+    async def _resolve_assistant_skill_runtime(
+        self,
+        *,
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
+    ) -> SkillRuntimeResolution:
         assistant_id = cast(UUID | None, assistant.id)
-        if assistant_id is None:
-            direct_composition = compose_skill_instructions(
-                base_instructions=base_instructions, bindings=[]
+        direct_resolution = (
+            await self.skill_service.resolve_assistant_bindings_for_runtime(
+                assistant_id=assistant_id
             )
-        else:
-            direct_composition = await self.skill_service.compose_for_assistant(
-                assistant_id=assistant_id,
-                base_instructions=base_instructions,
-            )
+            if assistant_id is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        )
 
         if not (space_is_personal and assistant.is_default):
-            return direct_composition
-        if direct_composition.provenance:
+            return direct_resolution
+        if direct_resolution.eligible or direct_resolution.blocked:
             raise BadRequestException(
                 "Personal default Assistant has invalid direct Skill bindings"
             )
-        return compose_skill_instructions(
-            base_instructions=base_instructions,
-            bindings=list(governance_bindings),
-        )
+        if effective_config is None:
+            return SkillRuntimeResolution(eligible=(), blocked=())
+        return effective_config.governance_skill_resolution
 
     async def _create_skill_turn_plan(
         self,
@@ -319,27 +329,11 @@ class AssistantService:
             assistant,
             effective_config,
         )
-        assistant_id = cast(UUID | None, assistant.id)
-        direct_resolution = (
-            await self.skill_service.resolve_assistant_bindings_for_runtime(
-                assistant_id=assistant_id
-            )
-            if assistant_id is not None
-            else SkillRuntimeResolution(eligible=(), blocked=())
+        resolution = await self._resolve_assistant_skill_runtime(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space_is_personal,
         )
-
-        resolution = direct_resolution
-        if space_is_personal and assistant.is_default:
-            if direct_resolution.eligible or direct_resolution.blocked:
-                raise BadRequestException(
-                    "Personal default Assistant has invalid direct Skill bindings"
-                )
-            resolution = (
-                effective_config.governance_skill_resolution
-                if effective_config is not None
-                else SkillRuntimeResolution(eligible=(), blocked=())
-            )
-
         return await self.skill_service.create_turn_plan(
             base_instructions=base_instructions,
             resolution=resolution,
@@ -1912,19 +1906,17 @@ class AssistantService:
         skill_composition = skill_plan.composition
         if skill_composition.provenance:
             prompt_override = skill_composition.prompt
+        model_route = effective_completion_model.get_model_route()
         skill_context = measure_skill_context(
             base_instructions=skill_plan.base_instructions,
             composed_instructions=skill_composition.prompt,
-            model_name=(
-                effective_completion_model.litellm_model_name
-                or effective_completion_model.name
-            ),
+            model_name=model_route,
             max_input_tokens=effective_completion_model.max_input_tokens,
             context_share_percent=skill_plan.policy.context_share_percent,
         )
         skill_activation = skill_plan.activation_evidence(
             selected_model_id=effective_completion_model.id,
-            selected_model_name=effective_completion_model.name,
+            selected_model_route=model_route,
             skill_context_tokens=skill_context.tokens,
             skill_context_token_limit=skill_context.limit,
             token_count_source=skill_context.source.value,

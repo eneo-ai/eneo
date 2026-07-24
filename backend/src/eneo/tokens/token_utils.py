@@ -157,6 +157,18 @@ def _fallback_message_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+def _measure_messages_with_litellm(
+    messages: list[dict[str, Any]],
+    model_name: str,
+) -> int:
+    stripped, image_tokens = _split_image_blocks(messages, model_name)
+    text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+        model=model_name,
+        messages=stripped,
+    )
+    return text_tokens + image_tokens
+
+
 def measure_message_tokens(
     messages: list[dict[str, Any]], model_name: str = ""
 ) -> TokenCount:
@@ -169,12 +181,8 @@ def measure_message_tokens(
         return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
 
     try:
-        stripped, image_tokens = _split_image_blocks(messages, model_name)
-        text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
-            model=model_name, messages=stripped
-        )
         return TokenCount(
-            tokens=text_tokens + image_tokens,
+            tokens=_measure_messages_with_litellm(messages, model_name),
             source=TokenCountSource.LITELLM,
         )
     except Exception as e:
@@ -186,6 +194,39 @@ def measure_message_tokens(
             tokens=_fallback_message_tokens(messages),
             source=TokenCountSource.FALLBACK_ESTIMATE,
         )
+
+
+def measure_message_token_delta(
+    base_messages: list[dict[str, Any]],
+    composed_messages: list[dict[str, Any]],
+    model_name: str = "",
+) -> TokenCount:
+    """Measure a message delta without mixing tokenization strategies."""
+    if base_messages == composed_messages:
+        return TokenCount(tokens=0, source=TokenCountSource.LITELLM)
+
+    try:
+        base_tokens = _measure_messages_with_litellm(base_messages, model_name)
+        composed_tokens = _measure_messages_with_litellm(
+            composed_messages,
+            model_name,
+        )
+        source = TokenCountSource.LITELLM
+    except Exception as error:
+        logger.error(
+            "Message token delta failed for model '%s'; recomputing both "
+            "messages with the fallback estimate: %s",
+            model_name,
+            error,
+        )
+        base_tokens = _fallback_message_tokens(base_messages)
+        composed_tokens = _fallback_message_tokens(composed_messages)
+        source = TokenCountSource.FALLBACK_ESTIMATE
+
+    return TokenCount(
+        tokens=max(composed_tokens - base_tokens, 0),
+        source=source,
+    )
 
 
 def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -> int:

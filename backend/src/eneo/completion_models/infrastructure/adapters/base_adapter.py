@@ -25,11 +25,7 @@ class CompletionModelAdapter(ABC):
         Token counting must use the same identifier as the actual request,
         otherwise the tokenizer may silently resolve a different model.
         """
-        return self.model.name
-
-    def get_litellm_model_name(self) -> str:
-        """Backward-compatible alias for persisted/API code using the old name."""
-        return self.get_model_route()
+        return self.model.get_model_route()
 
     def get_logging_details(
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"

@@ -46,9 +46,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.model_providers.infrastructure.litellm_provider import (
-    build_litellm_model_name,
-)
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure.litellm_transport import (
     get_supported_openai_params,
 )
@@ -128,7 +126,10 @@ def _snapshot_completion_capabilities(
     *,
     reasoning: bool,
 ) -> dict[str, object]:
-    model_route = build_litellm_model_name(provider_type, model_name)
+    model_route = resolve_model_route(
+        provider_type=provider_type,
+        model_name=model_name,
+    )
     try:
         supported_params = get_supported_openai_params(model_route)
     except Exception:

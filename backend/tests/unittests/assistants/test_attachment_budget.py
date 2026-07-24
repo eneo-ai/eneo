@@ -9,7 +9,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException
-from eneo.skills.domain.skill import SkillComposition, SkillRuntimeResolution
+from eneo.skills.domain.skill import SkillRuntimeResolution
 
 
 def _settings(**overrides):
@@ -434,11 +434,6 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
     service.repo.get_personal_defaults_for_tenant.return_value = assistants
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_for.return_value = effective_config
-    service.skill_service.compose_for_assistant.side_effect = (
-        lambda *, base_instructions, **_: SkillComposition(
-            prompt=base_instructions, provenance=()
-        )
-    )
     service._assert_persistent_baseline_fits = AsyncMock()
 
     await service.assert_personal_default_governance_context_fit()
@@ -451,7 +446,6 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
     service.effective_config_service.resolve_for.assert_awaited_once_with(
         assistants[0], space_is_personal=True
     )
-    service.skill_service.compose_for_assistant.assert_not_awaited()
 
 
 # --- context fit: per-message ask-time guard (uploads have no save-time gate) ---

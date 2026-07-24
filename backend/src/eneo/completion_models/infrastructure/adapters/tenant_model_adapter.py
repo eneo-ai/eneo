@@ -44,7 +44,6 @@ from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
-    build_litellm_model_name,
     build_litellm_provider_kwargs,
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
@@ -384,11 +383,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         super().__init__(model)
         self.credential_resolver = credential_resolver
 
-        # Construct LiteLLM model name with provider prefix
-        # LiteLLM requires the provider prefix to know which client to use
-        # When using custom api_base, LiteLLM strips one prefix level and sends the rest to the API
-        # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
-        self.litellm_model = build_litellm_model_name(provider_type, model.name)
+        self.litellm_model = model.get_model_route(provider_type=provider_type)
         self.provider_type = provider_type
 
     def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:

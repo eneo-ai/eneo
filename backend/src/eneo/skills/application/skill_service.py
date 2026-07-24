@@ -820,17 +820,6 @@ class SkillService:
             policy=policy,
         )
 
-    async def compose_for_assistant(
-        self, *, assistant_id: UUID, base_instructions: str
-    ) -> SkillComposition:
-        resolution = await self.resolve_assistant_bindings_for_runtime(
-            assistant_id=assistant_id
-        )
-        return compose_skill_instructions(
-            base_instructions=base_instructions,
-            bindings=list(resolution.eligible),
-        )
-
     async def compose_for_app(
         self, *, app_id: UUID, base_instructions: str
     ) -> SkillComposition:

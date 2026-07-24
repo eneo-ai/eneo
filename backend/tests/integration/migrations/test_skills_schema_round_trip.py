@@ -39,7 +39,7 @@ PRE_SKILL_EXECUTION_BLOCK_REVISION = "202607231330"
 SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
 BINDING_ACTIVATION_MODE_REVISION = "202607240115"
 SKILL_RUNTIME_POLICY_REVISION = "202607240310"
-QUESTION_SKILL_ACTIVATION_REVISION = "202607240900"
+QUESTION_SKILL_ACTIVATION_REVISION = "202607241100"
 
 
 @dataclass(frozen=True)
@@ -2116,7 +2116,7 @@ def test_question_skill_activation_migration_is_nullable_and_round_trips(
         "repeated": [],
         "rejected": [],
         "selected_model_id": str(uuid4()),
-        "selected_model_name": "gpt-4o",
+        "selected_model_route": "gpt-4o",
         "skill_context_tokens": 0,
         "skill_context_token_limit": 12800,
         "token_count_source": "litellm",

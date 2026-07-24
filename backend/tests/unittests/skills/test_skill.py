@@ -1,3 +1,4 @@
+import json
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -7,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.main.exceptions import BadRequestException
+from eneo.model_providers.domain.model_route import MAX_MODEL_ROUTE_LENGTH
 from eneo.skills import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     ResolvedSkillBinding,
@@ -32,6 +34,8 @@ from eneo.skills.domain.skill import (
     SkillTurnPlan,
 )
 from eneo.tokens.token_utils import TokenCountSource
+
+SKILL_ACTIVATION_EVIDENCE_SIZE_BUDGET_BYTES = 400_000
 
 
 def _binding(*, position: int, name: str = "Payroll") -> ResolvedSkillBinding:
@@ -297,7 +301,7 @@ def test_eager_turn_plan_preserves_composition_and_freezes_exact_bindings():
 
     evidence = plan.activation_evidence(
         selected_model_id=uuid4(),
-        selected_model_name="gpt-4o",
+        selected_model_route="gpt-4o",
         skill_context_tokens=321,
         skill_context_token_limit=19_200,
         token_count_source=TokenCountSource.LITELLM,
@@ -308,7 +312,7 @@ def test_eager_turn_plan_preserves_composition_and_freezes_exact_bindings():
         on_demand.skill_id,
     ]
     assert [reference.skill_id for reference in evidence.blocked] == [blocked.skill_id]
-    assert evidence.initially_active == evidence.available
+    assert evidence.initially_active == ("skill-1", "skill-2")
     assert evidence.accepted == ()
     assert evidence.repeated == ()
     assert evidence.rejected == ()
@@ -330,7 +334,7 @@ def test_zero_skill_turn_plan_preserves_base_and_records_empty_evidence():
 
     evidence = plan.activation_evidence(
         selected_model_id=uuid4(),
-        selected_model_name="gpt-4o",
+        selected_model_route="gpt-4o",
         skill_context_tokens=0,
         skill_context_token_limit=12_800,
         token_count_source=TokenCountSource.LITELLM,
@@ -360,7 +364,7 @@ def test_skill_activation_evidence_round_trips_strict_versioned_body_free_json()
     )
     evidence = plan.activation_evidence(
         selected_model_id=uuid4(),
-        selected_model_name="gpt-4o",
+        selected_model_route="gpt-4o",
         skill_context_tokens=42,
         skill_context_token_limit=100,
         token_count_source=TokenCountSource.FALLBACK_ESTIMATE,
@@ -377,7 +381,7 @@ def test_skill_activation_evidence_round_trips_strict_versioned_body_free_json()
             **dumped,
             "rejected": [
                 {
-                    "reference": dumped["available"][0],
+                    "activation_key": "skill-1",
                     "reason": "unknown_reason",
                 }
             ],
@@ -385,6 +389,159 @@ def test_skill_activation_evidence_round_trips_strict_versioned_body_free_json()
     ):
         with pytest.raises(ValidationError):
             type(evidence).model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("skill_context_tokens", "42"),
+        ("skill_context_token_limit", "100"),
+        ("activation_rounds", "0"),
+        ("selection_latency_ms", "0"),
+    ],
+)
+def test_skill_activation_evidence_rejects_coerced_numeric_counters(
+    field: str,
+    value: str,
+):
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0),),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        skill_context_tokens=42,
+        skill_context_token_limit=100,
+        token_count_source=TokenCountSource.LITELLM,
+    )
+    dumped = evidence.model_dump(mode="json")
+
+    with pytest.raises(ValidationError):
+        type(evidence).model_validate({**dumped, field: value})
+
+
+def test_skill_activation_reference_rejects_coerced_numeric_identity():
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0),),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        skill_context_tokens=42,
+        skill_context_token_limit=100,
+        token_count_source=TokenCountSource.LITELLM,
+    )
+    dumped = evidence.model_dump(mode="json")
+    dumped["available"][0]["revision_number"] = "1"
+
+    with pytest.raises(ValidationError):
+        type(evidence).model_validate(dumped)
+
+
+def test_skill_activation_evidence_rejects_duplicate_reference_catalogue_entries():
+    binding = _binding(position=0)
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        skill_context_tokens=42,
+        skill_context_token_limit=100,
+        token_count_source=TokenCountSource.LITELLM,
+    )
+    dumped = evidence.model_dump(mode="json")
+    dumped["blocked"] = dumped["available"]
+
+    with pytest.raises(ValidationError, match="both available and blocked"):
+        type(evidence).model_validate(dumped)
+
+
+def test_skill_activation_evidence_stays_compact_at_attachment_ceiling():
+    bindings = tuple(
+        _binding(position=position, name=f"Skill-{position}")
+        for position in range(1000)
+    )
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=bindings,
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=1000,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="m" * MAX_MODEL_ROUTE_LENGTH,
+        skill_context_tokens=42,
+        skill_context_token_limit=100,
+        token_count_source=TokenCountSource.LITELLM,
+    )
+
+    serialized = json.dumps(evidence.model_dump(mode="json"), separators=(",", ":"))
+
+    assert len(serialized) < SKILL_ACTIVATION_EVIDENCE_SIZE_BUDGET_BYTES
+
+
+def test_skill_activation_evidence_rejects_an_oversized_model_route():
+    binding = _binding(position=0)
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="selected_model_route"):
+        plan.activation_evidence(
+            selected_model_id=uuid4(),
+            selected_model_route="m" * (MAX_MODEL_ROUTE_LENGTH + 1),
+            skill_context_tokens=42,
+            skill_context_token_limit=100,
+            token_count_source=TokenCountSource.LITELLM,
+        )
 
 
 def test_composition_orders_skills_and_builds_matching_provenance():
@@ -501,9 +658,12 @@ async def test_assistant_composition_excludes_blocked_skill_without_changing_bin
     service = _service(repo)
     service.user.tenant_id = tenant_id
 
-    composition = await service.compose_for_assistant(
-        assistant_id=uuid4(),
+    resolution = await service.resolve_assistant_bindings_for_runtime(
+        assistant_id=uuid4()
+    )
+    composition = compose_skill_instructions(
         base_instructions="Base",
+        bindings=list(resolution.eligible),
     )
 
     assert "Payroll" not in composition.prompt
@@ -523,9 +683,12 @@ async def test_runtime_composition_keeps_all_bindings_without_execution_blocks()
     repo.list_active_execution_blocks.return_value = {}
     service = _service(repo)
 
-    assistant = await service.compose_for_assistant(
-        assistant_id=uuid4(),
+    assistant_resolution = await service.resolve_assistant_bindings_for_runtime(
+        assistant_id=uuid4()
+    )
+    assistant = compose_skill_instructions(
         base_instructions="Assistant base",
+        bindings=list(assistant_resolution.eligible),
     )
     app = await service.compose_for_app(
         app_id=uuid4(),
