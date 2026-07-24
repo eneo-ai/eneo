@@ -695,9 +695,6 @@ async def test_blocked_organization_skill_cannot_receive_new_binding(owner: str)
                 references=[_binding_reference(blocked)],
             )
 
-    repo.resolve_local_references_for_binding_update.assert_not_awaited()
-    repo.resolve_published_references_for_binding_update.assert_not_awaited()
-
 
 @pytest.mark.parametrize("owner", ["assistant", "app", "governance"])
 async def test_blocked_organization_skill_cannot_change_revision(owner: str):
@@ -740,9 +737,6 @@ async def test_blocked_organization_skill_cannot_change_revision(owner: str):
                 organization_space_id=space.id,
                 references=[_binding_reference(changed)],
             )
-
-    repo.resolve_local_references_for_binding_update.assert_not_awaited()
-    repo.resolve_published_references_for_binding_update.assert_not_awaited()
 
 
 @pytest.mark.parametrize("owner", ["assistant", "app", "governance"])

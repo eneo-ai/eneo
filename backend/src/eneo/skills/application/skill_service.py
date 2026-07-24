@@ -528,10 +528,6 @@ class SkillService:
             references=references,
             existing=existing,
         )
-        await self._reject_blocked_references(
-            tenant_id=tenant_id,
-            references=new_references,
-        )
         local = (
             []
             if organization_space or not new_references
@@ -555,6 +551,12 @@ class SkillService:
             )
             if catalogue_references
             else []
+        )
+        # Resolution holds the Skill rows FOR SHARE, so this read observes a
+        # concurrent execution block that acquired FOR UPDATE first.
+        await self._reject_blocked_references(
+            tenant_id=tenant_id,
+            references=new_references,
         )
         return self._order_resolved_bindings(
             references=references,
@@ -585,10 +587,6 @@ class SkillService:
             references=references,
             existing=existing,
         )
-        await self._reject_blocked_references(
-            tenant_id=self.user.tenant_id,
-            references=new_references,
-        )
         published = (
             await self.repo.resolve_published_references_for_binding_update(
                 tenant_id=self.user.tenant_id,
@@ -596,6 +594,12 @@ class SkillService:
             )
             if new_references
             else []
+        )
+        # Resolution holds the Skill rows FOR SHARE, so this read observes a
+        # concurrent execution block that acquired FOR UPDATE first.
+        await self._reject_blocked_references(
+            tenant_id=self.user.tenant_id,
+            references=new_references,
         )
         return self._order_resolved_bindings(
             references=references,
