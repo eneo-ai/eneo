@@ -627,6 +627,38 @@ def test_flow_architecture_uses_durable_existing_repository_references() -> None
         )
     }
     assert repository_references
+    frontend_owner_references = {
+        "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts::FlowRunFileInputState",
+        "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte::uploadFilesForStep",
+        "frontend/apps/web/src/lib/features/audio/recordingSession.ts::RecordingSession",
+        "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts::persistRecordingSegment",
+        "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts::scanRecoverableSessionsForSteps",
+        "frontend/apps/web/src/lib/features/flows/components/flowRunHistoryState.ts::FlowRunHistoryState",
+        "frontend/apps/web/src/lib/features/flows/components/flowRunHistoryState.ts::syncFlowRunHistoryPolling",
+        "frontend/apps/web/src/lib/features/flows/components/FlowRunsTable.svelte::loadRuns",
+        "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts::normalizeFlowFormFields",
+        "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts::buildFlowFormSchemaMetadata",
+        "frontend/apps/web/src/lib/features/flows/FlowEditor.ts::replaceFormSchemaFields",
+        "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte::keepLocalFormSchemaEdits",
+        "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte::reloadStoreFormSchemaFields",
+    }
+    architecture_references = {
+        match.group("reference")
+        for match in FLOW_ARCHITECTURE_REPOSITORY_REFERENCE_PATTERN.finditer(
+            architecture
+        )
+    }
+    assert frontend_owner_references <= architecture_references
+
+    normalized_architecture = " ".join(architecture.split())
+    for owner_statement in (
+        "Browser runtime-file state belongs to `FlowRunFileInputState`; upload side effects remain in `FlowRunDialog`.",
+        "`RecordingSession` owns recorder lifecycle, rotation, and retry.",
+        "`flowRunHistoryState.ts` owns run-history state, timer scheduling, and the in-flight concurrency guard.",
+        "`flowFormSchema.ts` owns normalization and metadata shape; `FlowEditor` owns persistence mutations; `FlowFormSchemaEditor` owns transient editing and conflict choice.",
+    ):
+        assert owner_statement in normalized_architecture
+
     missing_paths = sorted(
         path for path in repository_references if not (REPO_ROOT / path).exists()
     )
