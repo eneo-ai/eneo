@@ -12,7 +12,7 @@ import pytest
 from botocore.config import Config
 from botocore.exceptions import ReadTimeoutError
 from botocore.session import get_session
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
@@ -579,6 +579,108 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
         await real_object_store.store.head(
             await _object_key(object_content_database, prepared.id)
         )
+
+
+@pytest.mark.asyncio
+async def test_batch_object_store_reads_use_one_source_query(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    service = _service(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    grants: list[ContentReadGrant] = []
+    expected: dict[UUID, bytes] = {}
+    object_keys: list[str] = []
+
+    async with object_content_database.session() as session, session.begin():
+        tenant_id = (await session.scalars(select(Tenants.id))).one()
+        user_id = (await session.scalars(select(Users.id))).one()
+        assert session.bind is not None
+        sync_engine = session.bind.sync_engine
+
+    for index in range(3):
+        payload = f"remote attachment {index}".encode()
+        async with capture_content(
+            _payload_bytes(payload),
+            declared_media_type="application/octet-stream",
+            verified_media_type="application/octet-stream",
+            maximum_size_bytes=len(payload),
+            spool_memory_bytes=real_object_store.settings.spool_memory_bytes,
+            multipart_part_bytes=real_object_store.settings.multipart_part_bytes,
+        ) as captured:
+            async with object_content_database.session() as session, session.begin():
+                owner = Files(
+                    name=f"batch-{index}.bin",
+                    mimetype=captured.verified_media_type,
+                    file_type="text",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    parent_file_id=None,
+                )
+                session.add(owner)
+                await session.flush()
+                prepared = await service.prepare_in_transaction(
+                    session,
+                    intent=ContentIntent(
+                        tenant_id=tenant_id,
+                        created_by_user_id=user_id,
+                        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                        idempotency_key=uuid4().hex,
+                        producer_receipt=f"file:{owner.id}:original:0",
+                    ),
+                    content=captured,
+                    storage_kind=StorageKind.OBJECT_STORE,
+                )
+                session.add(
+                    FileContentReferences(
+                        file_id=owner.id,
+                        content_id=prepared.id,
+                        variant="original",
+                        ordinal=0,
+                    )
+                )
+                await session.flush()
+
+            await service.store_and_verify(
+                content_id=prepared.id,
+                content=captured,
+            )
+            grant = ContentReadGrant(
+                content_id=prepared.id,
+                tenant_id=tenant_id,
+                access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            )
+            grants.append(grant)
+            expected[prepared.id] = payload
+            object_keys.append(await _object_key(object_content_database, prepared.id))
+
+    source_queries: list[str] = []
+
+    def capture_source_query(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        normalized = statement.lower()
+        if "object_contents" in normalized or "object_store_objects" in normalized:
+            source_queries.append(statement)
+
+    event.listen(sync_engine, "before_cursor_execute", capture_source_query)
+    try:
+        materialized = await service.read_content_bytes(grants)
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", capture_source_query)
+        for object_key in object_keys:
+            await real_object_store.store.delete_and_confirm(object_key)
+
+    assert materialized == expected
+    assert len(source_queries) == 1
 
 
 @pytest.mark.asyncio

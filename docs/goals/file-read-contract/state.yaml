@@ -4,7 +4,7 @@ goal:
   title: "Efficient file views and explicit original downloads"
   slug: "file-read-contract"
   kind: specific
-  tranche: "Add an explicit authorized original-file download contract; leave metadata-only projections for the next #586 slice."
+  tranche: "Remove per-object database rereads from bounded attachment hydration; leave metadata-only aggregate projections for the next #586 slice."
   status: active
 
 rules:
@@ -35,7 +35,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "00aaa9dd2e296456bdadbb549aca14daf91e5754"
 
-active_task: T007
+active_task: T009
 
 tasks:
   - id: T001
@@ -394,7 +394,7 @@ tasks:
   - id: T007
     type: worker
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: low
     objective: "Publish the immutable reviewed source as a ready PR, request a fresh review, and verify all required GitHub checks."
     allowed_files:
@@ -409,7 +409,16 @@ tasks:
       - "Pre-push, CI, or fresh review exposes a current defect."
       - "The branch contains unrelated changes."
       - "The PR would imply that all of #586 is complete."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Published and merged PR #589 with exact-original recovery, purpose-separated signed access, attributable link audit, and PostgreSQL-inline/compatible-store parity."
+      source_commit: "369e574600dcc3e07b5f35cd90e798ebdf55179a"
+      merge_commit: "a97c8a9b0f7fb7dbb35b2ca757c30bc73badc261"
+      pull_request: "https://github.com/eneo-ai/eneo/pull/589"
+      validation:
+        - "All required GitHub checks passed on the immutable source head."
+        - "Backend tests passed in 32m49s; frontend, E2E, Docker, schema, coverage, dependency, and policy checks passed."
+        - "Task #588 closed through the merged PR; #586 remains open for read-performance work."
 
   - id: T008
     type: worker
@@ -513,11 +522,51 @@ tasks:
           - ".codex/artifacts/claude-peer-loop-pr-589-original-download-architecture-and-api-dx-review-20260724T130152Z.md"
           - ".codex/artifacts/claude-peer-loop-pr-589-original-download-verification-20260724T131537Z.md"
 
+  - id: T009
+    type: worker
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Eliminate per-object database transactions from bounded object-store attachment hydration without changing File or storage-provider contracts."
+    allowed_files:
+      - "backend/src/eneo/object_content/content_repository.py"
+      - "backend/src/eneo/object_content/content_service.py"
+      - "backend/tests/integration/object_content/test_content_service.py"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - "docs/goals/file-read-contract/state.yaml"
+    verify:
+      - "Multiple object-store grants are access-validated with one bounded relational source query per page."
+      - "No object-store item re-enters open_content or opens a per-item database transaction."
+      - "Single reads and batch reads share one private verified backend-dispatch implementation."
+      - "Bytes, authorization, failure-state transitions, integrity checks, ordering, deduplication, and PostgreSQL-inline behavior remain unchanged."
+      - "Focused real compatible-store tests, Ruff, format, strict Pyright, docs-site build, and repository gates pass."
+    stop_if:
+      - "The fix requires a provider-specific branch outside the private S3-compatible adapter."
+      - "The fix requires public API, schema, migration, placement, worker, or retention changes."
+      - "A bounded source page cannot preserve tenant and access-class validation."
+
+  - id: T010
+    type: worker
+    assignee: PM
+    status: queued
+    reasoning_hint: high
+    objective: "Give metadata-only File, Assistant, App, and Space views an explicit projection that performs no payload reads while preserving execution-time hydration."
+    allowed_files:
+      - "Freeze after T009 from current source and public-contract evidence."
+    verify:
+      - "Zero payload reads for metadata-only views."
+      - "Execution, prompt, history, and transcription consumers keep explicit verified hydration."
+      - "No partially hydrated File domain object or storage-provider branch."
+      - "docs.eneo.ai explains metadata versus content reads."
+    stop_if:
+      - "The public transcription contract cannot be preserved or changed additively."
+      - "The slice requires a boolean hydration mode or a broad repository framework."
+
 checks:
   dirty_fingerprint: "Only the new Goal Maker charter and board are tracked before T001."
   last_verification:
     result: pass
-    task: T008
+    task: T007
     commands:
       - "118 focused backend and integration tests passed"
       - "3825 backend non-integration tests passed"
@@ -525,3 +574,4 @@ checks:
       - "Strict Pyright 0/0 and changed-path Ruff/format passed"
       - "SDK tests/lint, web check/lint, docs-site build, schema parity, and diff check passed"
       - "Fable high pass 1 changes_required at 8; pass 2 green at 8 with no blockers"
+      - "PR #589 required GitHub checks passed and squash merge produced a97c8a9b"

@@ -57,15 +57,16 @@ class ReadableContent:
 
 
 @dataclass(frozen=True, slots=True)
-class ReadableContentSource:
-    content: ReadableContent
-    inline_payload: bytes | None
-
-
-@dataclass(frozen=True, slots=True)
 class ObjectStoreDescriptor:
     content_id: UUID
     object_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReadableContentSource:
+    content: ReadableContent
+    inline_payload: bytes | None
+    object_store_descriptor: ObjectStoreDescriptor | None
 
 
 class ObjectContentRepository:
@@ -504,31 +505,11 @@ class ObjectContentRepository:
         self._clear_lease(row)
         await self._session.flush()
 
-    async def get_readable(
-        self,
-        *,
-        content_id: UUID,
-        tenant_id: UUID,
-        access_class: ContentAccessClass,
-    ) -> ReadableContent:
-        row = (
-            await self._session.scalars(
-                select(ObjectContents).where(
-                    ObjectContents.id == content_id,
-                    ObjectContents.tenant_id == tenant_id,
-                    ObjectContents.access_class == access_class.value,
-                )
-            )
-        ).one_or_none()
-        if row is None or row.state != ContentState.AVAILABLE.value:
-            raise ObjectContentStateError("Object content is not available")
-        return self._readable(row)
-
     async def get_readable_sources(
         self,
         grants: Sequence[ContentReadGrant],
     ) -> dict[UUID, ReadableContentSource]:
-        """Read access-validated controls and inline payloads in one query."""
+        """Read access-validated controls and byte-source facts in one query."""
         if not grants:
             return {}
 
@@ -542,10 +523,18 @@ class ObjectContentRepository:
         }
         rows = (
             await self._session.execute(
-                select(ObjectContents, InlineContentPayloads.payload)
+                select(
+                    ObjectContents,
+                    InlineContentPayloads.payload,
+                    ObjectStoreObjects.object_key,
+                )
                 .outerjoin(
                     InlineContentPayloads,
                     InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .outerjoin(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
                 )
                 .where(
                     tuple_(
@@ -559,16 +548,26 @@ class ObjectContentRepository:
         ).all()
 
         sources: dict[UUID, ReadableContentSource] = {}
-        for row, inline_payload in rows:
+        for row, inline_payload, object_key in rows:
             content = self._readable(row)
             if (
                 content.storage_kind is StorageKind.POSTGRES_INLINE
                 and inline_payload is None
             ):
                 raise ObjectContentStateError("Inline content payload is missing")
+            if content.storage_kind is StorageKind.OBJECT_STORE and object_key is None:
+                raise ObjectContentStateError("Object-store descriptor is missing")
             sources[content.content_id] = ReadableContentSource(
                 content=content,
                 inline_payload=inline_payload,
+                object_store_descriptor=(
+                    ObjectStoreDescriptor(
+                        content_id=content.content_id,
+                        object_key=object_key,
+                    )
+                    if object_key is not None
+                    else None
+                ),
             )
 
         requested_ids = {grant.content_id for grant in grants}
@@ -604,22 +603,6 @@ class ObjectContentRepository:
             row.failure_detail = "durable object bytes are unavailable or untrusted"
             row.next_attempt_at = None
             await self._session.flush()
-
-    async def get_inline_payload(self, content_id: UUID) -> bytes:
-        payload = await self._session.get(InlineContentPayloads, content_id)
-        if payload is None:
-            raise ObjectContentStateError("Inline content payload is missing")
-        return payload.payload
-
-    async def get_object_store_descriptor(
-        self,
-        content_id: UUID,
-    ) -> ObjectStoreDescriptor:
-        descriptor = await self._object_store_descriptor(content_id)
-        return ObjectStoreDescriptor(
-            content_id=descriptor.content_id,
-            object_key=descriptor.object_key,
-        )
 
     async def apply_hold(
         self,

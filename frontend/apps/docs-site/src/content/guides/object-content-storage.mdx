@@ -101,6 +101,11 @@ bytes are stored inline in PostgreSQL or in an optional configured
 S3-compatible endpoint. Callers do not receive bucket, object-key, or provider
 details, and Eneo does not require S3-compatible storage.
 
+When a view genuinely needs several attachment payloads, Eneo validates their
+database records as a bounded batch and then verifies each byte stream. Remote
+objects still require one content read each, but they do not add one database
+transaction per attachment.
+
 ## What happens when a File is deleted?
 
 Eneo first checks the File and its generated derivatives against concrete
