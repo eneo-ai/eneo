@@ -19,6 +19,7 @@ from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
+from eneo.completion_models.domain.skill_context import measure_skill_context
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
@@ -64,6 +65,8 @@ from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillComposition,
+    SkillRuntimeResolution,
+    SkillTurnPlan,
     compose_skill_instructions,
 )
 from eneo.spaces.api.space_models import WizardType
@@ -279,30 +282,61 @@ class AssistantService:
         base_instructions = self._governed_base_instructions(
             assistant, effective_config
         )
-        governance_bindings = ()
-        if effective_config is not None:
-            governance_bindings = effective_config.governance_skill_bindings
+        resolution = await self._resolve_assistant_skill_runtime(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space_is_personal,
+        )
+        return compose_skill_instructions(
+            base_instructions=base_instructions,
+            bindings=list(resolution.eligible),
+        )
 
+    async def _resolve_assistant_skill_runtime(
+        self,
+        *,
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
+    ) -> SkillRuntimeResolution:
         assistant_id = cast(UUID | None, assistant.id)
-        if assistant_id is None:
-            direct_composition = compose_skill_instructions(
-                base_instructions=base_instructions, bindings=[]
+        direct_resolution = (
+            await self.skill_service.resolve_assistant_bindings_for_runtime(
+                assistant_id=assistant_id
             )
-        else:
-            direct_composition = await self.skill_service.compose_for_assistant(
-                assistant_id=assistant_id,
-                base_instructions=base_instructions,
-            )
+            if assistant_id is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        )
 
         if not (space_is_personal and assistant.is_default):
-            return direct_composition
-        if direct_composition.provenance:
+            return direct_resolution
+        if direct_resolution.eligible or direct_resolution.blocked:
             raise BadRequestException(
                 "Personal default Assistant has invalid direct Skill bindings"
             )
-        return compose_skill_instructions(
+        if effective_config is None:
+            return SkillRuntimeResolution(eligible=(), blocked=())
+        return effective_config.governance_skill_resolution
+
+    async def _create_skill_turn_plan(
+        self,
+        *,
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
+    ) -> SkillTurnPlan:
+        base_instructions = self._governed_base_instructions(
+            assistant,
+            effective_config,
+        )
+        resolution = await self._resolve_assistant_skill_runtime(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space_is_personal,
+        )
+        return await self.skill_service.create_turn_plan(
             base_instructions=base_instructions,
-            bindings=list(governance_bindings),
+            resolution=resolution,
         )
 
     async def _ensure_governance_policy_allows_update(
@@ -605,7 +639,7 @@ class AssistantService:
                 base_instructions=self._governed_base_instructions(
                     assistant, effective_config
                 ),
-                bindings=list(effective_config.governance_skill_bindings),
+                bindings=list(effective_config.governance_skill_resolution.eligible),
             )
             model = self._context_model(assistant, effective_config=effective_config)
             if model is None:
@@ -1856,13 +1890,37 @@ class AssistantService:
             ):
                 prompt_override = effective_config.enforced_prompt_text
 
-        skill_composition = await self._compose_assistant_prompt(
+        effective_completion_model = (
+            completion_model_override or assistant_to_ask.completion_model
+        )
+        if effective_completion_model is None:
+            raise BadRequestException(
+                "No completion model configured for this conversation.",
+            )
+
+        skill_plan = await self._create_skill_turn_plan(
             assistant=assistant_to_ask,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
+        skill_composition = skill_plan.composition
         if skill_composition.provenance:
             prompt_override = skill_composition.prompt
+        model_route = effective_completion_model.get_model_route()
+        skill_context = measure_skill_context(
+            base_instructions=skill_plan.base_instructions,
+            composed_instructions=skill_composition.prompt,
+            model_name=model_route,
+            max_input_tokens=effective_completion_model.max_input_tokens,
+            context_share_percent=skill_plan.policy.context_share_percent,
+        )
+        skill_activation = skill_plan.activation_evidence(
+            selected_model_id=effective_completion_model.id,
+            selected_model_route=model_route,
+            skill_context_tokens=skill_context.tokens,
+            skill_context_token_limit=skill_context.limit,
+            token_count_source=skill_context.source.value,
+        )
 
         # Per-request MCP opt-out from the composer toolbar: narrow whatever set
         # is effective (policy-granted servers above, or the assistant's own) by
@@ -1878,14 +1936,6 @@ class AssistantService:
             mcp_servers_override = [
                 server for server in base_mcp_servers if server.id not in disabled_ids
             ]
-
-        effective_completion_model = (
-            completion_model_override or assistant_to_ask.completion_model
-        )
-        if effective_completion_model is None:
-            raise BadRequestException(
-                "No completion model configured for this conversation.",
-            )
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
@@ -1935,6 +1985,7 @@ class AssistantService:
                         "AICompletionModel", effective_completion_model
                     ),
                     skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
                 )
             else:
                 (
@@ -1950,6 +2001,7 @@ class AssistantService:
                         "AICompletionModel", effective_completion_model
                     ),
                     skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
                 )
 
         assert session is not None
@@ -1974,6 +2026,7 @@ class AssistantService:
                 assistant_id=assistant_to_ask.id,
                 completion_model=cast("AICompletionModel", effective_completion_model),
                 skill_provenance=skill_composition.provenance or None,
+                skill_activation=skill_activation,
             )
         assert question_id is not None
 

@@ -9,7 +9,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException
-from eneo.skills.domain.skill import SkillComposition
+from eneo.skills.domain.skill import SkillRuntimeResolution
 
 
 def _settings(**overrides):
@@ -336,7 +336,10 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
             models_enforced=True,
             prompt_enforced=False,
             enforced_prompt_text=None,
-            governance_skill_bindings=(),
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(),
+                blocked=(),
+            ),
         )
     )
     # own ceiling 90 -> 15 fits; effective ceiling 10 -> 15 over -> reject
@@ -364,7 +367,10 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
             models_enforced=False,
             prompt_enforced=True,
             enforced_prompt_text="x" * 95,
-            governance_skill_bindings=(),
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(),
+                blocked=(),
+            ),
         )
     )
     # ceiling 90; enforced prompt is 95 chars -> 95 > 90 -> reject
@@ -419,17 +425,15 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         available_mcp_servers=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
-        governance_skill_bindings=(),
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(),
+            blocked=(),
+        ),
     )
     service = _service()
     service.repo.get_personal_defaults_for_tenant.return_value = assistants
     service.effective_config_service = AsyncMock()
     service.effective_config_service.resolve_for.return_value = effective_config
-    service.skill_service.compose_for_assistant.side_effect = (
-        lambda *, base_instructions, **_: SkillComposition(
-            prompt=base_instructions, provenance=()
-        )
-    )
     service._assert_persistent_baseline_fits = AsyncMock()
 
     await service.assert_personal_default_governance_context_fit()
@@ -442,7 +446,6 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
     service.effective_config_service.resolve_for.assert_awaited_once_with(
         assistants[0], space_is_personal=True
     )
-    service.skill_service.compose_for_assistant.assert_not_awaited()
 
 
 # --- context fit: per-message ask-time guard (uploads have no save-time gate) ---

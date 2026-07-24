@@ -12,7 +12,11 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     select_effective_completion_model,
 )
-from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingSource
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingSource,
+    SkillRuntimeResolution,
+)
 
 
 def _mk_assistant(is_default: bool = True):
@@ -111,12 +115,18 @@ def test_personal_default_carries_governance_skill_bindings_with_enforced_prompt
         tenant_completion_models=[],
         tenant_mcp_servers=[],
         library_prompt_text="Enforced tenant prompt",
-        governance_skill_bindings=(binding,),
+        governance_skill_resolution=SkillRuntimeResolution(
+            eligible=(binding,),
+            blocked=(),
+        ),
     )
 
     assert cfg.prompt_enforced is True
     assert cfg.enforced_prompt_text == "Enforced tenant prompt"
-    assert cfg.governance_skill_bindings == (binding,)
+    assert cfg.governance_skill_resolution == SkillRuntimeResolution(
+        eligible=(binding,),
+        blocked=(),
+    )
 
 
 def test_models_disabled_means_no_filtering_even_with_m2m_rows():

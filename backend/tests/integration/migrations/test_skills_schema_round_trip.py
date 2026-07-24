@@ -39,6 +39,7 @@ PRE_SKILL_EXECUTION_BLOCK_REVISION = "202607231330"
 SKILL_EXECUTION_BLOCK_REVISION = "202607231730"
 BINDING_ACTIVATION_MODE_REVISION = "202607240115"
 SKILL_RUNTIME_POLICY_REVISION = "202607240310"
+QUESTION_SKILL_ACTIVATION_REVISION = "202607241100"
 
 
 @dataclass(frozen=True)
@@ -2070,3 +2071,89 @@ def test_skill_runtime_policy_migration_backfills_tenants_and_round_trips(
             (tenant_id,),
         )
         assert cursor.fetchone() == (37,)
+
+
+def test_question_skill_activation_migration_is_nullable_and_round_trips(
+    pre_skills_database: MigrationDatabase,
+):
+    connection = pre_skills_database.connection
+    config = pre_skills_database.alembic_config
+    command.upgrade(config, SKILL_RUNTIME_POLICY_REVISION)
+
+    tenant_id = _insert_tenant(connection, "question-skill-activation")
+    user_id = _insert_user(connection, tenant_id, "question-skill-activation")
+    session_id = str(uuid4())
+    question_id = str(uuid4())
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO sessions (id, user_id, name)
+            VALUES (%s, %s, 'Skill activation migration')
+            """,
+            (session_id, user_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO questions (
+                id, question, answer, num_tokens_question, num_tokens_answer,
+                tenant_id, session_id
+            )
+            VALUES (%s, 'Question', '', 1, 0, %s, %s)
+            """,
+            (question_id, tenant_id, session_id),
+        )
+
+    command.upgrade(config, QUESTION_SKILL_ACTIVATION_REVISION)
+
+    payload = {
+        "version": 1,
+        "effective_mode": "eager",
+        "fallback_reason": None,
+        "available": [],
+        "blocked": [],
+        "initially_active": [],
+        "accepted": [],
+        "repeated": [],
+        "rejected": [],
+        "selected_model_id": str(uuid4()),
+        "selected_model_route": "gpt-4o",
+        "skill_context_tokens": 0,
+        "skill_context_token_limit": 12800,
+        "token_count_source": "litellm",
+        "activation_rounds": 0,
+        "selection_latency_ms": 0,
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT skill_activation FROM questions WHERE id = %s",
+            (question_id,),
+        )
+        assert cursor.fetchone() == (None,)
+        cursor.execute(
+            "UPDATE questions SET skill_activation = %s::jsonb WHERE id = %s",
+            (json.dumps(payload), question_id),
+        )
+        cursor.execute(
+            "SELECT skill_activation FROM questions WHERE id = %s",
+            (question_id,),
+        )
+        assert cursor.fetchone() == (payload,)
+
+    command.downgrade(config, "-1")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT count(*)
+            FROM information_schema.columns
+            WHERE table_name = 'questions' AND column_name = 'skill_activation'
+            """
+        )
+        assert cursor.fetchone() == (0,)
+
+    command.upgrade(config, QUESTION_SKILL_ACTIVATION_REVISION)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT skill_activation FROM questions WHERE id = %s",
+            (question_id,),
+        )
+        assert cursor.fetchone() == (None,)

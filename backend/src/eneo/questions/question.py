@@ -21,7 +21,10 @@ from eneo.logging.logging import (
     LoggingDetailsPublic,
 )
 from eneo.main.models import InDB
-from eneo.skills.domain.skill import SkillExecutionReference
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 
 
 # SubModels
@@ -112,6 +115,7 @@ class QuestionAdd(QuestionBase):
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
     skill_provenance: Optional[list[SkillExecutionReference]] = None
+    skill_activation: Optional[SkillActivationEvidenceV1] = None
     # Model reasoning/thinking text captured during streaming. Persisted so the
     # trace can be re-shown when a conversation is reloaded. None for turns
     # produced before this field existed or by models without reasoning.

@@ -24,6 +24,14 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session_service import persist_partial_question_answer
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingSource,
+    SkillRuntimePolicy,
+    SkillRuntimeResolution,
+    SkillTurnPlan,
+)
+from eneo.tokens.token_utils import TokenCountSource
 
 
 @dataclass
@@ -257,6 +265,144 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
     assert row.question == "why did it stop?"
     assert row.answer == "partial reply before the user pressed ESC"
     assert row.num_tokens_answer == 9
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
+    client,
+    db_container,
+    default_user,
+    default_user_token,
+):
+    space_id = await _create_space(client, default_user_token)
+    assistant_id = await _create_assistant(client, default_user_token, space_id)
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=3,
+        current_revision_number=3,
+        display_name="Payroll",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.SPACE,
+    )
+    plan = SkillTurnPlan.create_eager(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(binding,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        skill_context_tokens=12,
+        skill_context_token_limit=100,
+        token_count_source=TokenCountSource.LITELLM,
+    )
+
+    async with db_container() as container:
+        session_service = container.session_service()
+        chat_session = await session_service.create_session(
+            name="abort-evidence-test",
+            assistant_id=UUID(assistant_id),
+        )
+        question_id = await session_service.create_question_placeholder(
+            question="What happens if I stop this answer?",
+            session=chat_session,
+            files=None,
+            assistant_id=UUID(assistant_id),
+            completion_model=None,
+            skill_activation=evidence,
+        )
+        await session_service.create_question_placeholder(
+            question="A second turn without activation evidence",
+            session=chat_session,
+            files=None,
+            assistant_id=UUID(assistant_id),
+            completion_model=None,
+        )
+
+    async with db_container() as container:
+        session = container.session()
+        assert session.bind is not None
+        sync_engine = session.bind.sync_engine
+        conversation_statements: list[str] = []
+
+        def capture_conversation_statement(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            if "from questions" in statement.lower():
+                conversation_statements.append(statement)
+
+        sa.event.listen(
+            sync_engine,
+            "before_cursor_execute",
+            capture_conversation_statement,
+        )
+        try:
+            hydrated_session = await container.session_repo().get(chat_session.id)
+        finally:
+            sa.event.remove(
+                sync_engine,
+                "before_cursor_execute",
+                capture_conversation_statement,
+            )
+
+    assert hydrated_session is not None
+    assert len(hydrated_session.questions) == 2
+    assert all(
+        question.skill_activation is None for question in hydrated_session.questions
+    )
+    assert conversation_statements
+    assert all(
+        "skill_activation" not in statement for statement in conversation_statements
+    )
+
+    async with db_container() as container:
+        hydrated = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
+    assert hydrated is not None
+    assert hydrated.skill_activation == evidence
+
+    async with db_container() as container:
+        cross_tenant = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=uuid4(),
+        )
+    assert cross_tenant is None
+
+    await persist_partial_question_answer(
+        tenant_id=default_user.tenant_id,
+        question_id=question_id,
+        answer="Partial answer",
+        num_tokens_answer=3,
+        completion_model_id=None,
+    )
+
+    async with db_container() as container:
+        after_abort = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
+    assert after_abort is not None
+    assert after_abort.answer == "Partial answer"
+    assert after_abort.skill_activation == evidence
 
 
 @pytest.mark.integration

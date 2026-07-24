@@ -8,9 +8,13 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from eneo.main.exceptions import BadRequestException
+from eneo.model_providers.domain.model_route import MAX_MODEL_ROUTE_LENGTH
 
 MAX_SKILL_SLUG_LENGTH = 64
 MAX_SKILL_DISPLAY_NAME_LENGTH = 200
@@ -612,6 +616,14 @@ class SkillExecutionReference:
 
 
 @dataclass(frozen=True)
+class SkillRuntimeResolution:
+    """One runtime read with blocked candidates retained for evidence."""
+
+    eligible: tuple[ResolvedSkillBinding, ...]
+    blocked: tuple[ResolvedSkillBinding, ...]
+
+
+@dataclass(frozen=True)
 class SkillComposition:
     prompt: str
     provenance: tuple[SkillExecutionReference, ...]
@@ -653,3 +665,207 @@ def compose_skill_instructions(
         )
 
     return SkillComposition(prompt="\n\n".join(parts), provenance=tuple(provenance))
+
+
+class SkillTurnEffectiveMode(str, Enum):
+    EAGER = "eager"
+    ALWAYS_ONLY = "always_only"
+    SELECTIVE = "selective"
+
+
+class SkillActivationFallbackReason(str, Enum):
+    MODEL_LACKS_TOOL_CALLING = "model_lacks_tool_calling"
+    CATALOG_BUDGET_EXCEEDED = "catalog_budget_exceeded"
+    SELECTIVE_ACTIVATION_DISABLED = "selective_activation_disabled"
+
+
+class SkillActivationRejectionReason(str, Enum):
+    UNKNOWN_KEY = "unknown_key"
+    BLOCKED = "blocked"
+    REPEATED = "repeated"
+    ACTIVATION_LIMIT_EXCEEDED = "activation_limit_exceeded"
+    CONTEXT_LIMIT_EXCEEDED = "context_limit_exceeded"
+    RESERVED_TOOL_COLLISION = "reserved_tool_collision"
+
+
+class SkillActivationReference(BaseModel):
+    """Body-free exact revision identity safe for retained turn evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    activation_key: str | None = Field(default=None, min_length=1, max_length=128)
+    skill_id: UUID
+    skill_revision_id: UUID
+    revision_number: int = Field(ge=1, strict=True)
+    content_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    position: int = Field(ge=0, strict=True)
+    source: SkillBindingSource
+
+    @classmethod
+    def from_binding(
+        cls,
+        binding: ResolvedSkillBinding,
+        *,
+        activation_key: str | None = None,
+    ) -> "SkillActivationReference":
+        return cls(
+            activation_key=activation_key,
+            skill_id=binding.skill_id,
+            skill_revision_id=binding.skill_revision_id,
+            revision_number=binding.revision_number,
+            content_digest=binding.content_digest,
+            position=binding.position,
+            source=binding.source,
+        )
+
+
+class SkillActivationRejection(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    activation_key: str = Field(min_length=1, max_length=128)
+    reason: SkillActivationRejectionReason
+
+
+class SkillActivationEvidenceV1(BaseModel):
+    """Strict, versioned, body-free facts retained with one Question."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1] = 1
+    effective_mode: SkillTurnEffectiveMode
+    fallback_reason: SkillActivationFallbackReason | None = None
+    available: tuple[SkillActivationReference, ...]
+    blocked: tuple[SkillActivationReference, ...]
+    initially_active: tuple[str, ...]
+    accepted: tuple[str, ...] = ()
+    repeated: tuple[str, ...] = ()
+    rejected: tuple[SkillActivationRejection, ...] = ()
+    selected_model_id: UUID
+    selected_model_route: str = Field(
+        min_length=1,
+        max_length=MAX_MODEL_ROUTE_LENGTH,
+    )
+    skill_context_tokens: int = Field(ge=0, strict=True)
+    skill_context_token_limit: int = Field(ge=0, strict=True)
+    token_count_source: Literal["litellm", "fallback_estimate"]
+    activation_rounds: int = Field(default=0, ge=0, strict=True)
+    selection_latency_ms: int = Field(default=0, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_reference_catalogue(self) -> "SkillActivationEvidenceV1":
+        available_revision_ids = [
+            reference.skill_revision_id for reference in self.available
+        ]
+        blocked_revision_ids = [
+            reference.skill_revision_id for reference in self.blocked
+        ]
+        if len(available_revision_ids) != len(set(available_revision_ids)):
+            raise ValueError("Available Skill revisions must be unique")
+        if len(blocked_revision_ids) != len(set(blocked_revision_ids)):
+            raise ValueError("Blocked Skill revisions must be unique")
+        if set(available_revision_ids) & set(blocked_revision_ids):
+            raise ValueError("A Skill revision cannot be both available and blocked")
+
+        available_keys = [
+            reference.activation_key
+            for reference in self.available
+            if reference.activation_key is not None
+        ]
+        if len(available_keys) != len(self.available):
+            raise ValueError("Every available Skill revision needs an activation key")
+        if len(available_keys) != len(set(available_keys)):
+            raise ValueError("Available Skill activation keys must be unique")
+
+        key_catalogue = set(available_keys)
+        for field_name, keys in (
+            ("initially_active", self.initially_active),
+            ("accepted", self.accepted),
+            ("repeated", self.repeated),
+        ):
+            if len(keys) != len(set(keys)):
+                raise ValueError(f"{field_name} Skill activation keys must be unique")
+            if not set(keys) <= key_catalogue:
+                raise ValueError(
+                    f"{field_name} contains an unknown Skill activation key"
+                )
+        return self
+
+
+@dataclass(frozen=True)
+class SkillTurnBinding:
+    activation_key: str
+    binding: ResolvedSkillBinding
+
+
+@dataclass(frozen=True)
+class SkillTurnPlan:
+    """Exact per-turn Skill state frozen before provider work begins."""
+
+    base_instructions: str
+    policy: SkillRuntimePolicy
+    available: tuple[SkillTurnBinding, ...]
+    blocked: tuple[ResolvedSkillBinding, ...]
+    initially_active_keys: tuple[str, ...]
+    composition: SkillComposition
+
+    @classmethod
+    def create_eager(
+        cls,
+        *,
+        base_instructions: str,
+        resolution: SkillRuntimeResolution,
+        policy: SkillRuntimePolicy,
+    ) -> "SkillTurnPlan":
+        ordered = tuple(
+            sorted(resolution.eligible, key=lambda binding: binding.position)
+        )
+        available = tuple(
+            SkillTurnBinding(activation_key=f"skill-{index}", binding=binding)
+            for index, binding in enumerate(ordered, start=1)
+        )
+        return cls(
+            base_instructions=base_instructions,
+            policy=policy,
+            available=available,
+            blocked=tuple(
+                sorted(resolution.blocked, key=lambda binding: binding.position)
+            ),
+            initially_active_keys=tuple(
+                binding.activation_key for binding in available
+            ),
+            composition=compose_skill_instructions(
+                base_instructions=base_instructions,
+                bindings=list(ordered),
+            ),
+        )
+
+    def activation_evidence(
+        self,
+        *,
+        selected_model_id: UUID,
+        selected_model_route: str,
+        skill_context_tokens: int,
+        skill_context_token_limit: int,
+        token_count_source: Literal["litellm", "fallback_estimate"],
+    ) -> SkillActivationEvidenceV1:
+        available = tuple(
+            SkillActivationReference.from_binding(
+                binding.binding,
+                activation_key=binding.activation_key,
+            )
+            for binding in self.available
+        )
+        return SkillActivationEvidenceV1(
+            effective_mode=SkillTurnEffectiveMode.EAGER,
+            available=available,
+            blocked=tuple(
+                SkillActivationReference.from_binding(binding)
+                for binding in self.blocked
+            ),
+            initially_active=self.initially_active_keys,
+            selected_model_id=selected_model_id,
+            selected_model_route=selected_model_route,
+            skill_context_tokens=skill_context_tokens,
+            skill_context_token_limit=skill_context_token_limit,
+            token_count_source=token_count_source,
+        )

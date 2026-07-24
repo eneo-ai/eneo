@@ -19,7 +19,8 @@ Assistant, App, or Personal Chat.
   [When to use a Skill](#when-to-use-a-skill).
 - **Building an Assistant or App:** follow
   [Create and attach a Skill](#create-and-attach-a-skill), then read
-  [Versions and adoption](#versions-and-adoption).
+  [Versions and adoption](#versions-and-adoption). If the Skill describes an
+  external capability, also read [Use a Skill with MCP](#use-a-skill-with-mcp).
 - **Administering Eneo:** start with
   [Scopes and permissions](#scopes-and-permissions) and
   [Governance and audit](#governance-and-audit).
@@ -64,6 +65,36 @@ decision-document structure, and safe intranet navigation.
 Reuse one Skill when the capability has one real owner and release cycle. Do not
 merge Skills only because parts of their text look similar.
 
+## Use a Skill with MCP
+
+Think of the two parts separately:
+
+- **Skill = guidance:** explains the domain, when a capability is appropriate,
+  which already-visible tool to use, its expected input and result, and safe
+  failure behavior.
+- **MCP tool = capability:** performs the external action under the target
+  resource's existing configuration, permissions, approval, identity, and
+  availability checks.
+
+For example, a municipal BI Skill can explain the data warehouse vocabulary,
+when to use the approved BI tool, how to form a query, and how to present the
+result. The Skill does not connect the BI server or grant access to it.
+
+Before attaching that Skill:
+
+1. Enable and approve the MCP server and tool through the existing organisation
+   and Space controls.
+2. Expose the tool to the target Assistant and keep any narrower user or policy
+   controls in place.
+3. Select a model that supports tool calling.
+4. Test an allowed request, a denied request, an approval-required call, an
+   unavailable server, and a request outside the Skill's scope.
+
+An Assistant cannot currently use knowledge and MCP at the same time. Tool
+availability can also change after a Skill is saved. Eneo therefore does not
+treat Skill text as a dependency declaration or perform a save-time MCP health
+check: the existing MCP runtime remains the source of truth and fails closed.
+
 ## Create and attach a Skill
 
 1. Open **Skills** in the relevant Space. Tenant admins use
@@ -99,6 +130,9 @@ On an organisation Skill's detail page, the adoption view shows:
 - how bindings are distributed across versions; and
 - whether each binding is **current**, **behind**, or **unpublished** relative
   to the published version.
+
+Configured resources load 25 at a time. The count shows how many are visible,
+and **Show more resources** loads the next page.
 
 These are structural configuration facts:
 
@@ -184,6 +218,13 @@ new versions, restoration, publication changes, deletion, and attachment
 changes. Audit metadata includes identity, version, digest, position, status,
 and actor information. Full Skill instruction bodies are not duplicated into
 audit metadata.
+
+Each new chat question records which Skill revisions were eligible, blocked,
+and included. The record also contains the selected model, measured
+Skill-context tokens, configured allowance, and counter source. It follows the
+Question's existing Assistant, Space, or tenant retention and deletion rules.
+It excludes prompts, Skill instructions, incident reasons, tool results, and
+hidden reasoning, and the standard chat response does not expose it.
 
 See the [Audit Logging Guide](/guides/audit-logging) for access, retention, and
 export behavior.

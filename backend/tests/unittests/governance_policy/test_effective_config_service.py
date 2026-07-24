@@ -11,7 +11,17 @@ from eneo.governance_policy.domain.governance_policy import (
     PolicyMcpServer,
     PolicyScope,
 )
-from eneo.skills.domain.skill import ResolvedSkillBinding, SkillBindingSource
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingSource,
+    SkillRuntimeResolution,
+)
+
+
+def _resolution(
+    *eligible: ResolvedSkillBinding,
+) -> SkillRuntimeResolution:
+    return SkillRuntimeResolution(eligible=eligible, blocked=())
 
 
 async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
@@ -52,7 +62,9 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
             )
         ),
         skill_service=AsyncMock(
-            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
         ),
     )
 
@@ -88,7 +100,9 @@ async def test_resolve_for_all_restrictions_disabled_skips_catalog_fetches():
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
         skill_service=AsyncMock(
-            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
         ),
     )
 
@@ -112,7 +126,9 @@ async def test_resolve_for_non_personal_space_short_circuits_before_repos():
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
         skill_service=AsyncMock(
-            list_governance_bindings_for_runtime=AsyncMock(return_value=[])
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
         ),
     )
 
@@ -146,7 +162,9 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
         source=SkillBindingSource.ORGANIZATION,
     )
     skill_service = AsyncMock(
-        list_governance_bindings_for_runtime=AsyncMock(return_value=[binding])
+        resolve_governance_bindings_for_runtime=AsyncMock(
+            return_value=_resolution(binding)
+        )
     )
     service = EffectiveConfigService(
         user=SimpleNamespace(tenant_id=tenant_id),
@@ -161,9 +179,9 @@ async def test_resolve_for_loads_exact_governance_skill_revisions():
         SimpleNamespace(is_default=True), space_is_personal=True
     )
 
-    assert cfg.governance_skill_bindings == (binding,)
-    skill_service.list_governance_bindings_for_runtime.assert_awaited_once_with(
-        policy_id=policy.id
+    assert cfg.governance_skill_resolution == _resolution(binding)
+    skill_service.resolve_governance_bindings_for_runtime.assert_awaited_once_with(
+        policy_id=policy.id,
     )
 
 
@@ -204,7 +222,7 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
         return await guarded_result(SimpleNamespace(text="Enforced prompt"))
 
     async def list_policy_bindings(**_):
-        return await guarded_result([binding])
+        return await guarded_result(_resolution(binding))
 
     service = EffectiveConfigService(
         user=SimpleNamespace(tenant_id=tenant_id),
@@ -213,7 +231,7 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
         skill_service=AsyncMock(
-            list_governance_bindings_for_runtime=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
                 side_effect=list_policy_bindings
             )
         ),
@@ -224,5 +242,5 @@ async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
     )
 
     assert cfg.enforced_prompt_text == "Enforced prompt"
-    assert cfg.governance_skill_bindings == (binding,)
+    assert cfg.governance_skill_resolution == _resolution(binding)
     assert peak_active_calls == 1

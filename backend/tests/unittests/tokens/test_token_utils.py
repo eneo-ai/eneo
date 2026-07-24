@@ -5,11 +5,14 @@ from unittest.mock import patch
 from PIL import Image
 
 from eneo.tokens.token_utils import (
+    TokenCountSource,
     count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
     count_tool_tokens,
     log_token_count_drift,
+    measure_message_token_delta,
+    measure_message_tokens,
 )
 
 
@@ -111,6 +114,64 @@ def test_count_message_tokens_fallback_when_litellm_fails():
 
     # len//4 for the text + flat image estimate + per-message overhead
     assert tokens == 100 + 4 + 1105 + 4
+
+
+def test_measure_message_tokens_reports_litellm_or_named_fallback_source():
+    messages = [{"role": "system", "content": "System instructions"}]
+
+    measured = measure_message_tokens(messages, "openai/gpt-4o")
+
+    assert measured.tokens == count_message_tokens(messages, "openai/gpt-4o")
+    assert measured.source is TokenCountSource.LITELLM
+
+    with patch(
+        "eneo.tokens.token_utils.litellm.token_counter",
+        side_effect=RuntimeError("boom"),
+    ):
+        fallback = measure_message_tokens(messages, "openai/gpt-4o")
+
+    assert fallback.tokens > 0
+    assert fallback.source is TokenCountSource.FALLBACK_ESTIMATE
+
+
+def test_measure_message_token_delta_recomputes_both_sides_with_one_counter():
+    base = [{"role": "system", "content": "Base"}]
+    composed = [{"role": "system", "content": "Base plus Skill"}]
+
+    with (
+        patch(
+            "eneo.tokens.token_utils._measure_messages_with_litellm",
+            side_effect=[20, RuntimeError("second count failed")],
+        ),
+        patch(
+            "eneo.tokens.token_utils._fallback_message_tokens",
+            side_effect=[4, 9],
+        ) as fallback,
+    ):
+        measurement = measure_message_token_delta(
+            base,
+            composed,
+            "anthropic/claude-sonnet-4",
+        )
+
+    assert measurement.tokens == 5
+    assert measurement.source is TokenCountSource.FALLBACK_ESTIMATE
+    assert [call.args[0] for call in fallback.call_args_list] == [base, composed]
+
+
+def test_measure_message_token_delta_short_circuits_identical_messages():
+    messages = [{"role": "system", "content": "Same"}]
+
+    with patch("eneo.tokens.token_utils._measure_messages_with_litellm") as counter:
+        measurement = measure_message_token_delta(
+            messages,
+            messages.copy(),
+            "azure/gpt-4.1",
+        )
+
+    counter.assert_not_called()
+    assert measurement.tokens == 0
+    assert measurement.source is TokenCountSource.LITELLM
 
 
 def test_count_tool_tokens_fallback_when_litellm_fails():

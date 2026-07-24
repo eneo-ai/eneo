@@ -8,6 +8,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     coerce_model_kwargs_capabilities,
     resolve_supported_model_kwargs,
 )
+from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -117,6 +118,14 @@ class CompletionModel(AIModel):
     def token_limit(self) -> int:
         """Backward-compat alias: returns max_input_tokens."""
         return self.max_input_tokens
+
+    def get_model_route(self, *, provider_type: str | None = None) -> str:
+        """Return the provider route used for both requests and tokenization."""
+        return resolve_model_route(
+            model_name=self.name,
+            provider_type=provider_type or self.provider_type,
+            litellm_model_name=self.litellm_model_name,
+        )
 
     def get_supported_model_kwargs(self) -> SupportedModelKwargs:
         return resolve_supported_model_kwargs(

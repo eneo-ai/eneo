@@ -12,6 +12,7 @@ from eneo.governance_policy.domain.governance_policy import PolicyScope
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import NameCollisionException, NotFoundException
 from eneo.main.models import Status
+from eneo.skills import compose_skill_instructions
 from eneo.skills.domain.skill import (
     PublishedSkillDeletionError,
     SkillActivationMode,
@@ -311,13 +312,14 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
             == published.current_revision.id
         )
         assert assistant_bindings[0].attachable_revision_number == 1
+        assistant_resolution = await service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant.id
+        )
         assert (
             "approved catalogue instructions"
-            in (
-                await service.compose_for_assistant(
-                    assistant_id=assistant.id,
-                    base_instructions="Assistant base",
-                )
+            in compose_skill_instructions(
+                base_instructions="Assistant base",
+                bindings=list(assistant_resolution.eligible),
             ).prompt
         )
         app_composition = await service.compose_for_app(

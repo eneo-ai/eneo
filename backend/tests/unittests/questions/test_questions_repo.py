@@ -6,7 +6,11 @@ from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import QuestionAdd
 from eneo.questions.questions_repo import QuestionRepository
-from eneo.skills.domain.skill import SkillExecutionReference
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+    SkillTurnEffectiveMode,
+)
 
 
 async def test_get_by_tenant_filters_out_questions_without_session_id():
@@ -63,3 +67,56 @@ async def test_add_serializes_skill_provenance_as_json_safe_revision_references(
             "position": 0,
         }
     ]
+
+
+async def test_add_serializes_strict_skill_activation_evidence():
+    evidence = SkillActivationEvidenceV1(
+        effective_mode=SkillTurnEffectiveMode.EAGER,
+        available=(),
+        blocked=(),
+        initially_active=(),
+        selected_model_id=uuid4(),
+        selected_model_route="gpt-4o",
+        skill_context_tokens=0,
+        skill_context_token_limit=12_800,
+        token_count_source="litellm",
+    )
+    session = AsyncMock()
+    session.scalar.return_value = MagicMock(id=uuid4())
+    repo = QuestionRepository(session)
+    repo._add_references = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    repo.get = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
+
+    await repo.add(
+        QuestionAdd(
+            question="Question",
+            answer="",
+            num_tokens_question=1,
+            num_tokens_answer=0,
+            tenant_id=uuid4(),
+            session_id=uuid4(),
+            skill_activation=evidence,
+        )
+    )
+
+    statement = session.scalar.await_args.args[0]
+    params = statement.compile(dialect=postgresql.dialect()).params
+    assert params["skill_activation"] == evidence.model_dump(mode="json")
+
+
+async def test_answer_finalization_does_not_rewrite_frozen_skill_activation():
+    session = AsyncMock()
+    repo = QuestionRepository(session)
+
+    await repo.update_with_answer(
+        question_id=uuid4(),
+        tenant_id=uuid4(),
+        answer="Completed",
+        num_tokens_question=10,
+        num_tokens_answer=5,
+    )
+
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "skill_activation" not in str(compiled)
+    assert "skill_activation" not in compiled.params
