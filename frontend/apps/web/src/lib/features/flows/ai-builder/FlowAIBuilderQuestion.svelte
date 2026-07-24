@@ -13,10 +13,12 @@
   import PencilIcon from "@lucide/svelte/icons/pencil-line";
   import {
     buildStructuredQuestionCustomAnswer,
+    buildStructuredQuestionInputFieldsAnswer,
     buildStructuredQuestionSelection,
     getStructuredQuestionOptionKey,
     type StructuredQuestion,
     type StructuredQuestionAnswerPayload,
+    type StructuredInputFieldType,
     type StructuredQuestionOption
   } from "./structuredQuestionAnswer";
 
@@ -48,12 +50,31 @@
   let customSelected = $state(false);
   let customText = $state("");
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
+  let inputFields = $state([
+    {
+      variableName: "",
+      label: "",
+      fieldType: "text" as StructuredInputFieldType,
+      required: false,
+      optionsText: ""
+    }
+  ]);
 
   const isSingle = $derived(question.selection_mode === "single");
   const requiresConfirm = $derived(question.requires_confirm === true);
+  const isInputFieldCollection = $derived(question.input_field_collection === true);
 
   const canConfirm = $derived.by(() => {
     if (answered) return false;
+    if (isInputFieldCollection) {
+      return inputFields.every(
+        (field) =>
+          field.variableName.trim().length > 0 &&
+          field.label.trim().length > 0 &&
+          (!["select", "multiselect"].includes(field.fieldType) ||
+            field.optionsText.trim().length > 0)
+      );
+    }
     if (customSelected) return customText.trim().length > 0;
     if (!isSingle || requiresConfirm) return selectedOptionKeys.size > 0;
     return false;
@@ -104,6 +125,21 @@
 
   function handleConfirm() {
     if (!canConfirm || disabled) return;
+    if (isInputFieldCollection) {
+      onanswer?.(
+        buildStructuredQuestionInputFieldsAnswer(
+          question,
+          inputFields.map((field) => ({
+            name: field.variableName,
+            label: field.label,
+            type: field.fieldType,
+            required: field.required,
+            options: field.optionsText.split(",")
+          }))
+        )
+      );
+      return;
+    }
     if (customSelected) {
       const trimmed = customText.trim();
       if (!trimmed) return;
@@ -122,6 +158,21 @@
       event.preventDefault();
       handleConfirm();
     }
+  }
+
+  function addInputField() {
+    if (inputFields.length >= 20) return;
+    inputFields.push({
+      variableName: "",
+      label: "",
+      fieldType: "text",
+      required: false,
+      optionsText: ""
+    });
+  }
+
+  function removeInputField(index: number) {
+    if (inputFields.length > 1) inputFields.splice(index, 1);
   }
 </script>
 
@@ -143,101 +194,156 @@
       {question.question}
     </p>
 
-    <div
-      class="options-stack"
-      role={isSingle ? "radiogroup" : "group"}
-      aria-labelledby={questionLabelId}
-    >
-      {#each question.options as option (getStructuredQuestionOptionKey(option))}
-        {@const optionKey = getStructuredQuestionOptionKey(option)}
-        {@const isSelected = selectedOptionKeys.has(optionKey)}
-        <button
-          type="button"
-          class="option-row"
-          class:is-selected={isSelected}
-          onclick={() => selectOption(option)}
-          role={isSingle ? "radio" : "checkbox"}
-          aria-checked={isSelected}
-          {disabled}
-        >
-          <span
-            class="option-indicator"
-            class:is-selected={isSelected}
-            class:is-radio={isSingle}
-            aria-hidden="true"
-          >
-            {#if isSelected}
-              {#if isSingle}
-                <span class="option-indicator-dot"></span>
-              {:else}
-                <CheckIcon class="size-3" />
-              {/if}
+    {#if isInputFieldCollection}
+      <div class="field-collection" aria-labelledby={questionLabelId}>
+        {#each inputFields as field, index (field)}
+          <div class="field-row">
+            <label>
+              <span>{m.ai_builder_question_field_label()}</span>
+              <input bind:value={field.label} {disabled} />
+            </label>
+            <label>
+              <span>{m.ai_builder_question_field_name()}</span>
+              <input bind:value={field.variableName} {disabled} />
+            </label>
+            <label>
+              <span>{m.ai_builder_question_field_type()}</span>
+              <select bind:value={field.fieldType} {disabled}>
+                <option value="text">{m.flow_form_field_type_text()}</option>
+                <option value="number">{m.flow_form_field_type_number()}</option>
+                <option value="date">{m.flow_form_field_type_date()}</option>
+                <option value="select">{m.flow_form_field_type_select()}</option>
+                <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
+              </select>
+            </label>
+            {#if field.fieldType === "select" || field.fieldType === "multiselect"}
+              <label class="field-options">
+                <span>{m.ai_builder_question_field_options()}</span>
+                <input bind:value={field.optionsText} {disabled} />
+              </label>
             {/if}
-          </span>
-          <span class="option-body">
-            <span class="option-label">{option.label}</span>
-            {#if option.description}
-              <span class="option-description">{option.description}</span>
+            <label class="field-required">
+              <input type="checkbox" bind:checked={field.required} {disabled} />
+              <span>{m.ai_builder_question_field_required()}</span>
+            </label>
+            {#if inputFields.length > 1}
+              <button
+                type="button"
+                class="field-remove"
+                onclick={() => removeInputField(index)}
+                {disabled}
+              >
+                {m.ai_builder_question_field_remove()}
+              </button>
             {/if}
-          </span>
-        </button>
-      {/each}
-
-      {#if question.allow_custom}
-        <button
-          type="button"
-          class="option-row option-row-custom"
-          class:is-selected={customSelected}
-          onclick={selectCustom}
-          role={isSingle ? "radio" : "checkbox"}
-          aria-checked={customSelected}
-          aria-controls="{questionLabelId}-custom"
-          {disabled}
-        >
-          <span
-            class="option-indicator"
-            class:is-selected={customSelected}
-            class:is-radio={isSingle}
-            aria-hidden="true"
-          >
-            {#if customSelected}
-              {#if isSingle}
-                <span class="option-indicator-dot"></span>
-              {:else}
-                <CheckIcon class="size-3" />
-              {/if}
-            {:else}
-              <PencilIcon class="text-secondary size-3" />
-            {/if}
-          </span>
-          <span class="option-body">
-            <span class="option-label">{m.ai_builder_question_custom()}</span>
-            <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
-          </span>
-        </button>
-
-        {#if customSelected}
-          <div
-            class="custom-input-wrap"
-            id="{questionLabelId}-custom"
-            transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
-          >
-            <Textarea
-              bind:ref={textareaRef}
-              bind:value={customText}
-              rows={2}
-              placeholder={m.ai_builder_question_custom_placeholder()}
-              onkeydown={handleTextareaKeydown}
-              class="resize-none"
-              aria-label={m.ai_builder_question_custom()}
-              {disabled}
-            />
           </div>
-        {/if}
-      {/if}
-    </div>
+        {/each}
+        <button
+          type="button"
+          class="field-add"
+          onclick={addInputField}
+          disabled={disabled || inputFields.length >= 20}
+        >
+          {m.ai_builder_question_field_add()}
+        </button>
+      </div>
+    {:else}
+      <div
+        class="options-stack"
+        role={isSingle ? "radiogroup" : "group"}
+        aria-labelledby={questionLabelId}
+      >
+        {#each question.options as option (getStructuredQuestionOptionKey(option))}
+          {@const optionKey = getStructuredQuestionOptionKey(option)}
+          {@const isSelected = selectedOptionKeys.has(optionKey)}
+          <button
+            type="button"
+            class="option-row"
+            class:is-selected={isSelected}
+            onclick={() => selectOption(option)}
+            role={isSingle ? "radio" : "checkbox"}
+            aria-checked={isSelected}
+            {disabled}
+          >
+            <span
+              class="option-indicator"
+              class:is-selected={isSelected}
+              class:is-radio={isSingle}
+              aria-hidden="true"
+            >
+              {#if isSelected}
+                {#if isSingle}
+                  <span class="option-indicator-dot"></span>
+                {:else}
+                  <CheckIcon class="size-3" />
+                {/if}
+              {/if}
+            </span>
+            <span class="option-body">
+              <span class="option-label">{option.label}</span>
+              {#if option.description}
+                <span class="option-description">{option.description}</span>
+              {/if}
+            </span>
+          </button>
+        {/each}
 
-    {#if !isSingle || customSelected || requiresConfirm}
+        {#if question.allow_custom}
+          <button
+            type="button"
+            class="option-row option-row-custom"
+            class:is-selected={customSelected}
+            onclick={selectCustom}
+            role={isSingle ? "radio" : "checkbox"}
+            aria-checked={customSelected}
+            aria-controls="{questionLabelId}-custom"
+            {disabled}
+          >
+            <span
+              class="option-indicator"
+              class:is-selected={customSelected}
+              class:is-radio={isSingle}
+              aria-hidden="true"
+            >
+              {#if customSelected}
+                {#if isSingle}
+                  <span class="option-indicator-dot"></span>
+                {:else}
+                  <CheckIcon class="size-3" />
+                {/if}
+              {:else}
+                <PencilIcon class="text-secondary size-3" />
+              {/if}
+            </span>
+            <span class="option-body">
+              <span class="option-label">{m.ai_builder_question_custom()}</span>
+              <span class="option-description">{m.ai_builder_question_custom_helper()}</span>
+            </span>
+          </button>
+
+          {#if customSelected}
+            <div
+              class="custom-input-wrap"
+              id="{questionLabelId}-custom"
+              transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
+            >
+              <Textarea
+                bind:ref={textareaRef}
+                bind:value={customText}
+                rows={2}
+                placeholder={m.ai_builder_question_custom_placeholder()}
+                onkeydown={handleTextareaKeydown}
+                class="resize-none"
+                aria-label={m.ai_builder_question_custom()}
+                {disabled}
+              />
+            </div>
+          {/if}
+        {/if}
+      </div>
+    {/if}
+
+    {#if isInputFieldCollection || !isSingle || customSelected || requiresConfirm}
       <div class="actions-row">
         <Button
           variant="default"
@@ -366,6 +472,43 @@
   .option-description {
     @apply text-xs leading-relaxed;
     color: var(--text-secondary);
+  }
+
+  .field-collection {
+    @apply flex flex-col gap-3;
+  }
+
+  .field-row {
+    @apply grid grid-cols-2 gap-3 rounded-lg p-3;
+    background: var(--bg-secondary);
+  }
+
+  .field-row label:not(.field-required) {
+    @apply flex flex-col gap-1 text-xs font-medium;
+    color: var(--text-secondary);
+  }
+
+  .field-row input:not([type="checkbox"]),
+  .field-row select {
+    @apply h-9 rounded-md border px-2 text-sm;
+    border-color: var(--border-default);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .field-options {
+    @apply col-span-2;
+  }
+
+  .field-required {
+    @apply flex items-center gap-2 text-xs;
+    color: var(--text-primary);
+  }
+
+  .field-add,
+  .field-remove {
+    @apply w-fit text-xs font-medium underline-offset-2 hover:underline disabled:opacity-50;
+    color: var(--accent-stronger);
   }
 
   .custom-input-wrap {

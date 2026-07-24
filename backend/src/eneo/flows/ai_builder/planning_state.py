@@ -41,6 +41,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.files.file_models import FileType
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.enums import AIBuilderInputType
 from eneo.json_types import JsonObject
 
@@ -280,6 +281,9 @@ class PlanningState(_PlanningModel):
     )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
     output_schema_evidence: OutputSchemaEvidence | None = None
+    input_fields: list[FlowInputFieldIntent] = Field(
+        default_factory=list[FlowInputFieldIntent]
+    )
     architecture_commit: ArchitectureCommit | None = None
 
     @model_validator(mode="after")

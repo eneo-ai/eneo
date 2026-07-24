@@ -4,6 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    FlowInputFieldProvenance,
+)
 from eneo.json_types import JsonValue
 
 
@@ -56,6 +59,7 @@ class EditAdvisory(BaseModel):
     message: str
     severity: Literal["info", "warning", "error"]
     field: str | None = None
+    field_provenance: FlowInputFieldProvenance | None = None
 
 
 __all__ = [

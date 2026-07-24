@@ -4,24 +4,28 @@ export type StructuredQuestionOption = components["schemas"]["StructuredQuestion
 
 export type StructuredQuestion = components["schemas"]["StructuredQuestionPayload"];
 
-type StructuredQuestionOptionValue = Exclude<StructuredQuestionOption["value"], undefined>;
+type GeneratedInputField = components["schemas"]["FlowInputFieldIntent"];
+export type StructuredInputFieldType = NonNullable<GeneratedInputField["type"]>;
 
-export interface PersistedStructuredQuestionAnswerMetadata {
-  question_id?: string | null;
-  selected_option_ids?: string[];
-  selected_values?: StructuredQuestionOptionValue[];
-  custom_value?: string;
+export interface StructuredInputFieldAnswer extends Omit<
+  GeneratedInputField,
+  "type" | "required" | "options" | "provenance"
+> {
+  type: StructuredInputFieldType;
+  required: boolean;
+  options: string[];
 }
 
+type StructuredQuestionOptionValue = Exclude<StructuredQuestionOption["value"], undefined>;
+
+export type PersistedStructuredQuestionAnswerMetadata = Omit<
+  components["schemas"]["StructuredQuestionAnswerMetadata"],
+  "kind" | "selected_values"
+> & { selected_values?: StructuredQuestionOptionValue[] | null };
+
 export type StructuredQuestionAnswerMetadata =
-  | ({
-      kind: "structured_question_answer";
-    } & PersistedStructuredQuestionAnswerMetadata)
-  | {
-      kind: "requirements_confirmation";
-      requirements_confirmed: true;
-      requirements_version?: string | null;
-    };
+  | components["schemas"]["StructuredQuestionAnswerMetadata"]
+  | components["schemas"]["RequirementsConfirmationMetadata"];
 
 export interface StructuredQuestionAnswerPayload {
   text: string;
@@ -61,6 +65,29 @@ export function buildStructuredQuestionCustomAnswer(
       kind: "structured_question_answer",
       question_id: question.question_id,
       custom_value: customValue
+    }
+  };
+}
+
+export function buildStructuredQuestionInputFieldsAnswer(
+  question: StructuredQuestion,
+  fields: StructuredInputFieldAnswer[]
+): StructuredQuestionAnswerPayload {
+  const inputFields = fields.map((field) => ({
+    ...field,
+    name: field.name.trim(),
+    label: field.label.trim(),
+    options:
+      field.type === "select" || field.type === "multiselect"
+        ? field.options.map((option) => option.trim()).filter(Boolean)
+        : []
+  }));
+  return {
+    text: inputFields.map((field) => `${field.label} (${field.name})`).join(", "),
+    questionAnswer: {
+      kind: "structured_question_answer",
+      question_id: question.question_id,
+      input_fields: inputFields
     }
   };
 }

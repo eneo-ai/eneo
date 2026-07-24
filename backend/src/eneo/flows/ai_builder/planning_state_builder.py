@@ -53,6 +53,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
@@ -202,11 +203,26 @@ def build_planning_state_from_conversation(
         builder_schema_version=BUILDER_SCHEMA_VERSION,
         resolved_slots=resolved_slots,
         output_schema_evidence=output_schema_evidence,
+        input_fields=_confirmed_input_fields(conversation),
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
     _reconcile_output_schema_evidence(state, conversation)
     return state
+
+
+def _confirmed_input_fields(
+    conversation: list[ConversationMessage],
+) -> list[FlowInputFieldIntent]:
+    for message in reversed(conversation):
+        answer = question_answer_from_metadata(message.metadata)
+        if (
+            answer is not None
+            and answer.question_id == "runtime_metadata_field_details"
+            and answer.input_fields is not None
+        ):
+            return list(answer.input_fields)
+    return []
 
 
 def _replay_slot_classification_metadata(

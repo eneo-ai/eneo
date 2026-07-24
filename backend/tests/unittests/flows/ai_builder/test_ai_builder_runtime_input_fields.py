@@ -91,6 +91,20 @@ def test_runtime_input_field_extraction_understands_explicit_absence() -> None:
     assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Användaren ska ange inmatningsfält för Ärendenummer och Prioritet.",
+        "The user should provide input fields for Case number and Priority.",
+    ],
+)
+def test_named_user_fields_are_confirmed_evidence(text: str) -> None:
+    hints = extract_runtime_input_field_hints(text)
+
+    assert hints
+    assert {hint.provenance for hint in hints} == {"user_confirmed"}
+
+
 def test_runtime_input_field_extraction_understands_bare_absence() -> None:
     text = "Skapa ett enkelt flöde för kundfrågor. Inga inmatningsfält."
 

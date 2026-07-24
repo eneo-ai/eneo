@@ -35,6 +35,10 @@ class StructuredQuestionPayload(BaseModel):
     selection_mode: Literal["single", "multi"]
     allow_custom: bool
     requires_confirm: bool = False
+    input_field_collection: bool = Field(
+        default=False,
+        exclude_if=lambda value: value is False,
+    )
 
 
 class AIBuilderTextEventData(BaseModel):

@@ -27,6 +27,7 @@ run_inside_container() {
   local uv_bin
   uv_bin="$(resolve_uv_bin)"
   export PATH="/home/vscode/.local/bin:/home/vscode/.bun/bin:${PATH}"
+  export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
   cd "${workspace_backend}"
   exec "${uv_bin}" run pyright "$@"
 }
@@ -81,12 +82,12 @@ resolve_container() {
   exit 1
 }
 
-if [ -f "${workspace_backend}/pyproject.toml" ] && [ -d /workspace ]; then
+if [ -f /.dockerenv ] && [ -f "${workspace_backend}/pyproject.toml" ]; then
   run_inside_container "$@"
 fi
 
 container_name="$(resolve_container)"
 
 exec docker exec -u vscode -i "${container_name}" bash -lc \
-  'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pyright "$@"' \
+  'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && export NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096} && cd /workspace/backend && uv run pyright "$@"' \
   bash "$@"

@@ -4,6 +4,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    FlowInputFieldProvenance,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_input_reference_instruction_hint,
     compile_new_step_draft,
@@ -65,6 +68,9 @@ class MaterializedOrderedEditProposal(BaseModel):
     steps: list[MaterializedOrderedEditStep]
     removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
     form_fields: list[FormFieldSpec] | None = None
+    form_field_provenance: dict[str, FlowInputFieldProvenance] = Field(
+        default_factory=dict
+    )
 
 
 def materialize_ordered_edit_proposal(
@@ -75,9 +81,28 @@ def materialize_ordered_edit_proposal(
 ) -> MaterializedOrderedEditProposal:
     payload = proposal.model_dump(
         mode="python",
-        exclude={"steps"},
+        exclude={"steps", "form_fields"},
         exclude_unset=True,
     )
+    if "form_fields" in proposal.model_fields_set:
+        payload["form_fields"] = (
+            None
+            if proposal.form_fields is None
+            else [
+                FormFieldSpec(
+                    name=field.variable_name,
+                    label=field.label,
+                    type=field.field_type,
+                    required=field.required,
+                    options=list(field.options) or None,
+                )
+                for field in proposal.form_fields
+            ]
+        )
+        payload["form_field_provenance"] = {
+            field.variable_name: field.provenance
+            for field in proposal.form_fields or []
+        }
     payload["steps"] = [
         _materialize_ordered_edit_step(
             item,

@@ -16,6 +16,7 @@ from eneo.flows.ai_builder.ai_builder_create_proposal import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
 )
@@ -425,3 +426,132 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
     assert spec.steps[0].input_bindings is not None
     assert "{{ flow_input.malgrupp }}" in spec.steps[0].input_bindings["question"]
     await assert_create_spec_prepares_through_authoring_command_async(spec)
+
+
+@pytest.mark.asyncio
+async def test_confirmed_create_field_preserves_options_and_provenance() -> None:
+    state = PlanningState.empty()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="priority",
+            label="Priority",
+            field_type="select",
+            required=True,
+            options=["Low", "High"],
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Priority response",
+            "plan_rationale": "Use the confirmed priority when drafting.",
+            "steps": [
+                {
+                    "name": "Draft response",
+                    "instructions": "Draft a response for the selected priority.",
+                    "uses_form_fields": ["priority"],
+                }
+            ],
+        },
+        tool_call_id="call-confirmed-field",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    fields = result.compiled_proposal.content.spec.form_fields
+    assert fields is not None
+    assert fields[0].model_dump(exclude_none=True) == {
+        "name": "priority",
+        "label": "Priority",
+        "type": "select",
+        "required": True,
+        "options": ["Low", "High"],
+    }
+    assert result.compiled_proposal.content.lint_warnings == []
+    assert state.input_fields[0].provenance == "user_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_model_proposed_create_shadow_drop_is_visible() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="text",
+        source="structured_answer",
+        confidence="high",
+    )
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Text summary",
+            "plan_rationale": "Summarize the primary text.",
+            "input_fields": [{"name": "text", "label": "Text", "type": "text"}],
+            "steps": [
+                {
+                    "name": "Summarize",
+                    "instructions": "Summarize the text.",
+                    "uses_form_fields": ["text"],
+                }
+            ],
+        },
+        tool_call_id="call-shadow-field",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.spec.form_fields is None
+    assert [
+        (warning.code, warning.field_name, warning.field_provenance)
+        for warning in result.compiled_proposal.content.lint_warnings
+    ] == [("primary_input_shadow_form_field_dropped", "text", "model_proposed")]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_create_shadow_field_is_rejected_explicitly() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="text",
+        source="structured_answer",
+        confidence="high",
+    )
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="text",
+            label="Text",
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[],
+        arguments={
+            "flow_name": "Text summary",
+            "plan_rationale": "Summarize the primary text.",
+            "steps": [
+                {
+                    "name": "Summarize",
+                    "instructions": "Summarize the text.",
+                    "uses_form_fields": ["text"],
+                }
+            ],
+        },
+        tool_call_id="call-confirmed-shadow-field",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})

@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
@@ -504,6 +505,10 @@ class StructuredQuestionAnswerMetadata(BaseModel):
     selected_value: QuestionAnswerScalar = None
     answer: QuestionAnswerScalar = None
     custom_value: str | None = Field(default=None, max_length=500)
+    input_fields: list[FlowInputFieldIntent] | None = Field(
+        default=None,
+        max_length=20,
+    )
     ui_language: str | None = Field(
         default=None,
         max_length=_MAX_UI_LANGUAGE_LENGTH,
@@ -517,6 +522,29 @@ class StructuredQuestionAnswerMetadata(BaseModel):
         payload = dict(cast(Mapping[str, Any], data))
         payload.setdefault("kind", "structured_question_answer")
         return normalize_question_answer(payload)
+
+    @field_validator("input_fields", mode="after")
+    @classmethod
+    def confirm_submitted_input_fields(
+        cls, fields: list[FlowInputFieldIntent] | None
+    ) -> list[FlowInputFieldIntent] | None:
+        if fields is None:
+            return None
+        return [
+            field.model_copy(update={"provenance": "user_confirmed"})
+            for field in fields
+        ]
+
+    @model_validator(mode="after")
+    def require_field_details_payload(self) -> "StructuredQuestionAnswerMetadata":
+        if (
+            self.question_id == "runtime_metadata_field_details"
+            and not self.input_fields
+        ):
+            raise ValueError(
+                "runtime metadata field details require at least one field"
+            )
+        return self
 
 
 class RequirementsConfirmationMetadata(BaseModel):

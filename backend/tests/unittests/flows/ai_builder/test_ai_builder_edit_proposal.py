@@ -8,6 +8,7 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -630,9 +631,10 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
                 },
                 {
                     "name": "review_date",
-                    "type": "date",
+                    "type": "select",
                     "label": "Review date",
                     "required": True,
+                    "options": ["Today", "Later"],
                 },
             ],
         },
@@ -647,6 +649,11 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
         ("modified", "case_id"),
         ("added", "review_date"),
         ("removed", "legacy_context"),
+    ]
+    assert result.compiled_proposal.content.spec.form_fields is not None
+    assert result.compiled_proposal.content.spec.form_fields[1].options == [
+        "Today",
+        "Later",
     ]
 
 
@@ -1034,6 +1041,7 @@ async def test_ordered_form_field_shadow_declaration_is_dropped_with_advisory() 
                     "type": "text",
                     "label": "Text",
                     "required": True,
+                    "provenance": "user_confirmed",
                 }
             ],
         },
@@ -1046,8 +1054,116 @@ async def test_ordered_form_field_shadow_declaration_is_dropped_with_advisory() 
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
+        and advisory.field_provenance == "model_proposed"
         for advisory in result.compiled_proposal.content.edit.advisories
     )
+
+
+@pytest.mark.asyncio
+async def test_confirmed_edit_field_options_survive_server_owned_projection() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+    state = PlanningState.empty()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="priority",
+            label="Priority",
+            field_type="select",
+            required=True,
+            options=["Low", "High"],
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await _process(
+        flow=flow,
+        planning_state=state,
+        arguments={
+            "plan_rationale": "Use the confirmed priority field.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "form_fields": [
+                {
+                    "name": "priority",
+                    "type": "select",
+                    "label": "Changed by model",
+                    "options": ["Other"],
+                }
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.spec.form_fields == [
+        FormFieldSpec(
+            name="priority",
+            type="select",
+            label="Priority",
+            required=True,
+            options=["Low", "High"],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+    state = PlanningState.empty()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="priority",
+            label="Priority",
+            field_type="select",
+            required=True,
+            options=["Low", "High"],
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await _process(
+        flow=flow,
+        planning_state=state,
+        arguments={
+            "plan_rationale": "Keep the confirmed priority field.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.compiled_proposal.content.spec.form_fields == [
+        FormFieldSpec(
+            name="priority",
+            type="select",
+            label="Priority",
+            required=True,
+            options=["Low", "High"],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
+    state = PlanningState.empty()
+    state.input_fields = [
+        FlowInputFieldIntent(
+            variable_name="text",
+            label="Text",
+            provenance="user_confirmed",
+        )
+    ]
+
+    result = await _process(
+        flow=flow,
+        planning_state=state,
+        arguments={
+            "plan_rationale": "Use the confirmed text field.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+            "form_fields": [{"name": "text", "type": "text", "label": "Text"}],
+        },
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})
 
 
 @pytest.mark.asyncio

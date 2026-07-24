@@ -2119,6 +2119,70 @@ class TestExtendedClarificationHints:
 
         assert "post_processing_goal" not in question_ids
 
+    @pytest.mark.parametrize(
+        ("language", "selection", "selection_text", "field_label"),
+        [
+            ("sv", "basic_case_metadata", "Grundläggande metadata", "Ärendenummer"),
+            ("en", "detailed_case_metadata", "Detailed metadata", "Case number"),
+        ],
+    )
+    def test_runtime_metadata_selection_asks_once_for_field_details_and_answer_resolves_it(
+        self,
+        language: str,
+        selection: str,
+        selection_text: str,
+        field_label: str,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=selection_text,
+                metadata={
+                    "question_answer": {
+                        "question_id": "runtime_metadata_fields",
+                        "selected_values": [selection],
+                    },
+                    "ui_language": language,
+                },
+            )
+        ]
+
+        followup = build_discovery_followup(conversation)
+
+        assert followup is not None
+        assert followup.question_data.question_id == "runtime_metadata_field_details"
+        assert followup.question_data.input_field_collection is True
+        assert followup.question_data.options == []
+
+        resolved_conversation = [
+            *conversation,
+            ConversationMessage(
+                role="user",
+                content=field_label,
+                metadata={
+                    "question_answer": {
+                        "question_id": "runtime_metadata_field_details",
+                        "input_fields": [
+                            {
+                                "variable_name": "case_number",
+                                "label": field_label,
+                                "field_type": "text",
+                                "required": True,
+                                "options": [],
+                            }
+                        ],
+                    },
+                    "ui_language": language,
+                },
+            ),
+        ]
+
+        next_followup = build_discovery_followup(resolved_conversation)
+
+        assert next_followup is None or (
+            next_followup.question_data.question_id != "runtime_metadata_field_details"
+        )
+
     def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
         self,
     ) -> None:

@@ -9,7 +9,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
 )
-from eneo.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    BuilderFormFieldType,
+    FlowInputFieldProvenance,
+)
 from eneo.flows.ai_builder.planning_state import SlotConfidence, SlotSource
 
 RuntimeMetadataState: TypeAlias = Literal[
@@ -44,6 +47,7 @@ class RuntimeInputFieldHint:
     field_type: BuilderFormFieldType = "text"
     required: bool = False
     options: tuple[str, ...] = ()
+    provenance: FlowInputFieldProvenance = "runtime_inferred"
 
 
 _RUNTIME_FIELD_DECLARATION_TRIGGERS: tuple[str, ...] = (
@@ -341,7 +345,11 @@ def extract_runtime_input_field_hints(text: str) -> tuple[RuntimeInputFieldHint,
             if not variable_name or variable_name in seen:
                 continue
             hints.append(
-                RuntimeInputFieldHint(variable_name=variable_name, label=label)
+                RuntimeInputFieldHint(
+                    variable_name=variable_name,
+                    label=label,
+                    provenance="user_confirmed",
+                )
             )
             seen.add(variable_name)
             if len(hints) >= 8:

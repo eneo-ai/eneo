@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildStructuredQuestionCustomAnswer,
+  buildStructuredQuestionInputFieldsAnswer,
   buildStructuredQuestionSelection,
   getStructuredQuestionOptionKey,
   type StructuredQuestion
@@ -72,6 +73,44 @@ describe("structured question answer helpers", () => {
       kind: "structured_question_answer",
       question_id: "docx_template",
       custom_value: "Use the board-report template"
+    });
+  });
+
+  it("preserves named field types, requiredness, and choice options", () => {
+    const question: StructuredQuestion = {
+      question_id: "runtime_metadata_field_details",
+      question: "Which fields?",
+      selection_mode: "multi",
+      allow_custom: false,
+      options: [],
+      input_field_collection: true
+    };
+
+    const result = buildStructuredQuestionInputFieldsAnswer(question, [
+      {
+        name: " category ",
+        label: " Category ",
+        type: "multiselect",
+        required: true,
+        options: ["A", " B "]
+      }
+    ]);
+
+    expect(result).toEqual({
+      text: "Category (category)",
+      questionAnswer: {
+        kind: "structured_question_answer",
+        question_id: "runtime_metadata_field_details",
+        input_fields: [
+          {
+            name: "category",
+            label: "Category",
+            type: "multiselect",
+            required: true,
+            options: ["A", "B"]
+          }
+        ]
+      }
     });
   });
 });

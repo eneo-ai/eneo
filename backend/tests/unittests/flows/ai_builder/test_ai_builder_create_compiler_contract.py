@@ -1261,6 +1261,97 @@ def test_assembly_drops_source_contract_shadow_form_fields_before_lowering() -> 
     assert validate_spec(compiled).valid
 
 
+def test_assembly_rejects_confirmed_source_contract_shadow_form_field() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document case summary",
+            "plan_rationale": "The source reader owns the case id contract.",
+            "input_fields": [
+                {
+                    "variable_name": "case_id",
+                    "label": "Case id",
+                }
+            ],
+            "steps": [
+                {
+                    "name": "Extract source facts",
+                    "instructions": "Extract the case id from the document.",
+                    "uses_form_fields": ["case_id"],
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case id found in the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write summary",
+                    "instructions": "Write the final summary.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    intent = intent.model_copy(
+        update={
+            "input_fields": [
+                intent.input_fields[0].model_copy(
+                    update={"provenance": "user_confirmed"}
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(runtime_input_type=InputType.DOCUMENT),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "confirmed_form_field_incompatible"
+    )
+    assert exc_info.value.log_context["field_names"] == "case_id"
+
+
+def test_inferred_primary_input_shadow_drop_emits_typed_diagnostic() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Audio summary",
+            "plan_rationale": "Transcribe the uploaded audio.",
+            "steps": [
+                {
+                    "name": "Summarize audio",
+                    "instructions": "Summarize the audio.",
+                }
+            ],
+        }
+    )
+    diagnostics = []
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            runtime_metadata_state="detailed_case_metadata",
+            runtime_input_field_hints=(
+                RuntimeInputFieldHint(
+                    "audio",
+                    "Audio",
+                    provenance="runtime_inferred",
+                ),
+            ),
+        ),
+        field_diagnostics=diagnostics,
+    )
+
+    assert compiled.form_fields is None
+    assert [(item.code, item.field_provenance) for item in diagnostics] == [
+        ("primary_input_shadow_form_field_dropped", "runtime_inferred")
+    ]
+
+
 def test_assembly_places_server_owned_runtime_field_hints() -> None:
     intent = parse_create_flow_intent_arguments(
         {

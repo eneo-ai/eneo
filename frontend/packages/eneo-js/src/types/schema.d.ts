@@ -12511,6 +12511,9 @@ export interface components {
       severity: "info" | "warning" | "error";
       /** Field */
       field?: string | null;
+      /** Field Provenance */
+      field_provenance?:
+        ("user_confirmed" | "template_derived" | "runtime_inferred" | "model_proposed") | null;
     };
     /**
      * EffectiveConfigPublic
@@ -14333,6 +14336,32 @@ export interface components {
      * @enum {string}
      */
     FlowFormFieldType: "text" | "multiselect" | "number" | "date" | "select";
+    /** FlowInputFieldIntent */
+    FlowInputFieldIntent: {
+      /** Name */
+      name: string;
+      /** Label */
+      label: string;
+      /**
+       * Type
+       * @default text
+       * @enum {string}
+       */
+      type?: "text" | "number" | "date" | "select" | "multiselect";
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Options */
+      options?: string[];
+      /**
+       * Provenance
+       * @default model_proposed
+       * @enum {string}
+       */
+      provenance?: "user_confirmed" | "template_derived" | "runtime_inferred" | "model_proposed";
+    };
     /**
      * FlowInputLimitsPublic
      * @example {
@@ -21211,6 +21240,11 @@ export interface components {
       message: string;
       /** @default warning */
       severity?: components["schemas"]["LintSeverity"];
+      /** Field Name */
+      field_name?: string | null;
+      /** Field Provenance */
+      field_provenance?:
+        ("user_confirmed" | "template_derived" | "runtime_inferred" | "model_proposed") | null;
     };
     /**
      * LocalResourceKind
@@ -25623,6 +25657,8 @@ export interface components {
       answer?: string | number | boolean | null;
       /** Custom Value */
       custom_value?: string | null;
+      /** Input Fields */
+      input_fields?: components["schemas"]["FlowInputFieldIntent"][] | null;
       /** Ui Language */
       ui_language?: string | null;
     };
@@ -25657,6 +25693,11 @@ export interface components {
        * @default false
        */
       requires_confirm?: boolean;
+      /**
+       * Input Field Collection
+       * @default false
+       */
+      input_field_collection?: boolean;
     };
     /**
      * SubscriptionRenewalResult

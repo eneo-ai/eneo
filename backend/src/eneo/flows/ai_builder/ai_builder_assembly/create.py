@@ -30,6 +30,10 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     derive_underlag_channel,
     planned_step_is_source_reader,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    FlowInputFieldProvenance,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     PreviousFieldRef,
     StructuredFieldDraft,
@@ -262,6 +266,8 @@ def try_compile_create_intent_with_assembly(
     runtime_max_files: int | None,
     ui_language: str | None,
     terminal_obligation_instructions: str | None = None,
+    field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
+    field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowDraftSpecCore | CreateAssemblyRejection:
     try:
         plan = _assemble_create_intent(
@@ -281,6 +287,8 @@ def try_compile_create_intent_with_assembly(
             runtime_max_files=runtime_max_files,
             ui_language=ui_language,
             terminal_obligation_instructions=terminal_obligation_instructions,
+            field_provenance=field_provenance,
+            field_diagnostics=field_diagnostics,
         )
         if isinstance(plan, CreateAssemblyRejection):
             return plan
@@ -307,6 +315,8 @@ def _assemble_create_intent(
     runtime_max_files: int | None,
     ui_language: str | None,
     terminal_obligation_instructions: str | None = None,
+    field_provenance: dict[str, FlowInputFieldProvenance] | None = None,
+    field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if not _architecture_hints_are_supported(
         runtime_input_type=runtime_input_type,
@@ -354,6 +364,8 @@ def _assemble_create_intent(
             runtime_max_files=runtime_max_files,
             aggregation_intent=aggregation_intent,
             ui_language=ui_language,
+            field_provenance=field_provenance,
+            field_diagnostics=field_diagnostics,
         )
     if _is_pure_audio_transcription_request(
         runtime_input_type=runtime_input_type,
@@ -591,6 +603,8 @@ def _assemble_create_intent(
         _drop_planned_source_contract_shadow_form_fields(
             planned_steps=completed_steps,
             form_fields=tuple(form_fields),
+            field_provenance=field_provenance or {},
+            field_diagnostics=field_diagnostics,
         )
     )
     return FlowAssemblyPlan(
@@ -994,6 +1008,8 @@ def _assemble_docx_template_fill(
     runtime_max_files: int | None,
     aggregation_intent: AggregationIntent,
     ui_language: str | None,
+    field_provenance: dict[str, FlowInputFieldProvenance] | None,
+    field_diagnostics: list[LintWarning] | None,
 ) -> FlowAssemblyPlan | CreateAssemblyRejection:
     if (
         runtime_input_type not in _FILE_INPUT_TYPES
@@ -1057,6 +1073,8 @@ def _assemble_docx_template_fill(
         _drop_planned_source_contract_shadow_form_fields(
             planned_steps=completed_steps,
             form_fields=tuple(form_fields),
+            field_provenance=field_provenance or {},
+            field_diagnostics=field_diagnostics,
         )
     )
     return FlowAssemblyPlan(
@@ -2087,6 +2105,8 @@ def _drop_planned_source_contract_shadow_form_fields(
     *,
     planned_steps: tuple[PlannedStep, ...],
     form_fields: tuple[FormFieldSpec, ...],
+    field_provenance: dict[str, FlowInputFieldProvenance],
+    field_diagnostics: list[LintWarning] | None,
 ) -> tuple[tuple[PlannedStep, ...], tuple[FormFieldSpec, ...]]:
     dropped_names = set(
         source_contract_shadow_form_field_names(
@@ -2100,6 +2120,35 @@ def _drop_planned_source_contract_shadow_form_fields(
     )
     if not dropped_names:
         return planned_steps, form_fields
+    confirmed_names = sorted(
+        name for name in dropped_names if field_provenance.get(name) == "user_confirmed"
+    )
+    if confirmed_names:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail=(
+                "Confirmed runtime fields conflict with fields extracted from the "
+                "source contract. Rename or remove the incompatible fields."
+            ),
+            log_context={
+                "failure_code": "confirmed_form_field_incompatible",
+                "field_names": ",".join(confirmed_names),
+            },
+        )
+    if field_diagnostics is not None:
+        for name in sorted(dropped_names):
+            provenance = field_provenance.get(name, "model_proposed")
+            field_diagnostics.append(
+                LintWarning(
+                    code="source_contract_shadow_form_field_dropped",
+                    message=(
+                        f"Runtime field '{name}' was removed because the source "
+                        "reader already produces that field."
+                    ),
+                    field_name=name,
+                    field_provenance=provenance,
+                )
+            )
     log_dropped_source_contract_shadow_fields(field_names=sorted(dropped_names))
     return (
         tuple(

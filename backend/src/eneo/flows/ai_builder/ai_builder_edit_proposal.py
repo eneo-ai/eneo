@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -74,7 +77,24 @@ async def process_edit_arguments(
         )
 
     try:
-        proposal = OrderedEditProposal.model_validate(arguments)
+        model_arguments = dict(arguments)
+        raw_form_fields = model_arguments.get("form_fields")
+        if isinstance(raw_form_fields, list):
+            normalized_form_fields: list[Any] = []
+            for field in cast(list[Any], raw_form_fields):
+                normalized_form_fields.append(
+                    {
+                        **cast(dict[str, Any], field),
+                        "provenance": "model_proposed",
+                    }
+                    if isinstance(field, dict)
+                    else field
+                )
+            model_arguments["form_fields"] = normalized_form_fields
+        proposal = _apply_server_owned_input_fields(
+            OrderedEditProposal.model_validate(model_arguments),
+            planning_state=planning_state,
+        )
     except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         return ToolProcessingResult(
@@ -102,6 +122,17 @@ async def process_edit_arguments(
         return ToolProcessingResult(
             feedback=_format_edit_compilation_request_error(exc),
             failure_kind="validation",
+        )
+    except AIBuilderArchitectureError as exc:
+        failure_code = exc.log_context.get("failure_code")
+        return ToolProcessingResult(
+            feedback=exc.detail,
+            failure_kind="validation",
+            failure_codes=(
+                frozenset({failure_code})
+                if isinstance(failure_code, str)
+                else frozenset()
+            ),
         )
     except AssistantSnapshotResourceUnavailableError as exc:
         logger.warning(
@@ -218,6 +249,30 @@ async def process_edit_arguments(
             ),
         ),
     )
+
+
+def _apply_server_owned_input_fields(
+    proposal: OrderedEditProposal,
+    *,
+    planning_state: PlanningState | None,
+) -> OrderedEditProposal:
+    if planning_state is None or not planning_state.input_fields:
+        return proposal
+    server_fields = {
+        field.variable_name: field for field in planning_state.input_fields
+    }
+    if proposal.form_fields is None or "form_fields" not in proposal.model_fields_set:
+        return proposal.model_copy(update={"form_fields": list(server_fields.values())})
+    projected_fields = [
+        server_fields.get(field.variable_name, field) for field in proposal.form_fields
+    ]
+    projected_names = {field.variable_name for field in projected_fields}
+    projected_fields.extend(
+        field
+        for field in planning_state.input_fields
+        if field.variable_name not in projected_names
+    )
+    return proposal.model_copy(update={"form_fields": projected_fields})
 
 
 def _requested_primary_runtime_input_type(

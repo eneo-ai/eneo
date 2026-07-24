@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     FlowBuilderProposalContent,
+    LintWarning,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
@@ -85,9 +86,11 @@ async def process_create_intent_arguments(
             ui_language=resolve_ui_language(conversation),
             runtime_input_hint_text=aggregate_text or None,
         )
+        field_diagnostics: list[LintWarning] = []
         spec = compile_create_intent_to_spec(
             intent,
             context=compile_context,
+            field_diagnostics=field_diagnostics,
         )
     except ProposalIntentArgumentError as error:
         logger.info(
@@ -133,6 +136,7 @@ async def process_create_intent_arguments(
         ),
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
+        field_diagnostics=field_diagnostics,
     )
 
 
@@ -149,6 +153,7 @@ async def _process_create_spec(
     aggregation_intent: AggregationIntent = "linear",
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
+    field_diagnostics: list[LintWarning] | None = None,
 ) -> ToolProcessingResult:
     prepared = prepare_compiled_spec_for_session(
         spec=spec,
@@ -214,6 +219,7 @@ async def _process_create_spec(
             content=FlowBuilderProposalContent(
                 spec=spec,
                 assumptions=intent.assumptions,
+                lint_warnings=field_diagnostics or [],
                 plan_rationale=intent.plan_rationale,
             ),
             validation=validation,

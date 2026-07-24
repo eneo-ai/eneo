@@ -20,6 +20,9 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    FlowInputFieldProvenance,
+)
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -78,6 +81,8 @@ class LintWarning(BaseModel):
     code: str
     message: str
     severity: LintSeverity = LintSeverity.WARNING
+    field_name: str | None = None
+    field_provenance: FlowInputFieldProvenance | None = None
 
 
 def _new_message_id() -> str:

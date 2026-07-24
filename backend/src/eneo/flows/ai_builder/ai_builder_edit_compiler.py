@@ -11,6 +11,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, cast
 
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
 from eneo.flows.ai_builder.ai_builder_authoring_projection import (
     MaterializedAddStep,
     MaterializedOrderedEditProposal,
@@ -27,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     MetadataChange,
     StepChange,
 )
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
@@ -75,6 +79,7 @@ class _PreparedOrderedEditProposal:
     proposal: MaterializedOrderedEditProposal
     warnings: list[str]
     shadowed_primary_input_fields: list[str]
+    form_field_provenance: dict[str, FlowInputFieldProvenance]
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +199,7 @@ def compile_edit_proposal(
         _build_primary_input_shadow_advisories(
             field_names=prepared.shadowed_primary_input_fields,
             primary_runtime_input_type=primary_runtime_input_type,
+            field_provenance=prepared.form_field_provenance,
         )
     )
 
@@ -278,6 +284,7 @@ def _prepare_ordered_edit_proposal(
             *dropped_step_field_names,
             *dropped_declared_field_names,
         ],
+        form_field_provenance=prepared.form_field_provenance,
     )
 
 
@@ -340,6 +347,18 @@ def _sanitize_shadowed_form_fields(
             field_type=field.type,
             runtime_input_type=primary_runtime_input_type,
         ):
+            if proposal.form_field_provenance.get(field.name) == "user_confirmed":
+                raise AIBuilderArchitectureError(
+                    public_code="architecture_materialization_failed",
+                    detail=(
+                        f"Confirmed runtime field '{field.name}' duplicates the "
+                        "flow's primary runtime input."
+                    ),
+                    log_context={
+                        "failure_code": "confirmed_form_field_incompatible",
+                        "field_names": field.name,
+                    },
+                )
             dropped_field_names.append(field.name)
             continue
         kept_fields.append(field)
@@ -708,6 +727,7 @@ def _build_primary_input_shadow_advisories(
     *,
     field_names: list[str],
     primary_runtime_input_type: InputType | None,
+    field_provenance: dict[str, FlowInputFieldProvenance],
 ) -> list[EditAdvisory]:
     unique_names = sorted(set(field_names))
     if not unique_names or primary_runtime_input_type is None:
@@ -723,6 +743,11 @@ def _build_primary_input_shadow_advisories(
             ),
             severity="info",
             field="form_fields",
+            field_provenance=(
+                field_provenance.get(unique_names[0], "model_proposed")
+                if len(unique_names) == 1
+                else None
+            ),
         )
     ]
 

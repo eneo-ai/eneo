@@ -21,6 +21,8 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     try_compile_create_intent_with_assembly,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
+from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -102,6 +104,7 @@ def compile_create_intent_to_spec(
     intent: CreateFlowIntent,
     *,
     context: CreateCompileContext | None = None,
+    field_diagnostics: list[LintWarning] | None = None,
 ) -> FlowDraftSpecCore:
     runtime_input_type = (
         context.runtime_input_type
@@ -121,6 +124,7 @@ def compile_create_intent_to_spec(
         intent_fields=intent.input_fields,
         context=context,
         runtime_input_type=runtime_input_type,
+        field_diagnostics=field_diagnostics,
     )
     intent_with_admitted_form_refs = _intent_without_form_field_refs(
         intent,
@@ -168,6 +172,22 @@ def compile_create_intent_to_spec(
         translated_capture_fields,
         ui_language=context.ui_language if context is not None else None,
     )
+    field_provenance: dict[str, FlowInputFieldProvenance] = {
+        field.variable_name: field.provenance for field in intent.input_fields
+    }
+    field_provenance.update(
+        {
+            hint.variable_name: hint.provenance
+            for hint in (
+                *(context.runtime_input_field_hints if context is not None else ()),
+                *(
+                    context.template_placeholder_field_hints
+                    if context is not None
+                    else ()
+                ),
+            )
+        }
+    )
     assembly_spec = try_compile_create_intent_with_assembly(
         intent_with_server_owned_field_placement,
         runtime_input_type=runtime_input_type,
@@ -187,6 +207,8 @@ def compile_create_intent_to_spec(
         runtime_max_files=context.runtime_max_files if context is not None else None,
         ui_language=context.ui_language if context is not None else None,
         terminal_obligation_instructions=terminal_obligation_instructions,
+        field_provenance=field_provenance,
+        field_diagnostics=field_diagnostics,
     )
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(
@@ -309,7 +331,9 @@ def create_compile_context_from_planning_state(
             planning_state
         )
     )
-    runtime_input_field_hints = _runtime_input_field_hints_from_source(
+    runtime_input_field_hints = _runtime_input_field_hints_from_planning_state(
+        planning_state
+    ) or _runtime_input_field_hints_from_source(
         runtime_metadata_state=runtime_metadata_state,
         runtime_input_hint_text=runtime_input_hint_text,
     )
@@ -534,6 +558,24 @@ def _runtime_input_field_hints_from_source(
     return extract_runtime_input_field_hints(source_text)
 
 
+def _runtime_input_field_hints_from_planning_state(
+    planning_state: PlanningState | None,
+) -> tuple[RuntimeInputFieldHint, ...]:
+    if planning_state is None:
+        return ()
+    return tuple(
+        RuntimeInputFieldHint(
+            variable_name=field.variable_name,
+            label=field.label,
+            field_type=field.field_type,
+            required=field.required,
+            options=tuple(field.options),
+            provenance=field.provenance,
+        )
+        for field in planning_state.input_fields
+    )
+
+
 def _template_placeholder_field_hints_from_planning_state(
     planning_state: PlanningState | None,
 ) -> tuple[RuntimeInputFieldHint, ...]:
@@ -565,6 +607,7 @@ def _template_placeholder_field_hints_from_planning_state(
                 required=(
                     raw_placeholder in required_names or field_name in required_names
                 ),
+                provenance="template_derived",
             )
         )
         seen.add(field_name)
@@ -746,6 +789,7 @@ def _compile_form_fields(
     intent_fields: list[FlowInputFieldIntent],
     context: CreateCompileContext | None,
     runtime_input_type: InputType | None,
+    field_diagnostics: list[LintWarning] | None,
 ) -> tuple[list[FormFieldSpec], list[str], set[str]]:
     runtime_metadata_state = (
         context.runtime_metadata_state if context is not None else None
@@ -783,6 +827,11 @@ def _compile_form_fields(
         }
         runtime_input_field_hints = ()
         if metadata_disables_declared_input_fields:
+            _reject_or_diagnose_field_drops(
+                fields=intent_fields,
+                code="runtime_metadata_form_field_dropped",
+                field_diagnostics=field_diagnostics,
+            )
             active_intent_fields = []
             dropped_form_field_ref_names.update(dropped_ref_names)
 
@@ -798,6 +847,11 @@ def _compile_form_fields(
             and field.variable_name not in metadata_hint_names
             and field.variable_name not in template_hint_names
         ):
+            _reject_or_diagnose_field_drops(
+                fields=[field],
+                code="unconfirmed_runtime_form_field_dropped",
+                field_diagnostics=field_diagnostics,
+            )
             dropped_form_field_ref_names.add(field.variable_name)
             continue
         if is_primary_runtime_input_shadow_field(
@@ -805,6 +859,11 @@ def _compile_form_fields(
             field_type=field.field_type,
             runtime_input_type=runtime_input_type,
         ):
+            _reject_or_diagnose_field_drops(
+                fields=[field],
+                code="primary_input_shadow_form_field_dropped",
+                field_diagnostics=field_diagnostics,
+            )
             dropped_primary_input_field_names.append(field.variable_name)
             dropped_form_field_ref_names.add(field.variable_name)
             continue
@@ -817,6 +876,11 @@ def _compile_form_fields(
             field_type=hint.field_type,
             runtime_input_type=runtime_input_type,
         ):
+            _reject_or_diagnose_field_drops(
+                fields=[hint],
+                code="primary_input_shadow_form_field_dropped",
+                field_diagnostics=field_diagnostics,
+            )
             dropped_primary_input_field_names.append(hint.variable_name)
             dropped_form_field_ref_names.add(hint.variable_name)
             continue
@@ -833,6 +897,40 @@ def _compile_form_fields(
         )
         seen.add(hint.variable_name)
     return fields, dropped_primary_input_field_names, dropped_form_field_ref_names
+
+
+def _reject_or_diagnose_field_drops(
+    *,
+    fields: list[FlowInputFieldIntent] | list[RuntimeInputFieldHint],
+    code: str,
+    field_diagnostics: list[LintWarning] | None,
+) -> None:
+    confirmed_names = sorted(
+        field.variable_name for field in fields if field.provenance == "user_confirmed"
+    )
+    if confirmed_names:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail="Confirmed runtime fields are incompatible with the selected input contract.",
+            log_context={
+                "failure_code": "confirmed_form_field_incompatible",
+                "field_names": ",".join(confirmed_names),
+            },
+        )
+    if field_diagnostics is None:
+        return
+    for field in fields:
+        field_diagnostics.append(
+            LintWarning(
+                code=code,
+                message=(
+                    f"Runtime field '{field.variable_name}' was removed during "
+                    "form-field normalization."
+                ),
+                field_name=field.variable_name,
+                field_provenance=field.provenance,
+            )
+        )
 
 
 def _server_owned_runtime_field_names(

@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Final
 
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
@@ -125,6 +128,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.question_catalog import (
+    runtime_metadata_field_details_question,
+)
 from eneo.flows.domain.flow import Flow
 
 DiscoveryIssueBuilder = Callable[
@@ -654,6 +660,20 @@ def build_discovery_followup(
     analysis: DiscoveryAnalysis | None = None,
 ) -> BackendQuestion | None:
     profile = _build_discovery_profile(conversation, flow=flow)
+    if _runtime_metadata_field_details_required(conversation):
+        question = runtime_metadata_field_details_question(profile.language)
+        return BackendQuestion(
+            question_data=StructuredQuestionPayload(
+                question_id="runtime_metadata_field_details",
+                question=question,
+                options=[],
+                selection_mode="multi",
+                allow_custom=False,
+                requires_confirm=True,
+                input_field_collection=True,
+            ),
+            assistant_text=question,
+        )
     analysis = analysis or analyze_discovery(conversation, flow=flow)
     pending_question_id = _latest_pending_question_id(conversation)
     if pending_question_id is not None and not question_is_already_resolved(
@@ -700,6 +720,29 @@ def build_discovery_followup(
         question_data=_structured_question_payload_from_suggestion(suggestion),
         assistant_text=build_discovery_followup_text(issue, profile.language),
     )
+
+
+def _runtime_metadata_field_details_required(
+    conversation: list[ConversationMessage],
+) -> bool:
+    metadata_selected = False
+    details_provided = False
+    for message in conversation:
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is None:
+            continue
+        if answer.question_id == "runtime_metadata_fields":
+            values = {
+                value
+                for value in answer.selected_values or []
+                if isinstance(value, str)
+            }
+            metadata_selected = bool(
+                values & {"basic_case_metadata", "detailed_case_metadata"}
+            )
+        elif answer.question_id == "runtime_metadata_field_details":
+            details_provided = bool(answer.input_fields)
+    return metadata_selected and not details_provided
 
 
 def build_registry_question_followup(

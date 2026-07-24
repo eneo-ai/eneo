@@ -15,6 +15,7 @@ from pydantic import (
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     BuilderFormFieldType,
+    FlowInputFieldProvenance,
     builder_form_field_type_values,
     builder_output_type_values,
 )
@@ -42,7 +43,6 @@ from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_authoring_spec import (
-    FormFieldSpec,
     InputSource,
     InputType,
     OutputType,
@@ -78,13 +78,19 @@ _CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
 
 
 class FlowInputFieldIntent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    variable_name: str
+    variable_name: str = Field(
+        alias="name",
+    )
     label: str
-    field_type: BuilderFormFieldType = "text"
+    field_type: BuilderFormFieldType = Field(
+        default="text",
+        alias="type",
+    )
     required: bool = False
     options: list[str] = Field(default_factory=list)
+    provenance: FlowInputFieldProvenance = "model_proposed"
 
     @field_validator("variable_name", "label")
     @classmethod
@@ -224,7 +230,7 @@ class OrderedEditProposal(BaseModel):
     flow_description: str | None = None
     steps: list[OrderedEditStep]
     removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
-    form_fields: list[FormFieldSpec] | None = None
+    form_fields: list[FlowInputFieldIntent] | None = None
 
     @field_validator("plan_rationale")
     @classmethod
@@ -369,6 +375,16 @@ def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, A
         normalized["steps"] = [
             _strip_backend_owned_semantic_step_keys(raw_step)
             for raw_step in cast(list[Any], raw_steps)
+        ]
+    raw_input_fields = normalized.get("input_fields")
+    if isinstance(raw_input_fields, list):
+        normalized["input_fields"] = [
+            (
+                {**field, "provenance": "model_proposed"}
+                if isinstance(field, dict)
+                else field
+            )
+            for field in cast(list[Any], raw_input_fields)
         ]
     return normalized
 

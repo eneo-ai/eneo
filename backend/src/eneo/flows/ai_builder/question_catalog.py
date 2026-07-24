@@ -41,6 +41,18 @@ Locale = Literal["sv", "en"]
 QuestionExposure = Literal["user_requirement", "planner_internal"]
 
 
+def runtime_metadata_field_details_question(locale: Locale) -> str:
+    if locale == "sv":
+        return (
+            "Vilka metadatafält ska användaren fylla i? Ange etikett/namn, typ, "
+            "om fältet är obligatoriskt och val för listfält."
+        )
+    return (
+        "Which metadata fields should the user fill in? Provide the label/name, "
+        "type, requiredness, and options for select fields."
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class QuestionOption:
     """Single selectable option on a `QuestionTemplate`.

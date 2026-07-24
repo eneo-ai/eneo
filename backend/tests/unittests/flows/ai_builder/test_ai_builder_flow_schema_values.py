@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import get_args
+
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    FlowInputFieldProvenance,
     builder_input_source_values,
     builder_input_type_values,
     builder_output_mode_values,
@@ -39,6 +42,15 @@ def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> Non
     assert set(builder_input_type_values()) == exposed_input_types
     assert builder_output_type_values() == [item.value for item in FlowOutputType]
     assert builder_output_mode_values() == [item.value for item in AIBuilderOutputMode]
+
+
+def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> None:
+    assert get_args(FlowInputFieldProvenance) == (
+        "user_confirmed",
+        "template_derived",
+        "runtime_inferred",
+        "model_proposed",
+    )
 
 
 def test_builder_runtime_input_modes_are_covered_by_schema_input_types() -> None:
