@@ -578,3 +578,16 @@ class TestContainerMutationDiscipline:
         state.signals.append("not a signal")  # type: ignore[arg-type]
         with pytest.raises(ValidationError):
             state.validated_snapshot()
+
+
+def test_fcm_version_has_one_home() -> None:
+    """The planner stamps the capability manifest's version, not a copy of it.
+
+    A second constant drifted to 1 while the manifest reached 8, so a fresh
+    session and a built one stamped different versions of the same field.
+    """
+    from eneo.flows.ai_builder import planning_state as planning_state_module
+    from eneo.flows.flow_capability_manifest import FCM_VERSION as CANONICAL
+
+    assert planning_state_module.FCM_VERSION is CANONICAL
+    assert PlanningState.empty().fcm_version == CANONICAL

@@ -43,9 +43,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.enums import AIBuilderInputType
+from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
-FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
 BUILDER_SCHEMA_VERSION: int = 6
 PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
