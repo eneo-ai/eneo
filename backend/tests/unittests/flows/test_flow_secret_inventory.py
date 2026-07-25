@@ -16,6 +16,7 @@ from eneo.flows.infrastructure.flow_secret_inventory import (
     FlowSecretConfigLocation,
     FlowSecretConfigSource,
     PersistedFlowConfig,
+    draft_step_configs,
     inventory_persisted_flow_secrets,
     published_version_configs,
 )
@@ -272,3 +273,72 @@ def test_published_version_with_a_non_object_step_is_unreadable() -> None:
     )
 
     assert inventory.unreadable_count == 1
+
+
+def test_published_step_config_that_is_not_an_object_is_unreadable() -> None:
+    inventory = inventory_persisted_flow_secrets(
+        _version_configs(
+            {"steps": [{"step_order": 1, "input_config": "not-an-object"}]}
+        ),
+        _FakeEncryption(),
+    )
+
+    assert not inventory.is_clean
+    assert inventory.unreadable_count == 1
+    assert inventory.unreadable[0].config_field == "input_config"
+
+
+def test_definition_that_is_not_an_object_is_an_unreadable_version() -> None:
+    """A corrupted JSONB row must produce a finding, not crash the scan."""
+    for definition in (["not", "an", "object"], "scalar", None):
+        inventory = inventory_persisted_flow_secrets(
+            list(
+                published_version_configs(
+                    tenant_id=TENANT_ID,
+                    flow_id=FLOW_ID,
+                    version=2,
+                    definition_json=definition,
+                )
+            ),
+            _FakeEncryption(),
+        )
+
+        assert inventory.unreadable_count == 1
+        assert inventory.unreadable[0].flow_version == 2
+
+
+# --- draft_step_configs ---
+
+
+def test_draft_config_that_is_not_an_object_is_unreadable() -> None:
+    inventory = inventory_persisted_flow_secrets(
+        draft_step_configs(
+            tenant_id=TENANT_ID,
+            flow_id=FLOW_ID,
+            step_order=4,
+            input_config="not-an-object",
+            output_config=None,
+        ),
+        _FakeEncryption(),
+    )
+
+    assert not inventory.is_clean
+    assert inventory.unreadable_count == 1
+    assert inventory.unreadable[0].config_field == "input_config"
+    assert inventory.unreadable[0].step_order == 4
+
+
+def test_absent_draft_configs_stay_clean() -> None:
+    inventory = inventory_persisted_flow_secrets(
+        draft_step_configs(
+            tenant_id=TENANT_ID,
+            flow_id=FLOW_ID,
+            step_order=1,
+            input_config=None,
+            output_config=None,
+        ),
+        _FakeEncryption(),
+    )
+
+    assert inventory.is_clean
+    assert inventory.scanned_configs == 2

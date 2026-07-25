@@ -118,7 +118,7 @@ def unprotected_stored_secret_fields(
             encryption_service.decrypt(value)
         except ValueError:
             # Prefixed but undecryptable: a typed literal, a corrupted token, or
-            # a token from a different key. None of them is a protected secret.
+            # a token from a different key. None can be proved protected.
             return True
         return False
 

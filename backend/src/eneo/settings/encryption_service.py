@@ -159,7 +159,11 @@ class EncryptionService:
             decrypted_bytes = self._fernet.decrypt(token.encode())
             return decrypted_bytes.decode()
         except InvalidToken as e:
-            logger.error(f"Decryption failed: {e}")
+            # Logged at debug because the raised error carries the same fact and
+            # every caller already logs it with the context that makes it
+            # actionable. A caller that verifies many stored credentials at once
+            # would otherwise emit one error record per invalid value.
+            logger.debug(f"Decryption failed: {e}")
             raise ValueError("Decryption failed: invalid token or wrong encryption key")
 
     def is_encrypted(self, value: str) -> bool:

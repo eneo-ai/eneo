@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, cast
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -161,8 +161,24 @@ def inventory_persisted_flow_secrets(
     return accumulator.result()
 
 
-def _config_payload(value: object) -> Mapping[str, object] | None:
-    return cast(Mapping[str, object], value) if isinstance(value, dict) else None
+def _config_item(
+    location: FlowSecretConfigLocation,
+    value: object,
+) -> PersistedFlowConfig:
+    """Classify one stored config value: absent, readable, or malformed.
+
+    An absent config and a config that is not a JSON object are different
+    facts. Collapsing the second into the first would report a column holding
+    a string or an array as clean, when nothing at all can be said about it.
+    """
+    if value is None:
+        return PersistedFlowConfig(location=location)
+    if isinstance(value, dict):
+        return PersistedFlowConfig(
+            location=location,
+            config=cast(Mapping[str, object], value),
+        )
+    return PersistedFlowConfig(location=location, envelope_unreadable=True)
 
 
 def _published_step_order(step: Mapping[str, object]) -> int | None:
@@ -172,27 +188,32 @@ def _published_step_order(step: Mapping[str, object]) -> int | None:
     return None
 
 
-def _draft_step_configs(
+def draft_step_configs(
     *,
     tenant_id: UUID,
     flow_id: UUID,
     step_order: int,
-    input_config: dict[str, Any] | None,
-    output_config: dict[str, Any] | None,
+    input_config: object,
+    output_config: object,
 ) -> Iterable[PersistedFlowConfig]:
+    """Yield both config columns of one draft step.
+
+    The columns are typed as JSON objects, but a historical or hand-edited row
+    can hold any JSON value, so the payloads are classified rather than trusted.
+    """
     for config_field, config in (
         ("input_config", input_config),
         ("output_config", output_config),
     ):
-        yield PersistedFlowConfig(
-            location=FlowSecretConfigLocation(
+        yield _config_item(
+            FlowSecretConfigLocation(
                 source=FlowSecretConfigSource.DRAFT_STEP,
                 tenant_id=tenant_id,
                 flow_id=flow_id,
                 config_field=config_field,
                 step_order=step_order,
             ),
-            config=_config_payload(config),
+            config,
         )
 
 
@@ -201,14 +222,14 @@ def published_version_configs(
     tenant_id: UUID,
     flow_id: UUID,
     version: int,
-    definition_json: Mapping[str, object],
+    definition_json: object,
 ) -> Iterable[PersistedFlowConfig]:
     """Yield the step configs inside one published definition.
 
-    A definition whose step list or step entries are not the shape this snapshot
-    format guarantees is reported as an unreadable version rather than skipped:
-    an unreadable envelope can still hold credential material, and skipping it
-    would report the version clean.
+    A definition whose envelope, step list or step entries are not the shape
+    this snapshot format guarantees is reported as an unreadable version rather
+    than skipped: an unreadable envelope can still hold credential material,
+    and skipping it would report the version clean.
     """
     version_location = FlowSecretConfigLocation(
         source=FlowSecretConfigSource.PUBLISHED_VERSION,
@@ -216,7 +237,11 @@ def published_version_configs(
         flow_id=flow_id,
         flow_version=version,
     )
-    raw_steps = definition_json.get("steps")
+    if not isinstance(definition_json, dict):
+        yield PersistedFlowConfig(location=version_location, envelope_unreadable=True)
+        return
+
+    raw_steps = cast(Mapping[str, object], definition_json).get("steps")
     if not isinstance(raw_steps, list):
         yield PersistedFlowConfig(location=version_location, envelope_unreadable=True)
         return
@@ -230,8 +255,8 @@ def published_version_configs(
             continue
         step = cast(Mapping[str, object], raw_step)
         for config_field in ("input_config", "output_config"):
-            yield PersistedFlowConfig(
-                location=FlowSecretConfigLocation(
+            yield _config_item(
+                FlowSecretConfigLocation(
                     source=FlowSecretConfigSource.PUBLISHED_VERSION,
                     tenant_id=tenant_id,
                     flow_id=flow_id,
@@ -239,7 +264,7 @@ def published_version_configs(
                     step_order=_published_step_order(step),
                     flow_version=version,
                 ),
-                config=_config_payload(step.get(config_field)),
+                step.get(config_field),
             )
 
 
@@ -272,7 +297,7 @@ async def stream_persisted_flow_configs(
         input_config,
         output_config,
     ) in step_result.tuples():
-        for item in _draft_step_configs(
+        for item in draft_step_configs(
             tenant_id=tenant_id,
             flow_id=flow_id,
             step_order=step_order,
