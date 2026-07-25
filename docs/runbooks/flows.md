@@ -79,12 +79,15 @@ non-zero when it finds anything. It never rewrites, re-encrypts, or deletes a
 row: what to do about a reported row is an operator decision.
 
 Two findings are possible. `UNPROTECTED` names the credential fields; the value
-is never printed. `UNREADABLE` means the config declares the authored HTTP
-shape but no longer parses, so nothing can be said about the credentials in it.
+is never printed. It covers a plaintext value, a stored sentinel, and a value
+that carries the encryption prefix but does not decrypt — a typed literal, a
+corrupted token, or a token from a different key are all equally unprovable.
+`UNREADABLE` means the stored config or published definition no longer has the
+shape it guarantees, so nothing can be said about the credentials in it.
 
-Confirm `ENCRYPTION_KEY` is configured first — without an active key every
-stored credential is reported, because none of them can be recognized as
-protected. Then re-enter the credentials on the reported draft steps and publish
+Confirm `ENCRYPTION_KEY` is configured first — without an active key nothing can
+be proved protected, so every stored credential is reported. Then re-enter the
+credentials on the reported draft steps and publish
 a new version. Published versions are immutable: an affected version has to be
 retired rather than edited, and the credential it carried must be rotated at the
 destination, because it was readable in the snapshot.
