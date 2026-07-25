@@ -606,3 +606,36 @@ def test_step_output_mode_literal_matches_the_authoring_enum() -> None:
 
     assert set(get_args(StepOutputMode)) == {mode.value for mode in AIBuilderOutputMode}
     assert "http_post" not in get_args(StepOutputMode)
+
+
+def test_payload_cap_admits_a_state_within_the_limit() -> None:
+    from eneo.flows.ai_builder.planning_state import (
+        enforce_planning_state_payload_cap,
+    )
+
+    payload = {"fcm_version": 8, "notes": "x" * 1000}
+
+    assert enforce_planning_state_payload_cap(payload) is payload
+
+
+def test_payload_cap_refuses_an_oversized_state_before_it_is_persisted() -> None:
+    """A declared cap that nothing enforces is not a cap.
+
+    Persisting an oversized state would produce a session that cannot be
+    loaded again, so the write is refused and the last good state survives.
+    """
+    import pytest
+
+    from eneo.flows.ai_builder.planning_state import (
+        PLANNING_STATE_PAYLOAD_CAP_BYTES,
+        PlanningStatePayloadTooLargeError,
+        enforce_planning_state_payload_cap,
+    )
+
+    oversized = {"blob": "x" * (PLANNING_STATE_PAYLOAD_CAP_BYTES + 1)}
+
+    with pytest.raises(PlanningStatePayloadTooLargeError) as excinfo:
+        enforce_planning_state_payload_cap(oversized)
+
+    assert excinfo.value.cap_bytes == PLANNING_STATE_PAYLOAD_CAP_BYTES
+    assert excinfo.value.byte_size > PLANNING_STATE_PAYLOAD_CAP_BYTES

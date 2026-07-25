@@ -33,6 +33,7 @@ before writing.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Literal, assert_never
@@ -115,6 +116,37 @@ StepOutputMode = Literal[
     "render_verbatim",
 ]
 AggregationIntent = Literal["linear", "aggregate", "compare"]
+
+
+class PlanningStatePayloadTooLargeError(ValueError):
+    """The serialized planning state exceeds the persisted payload cap."""
+
+    def __init__(self, *, byte_size: int, cap_bytes: int) -> None:
+        super().__init__(
+            f"Planning state payload is {byte_size} bytes, over the "
+            f"{cap_bytes}-byte cap."
+        )
+        self.byte_size = byte_size
+        self.cap_bytes = cap_bytes
+
+
+def enforce_planning_state_payload_cap(payload: JsonObject) -> JsonObject:
+    """Refuse to persist a planning state larger than the cap.
+
+    Checked on the serialized form, since that is what the column stores. The
+    turn is not resumable from an oversized state: persisting it would either
+    be rejected by the database or produce a session that cannot be loaded
+    again, so failing here keeps the last good state intact.
+    """
+    byte_size = len(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    if byte_size > PLANNING_STATE_PAYLOAD_CAP_BYTES:
+        raise PlanningStatePayloadTooLargeError(
+            byte_size=byte_size,
+            cap_bytes=PLANNING_STATE_PAYLOAD_CAP_BYTES,
+        )
+    return payload
 
 
 class _PlanningModel(BaseModel):

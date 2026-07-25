@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    enforce_planning_state_payload_cap,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -2058,5 +2059,7 @@ def _planning_state_for_storage(state: PlanningState) -> dict[str, object]:
     """
     snapshot = state.validated_snapshot()
     return {
-        "planning_state_jsonb": snapshot.model_dump(mode="json"),
+        "planning_state_jsonb": enforce_planning_state_payload_cap(
+            snapshot.model_dump(mode="json")
+        ),
     }
