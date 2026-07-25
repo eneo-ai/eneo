@@ -40,6 +40,9 @@ class _FakeEncryptionService:
     def is_encrypted(self, value: str) -> bool:
         return value.startswith("enc:")
 
+    def can_decrypt(self, value: str) -> bool:
+        return value.startswith("enc:")
+
     def encrypt(self, plaintext: str) -> str:
         return f"enc:{plaintext}"
 
@@ -55,6 +58,9 @@ class _InactiveEncryptionService:
 
     def is_encrypted(self, value: str) -> bool:
         return value.startswith("enc:")
+
+    def can_decrypt(self, value: str) -> bool:
+        return False  # No key: nothing can be authenticated.
 
     def encrypt(self, plaintext: str) -> str:
         raise AssertionError("should not be called")
@@ -2990,8 +2996,8 @@ async def test_publish_flow_rejects_stored_secret_the_key_cannot_decrypt(user):
     """A row written before encryption can hold a typed prefix-shaped literal."""
 
     class _RejectingEncryptionService(_FakeEncryptionService):
-        def decrypt(self, ciphertext: str) -> str:
-            raise ValueError("Decryption failed: invalid token or wrong key")
+        def can_decrypt(self, value: str) -> bool:
+            return False
 
     stored = _published_flow_for_update(
         user, [_http_step_with_token("enc:not-really-ciphertext")]

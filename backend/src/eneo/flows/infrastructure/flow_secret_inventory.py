@@ -102,6 +102,11 @@ class _InventoryAccumulator:
 
     def add(self, item: PersistedFlowConfig) -> None:
         if item.envelope_unreadable:
+            # A malformed config column was still inspected, so it counts
+            # towards coverage. A malformed version envelope is not a step
+            # config slot and does not.
+            if item.location.config_field is not None:
+                self._scanned += 1
             self._record_unreadable(item.location)
             return
 

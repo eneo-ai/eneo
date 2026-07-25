@@ -39,6 +39,13 @@ class _FakeEncryption:
     def is_encrypted(self, value: str) -> bool:
         return value.startswith(self.prefix)
 
+    def can_decrypt(self, value: str) -> bool:
+        return (
+            self.active
+            and value.startswith(self.prefix)
+            and value not in self.undecryptable
+        )
+
     def encrypt(self, plaintext: str) -> str:
         return f"{self.prefix}{plaintext}"
 
@@ -286,6 +293,8 @@ def test_published_step_config_that_is_not_an_object_is_unreadable() -> None:
     assert not inventory.is_clean
     assert inventory.unreadable_count == 1
     assert inventory.unreadable[0].config_field == "input_config"
+    # Both published step config slots were inspected.
+    assert inventory.scanned_configs == 2
 
 
 def test_definition_that_is_not_an_object_is_an_unreadable_version() -> None:
@@ -326,6 +335,8 @@ def test_draft_config_that_is_not_an_object_is_unreadable() -> None:
     assert inventory.unreadable_count == 1
     assert inventory.unreadable[0].config_field == "input_config"
     assert inventory.unreadable[0].step_order == 4
+    # A malformed column was still inspected; coverage must say so.
+    assert inventory.scanned_configs == 2
 
 
 def test_absent_draft_configs_stay_clean() -> None:

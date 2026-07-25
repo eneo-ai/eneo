@@ -328,6 +328,9 @@ class _TestEncryptionService:
     def is_encrypted(self, value: str) -> bool:
         return value.startswith(self._PREFIX)
 
+    def can_decrypt(self, value: str) -> bool:
+        return value.startswith(self._PREFIX)
+
     def decrypt(self, ciphertext: str) -> str:
         if not ciphertext.startswith(self._PREFIX):
             return ciphertext

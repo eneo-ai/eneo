@@ -155,20 +155,43 @@ class EncryptionService:
                 "Set ENCRYPTION_KEY environment variable."
             )
 
-        try:
-            decrypted_bytes = self._fernet.decrypt(token.encode())
-            return decrypted_bytes.decode()
-        except InvalidToken as e:
-            # Logged at debug because the raised error carries the same fact and
-            # every caller already logs it with the context that makes it
-            # actionable. A caller that verifies many stored credentials at once
-            # would otherwise emit one error record per invalid value.
-            logger.debug(f"Decryption failed: {e}")
+        plaintext = self._authenticated_plaintext(token)
+        if plaintext is None:
+            logger.error("Decryption failed: invalid token or wrong encryption key")
             raise ValueError("Decryption failed: invalid token or wrong encryption key")
+        return plaintext
 
     def is_encrypted(self, value: str) -> bool:
         """Check if value is encrypted with versioned format."""
         return value.startswith(self.VERSION_PREFIX) if value else False
+
+    def can_decrypt(self, value: str) -> bool:
+        """Whether the active key authenticates this value as its own ciphertext.
+
+        Verification without side effects: unlike `decrypt` this neither logs
+        nor raises, so a caller checking a whole estate of stored credentials
+        produces no diagnostic record per invalid value. `decrypt` keeps its
+        logging, because callers that mask a credential swallow its failure and
+        that log is their only visibility.
+        """
+        if not value or not self.is_encrypted(value):
+            return False
+        parts = value.split(":", 3)
+        if len(parts) != 4:
+            return False
+        _scheme, algorithm, version, token = parts
+        if algorithm != "fernet" or version != "v1":
+            return False
+        return self._authenticated_plaintext(token) is not None
+
+    def _authenticated_plaintext(self, token: str) -> str | None:
+        """Decrypt one Fernet token, or None when it does not authenticate."""
+        if not self._fernet:
+            return None
+        try:
+            return self._fernet.decrypt(token.encode()).decode()
+        except InvalidToken:
+            return None
 
     @staticmethod
     def mask_secret(secret: str, visible_chars: int = 4) -> str:

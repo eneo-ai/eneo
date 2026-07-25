@@ -21,6 +21,7 @@ from eneo.flows.http_transport.normalizer import is_authored_config
 class SupportsEncryption(Protocol):
     def is_active(self) -> bool: ...
     def is_encrypted(self, value: str) -> bool: ...
+    def can_decrypt(self, value: str) -> bool: ...
     def encrypt(self, plaintext: str) -> str: ...
     def decrypt(self, ciphertext: str) -> str: ...
 
@@ -112,15 +113,9 @@ def unprotected_stored_secret_fields(
             return False
         if encryption_service is None or not encryption_service.is_active():
             return True
-        if not encryption_service.is_encrypted(value):
-            return True
-        try:
-            encryption_service.decrypt(value)
-        except ValueError:
-            # Prefixed but undecryptable: a typed literal, a corrupted token, or
-            # a token from a different key. None can be proved protected.
-            return True
-        return False
+        # Prefixed but unauthenticated means a typed literal, a corrupted token,
+        # or a token from a different key. None can be proved protected.
+        return not encryption_service.can_decrypt(value)
 
     return tuple(
         path

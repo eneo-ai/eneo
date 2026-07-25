@@ -38,6 +38,9 @@ class _FakeEncryption:
     def is_encrypted(self, value: str) -> bool:
         return value.startswith(self.prefix)
 
+    def can_decrypt(self, value: str) -> bool:
+        return value.startswith(self.prefix)
+
     def encrypt(self, plaintext: str) -> str:
         return f"{self.prefix}{plaintext}"
 
@@ -55,6 +58,9 @@ class _InactiveEncryption:
         return False
 
     def is_encrypted(self, value: str) -> bool:
+        return value.startswith(self.prefix)
+
+    def can_decrypt(self, value: str) -> bool:
         return value.startswith(self.prefix)
 
     def encrypt(self, plaintext: str) -> str:
