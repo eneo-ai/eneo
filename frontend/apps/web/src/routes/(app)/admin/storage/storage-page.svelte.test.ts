@@ -1,4 +1,5 @@
 import { page } from "@vitest/browser/context";
+import { EneoError } from "@eneo/eneo-js";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -285,7 +286,16 @@ describe("admin storage settings page", () => {
       }
     });
     getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(latest);
-    replacePolicy.mockRejectedValue({ status: 409 });
+    replacePolicy.mockRejectedValue(
+      new EneoError(
+        "Deployment policy revision is stale",
+        "RESPONSE",
+        409,
+        9046,
+        {},
+        { endpoint: "PUT@/admin/object-content-policy" }
+      )
+    );
 
     render(StoragePage);
 
@@ -299,6 +309,32 @@ describe("admin storage settings page", () => {
 
     await expect.element(sessionFileInput).toHaveValue(40 * 1024 * 1024);
     await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+  });
+
+  test("keeps the draft and reports object-store readiness when selection becomes unavailable", async () => {
+    testUser.isPlatformAdmin = true;
+    getPolicy.mockResolvedValue(policy());
+    replacePolicy.mockRejectedValue(
+      new EneoError(
+        "Object-store target is not selectable",
+        "RESPONSE",
+        409,
+        9047,
+        {},
+        { endpoint: "PUT@/admin/object-content-policy" }
+      )
+    );
+
+    render(StoragePage);
+
+    const sessionFileInput = page.getByLabelText("storage_limit_session_file");
+    await sessionFileInput.fill("32505856");
+    await page.getByRole("button", { name: "storage_settings_save" }).click();
+
+    await expect.element(page.getByText("storage_settings_target_unavailable_title")).toBeVisible();
+    await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
+    await expect.element(sessionFileInput).toHaveValue(32_505_856);
+    await expect.element(page.getByRole("button", { name: "storage_settings_save" })).toBeEnabled();
   });
 
   test("truthfully shows a degraded selected object store while preventing it from being reselected", async () => {

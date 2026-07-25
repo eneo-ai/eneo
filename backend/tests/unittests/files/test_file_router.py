@@ -58,6 +58,7 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
 
     service.save_file.side_effect = save_file
     audit_service = AsyncMock()
+    session = MagicMock()
 
     async def log(**_kwargs):
         events.append("log")
@@ -77,6 +78,10 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         def user():
             return user
 
+        @staticmethod
+        def session():
+            return session
+
     result = await file_router.upload_file(
         upload_file=MagicMock(),
         container=Container(),
@@ -85,6 +90,7 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
 
     assert result == file
     assert events == ["save", "log"]
+    session.begin.assert_called_once()
     audit_service.log_async.assert_awaited_once()
     audit_service.log.assert_not_awaited()
 

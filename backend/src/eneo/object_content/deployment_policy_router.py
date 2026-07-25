@@ -186,7 +186,8 @@ async def replace_deployment_policy(
             "new": _log_values(updated),
         },
     )
-    return await _read_projection(session)
+    async with session.begin():
+        return await _read_projection(session)
 
 
 def _log_values(policy: DeploymentPolicy) -> dict[str, str | int]:

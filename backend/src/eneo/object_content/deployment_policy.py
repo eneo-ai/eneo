@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
-from eneo.object_content.content import StorageKind
+from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES, StorageKind
 
 
 class PolicyActor(StrEnum):
@@ -25,10 +25,13 @@ class DeploymentPolicyUpdate(BaseModel):
 
     expected_revision: int = Field(ge=1)
     new_write_storage_target: StorageKind
-    session_file_limit_bytes: int = Field(ge=1)
-    session_image_limit_bytes: int = Field(ge=1)
-    knowledge_file_limit_bytes: int = Field(ge=1)
-    transcription_audio_limit_bytes: int = Field(ge=1)
+    session_file_limit_bytes: int = Field(ge=1, le=MAXIMUM_UPLOAD_POLICY_BYTES)
+    session_image_limit_bytes: int = Field(ge=1, le=MAXIMUM_UPLOAD_POLICY_BYTES)
+    knowledge_file_limit_bytes: int = Field(ge=1, le=MAXIMUM_UPLOAD_POLICY_BYTES)
+    transcription_audio_limit_bytes: int = Field(
+        ge=1,
+        le=MAXIMUM_UPLOAD_POLICY_BYTES,
+    )
 
 
 @dataclass(frozen=True, slots=True)

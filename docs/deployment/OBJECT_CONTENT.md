@@ -37,6 +37,12 @@ silently after a failure.
 | Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage** |
 | Operator | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
 
+Persisted business limits accept whole-byte values from 1 through
+9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
+integer exactly. This representation bound is not a business default or a
+capacity recommendation; the applicable operator ceiling can still make the
+effective limit lower.
+
 The default deployment uses PostgreSQL-inline storage and does not start
 SeaweedFS or require S3-compatible configuration. Operators can enable the
 bundled profile or connect an external endpoint when object size, capacity, or

@@ -48,7 +48,7 @@ continuity:
   last_handoff_at: null
   last_verified_revision: "31aad9731ddc0e7d6b38dc7c66f499d2cf50be5e"
 
-active_task: T005
+active_task: T006
 
 tasks:
   - id: T001
@@ -569,7 +569,7 @@ tasks:
   - id: T005
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Run the complete exact-head local validation and required same-session Claude pre-push gate, freeze the immutable SHA, then push and publish a ready PR with accurate scope and validation."
     inputs:
@@ -583,12 +583,29 @@ tasks:
       - "Claude GREEN_LIGHT and MIN_SCORE >= 8, or exact blocker"
       - "Immutable head SHA"
       - "Ready PR URL and description audit"
-    receipt: null
+    receipt:
+      result: ready_for_review_fix
+      summary: "Published ready PR #601 and proved the exact pushed head green in every required current-head workflow; repository Review 1 then reported five source-supported findings that remain the active gate."
+      evidence:
+        - "PR #601: https://github.com/eneo-ai/eneo/pull/601"
+        - "exact pushed head a85c8bfd697e07623969d4e5b49b47bae948f5a0"
+        - "CI run 30173305696 => success"
+        - "Docs run 30173305679 => success"
+        - "Dependency Review run 30173305750 => success"
+        - "Dead code run 30173305660 => success"
+        - "Review 1 comment 5080367770 against e07b690632dcd888e4dc5eba33a07cc57a41ab19"
+      review_findings:
+        - "F1: Icon create/read paths allocate the full policy-sized payload."
+        - "F2: File compensation has no finite cancellation bound."
+        - "F3: Persisted business limits exceed the PostgreSQL/JavaScript round-trip contract."
+        - "F4: The admin page classifies every 409 as a revision conflict."
+        - "F5: Icon upload omits its normal 503 response contract."
+      next_allowed_task: T006
 
   - id: T006
     type: pm
     assignee: PM
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Post top-level /review, wait for complete repository review and CI on the exact head, fix verified findings, and repeat until current and green."
     constraints:
@@ -599,7 +616,30 @@ tasks:
       - "Exact-head review result"
       - "Required CI/check result"
       - "Resolved or rejected findings with evidence"
-    receipt: null
+    receipt:
+      result: in_progress
+      summary: "Review 2 on a85c8bf confirmed F1-F5 and added F6. All six findings were reproduced or source-verified, fixed at their canonical owners, and covered by behavior tests. Claude iteration 27 found one additional same-root policy PUT transaction defect; its authenticated ASGI reproduction and two-transaction fix are included. Iteration 28 returned green/MIN_SCORE 8 for the intended commit delta."
+      evidence:
+        - "Review 2: https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
+        - ".codex/artifacts/claude-peer-loop-569-pr-1-review-2-fixes-20260725T213300Z.md => iteration 27, reproduced policy PUT post-commit read defect"
+        - ".codex/artifacts/claude-peer-loop-569-pr-1-review-2-fixes-20260725T213923Z.md => iteration 28, GREEN_LIGHT yes, MIN_SCORE 8"
+      resolved_findings:
+        - "F1: icon create returns metadata and GET streams bounded chunks with deterministic close; parity is integration-tested above the spool threshold."
+        - "F2: file/icon compensation is bounded to 30 seconds and preserves original plus cleanup/timeout failures."
+        - "F3: persisted limits are constrained to JavaScript's exact-integer maximum across API, ORM, migration, docs, and generated schema."
+        - "F4: the admin page distinguishes stale revision 9046, unavailable target 9047, and unknown 409 responses."
+        - "F5: icon POST declares and runtime-tests the normal typed 503 contract."
+        - "F6: file upload evaluates the audit kill switch in an explicit short post-commit transaction for both targets."
+        - "P0: policy PUT reads its response projection in a separate post-CAS transaction so readiness I/O does not hold the write transaction."
+      validation:
+        - "whole backend non-integration => 3960 passed"
+        - "relevant PostgreSQL/object-content integrations => 33 passed"
+        - "migration isolation => 5 passed; alembic heads => one head"
+        - "whole-backend pyright => 0 errors, 0 warnings"
+        - "full web unit suite => 59 files, 334 passed; focused admin page => 10 passed"
+        - "Svelte check => 0 errors, 0 warnings; frontend lint and docs-site build => passed"
+        - "generated client => 15 passed; Ruff/format and bounded secret scan => passed"
+      next_gate: "Stage the exact reviewed delta, create the review-fix commit, run exact-head pre-push validation and a fresh same-session Claude push gate, then push and post one top-level /review."
 
   - id: T007
     type: pm
@@ -637,13 +677,14 @@ tasks:
     receipt: null
 
 checks:
-  dirty_fingerprint: "goal-board-only"
+  dirty_fingerprint: "review-2-fixes-intended-for-commit"
   last_verification:
     result: passed
-    task: T014
+    task: T006
     commands:
-      - "same-session Claude iterations 14-15 => GREEN_LIGHT yes, MIN_SCORE 8"
-      - "cd frontend/apps/web && bun run test:unit"
-      - "cd frontend/apps/web && bun run check"
-      - "cd backend && uv run pytest -q tests/unittests/files/test_file_protocol.py"
-      - "git diff --cached --check and exact staged SHA verification"
+      - "same-session Claude iteration 28 => GREEN_LIGHT yes, MIN_SCORE 8"
+      - "cd backend && uv run pytest -v -n 2 -m 'not integration' --cov=src/eneo --cov-report=term:skip-covered tests/"
+      - "cd backend && uv run pytest -q -m integration tests/integration/object_content/test_icon_storage_lifecycle.py tests/integration/object_content/test_file_storage_lifecycle.py tests/integration/object_content/test_file_icon_adoption.py tests/integration/object_content/test_deployment_policy_integration.py tests/integration/object_content/test_file_public_routes.py"
+      - "cd backend && uv run pyright"
+      - "cd frontend/apps/web && bun run test:unit && bun run check"
+      - "cd frontend && bun run lint && bun run --cwd apps/docs-site build"

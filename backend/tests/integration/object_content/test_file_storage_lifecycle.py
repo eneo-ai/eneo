@@ -11,6 +11,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi import UploadFile
 
+import eneo.files.file_service as file_service_module
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -113,6 +114,12 @@ class _ControlledObjectContentService(ObjectContentService):
         return readable
 
 
+class _SlowCompensationFileService(FileService):
+    async def _compensate_new_family(self, root_file_id: UUID) -> None:
+        del root_file_id
+        await asyncio.sleep(0.05)
+
+
 def _snapshot(storage_target: StorageKind) -> UploadAdmissionSnapshot:
     maximum = 20 * 1024 * 1024
     return UploadAdmissionSnapshot(
@@ -185,13 +192,24 @@ def _service(
     protocol: FileProtocol,
     object_content: ObjectContentService,
     snapshot: UploadAdmissionSnapshot,
+    service_type: type[FileService] = FileService,
 ) -> FileService:
-    return FileService(
+    return service_type(
         user=user,
         repo=FileRepository(session),
         protocol=protocol,
         object_content=object_content,
         upload_admission=snapshot,
+    )
+
+
+def _group_contains(error: BaseExceptionGroup, expected: type[BaseException]) -> bool:
+    return any(
+        isinstance(nested, expected)
+        or (
+            isinstance(nested, BaseExceptionGroup) and _group_contains(nested, expected)
+        )
+        for nested in error.exceptions
     )
 
 
@@ -280,6 +298,96 @@ async def test_remote_failure_compensates_the_whole_multi_content_family(
             real_object_store.store,
             await _remote_object_keys(object_content_database),
         )
+
+
+@pytest.mark.asyncio
+async def test_remote_failure_bounds_stalled_database_compensation(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        file_service_module,
+        "_FILE_COMPENSATION_TIMEOUT_SECONDS",
+        0.001,
+        raising=False,
+    )
+    name = f"stalled-compensation-{uuid4().hex}"
+    content_service = _ControlledObjectContentService(
+        database=object_content_database,
+        real_object_store=real_object_store,
+        fail_at=0,
+    )
+
+    async with object_content_database.session() as session:
+        user = await _user(session)
+        service = _service(
+            session=session,
+            user=user,
+            protocol=_PreparedFileProtocol(_three_content_family(name)),
+            object_content=content_service,
+            snapshot=_snapshot(StorageKind.OBJECT_STORE),
+            service_type=_SlowCompensationFileService,
+        )
+
+        with pytest.raises(BaseExceptionGroup) as error:
+            await service.save_file(
+                UploadFile(
+                    file=BytesIO(),
+                    filename=f"{name}.pdf",
+                    headers={"content-type": "application/pdf"},
+                )
+            )
+
+    assert _group_contains(error.value, ObjectContentUnavailableError)
+    assert _group_contains(error.value, TimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_bounds_stalled_database_compensation(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        file_service_module,
+        "_FILE_COMPENSATION_TIMEOUT_SECONDS",
+        0.001,
+        raising=False,
+    )
+    name = f"cancel-stalled-compensation-{uuid4().hex}"
+    content_service = _ControlledObjectContentService(
+        database=object_content_database,
+        real_object_store=real_object_store,
+        pause_at=0,
+    )
+
+    async with object_content_database.session() as session:
+        user = await _user(session)
+        service = _service(
+            session=session,
+            user=user,
+            protocol=_PreparedFileProtocol(_three_content_family(name)),
+            object_content=content_service,
+            snapshot=_snapshot(StorageKind.OBJECT_STORE),
+            service_type=_SlowCompensationFileService,
+        )
+        saving = asyncio.create_task(
+            service.save_file(
+                UploadFile(
+                    file=BytesIO(),
+                    filename=f"{name}.pdf",
+                    headers={"content-type": "application/pdf"},
+                )
+            )
+        )
+        await asyncio.wait_for(content_service.paused.wait(), timeout=10)
+        saving.cancel()
+        with pytest.raises(BaseExceptionGroup) as error:
+            await saving
+
+    assert _group_contains(error.value, asyncio.CancelledError)
+    assert _group_contains(error.value, TimeoutError)
 
 
 @pytest.mark.asyncio

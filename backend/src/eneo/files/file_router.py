@@ -1,7 +1,7 @@
 import base64
 import time
 import unicodedata
-from typing import Annotated
+from typing import Annotated, cast
 from urllib.parse import quote
 from uuid import UUID
 
@@ -18,6 +18,7 @@ from eneo.authentication.signed_urls import (
     verify_file_original_download_token,
     verify_signed_token,
 )
+from eneo.database.database import AsyncSession
 from eneo.files.file_models import (
     ContentDisposition,
     FileContentRangeError,
@@ -75,19 +76,21 @@ async def upload_file(
     }
 
     audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.FILE_UPLOADED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=f"Uploaded file '{file.name}' ({file.size} bytes)",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=file,
-            extra=extra,
-        ),
-    )
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await audit_service.log_async(
+            tenant_id=current_user.tenant_id,
+            user=current_user,
+            action=ActionType.FILE_UPLOADED,
+            entity_type=EntityType.FILE,
+            entity_id=file.id,
+            description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+            metadata=AuditMetadata.standard(
+                actor=current_user,
+                target=file,
+                extra=extra,
+            ),
+        )
 
     return file
 

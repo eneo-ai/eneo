@@ -132,6 +132,8 @@
   "storage_settings_selected_target_degraded_description": "Objektlagring är fortfarande registrerad som aktuellt mål, men kan inte väljas just nu. Nya skrivningar faller inte tillbaka till PostgreSQL.",
   "storage_settings_stale_title": "Policyn har ändrats på annat håll",
   "storage_settings_stale_description": "Ditt utkast finns kvar. Läs in den senaste policyn innan du försöker tillämpa ändringarna igen.",
+  "storage_settings_target_unavailable_title": "Objektlagring kan inte väljas",
+  "storage_settings_target_unavailable_description": "Ditt utkast finns kvar och den tidigare policyn gäller fortfarande. Kontrollera objektlagringens beredskap innan du försöker igen.",
   "storage_settings_reload_latest": "Läs in senaste policyn",
   "storage_settings_reloading": "Läser in...",
   "storage_settings_reload_error_title": "Den senaste policyn kunde inte läsas in",

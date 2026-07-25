@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { DeploymentPolicy, DeploymentPolicyUpdate } from "@eneo/eneo-js";
+  import { EneoError, type DeploymentPolicy, type DeploymentPolicyUpdate } from "@eneo/eneo-js";
   import { AlertCircle, CheckCircle2, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -19,6 +19,9 @@
   type UploadUseCase = DeploymentPolicy["limits"][number]["use_case"];
   type ContentState = DeploymentPolicy["inventory"][number]["state"];
 
+  const DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE = 9046;
+  const OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE = 9047;
+
   const eneo = getEneo();
   const { user } = getAppContext();
 
@@ -30,6 +33,7 @@
   let saveError = $state(false);
   let saveSuccess = $state(false);
   let stale = $state(false);
+  let targetUnavailable = $state(false);
   let authorityRevoked = $state(false);
 
   let storageTarget = $state<StorageTarget>("postgres_inline");
@@ -82,6 +86,7 @@
     try {
       applyPolicy(await eneo.objectContentPolicy.get());
       stale = false;
+      targetUnavailable = false;
       saveError = false;
       saveSuccess = false;
     } catch {
@@ -114,13 +119,20 @@
     saveError = false;
     saveSuccess = false;
     stale = false;
+    targetUnavailable = false;
     try {
       applyPolicy(await eneo.objectContentPolicy.replace(replacement));
       saveSuccess = true;
     } catch (error: unknown) {
       if (hasStatus(error, 403)) authorityRevoked = true;
-      else if (hasStatus(error, 409)) stale = true;
-      else saveError = true;
+      else if (error instanceof EneoError && error.code === DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE) {
+        stale = true;
+      } else if (
+        error instanceof EneoError &&
+        error.code === OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE
+      ) {
+        targetUnavailable = true;
+      } else saveError = true;
     } finally {
       saving = false;
     }
@@ -271,6 +283,16 @@
               <AlertCircle />
               <Alert.Title>{m.storage_settings_reload_error_title()}</Alert.Title>
               <Alert.Description>{m.storage_settings_reload_error_description()}</Alert.Description>
+            </Alert.Root>
+          {/if}
+
+          {#if targetUnavailable}
+            <Alert.Root variant="destructive" aria-live="assertive">
+              <AlertCircle />
+              <Alert.Title>{m.storage_settings_target_unavailable_title()}</Alert.Title>
+              <Alert.Description>
+                {m.storage_settings_target_unavailable_description()}
+              </Alert.Description>
             </Alert.Root>
           {/if}
 

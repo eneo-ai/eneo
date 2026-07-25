@@ -38,6 +38,11 @@ from tests.integration.object_content.conftest import RealObjectStore
 _ICON_LIMIT_BYTES = 1024 * 1024
 
 
+class _ReadyObjectStoreContentService(ObjectContentService):
+    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+        assert storage_kind is StorageKind.OBJECT_STORE
+
+
 class _PausingStoreContentService(ObjectContentService):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -107,19 +112,22 @@ class _CancelAfterPublicationContentService(ObjectContentService):
             raise asyncio.CancelledError
 
 
-def _admission(target: StorageKind, *, revision: int) -> UploadAdmissionSnapshot:
-    operator_ceiling = (
-        _ICON_LIMIT_BYTES if target is StorageKind.POSTGRES_INLINE else None
-    )
+def _admission(
+    target: StorageKind,
+    *,
+    revision: int,
+    maximum_bytes: int = _ICON_LIMIT_BYTES,
+) -> UploadAdmissionSnapshot:
+    operator_ceiling = maximum_bytes if target is StorageKind.POSTGRES_INLINE else None
     return UploadAdmissionSnapshot(
         policy_revision=revision,
         session_storage_target=target,
         session_operator_ceiling_bytes=operator_ceiling,
-        session_file_maximum_bytes=_ICON_LIMIT_BYTES,
-        session_image_maximum_bytes=_ICON_LIMIT_BYTES,
-        session_audio_maximum_bytes=_ICON_LIMIT_BYTES,
-        knowledge_file_maximum_bytes=_ICON_LIMIT_BYTES,
-        knowledge_audio_maximum_bytes=_ICON_LIMIT_BYTES,
+        session_file_maximum_bytes=maximum_bytes,
+        session_image_maximum_bytes=maximum_bytes,
+        session_audio_maximum_bytes=maximum_bytes,
+        knowledge_file_maximum_bytes=maximum_bytes,
+        knowledge_audio_maximum_bytes=maximum_bytes,
     )
 
 
@@ -145,6 +153,14 @@ async def _user(database: DatabaseSessionManager) -> UserInDB:
         row = (await session.scalars(select(Users))).first()
         assert row is not None
         return UserInDB.model_construct(id=row.id, tenant_id=row.tenant_id)
+
+
+async def _read_icon_bytes(service: IconService, icon_id: UUID) -> bytes:
+    opened = await service.open_icon(icon_id)
+    try:
+        return b"".join([chunk async for chunk in opened.chunks])
+    finally:
+        await opened.aclose()
 
 
 def _upload(payload: bytes) -> UploadFile:
@@ -183,7 +199,6 @@ async def test_inline_and_object_store_icons_are_immediately_byte_identical(
                     tenant_id=user.tenant_id,
                     created_by_user_id=user.id,
                 )
-                assert created_icon.blob == payload
                 created.append((created_icon.id, target))
 
             async with object_content_database.session() as session, session.begin():
@@ -205,12 +220,77 @@ async def test_inline_and_object_store_icons_are_immediately_byte_identical(
 
         for icon_id, _target in created:
             async with object_content_database.session() as session, session.begin():
-                read_icon = await IconService(
-                    icon_repo=IconRepository(session),
-                    file_size_service=FileSizeService(),
-                    object_content=content_service,
-                ).get_icon(icon_id)
-                assert read_icon.blob == payload
+                assert (
+                    await _read_icon_bytes(
+                        IconService(
+                            icon_repo=IconRepository(session),
+                            file_size_service=FileSizeService(),
+                            object_content=content_service,
+                        ),
+                        icon_id,
+                    )
+                    == payload
+                )
+    finally:
+        if remote_object_key is not None:
+            await real_object_store.store.delete_and_confirm(remote_object_key)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_policy_sized_object_store_icon_spools_and_streams_in_chunks(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    payload = b"\x89PNG\r\n\x1a\n" + b"x" * (8 * 1024 * 1024)
+    user = await _user(object_content_database)
+    content_service = _content_service(
+        object_content_database,
+        real_object_store,
+        _ReadyObjectStoreContentService,
+    )
+    remote_object_key: str | None = None
+
+    async with object_content_database.session() as session:
+        created = await IconService(
+            icon_repo=IconRepository(session),
+            file_size_service=FileSizeService(),
+            object_content=content_service,
+            upload_admission=_admission(
+                StorageKind.OBJECT_STORE,
+                revision=45,
+                maximum_bytes=len(payload),
+            ),
+        ).create_icon(
+            _upload(payload),
+            tenant_id=user.tenant_id,
+            created_by_user_id=user.id,
+        )
+
+    try:
+        async with object_content_database.session() as session, session.begin():
+            descriptor = await session.scalar(
+                select(ObjectStoreObjects)
+                .join(
+                    IconContentReferences,
+                    IconContentReferences.content_id == ObjectStoreObjects.content_id,
+                )
+                .where(IconContentReferences.icon_id == created.id)
+            )
+            assert descriptor is not None
+            remote_object_key = descriptor.object_key
+            opened = await IconService(
+                icon_repo=IconRepository(session),
+                file_size_service=FileSizeService(),
+                object_content=content_service,
+            ).open_icon(created.id)
+            try:
+                chunks = [chunk async for chunk in opened.chunks]
+            finally:
+                await opened.aclose()
+
+        assert len(chunks) > 1
+        assert b"".join(chunks) == payload
     finally:
         if remote_object_key is not None:
             await real_object_store.store.delete_and_confirm(remote_object_key)
@@ -275,12 +355,17 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
             remote_object_key = descriptor.object_key
 
         async with object_content_database.session() as session, session.begin():
-            read = await IconService(
-                icon_repo=IconRepository(session),
-                file_size_service=FileSizeService(),
-                object_content=content_service,
-            ).get_icon(icon_id)
-            assert read.blob == payload
+            assert (
+                await _read_icon_bytes(
+                    IconService(
+                        icon_repo=IconRepository(session),
+                        file_size_service=FileSizeService(),
+                        object_content=content_service,
+                    ),
+                    icon_id,
+                )
+                == payload
+            )
     finally:
         if remote_object_key is not None:
             await real_object_store.store.delete_and_confirm(remote_object_key)
@@ -487,11 +572,14 @@ async def test_failed_icon_stays_hidden_and_tenant_deletable(
         assert await repository.get(created.id) is None
         assert await repository.get_for_lifecycle(created.id) is not None
         with pytest.raises(NotFoundException):
-            await IconService(
-                icon_repo=repository,
-                file_size_service=FileSizeService(),
-                object_content=content_service,
-            ).get_icon(created.id)
+            await _read_icon_bytes(
+                IconService(
+                    icon_repo=repository,
+                    file_size_service=FileSizeService(),
+                    object_content=content_service,
+                ),
+                created.id,
+            )
 
     other_tenant = UUID("00000000-0000-0000-0000-000000000001")
     async with object_content_database.session() as session:

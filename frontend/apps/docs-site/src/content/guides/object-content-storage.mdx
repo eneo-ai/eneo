@@ -165,6 +165,12 @@ upload limit. For PostgreSQL-inline session uploads, Eneo uses the smaller of
 the admin policy and this ceiling. **Admin > Storage** shows the configured
 limit, effective limit, and constraining source.
 
+Persisted business limits accept whole-byte values from 1 through
+9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
+integer exactly. This representation bound is not a business default or a
+capacity recommendation; the applicable operator ceiling can still make the
+effective limit lower.
+
 ## Set up your choice
 
 <Tabs items={["PostgreSQL only", "Bundled SeaweedFS", "External / MinIO"]}>
@@ -359,14 +365,14 @@ multipart uploads. Keep endpoint APIs and consoles private.
 
 The policy migration creates revision 1 with **PostgreSQL inline** selected. It
 reads the four former upload-limit environment values once as migration seeds.
-A present positive integer is preserved exactly; an absent value uses the
-fresh-install default (10 MiB for session File, session image, and knowledge
-File; 200 MiB for transcription audio). Blank, non-integer, zero, or negative
-values stop the migration with a named remediation error. After the migration,
-environment changes and restarts never overwrite the stored policy. During an
-upgrade, keep the old release's values available until `db-init` succeeds, then
-remove them from active backend and worker configuration. Fresh installations
-do not need them.
+A present integer from 1 through 9,007,199,254,740,991 is preserved exactly; an
+absent value uses the fresh-install default (10 MiB for session File, session
+image, and knowledge File; 200 MiB for transcription audio). Blank,
+non-integer, zero, negative, or larger values stop the migration with a named
+remediation error. After the migration, environment changes and restarts never
+overwrite the stored policy. During an upgrade, keep the old release's values
+available until `db-init` succeeds, then remove them from active backend and
+worker configuration. Fresh installations do not need them.
 
 If you restore a database from before this migration, stop writers and run
 `docker compose run --rm db-init` before starting backend and worker. `db-init`

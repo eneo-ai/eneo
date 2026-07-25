@@ -559,9 +559,6 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
             tenant_id=user.tenant_id,
             created_by_user_id=user.id,
         )
-        assert saved_icon.blob == icon
-        assert saved_icon.mimetype == "image/png"
-        assert saved_icon.size == len(icon)
 
         icon_reference = await session.scalar(
             select(IconContentReferences).where(
@@ -573,6 +570,19 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
         assert control is not None
         assert control.storage_kind == "postgres_inline"
         assert control.access_class == "public_immutable"
+        assert control.verified_media_type == "image/png"
+        assert control.size_bytes == len(icon)
+
+    async with object_content_database.session() as session, session.begin():
+        opened_icon = await IconService(
+            icon_repo=IconRepository(session),
+            file_size_service=FileSizeService(),
+            object_content=content_service,
+        ).open_icon(saved_icon.id)
+        try:
+            assert b"".join([chunk async for chunk in opened_icon.chunks]) == icon
+        finally:
+            await opened_icon.aclose()
 
     assert audio_id is not None
     async with object_content_database.session() as session, session.begin():

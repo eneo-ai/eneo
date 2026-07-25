@@ -53,6 +53,8 @@ from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
 
+_FILE_COMPENSATION_TIMEOUT_SECONDS = 30
+
 
 @dataclass(frozen=True, slots=True)
 class FileDownload:
@@ -210,19 +212,7 @@ class FileService:
                 and not family_visible
                 and not self.repo.session.in_transaction()
             ):
-                compensation = asyncio.create_task(self._compensate_new_family(root_id))
-                while not compensation.done():
-                    try:
-                        await asyncio.shield(compensation)
-                    except asyncio.CancelledError:
-                        continue
-                try:
-                    compensation.result()
-                except BaseException as compensation_error:
-                    raise BaseExceptionGroup(
-                        "File save and compensation both failed",
-                        [operation_error, compensation_error],
-                    ) from None
+                await self._complete_compensation(root_id, operation_error)
             raise
 
     async def _capture_prepared_file(
@@ -340,6 +330,32 @@ class FileService:
                 user_id=user.id,
                 tenant_id=user.tenant_id,
             )
+
+    async def _complete_compensation(
+        self,
+        root_file_id: UUID,
+        original_error: BaseException,
+    ) -> None:
+        cleanup = asyncio.create_task(
+            asyncio.wait_for(
+                self._compensate_new_family(root_file_id),
+                timeout=_FILE_COMPENSATION_TIMEOUT_SECONDS,
+            )
+        )
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        try:
+            cleanup.result()
+        except BaseException as cleanup_error:
+            raise BaseExceptionGroup(
+                "File save and compensation both failed",
+                [original_error, cleanup_error],
+            ) from None
 
     @staticmethod
     def _maximum_bytes_for_file_type(

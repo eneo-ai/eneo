@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -8,8 +9,10 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import eneo.object_content.deployment_policy_router as deployment_policy_router
 from eneo.authentication.auth_dependencies import (
     require_platform_admin,
     require_session_auth,
@@ -85,6 +88,20 @@ def test_legacy_seed_uses_defaults_only_for_absent_values() -> None:
     }
 
 
+def test_legacy_seed_accepts_json_safe_maximum_and_rejects_next_value() -> None:
+    resolve_seed_limits = _migration_module().resolve_seed_limits
+    maximum = 9_007_199_254_740_991
+
+    assert (
+        resolve_seed_limits({"UPLOAD_MAX_FILE_SIZE": str(maximum)})[
+            "knowledge_file_limit_bytes"
+        ]
+        == maximum
+    )
+    with pytest.raises(ValueError, match="UPLOAD_MAX_FILE_SIZE"):
+        resolve_seed_limits({"UPLOAD_MAX_FILE_SIZE": str(maximum + 1)})
+
+
 @pytest.mark.parametrize("value", ["", "abc", "0", "-1"])
 def test_legacy_seed_rejects_invalid_present_value(value: str) -> None:
     resolve_seed_limits = _migration_module().resolve_seed_limits
@@ -112,6 +129,130 @@ def test_policy_update_is_full_typed_positive_replacement() -> None:
             knowledge_file_limit_bytes=3,
             transcription_audio_limit_bytes=0,
         )
+
+
+def test_policy_update_accepts_json_safe_maximum_and_rejects_next_value() -> None:
+    maximum = 9_007_199_254_740_991
+    accepted = DeploymentPolicyUpdate(
+        expected_revision=3,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
+        session_file_limit_bytes=maximum,
+        session_image_limit_bytes=maximum,
+        knowledge_file_limit_bytes=maximum,
+        transcription_audio_limit_bytes=maximum,
+    )
+    assert accepted.session_file_limit_bytes == maximum
+
+    with pytest.raises(ValidationError):
+        DeploymentPolicyUpdate(
+            expected_revision=3,
+            new_write_storage_target=StorageKind.POSTGRES_INLINE,
+            session_file_limit_bytes=maximum + 1,
+            session_image_limit_bytes=maximum,
+            knowledge_file_limit_bytes=maximum,
+            transcription_audio_limit_bytes=maximum,
+        )
+
+
+def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    maximum = 9_007_199_254_740_991
+    stored = _policy(
+        target=StorageKind.POSTGRES_INLINE,
+        session_file=maximum,
+        session_image=maximum,
+        knowledge_file=maximum,
+        transcription_audio=maximum,
+    )
+
+    class Session:
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    session = Session()
+
+    class Container:
+        @staticmethod
+        def session():
+            return session
+
+    class Repository:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def get(self) -> DeploymentPolicy:
+            return stored
+
+        async def replace(
+            self,
+            _replacement: DeploymentPolicyUpdate,
+            *,
+            actor_user_id,
+        ) -> DeploymentPolicy:
+            del actor_user_id
+            return stored
+
+    projection = {
+        "policy": {
+            "revision": stored.revision,
+            "new_write_storage_target": stored.new_write_storage_target,
+            "session_file_limit_bytes": maximum,
+            "session_image_limit_bytes": maximum,
+            "knowledge_file_limit_bytes": maximum,
+            "transcription_audio_limit_bytes": maximum,
+            "updated_by_actor": stored.updated_by_actor,
+            "created_at": stored.created_at,
+            "updated_at": stored.updated_at,
+        },
+        "limits": [],
+        "capabilities": [],
+        "inventory": [],
+    }
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "DeploymentPolicyRepository",
+        Repository,
+    )
+    monkeypatch.setattr(
+        deployment_policy_router,
+        "_read_projection",
+        AsyncMock(return_value=projection),
+    )
+
+    app = FastAPI()
+    app.include_router(router, prefix="/admin")
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute) and route.endpoint is replace_deployment_policy
+    )
+    user = TEST_USER.model_copy(update={"is_platform_admin": True})
+    for dependency in route.dependant.dependencies:
+        if dependency.name == "user":
+            app.dependency_overrides[dependency.call] = lambda: user
+        elif dependency.name == "container":
+            app.dependency_overrides[dependency.call] = Container
+        else:
+            app.dependency_overrides[dependency.call] = lambda: None
+
+    client = TestClient(app)
+    payload = {
+        "expected_revision": 1,
+        "new_write_storage_target": "postgres_inline",
+        "session_file_limit_bytes": maximum,
+        "session_image_limit_bytes": maximum,
+        "knowledge_file_limit_bytes": maximum,
+        "transcription_audio_limit_bytes": maximum,
+    }
+
+    assert client.put("/admin/object-content-policy", json=payload).status_code == 200
+    payload["session_file_limit_bytes"] = maximum + 1
+    assert client.put("/admin/object-content-policy", json=payload).status_code == 422
+
+    schema = app.openapi()["components"]["schemas"]["DeploymentPolicyUpdate"]
+    assert schema["properties"]["session_file_limit_bytes"]["maximum"] == maximum
 
 
 def test_policy_conflicts_have_stable_machine_readable_codes() -> None:

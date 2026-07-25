@@ -80,6 +80,8 @@ class InvalidContentRangeError(ValueError):
     code = "object_content_range_invalid"
 
 
+MAXIMUM_UPLOAD_POLICY_BYTES = 9_007_199_254_740_991
+
 # Durable content sizes use PostgreSQL BIGINT, whose decimal width is 19 digits.
 _MAX_BYTE_RANGE_DIGITS = 19
 

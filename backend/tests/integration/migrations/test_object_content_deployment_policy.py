@@ -126,6 +126,37 @@ def test_upgrade_uses_defaults_only_for_absent_values(
     )
 
 
+def test_database_limit_constraint_matches_json_safe_integer_contract(
+    round_trip_db,
+) -> None:
+    connection, _config = round_trip_db
+    maximum = 9_007_199_254_740_991
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE object_content_deployment_policy
+            SET
+                session_file_limit_bytes = %s,
+                session_image_limit_bytes = %s,
+                knowledge_file_limit_bytes = %s,
+                transcription_audio_limit_bytes = %s
+            WHERE id = 1
+            """,
+            (maximum, maximum, maximum, maximum),
+        )
+
+    with pytest.raises(psycopg2.errors.CheckViolation):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE object_content_deployment_policy
+                SET session_file_limit_bytes = %s
+                WHERE id = 1
+                """,
+                (maximum + 1,),
+            )
+
+
 def test_invalid_present_seed_rolls_back_and_names_variable(
     round_trip_db, monkeypatch
 ) -> None:

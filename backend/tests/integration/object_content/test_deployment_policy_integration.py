@@ -8,6 +8,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
+from eneo.database.tables.users_table import Users
 from eneo.main.container.container import Container, SessionProxy
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
@@ -35,6 +36,46 @@ async def _seed_policy() -> None:
                 updated_by_actor="migration",
             )
         )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_policy_put_returns_the_committed_projection(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+) -> None:
+    await _seed_policy()
+    async with db_container() as container:
+        session = container.session()
+        stored_user = await session.get(Users, admin_user.id)
+        assert stored_user is not None
+        stored_user.is_platform_admin = True
+        token = container.auth_service().create_access_token_for_user(admin_user)
+
+    response = await client.put(
+        "/api/v1/admin/object-content-policy",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "expected_revision": 1,
+            "new_write_storage_target": "postgres_inline",
+            "session_file_limit_bytes": 101,
+            "session_image_limit_bytes": 102,
+            "knowledge_file_limit_bytes": 103,
+            "transcription_audio_limit_bytes": 104,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    policy = response.json()["policy"]
+    assert policy["revision"] == 2
+    assert policy["new_write_storage_target"] == "postgres_inline"
+    assert policy["session_file_limit_bytes"] == 101
+    assert policy["session_image_limit_bytes"] == 102
+    assert policy["knowledge_file_limit_bytes"] == 103
+    assert policy["transcription_audio_limit_bytes"] == 104
+    assert policy["updated_by_actor"] == "platform_admin"
 
 
 @pytest.mark.integration

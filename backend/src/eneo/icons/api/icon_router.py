@@ -2,6 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, UploadFile
+from fastapi.responses import StreamingResponse
 
 from eneo.icons.api.icon_models import IconPublic
 from eneo.main.container.container import Container
@@ -39,13 +40,21 @@ _ContainerWithUploadAdmission = Annotated[
 )
 async def get_icon(id: UUID, container: _Container) -> Response:
     icon_service = container.icon_service()
-    icon = await icon_service.get_icon(id)
-    return Response(
-        content=icon.blob,
-        media_type=icon.mimetype,
+    download = await icon_service.open_icon(id)
+
+    async def response_chunks():
+        try:
+            async for chunk in download.chunks:
+                yield chunk
+        finally:
+            await download.aclose()
+
+    return StreamingResponse(
+        response_chunks(),
+        media_type=download.media_type,
         headers={
             "Cache-Control": "public, max-age=31536000",
-            "Content-Length": str(icon.size),
+            "Content-Length": str(download.content_length),
         },
     )
 
@@ -53,7 +62,7 @@ async def get_icon(id: UUID, container: _Container) -> Response:
 @router.post(
     "/",
     response_model=IconPublic,
-    responses=responses.get_responses([400, 413, 415]),
+    responses=responses.get_responses([400, 413, 415, 503]),
     summary="Upload icon",
     description=(
         "Upload an icon image (PNG, JPEG, WebP) within the active deployment "

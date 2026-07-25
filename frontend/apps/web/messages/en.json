@@ -132,6 +132,8 @@
   "storage_settings_selected_target_degraded_description": "Object storage remains recorded as the current target, but it is not selectable right now. New writes will not fall back to PostgreSQL.",
   "storage_settings_stale_title": "This policy changed elsewhere",
   "storage_settings_stale_description": "Your draft has been kept. Reload the latest policy before applying your changes again.",
+  "storage_settings_target_unavailable_title": "Object storage is not selectable",
+  "storage_settings_target_unavailable_description": "Your draft has been kept and the prior policy remains active. Review object-storage readiness before trying again.",
   "storage_settings_reload_latest": "Reload latest policy",
   "storage_settings_reloading": "Reloading...",
   "storage_settings_reload_error_title": "The latest policy could not be loaded",

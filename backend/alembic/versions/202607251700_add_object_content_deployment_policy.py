@@ -17,6 +17,8 @@ down_revision: str | None = "202607241100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Historical schema snapshot: migrations must remain isolated from runtime modules.
+_MAXIMUM_UPLOAD_POLICY_BYTES = 9_007_199_254_740_991
 _SEEDS = {
     "session_file_limit_bytes": ("UPLOAD_FILE_TO_SESSION_MAX_SIZE", 10 * 1024**2),
     "session_image_limit_bytes": ("UPLOAD_IMAGE_TO_SESSION_MAX_SIZE", 10 * 1024**2),
@@ -41,8 +43,11 @@ def resolve_seed_limits(environment: Mapping[str, str]) -> dict[str, int]:
             raise ValueError(
                 f"{variable} must be a positive integer byte count"
             ) from error
-        if value < 1:
-            raise ValueError(f"{variable} must be a positive integer byte count")
+        if value < 1 or value > _MAXIMUM_UPLOAD_POLICY_BYTES:
+            raise ValueError(
+                f"{variable} must be an integer byte count between "
+                f"1 and {_MAXIMUM_UPLOAD_POLICY_BYTES}"
+            )
         values[field] = value
     return values
 
@@ -101,10 +106,14 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "session_file_limit_bytes > 0 "
+            "AND session_file_limit_bytes <= 9007199254740991 "
             "AND session_image_limit_bytes > 0 "
+            "AND session_image_limit_bytes <= 9007199254740991 "
             "AND knowledge_file_limit_bytes > 0 "
-            "AND transcription_audio_limit_bytes > 0",
-            name="ck_object_content_policy_positive_limits",
+            "AND knowledge_file_limit_bytes <= 9007199254740991 "
+            "AND transcription_audio_limit_bytes > 0 "
+            "AND transcription_audio_limit_bytes <= 9007199254740991",
+            name="ck_object_content_policy_limit_range",
         ),
         sa.ForeignKeyConstraint(
             ["updated_by_user_id"], ["users.id"], ondelete="SET NULL"

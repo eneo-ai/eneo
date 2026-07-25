@@ -1,13 +1,13 @@
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import BinaryIO
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import UploadFile
 
 from eneo.files.file_size_service import FileSizeService
-from eneo.icons.icon import Icon, IconMetadataCreate
+from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import (
     BadRequestException,
@@ -35,18 +35,20 @@ _ICON_STREAM_CHUNK_BYTES = 64 * 1024
 _ICON_COMPENSATION_TIMEOUT_SECONDS = 30
 
 
+@dataclass(frozen=True, slots=True)
+class IconDownload:
+    chunks: AsyncGenerator[bytes]
+    content_length: int
+    media_type: str
+    _close: Callable[[], Awaitable[None]] = field(repr=False)
+
+    async def aclose(self) -> None:
+        await self._close()
+
+
 async def _upload_chunks(upload_file: UploadFile) -> AsyncGenerator[bytes]:
     while chunk := await upload_file.read(_ICON_STREAM_CHUNK_BYTES):
         yield chunk
-
-
-def _read_captured(file: BinaryIO) -> bytes:
-    position = file.tell()
-    try:
-        file.seek(0)
-        return file.read()
-    finally:
-        file.seek(position)
 
 
 class IconService:
@@ -100,6 +102,8 @@ class IconService:
                 await asyncio.shield(cleanup)
             except asyncio.CancelledError:
                 continue
+            except BaseException:
+                break
         try:
             cleanup.result()
         except BaseException as cleanup_error:
@@ -114,7 +118,7 @@ class IconService:
         *,
         tenant_id: UUID,
         created_by_user_id: UUID,
-    ) -> Icon:
+    ) -> IconMetadata:
         self.validate_mimetype(upload_file.content_type)
         if self.upload_admission is None:
             raise RuntimeError("Icon upload admission was not resolved")
@@ -170,19 +174,6 @@ class IconService:
                         icon_id=metadata.id,
                         content_id=prepared.id,
                     )
-                    payload = await asyncio.to_thread(
-                        _read_captured,
-                        captured.file,
-                    )
-                    icon = Icon(
-                        id=metadata.id,
-                        created_at=metadata.created_at,
-                        updated_at=metadata.updated_at,
-                        tenant_id=metadata.tenant_id,
-                        blob=payload,
-                        mimetype=captured.verified_media_type,
-                        size=captured.size_bytes,
-                    )
 
                 if storage_kind is StorageKind.OBJECT_STORE:
                     await self.object_content.store_and_verify(
@@ -195,9 +186,10 @@ class IconService:
                 await self._complete_compensation(metadata.id, error)
             raise
 
-        return icon
+        assert metadata is not None
+        return metadata
 
-    async def get_icon(self, icon_id: UUID) -> Icon:
+    async def open_icon(self, icon_id: UUID) -> IconDownload:
         metadata = await self.icon_repo.get(icon_id)
         if metadata is None:
             raise NotFoundException(f"Icon with id {icon_id} not found")
@@ -205,23 +197,49 @@ class IconService:
         if reference is None:
             raise NotFoundException(f"Icon with id {icon_id} has no durable content")
 
-        async with self.object_content.open_content(
+        read_context = self.object_content.open_content(
             ContentReadGrant(
                 content_id=reference.content_id,
                 tenant_id=metadata.tenant_id,
                 access_class=reference.access_class,
             )
-        ) as opened:
-            payload = b"".join([chunk async for chunk in opened.chunks])
+        )
+        opened = await read_context.__aenter__()
+        closed = False
 
-        return Icon(
-            id=metadata.id,
-            created_at=metadata.created_at,
-            updated_at=metadata.updated_at,
-            tenant_id=metadata.tenant_id,
-            blob=payload,
-            mimetype=reference.media_type,
-            size=reference.size_bytes,
+        async def exit_read_context(
+            error: BaseException | None = None,
+        ) -> bool | None:
+            nonlocal closed
+            if closed:
+                return None
+            closed = True
+            if error is None:
+                return await read_context.__aexit__(None, None, None)
+            return await read_context.__aexit__(
+                type(error),
+                error,
+                error.__traceback__,
+            )
+
+        async def stream() -> AsyncGenerator[bytes]:
+            try:
+                async for chunk in opened.chunks:
+                    yield chunk
+            except BaseException as error:
+                if not await exit_read_context(error):
+                    raise
+            else:
+                await exit_read_context()
+
+        async def close() -> None:
+            await exit_read_context()
+
+        return IconDownload(
+            chunks=stream(),
+            content_length=opened.content_length,
+            media_type=opened.media_type,
+            _close=close,
         )
 
     async def delete_icon(self, icon_id: UUID, tenant_id: UUID) -> None:

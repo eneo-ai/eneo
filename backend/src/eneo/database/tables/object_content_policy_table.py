@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, SmallInteger, St
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseWithTableName, TimestampMixin
+from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES
 
 
 class ObjectContentDeploymentPolicy(TimestampMixin, BaseWithTableName):
@@ -32,10 +33,14 @@ class ObjectContentDeploymentPolicy(TimestampMixin, BaseWithTableName):
             name="ck_object_content_policy_actor",
         ),
         CheckConstraint(
-            "session_file_limit_bytes > 0 "
-            "AND session_image_limit_bytes > 0 "
-            "AND knowledge_file_limit_bytes > 0 "
-            "AND transcription_audio_limit_bytes > 0",
-            name="ck_object_content_policy_positive_limits",
+            f"session_file_limit_bytes > 0 "
+            f"AND session_file_limit_bytes <= {MAXIMUM_UPLOAD_POLICY_BYTES} "
+            f"AND session_image_limit_bytes > 0 "
+            f"AND session_image_limit_bytes <= {MAXIMUM_UPLOAD_POLICY_BYTES} "
+            f"AND knowledge_file_limit_bytes > 0 "
+            f"AND knowledge_file_limit_bytes <= {MAXIMUM_UPLOAD_POLICY_BYTES} "
+            f"AND transcription_audio_limit_bytes > 0 "
+            f"AND transcription_audio_limit_bytes <= {MAXIMUM_UPLOAD_POLICY_BYTES}",
+            name="ck_object_content_policy_limit_range",
         ),
     )
