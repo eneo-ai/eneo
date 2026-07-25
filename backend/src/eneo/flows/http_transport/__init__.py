@@ -34,6 +34,7 @@ from eneo.flows.http_transport.secret_codec import (
     protect_authored_secrets,
     redact_authored_config,
     redact_persisted_config,
+    unprotected_persisted_secret_fields,
     unprotected_stored_secret_fields,
     unresolved_secret_sentinel_fields,
 )
@@ -69,6 +70,7 @@ __all__ = [
     "protect_authored_secrets",
     "redact_authored_config",
     "redact_persisted_config",
+    "unprotected_persisted_secret_fields",
     "unprotected_stored_secret_fields",
     "unresolved_secret_sentinel_fields",
     "validate_authored_config",

@@ -118,6 +118,29 @@ def unprotected_stored_secret_fields(
     )
 
 
+def unprotected_persisted_secret_fields(
+    config: Mapping[str, object] | None,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the unprotected declared secret fields in a persisted config payload.
+
+    The persisted form is what every stored-config caller actually holds: a raw
+    JSON object that may not be an authored HTTP config at all. A payload of
+    another shape carries no HTTP credential and reports nothing.
+
+    Raises:
+        pydantic.ValidationError: the payload declares the authored HTTP shape
+            but does not parse. Callers scanning historical rows should treat
+            that as its own finding rather than as an absence of secrets.
+    """
+    if config is None or not is_authored_config(config):
+        return ()
+    return unprotected_stored_secret_fields(
+        HttpAuthoredConfig.model_validate(config),
+        encryption_service,
+    )
+
+
 def protect_authored_secrets(
     config: HttpAuthoredConfig,
     encryption_service: SupportsEncryption | None,

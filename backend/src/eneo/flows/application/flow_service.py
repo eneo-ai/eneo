@@ -52,7 +52,7 @@ from eneo.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
     protect_authored_secrets,
-    unprotected_stored_secret_fields,
+    unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -722,10 +722,8 @@ class FlowService:
                 ("input_config", step.input_config),
                 ("output_config", step.output_config),
             ):
-                if config is None or not is_authored_config(config):
-                    continue
-                unprotected = unprotected_stored_secret_fields(
-                    HttpAuthoredConfig.model_validate(config),
+                unprotected = unprotected_persisted_secret_fields(
+                    config,
                     self.encryption_service,
                 )
                 if unprotected:
