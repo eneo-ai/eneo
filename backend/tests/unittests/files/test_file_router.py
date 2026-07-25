@@ -11,6 +11,7 @@ from eneo.files.file_models import (
     ContentDisposition,
     FileContentRangeError,
     FileContentVariant,
+    FileInfo,
     FileMetadata,
     FileType,
     OriginalSignedURLRequest,
@@ -26,6 +27,76 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
 )
+
+
+async def test_upload_enqueues_audit_only_after_file_success() -> None:
+    events: list[str] = []
+    now = datetime.now(UTC)
+    user = MagicMock(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        username="file-owner",
+        email="owner@example.eu",
+    )
+    file = FileInfo(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="source.txt",
+        checksum="checksum",
+        size=7,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+    )
+    service = AsyncMock()
+
+    async def save_file(_upload_file):
+        events.append("save")
+        return file
+
+    service.save_file.side_effect = save_file
+    audit_service = AsyncMock()
+
+    async def log(**_kwargs):
+        events.append("log")
+
+    audit_service.log_async.side_effect = log
+
+    class Container:
+        @staticmethod
+        def file_service():
+            return service
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+        @staticmethod
+        def user():
+            return user
+
+    result = await file_router.upload_file(
+        upload_file=MagicMock(),
+        container=Container(),
+        _user_for_creation=None,
+    )
+
+    assert result == file
+    assert events == ["save", "log"]
+    audit_service.log_async.assert_awaited_once()
+    audit_service.log.assert_not_awaited()
+
+    service.save_file.side_effect = RuntimeError("upload failed")
+    with pytest.raises(RuntimeError, match="upload failed"):
+        await file_router.upload_file(
+            upload_file=MagicMock(),
+            container=Container(),
+            _user_for_creation=None,
+        )
+
+    audit_service.log_async.assert_awaited_once()
 
 
 async def test_original_signed_url_audits_the_attributable_access_grant(

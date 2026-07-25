@@ -22,6 +22,10 @@ from eneo.files.image_processing import (
 from eneo.files.text import TextExtractor, TextMimeTypes
 from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
+from eneo.object_content.deployment_policy import (
+    UploadAdmissionSnapshot,
+    UploadLimitUseCase,
+)
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -89,8 +93,9 @@ class FileProtocol:
         self,
         upload_file: UploadFile,
         *,
+        upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
-        limit_setting_name: str | None = None,
+        limit_name: str | None = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
         """Classify one upload into exact and derived content variants.
 
@@ -102,29 +107,31 @@ class FileProtocol:
         if ImageMimeTypes.has_value(content_type):
             file_type = FileType.IMAGE
             if max_size is None:
-                max_size = get_settings().upload_image_to_session_max_size
-                limit_setting_name = (
-                    limit_setting_name or "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
-                )
+                if upload_admission_snapshot is None:
+                    raise RuntimeError("Upload admission snapshot is required")
+                max_size = upload_admission_snapshot.session_image_maximum_bytes
+                limit_name = limit_name or UploadLimitUseCase.SESSION_IMAGE.value
         elif AudioMimeTypes.has_value(content_type):
             file_type = FileType.AUDIO
             if max_size is None:
-                max_size = get_settings().transcription_max_file_size
-                limit_setting_name = limit_setting_name or "TRANSCRIPTION_MAX_FILE_SIZE"
+                if upload_admission_snapshot is None:
+                    raise RuntimeError("Upload admission snapshot is required")
+                max_size = upload_admission_snapshot.session_audio_maximum_bytes
+                limit_name = limit_name or UploadLimitUseCase.SESSION_AUDIO.value
         else:
             file_type = FileType.TEXT
             if max_size is None:
-                max_size = get_settings().upload_file_to_session_max_size
-                limit_setting_name = (
-                    limit_setting_name or "UPLOAD_FILE_TO_SESSION_MAX_SIZE"
-                )
+                if upload_admission_snapshot is None:
+                    raise RuntimeError("Upload admission snapshot is required")
+                max_size = upload_admission_snapshot.session_file_maximum_bytes
+                limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
 
         file_size = self.file_size_service.get_file_size(upload_file.file)
         if file_size > max_size:
             raise FileTooLargeException(
                 file_size=file_size,
                 max_size=max_size,
-                setting_name=limit_setting_name,
+                limit_name=limit_name,
             )
 
         filepath = Path(

@@ -7,9 +7,19 @@ import json
 import os
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+
+@dataclass(frozen=True, slots=True)
+class _DeploymentPolicySeed:
+    new_write_storage_target: str
+    session_file_limit_bytes: int
+    session_image_limit_bytes: int
+    knowledge_file_limit_bytes: int
+    transcription_audio_limit_bytes: int
 
 
 def pytest_collection_modifyitems(config, items):
@@ -253,10 +263,6 @@ def test_settings(
         redis_port=redis_port,
         redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
         # File upload limits
-        upload_file_to_session_max_size=10_000_000,
-        upload_image_to_session_max_size=5_000_000,
-        upload_max_file_size=100_000_000,
-        transcription_max_file_size=25_000_000,
         # API settings
         api_prefix="/api/v1",
         api_key_length=32,
@@ -438,6 +444,16 @@ async def setup_database(test_settings: Settings):
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute("""
+        SELECT new_write_storage_target, session_file_limit_bytes,
+            session_image_limit_bytes, knowledge_file_limit_bytes,
+            transcription_audio_limit_bytes
+        FROM object_content_deployment_policy
+        WHERE id = 1
+    """)
+    policy_row = cursor.fetchone()
+    assert policy_row is not None
+    deployment_policy_seed = _DeploymentPolicySeed(*policy_row)
     conn.commit()
     cursor.close()
 
@@ -482,14 +498,17 @@ async def setup_database(test_settings: Settings):
             assert users[0].tenant_id is not None
             print(f"✓ Test user created: {users[0].email}")
 
-    yield
+    yield deployment_policy_seed
 
     # Cleanup
     await sessionmanager.close()
 
 
 @pytest.fixture(autouse=True)
-async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
+async def cleanup_database(
+    setup_database: _DeploymentPolicySeed,
+    test_settings: Settings,
+):
     """
     Automatically truncate all tables and reseed after each test for full isolation.
 
@@ -553,6 +572,24 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    cursor.execute(
+        """
+        INSERT INTO object_content_deployment_policy (
+            id, revision, new_write_storage_target,
+            session_file_limit_bytes, session_image_limit_bytes,
+            knowledge_file_limit_bytes, transcription_audio_limit_bytes,
+            updated_by_actor
+        )
+        VALUES (1, 1, %s, %s, %s, %s, %s, 'migration')
+        """,
+        (
+            setup_database.new_write_storage_target,
+            setup_database.session_file_limit_bytes,
+            setup_database.session_image_limit_bytes,
+            setup_database.knowledge_file_limit_bytes,
+            setup_database.transcription_audio_limit_bytes,
+        ),
+    )
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
@@ -667,13 +704,7 @@ def db_container(setup_database, test_settings: Settings):
 
         async with runtime_lock:
             if active_contexts == 0 and not object_content_runtime.enabled:
-                object_content_runtime.start(
-                    required_inline_bytes=max(
-                        test_settings.upload_file_to_session_max_size,
-                        test_settings.upload_image_to_session_max_size,
-                        test_settings.transcription_max_file_size,
-                    )
-                )
+                object_content_runtime.start()
                 try:
                     await object_content_runtime.validate_configuration()
                 except BaseException:

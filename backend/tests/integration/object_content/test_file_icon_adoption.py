@@ -34,7 +34,9 @@ from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
 from eneo.main.exceptions import NotFoundException
 from eneo.object_content.configuration import ObjectContentCoreSettings
+from eneo.object_content.content import StorageKind
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
 
 
@@ -57,6 +59,20 @@ async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
     yield payload
 
 
+def _inline_upload_admission() -> UploadAdmissionSnapshot:
+    maximum_bytes = 20 * 1024 * 1024
+    return UploadAdmissionSnapshot(
+        policy_revision=1,
+        session_storage_target=StorageKind.POSTGRES_INLINE,
+        session_operator_ceiling_bytes=maximum_bytes,
+        session_file_maximum_bytes=maximum_bytes,
+        session_image_maximum_bytes=maximum_bytes,
+        session_audio_maximum_bytes=maximum_bytes,
+        knowledge_file_maximum_bytes=maximum_bytes,
+        knowledge_audio_maximum_bytes=maximum_bytes,
+    )
+
+
 class _PreparedFileProtocol(FileProtocol):
     def __init__(self, prepared: PreparedFileUpload) -> None:
         self._prepared = prepared
@@ -66,10 +82,11 @@ class _PreparedFileProtocol(FileProtocol):
         self,
         upload_file: UploadFile,
         *,
+        upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
-        limit_setting_name: str | None = None,
+        limit_name: str | None = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
-        del upload_file, max_size, limit_setting_name
+        del upload_file, upload_admission_snapshot, max_size, limit_name
         yield self._prepared
 
 
@@ -115,6 +132,7 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
                 image_extractor=ImageExtractor(),
             ),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         saved = await service.save_file(
             UploadFile(
@@ -152,6 +170,7 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
                 image_extractor=ImageExtractor(),
             ),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         hydrated = await service.get_file_content(file_id)
         download = await service.get_download_no_auth(file_id)
@@ -179,6 +198,7 @@ async def test_file_hydration_batches_multiple_inline_payloads_in_one_query(
                 image_extractor=ImageExtractor(),
             ),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         for index in range(3):
             saved = await service.save_file(
@@ -264,6 +284,7 @@ async def test_file_capture_persists_payload_above_the_old_inline_default(
                 object_content_database,
                 inline_maximum_bytes=len(payload),
             ),
+            upload_admission=_inline_upload_admission(),
         )
         saved = await service.save_file(
             UploadFile(
@@ -386,6 +407,7 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
                 repo=FileRepository(session),
                 protocol=_PreparedFileProtocol(prepared),
                 object_content=_content_service(object_content_database),
+                upload_admission=_inline_upload_admission(),
             )
             saved = await service.save_file(
                 UploadFile(
@@ -461,6 +483,7 @@ async def test_text_hydration_without_readable_text_returns_typed_not_found(
             repo=FileRepository(session),
             protocol=_PreparedFileProtocol(prepared),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         saved = await service.save_file(
             UploadFile(
@@ -476,6 +499,7 @@ async def test_text_hydration_without_readable_text_returns_typed_not_found(
             repo=FileRepository(session),
             protocol=_PreparedFileProtocol(prepared),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         with pytest.raises(NotFoundException, match="no readable text content"):
             await service.get_file_content(saved.id)
@@ -500,6 +524,7 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
                 image_extractor=ImageExtractor(),
             ),
             object_content=content_service,
+            upload_admission=_inline_upload_admission(),
         )
         saved_audio = await file_service.save_file(
             UploadFile(
@@ -514,6 +539,16 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
             icon_repo=IconRepository(session),
             file_size_service=FileSizeService(),
             object_content=content_service,
+            upload_admission=UploadAdmissionSnapshot(
+                policy_revision=1,
+                session_storage_target=StorageKind.POSTGRES_INLINE,
+                session_operator_ceiling_bytes=10 * 1024 * 1024,
+                session_file_maximum_bytes=10 * 1024 * 1024,
+                session_image_maximum_bytes=10 * 1024 * 1024,
+                session_audio_maximum_bytes=10 * 1024 * 1024,
+                knowledge_file_maximum_bytes=10 * 1024 * 1024,
+                knowledge_audio_maximum_bytes=10 * 1024 * 1024,
+            ),
         )
         saved_icon = await icon_service.create_icon(
             UploadFile(
@@ -551,6 +586,7 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
                 image_extractor=ImageExtractor(),
             ),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         ranged = await file_service.get_download_no_auth(
             audio_id,
@@ -580,6 +616,7 @@ async def test_concurrent_transcription_writes_converge_on_one_reference(
                 image_extractor=ImageExtractor(),
             ),
             object_content=_content_service(object_content_database),
+            upload_admission=_inline_upload_admission(),
         )
         audio = await setup_service.save_file(
             UploadFile(

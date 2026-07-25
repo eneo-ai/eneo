@@ -211,8 +211,7 @@ class FileNotSupportedException(Exception):
 
 class FileTooLargeException(Exception):
     DEFAULT_DOCS_HINT = (
-        "See backend/README.md (Environment variables) and backend/.env.template "
-        "to update upload limits."
+        "Ask a platform administrator to review the object-content deployment policy."
     )
 
     def __init__(
@@ -221,12 +220,12 @@ class FileTooLargeException(Exception):
         *,
         file_size: int | None = None,
         max_size: int | None = None,
-        setting_name: str | None = None,
+        limit_name: str | None = None,
         docs_hint: str | None = None,
     ):
         self.file_size = file_size
         self.max_size = max_size
-        self.setting_name = setting_name
+        self.limit_name = limit_name
         self.docs_hint = docs_hint or self.DEFAULT_DOCS_HINT
 
         if message is None:
@@ -264,11 +263,8 @@ class FileTooLargeException(Exception):
         else:
             message = "File size limit exceeded."
 
-        if self.setting_name:
-            message += (
-                f" Adjust {self.setting_name} in your backend environment "
-                "if you need a higher limit."
-            )
+        if self.limit_name:
+            message += f" The active limit is {self.limit_name}."
 
         if self.docs_hint:
             message += f" {self.docs_hint}"
@@ -286,6 +282,9 @@ class FileTooLargeException(Exception):
         if self.max_size is not None:
             details["max_size_bytes"] = self.max_size
             details["max_size_human"] = self._format_bytes(self.max_size)
+
+        if self.limit_name is not None:
+            details["limit_name"] = self.limit_name
 
         return details
 

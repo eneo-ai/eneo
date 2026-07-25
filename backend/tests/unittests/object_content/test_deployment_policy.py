@@ -1,12 +1,12 @@
 import importlib.util
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
@@ -27,7 +27,9 @@ from eneo.object_content.deployment_policy import (
     DeploymentPolicyUpdate,
     ObjectStoreTargetNotSelectable,
     PolicyActor,
+    UploadAdmissionSnapshot,
     UploadLimitUseCase,
+    load_upload_admission_snapshot,
     project_upload_limits,
 )
 from eneo.object_content.deployment_policy_router import (
@@ -167,6 +169,16 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
 
+def test_policy_router_is_registered_on_the_admin_surface() -> None:
+    from eneo.server.routers import router as api_router
+
+    app = FastAPI()
+    app.include_router(api_router)
+    methods = set(app.openapi()["paths"]["/admin/object-content-policy"])
+
+    assert methods == {"get", "put"}
+
+
 @pytest.mark.asyncio
 async def test_policy_replace_uses_revision_compare_and_swap() -> None:
     row = ObjectContentDeploymentPolicy(
@@ -248,6 +260,46 @@ def test_limit_projection_has_no_inline_ceiling_for_object_store() -> None:
     )
     assert projections[0].storage_target is StorageKind.OBJECT_STORE
     assert projections[3].storage_target is None
+
+
+async def test_load_upload_admission_snapshot_reads_one_effective_revision() -> None:
+    policy = _policy(
+        target=StorageKind.POSTGRES_INLINE,
+        session_file=101,
+        session_image=102,
+        knowledge_file=103,
+        transcription_audio=104,
+    )
+    session = AsyncMock()
+    session.scalar.return_value = SimpleNamespace(
+        revision=policy.revision,
+        new_write_storage_target=policy.new_write_storage_target.value,
+        session_file_limit_bytes=policy.session_file_limit_bytes,
+        session_image_limit_bytes=policy.session_image_limit_bytes,
+        knowledge_file_limit_bytes=policy.knowledge_file_limit_bytes,
+        transcription_audio_limit_bytes=policy.transcription_audio_limit_bytes,
+        updated_by_actor=policy.updated_by_actor.value,
+        updated_by_user_id=policy.updated_by_user_id,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+    snapshot = await load_upload_admission_snapshot(
+        session,
+        inline_maximum_bytes=100,
+    )
+
+    assert snapshot == UploadAdmissionSnapshot(
+        policy_revision=1,
+        session_storage_target=StorageKind.POSTGRES_INLINE,
+        session_operator_ceiling_bytes=100,
+        session_file_maximum_bytes=100,
+        session_image_maximum_bytes=100,
+        session_audio_maximum_bytes=100,
+        knowledge_file_maximum_bytes=103,
+        knowledge_audio_maximum_bytes=104,
+    )
+    session.scalar.assert_awaited_once()
 
 
 def _policy(

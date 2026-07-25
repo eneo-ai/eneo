@@ -211,33 +211,50 @@ class ObjectContentService:
             ) from error
 
     @asynccontextmanager
-    async def capture_inline(
+    async def capture_for_target(
         self,
         source: AsyncIterable[bytes],
         *,
+        storage_kind: StorageKind,
         declared_media_type: str,
         verified_media_type: str,
         business_maximum_bytes: int | None = None,
     ) -> AsyncGenerator[CapturedContent]:
-        """Capture one producer stream within both business and inline limits."""
-        maximum_size_bytes = self._core_settings.inline_maximum_bytes
-        if business_maximum_bytes is not None:
-            if business_maximum_bytes < 1:
-                raise ValueError("business_maximum_bytes must be positive")
-            maximum_size_bytes = min(
-                maximum_size_bytes,
-                business_maximum_bytes,
+        if business_maximum_bytes is not None and business_maximum_bytes < 1:
+            raise ValueError("business_maximum_bytes must be positive")
+        if storage_kind is StorageKind.POSTGRES_INLINE:
+            maximum_size_bytes = (
+                self._core_settings.inline_maximum_bytes
+                if business_maximum_bytes is None
+                else min(
+                    business_maximum_bytes,
+                    self._core_settings.inline_maximum_bytes,
+                )
             )
-
+            spool_memory_bytes = self._core_settings.inline_io_chunk_bytes
+            multipart_part_bytes = self._core_settings.inline_io_chunk_bytes
+        else:
+            if business_maximum_bytes is None:
+                raise ValueError(
+                    "business_maximum_bytes is required for object-store capture"
+                )
+            settings, _store = self._require_object_store()
+            maximum_size_bytes = business_maximum_bytes
+            spool_memory_bytes = settings.spool_memory_bytes
+            multipart_part_bytes = settings.multipart_part_bytes
         async with capture_content(
             source,
             declared_media_type=declared_media_type,
             verified_media_type=verified_media_type,
             maximum_size_bytes=maximum_size_bytes,
-            spool_memory_bytes=self._core_settings.inline_io_chunk_bytes,
-            multipart_part_bytes=self._core_settings.inline_io_chunk_bytes,
+            spool_memory_bytes=spool_memory_bytes,
+            multipart_part_bytes=multipart_part_bytes,
         ) as captured:
             yield captured
+
+    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+        if storage_kind is StorageKind.OBJECT_STORE:
+            await self.check_object_store_ready()
 
     async def prepare_in_transaction(
         self,

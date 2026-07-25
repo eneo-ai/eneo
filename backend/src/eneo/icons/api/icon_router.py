@@ -11,7 +11,19 @@ from eneo.server.protocol import responses
 router = APIRouter()
 
 _Container = Annotated[Container, Depends(get_container())]
-_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+_ContainerWithUser = Annotated[
+    Container, Depends(get_container(with_user=True, with_transaction=False))
+]
+_ContainerWithUploadAdmission = Annotated[
+    Container,
+    Depends(
+        get_container(
+            with_user=True,
+            with_transaction=False,
+            with_upload_admission=True,
+        )
+    ),
+]
 
 
 @router.get(
@@ -43,9 +55,15 @@ async def get_icon(id: UUID, container: _Container) -> Response:
     response_model=IconPublic,
     responses=responses.get_responses([400, 413, 415]),
     summary="Upload icon",
-    description="Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.",
+    description=(
+        "Upload an icon image (PNG, JPEG, WebP) within the active deployment "
+        "image limit. Returns the icon ID."
+    ),
 )
-async def create_icon(file: UploadFile, container: _ContainerWithUser) -> IconPublic:
+async def create_icon(
+    file: UploadFile,
+    container: _ContainerWithUploadAdmission,
+) -> IconPublic:
     icon_service = container.icon_service()
     user = container.user()
     icon = await icon_service.create_icon(

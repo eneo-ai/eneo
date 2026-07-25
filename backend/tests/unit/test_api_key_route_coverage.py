@@ -1015,7 +1015,8 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "repo.delete_by_owner_for_lifecycle("
+        "id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
         "The file delete scope guard "
         "blocks service keys because files are user-owned.",
         (

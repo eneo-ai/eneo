@@ -1,12 +1,14 @@
 import asyncio
 
 import pytest
+from dependency_injector import providers
 from sqlalchemy import delete, insert
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
+from eneo.main.container.container import Container, SessionProxy
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
     DeploymentPolicy,
@@ -15,6 +17,7 @@ from eneo.object_content.deployment_policy import (
     DeploymentPolicyUpdate,
 )
 from eneo.object_content.deployment_policy_router import _read_projection
+from eneo.server.dependencies.container import load_container_upload_admission
 
 
 async def _seed_policy() -> None:
@@ -141,3 +144,39 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
         set(fact) == {"target", "state", "count", "bytes", "oldest_created_at"}
         for fact in payload["inventory"]
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_independent_api_and_worker_containers_observe_committed_revision(
+    admin_user,
+    db_container,
+) -> None:
+    await _seed_policy()
+
+    async with db_container() as api_container:
+        api_snapshot = await load_container_upload_admission(api_container)
+
+        async with sessionmanager.session() as session, session.begin():
+            await DeploymentPolicyRepository(session).replace(
+                DeploymentPolicyUpdate(
+                    expected_revision=1,
+                    new_write_storage_target=StorageKind.POSTGRES_INLINE,
+                    session_file_limit_bytes=101,
+                    session_image_limit_bytes=102,
+                    knowledge_file_limit_bytes=103,
+                    transcription_audio_limit_bytes=104,
+                ),
+                actor_user_id=admin_user.id,
+            )
+
+        worker_container = Container(
+            session=providers.Object(SessionProxy()),
+        )
+        async with Container.session_scope():
+            worker_snapshot = await load_container_upload_admission(worker_container)
+
+    assert api_snapshot.policy_revision == 1
+    assert api_snapshot.session_file_maximum_bytes == 10
+    assert worker_snapshot.policy_revision == 2
+    assert worker_snapshot.session_file_maximum_bytes == 101

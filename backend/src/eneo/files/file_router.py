@@ -8,7 +8,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
-# Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -46,21 +45,27 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=FilePublic,
-    responses=responses.get_responses([400, 403, 413, 415]),
+    responses=responses.get_responses([400, 403, 413, 415, 503]),
     description="Upload a file; rejects unsupported media types and oversized files.",
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(
+            get_container(
+                with_user=True,
+                with_transaction=False,
+                with_upload_admission=True,
+            )
+        ),
+    ],
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.file_service()
     current_user = container.user()
-
-    # Upload file
     file = await service.save_file(upload_file)
 
-    # Build extra context with file details
     extra = {
         "size_bytes": file.size,
         "mimetype": getattr(file, "mimetype", None),
@@ -69,7 +74,6 @@ async def upload_file(
         else None,
     }
 
-    # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,

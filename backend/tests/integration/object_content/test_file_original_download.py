@@ -347,10 +347,10 @@ async def test_original_mint_does_not_read_payload_and_corruption_fails_before_h
 
     retry = await client.get(f"{parsed.path}?{parsed.query}")
 
-    assert retry.status_code == 409
+    assert retry.status_code == 404
     assert retry.headers["content-type"].startswith("application/json")
-    assert retry.json()["code"] == "object_content_state_conflict"
-    assert retry.json()["eneo_error_code"] == 9007
+    assert retry.json()["eneo_error_code"] == 9000
+    assert "code" not in retry.json()
 
 
 @pytest.mark.integration

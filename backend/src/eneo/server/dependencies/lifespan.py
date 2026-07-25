@@ -32,13 +32,7 @@ async def startup():
     # Remote configuration is optional; the inline-capable core always starts.
     # Any partial configuration fails construction. Startup then verifies the
     # durable PostgreSQL/object-store pairing before producers or workers run.
-    object_content_runtime.start(
-        required_inline_bytes=max(
-            settings.upload_file_to_session_max_size,
-            settings.upload_image_to_session_max_size,
-            settings.transcription_max_file_size,
-        )
-    )
+    object_content_runtime.start()
     aiohttp_client.start()
     sessionmanager.init(settings.database_url)
     try:

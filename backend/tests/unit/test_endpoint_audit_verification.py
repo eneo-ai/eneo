@@ -305,11 +305,7 @@ class TestLimitsRouterAuth:
         container_param = sig.parameters.get("container")
         assert container_param is not None, "get_limits missing container parameter"
 
-        # The default should be Depends(get_container(with_user=True))
-        # We can't easily inspect the with_user=True arg directly, but
-        # we can verify it's using get_container by checking the source
         eneo_src = _get_eneo_src_path()
         source = (eneo_src / "limits" / "limit_router.py").read_text()
-        assert "get_container(with_user=True)" in source, (
-            "limit_router.py should use get_container(with_user=True)"
-        )
+        assert "with_user=True" in source
+        assert "with_upload_admission=True" in source

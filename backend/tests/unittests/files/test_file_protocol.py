@@ -17,6 +17,8 @@ from eneo.files import file_protocol as file_protocol_module
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_protocol import FileProtocol
 from eneo.main.exceptions import FileTooLargeException
+from eneo.object_content.content import StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -25,12 +27,19 @@ IMAGE_MAX = 20_000_000  # 20 MB
 AUDIO_MAX = 200_000_000  # 200 MB
 
 _FAKE_SETTINGS = SimpleNamespace(
-    upload_file_to_session_max_size=TEXT_MAX,
-    upload_image_to_session_max_size=IMAGE_MAX,
-    transcription_max_file_size=AUDIO_MAX,
     upload_tmp_dir=Path("/tmp"),
     attachment_image_extraction=False,
     attachment_max_extracted_images=10,
+)
+_UPLOAD_ADMISSION = UploadAdmissionSnapshot(
+    policy_revision=7,
+    session_storage_target=StorageKind.POSTGRES_INLINE,
+    session_operator_ceiling_bytes=250_000_000,
+    session_file_maximum_bytes=TEXT_MAX,
+    session_image_maximum_bytes=IMAGE_MAX,
+    session_audio_maximum_bytes=AUDIO_MAX,
+    knowledge_file_maximum_bytes=30_000_000,
+    knowledge_audio_maximum_bytes=220_000_000,
 )
 
 
@@ -87,7 +96,10 @@ async def _content_bytes(content) -> bytes:
 
 
 async def _prepare(protocol: FileProtocol, upload: UploadFile):
-    async with protocol.prepare_upload(upload) as prepared:
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
         return prepared
 
 
@@ -110,7 +122,10 @@ async def test_prepare_pdf_preserves_original_and_extracted_text_variants(
 
     protocol.file_size_service.save_file_to_disk = save_original
 
-    async with protocol.prepare_upload(upload) as prepared:
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
         by_variant = {content.variant: content for content in prepared.contents}
         assert await _content_bytes(by_variant[FileContentVariant.ORIGINAL]) == original
         assert (
@@ -146,7 +161,10 @@ async def test_prepare_image_keeps_original_separate_from_model_input(
         ),
     )
 
-    async with protocol.prepare_upload(upload) as prepared:
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
         by_variant = {content.variant: content for content in prepared.contents}
         assert await _content_bytes(by_variant[FileContentVariant.ORIGINAL]) == original
         assert (
@@ -172,7 +190,10 @@ async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
 
     protocol.file_size_service.save_file_to_disk = save_original
 
-    async with protocol.prepare_upload(upload) as prepared:
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
         assert len(prepared.contents) == 1
         content = prepared.contents[0]
         assert content.variant is FileContentVariant.ORIGINAL
@@ -184,7 +205,7 @@ async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
 
 @pytest.mark.asyncio
 async def test_text_under_limit_accepted(protocol):
-    upload, size = _make_upload("text/plain", TEXT_MAX - 1)
+    upload, size = _make_upload("text/plain", TEXT_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
     result = await _prepare(protocol, upload)
@@ -201,7 +222,7 @@ async def test_text_over_limit_rejected(protocol):
         await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == TEXT_MAX
-    assert exc_info.value.setting_name == "UPLOAD_FILE_TO_SESSION_MAX_SIZE"
+    assert exc_info.value.limit_name == "session_file"
 
 
 # ── Tests: image files use IMAGE_MAX ─────────────────────────────────────
@@ -209,7 +230,7 @@ async def test_text_over_limit_rejected(protocol):
 
 @pytest.mark.asyncio
 async def test_image_under_limit_accepted(protocol):
-    upload, size = _make_upload("image/png", IMAGE_MAX - 1)
+    upload, size = _make_upload("image/png", IMAGE_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
     result = await _prepare(protocol, upload)
@@ -226,7 +247,7 @@ async def test_image_over_limit_rejected(protocol):
         await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == IMAGE_MAX
-    assert exc_info.value.setting_name == "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
+    assert exc_info.value.limit_name == "session_image"
 
 
 # ── Tests: audio files use AUDIO_MAX (the 200 MB fix) ───────────────────
@@ -235,7 +256,7 @@ async def test_image_over_limit_rejected(protocol):
 @pytest.mark.asyncio
 async def test_audio_under_limit_accepted(protocol):
     """Audio files up to AUDIO_MAX (200 MB) should be accepted — this was the bug."""
-    upload, size = _make_upload("audio/mpeg", AUDIO_MAX - 1)
+    upload, size = _make_upload("audio/mpeg", AUDIO_MAX)
     protocol.file_size_service.get_file_size.return_value = size
 
     result = await _prepare(protocol, upload)
@@ -252,7 +273,7 @@ async def test_audio_over_limit_rejected(protocol):
         await _prepare(protocol, upload)
 
     assert exc_info.value.max_size == AUDIO_MAX
-    assert exc_info.value.setting_name == "TRANSCRIPTION_MAX_FILE_SIZE"
+    assert exc_info.value.limit_name == "session_audio"
 
 
 @pytest.mark.asyncio

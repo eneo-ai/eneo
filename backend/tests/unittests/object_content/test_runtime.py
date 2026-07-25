@@ -21,7 +21,6 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
 )
 from eneo.object_content.content import (
-    ObjectContentConfigurationError,
     ObjectContentUnavailableError,
 )
 from eneo.object_content.runtime import (
@@ -159,23 +158,18 @@ def test_runtime_fails_closed_before_start() -> None:
         runtime.service
 
 
-def test_runtime_rejects_inline_capacity_below_file_producer_limit() -> None:
+def test_runtime_inline_capacity_has_no_process_owned_business_limit() -> None:
     runtime = ObjectContentRuntime()
 
-    with pytest.raises(
-        ObjectContentConfigurationError,
-        match="OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
-    ):
-        runtime.start(
-            core_settings=ObjectContentCoreSettings(
-                _env_file=None,
-                inline_maximum_bytes=10,
-                inline_io_chunk_bytes=10,
-            ),
-            required_inline_bytes=11,
-        )
+    runtime.start(
+        core_settings=ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=10,
+            inline_io_chunk_bytes=10,
+        ),
+    )
 
-    assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
+    assert runtime.state is ObjectContentRuntimeState.ENABLED
 
 
 @pytest.mark.asyncio

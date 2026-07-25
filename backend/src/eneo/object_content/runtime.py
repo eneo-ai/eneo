@@ -88,7 +88,6 @@ class ObjectContentRuntime:
         core_settings: ObjectContentCoreSettings | None = None,
         settings: ObjectContentSettings | None = None,
         store: S3ObjectStore | None = None,
-        required_inline_bytes: int | None = None,
     ) -> None:
         if self._state is not ObjectContentRuntimeState.NOT_STARTED:
             raise RuntimeError("Object-content runtime is already initialized")
@@ -99,14 +98,6 @@ class ObjectContentRuntime:
             if core_settings is not None
             else load_object_content_core_settings()
         )
-        if (
-            required_inline_bytes is not None
-            and resolved_core_settings.inline_maximum_bytes < required_inline_bytes
-        ):
-            raise ObjectContentConfigurationError(
-                "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES must be at least the "
-                "largest configured File upload limit"
-            )
         resolved_settings = (
             settings if settings is not None else load_object_content_settings()
         )

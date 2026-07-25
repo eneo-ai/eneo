@@ -76,6 +76,18 @@ class UploadLimitProjection:
     constraining_source: ConstrainingSource
 
 
+@dataclass(frozen=True, slots=True)
+class UploadAdmissionSnapshot:
+    policy_revision: int
+    session_storage_target: StorageKind
+    session_operator_ceiling_bytes: int | None
+    session_file_maximum_bytes: int
+    session_image_maximum_bytes: int
+    session_audio_maximum_bytes: int
+    knowledge_file_maximum_bytes: int
+    knowledge_audio_maximum_bytes: int
+
+
 def project_upload_limits(
     policy: DeploymentPolicy, *, inline_maximum_bytes: int
 ) -> tuple[UploadLimitProjection, ...]:
@@ -192,3 +204,38 @@ class DeploymentPolicyRepository:
         if row is None:
             raise DeploymentPolicyConflict("Deployment policy revision is stale")
         return _policy(row)
+
+
+async def load_upload_admission_snapshot(
+    session: AsyncSession,
+    *,
+    inline_maximum_bytes: int,
+) -> UploadAdmissionSnapshot:
+    policy = await DeploymentPolicyRepository(session).get()
+    projections = {
+        projection.use_case: projection
+        for projection in project_upload_limits(
+            policy,
+            inline_maximum_bytes=inline_maximum_bytes,
+        )
+    }
+    session_file = projections[UploadLimitUseCase.SESSION_FILE]
+
+    return UploadAdmissionSnapshot(
+        policy_revision=policy.revision,
+        session_storage_target=policy.new_write_storage_target,
+        session_operator_ceiling_bytes=session_file.operator_ceiling_bytes,
+        session_file_maximum_bytes=session_file.effective_bytes,
+        session_image_maximum_bytes=projections[
+            UploadLimitUseCase.SESSION_IMAGE
+        ].effective_bytes,
+        session_audio_maximum_bytes=projections[
+            UploadLimitUseCase.SESSION_AUDIO
+        ].effective_bytes,
+        knowledge_file_maximum_bytes=projections[
+            UploadLimitUseCase.KNOWLEDGE_FILE
+        ].effective_bytes,
+        knowledge_audio_maximum_bytes=projections[
+            UploadLimitUseCase.KNOWLEDGE_AUDIO
+        ].effective_bytes,
+    )
