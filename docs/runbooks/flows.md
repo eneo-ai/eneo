@@ -62,6 +62,33 @@ deployment, do not enable or perform raw export. Redacted export remains the
 default. Never place encryption keys, super API keys, or exported evidence in
 incident tickets or command history.
 
+## Stored HTTP credential inventory (M2.9)
+
+Authored HTTP credentials are encrypted before they are stored, and both saving
+a step and publishing a version refuse a credential that cannot be protected.
+Rows written before that enforcement can still hold an unprotected value, and a
+published version keeps whatever the draft held when it was published.
+
+```bash
+python backend/scripts/flow_http_secret_inventory.py
+```
+
+The scan is read-only across every tenant. It reports each draft step and each
+published version whose declared credential fields are unprotected, and exits
+non-zero when it finds anything. It never rewrites, re-encrypts, or deletes a
+row: what to do about a reported row is an operator decision.
+
+Two findings are possible. `UNPROTECTED` names the credential fields; the value
+is never printed. `UNREADABLE` means the config declares the authored HTTP
+shape but no longer parses, so nothing can be said about the credentials in it.
+
+Confirm `ENCRYPTION_KEY` is configured first — without an active key every
+stored credential is reported, because none of them can be recognized as
+protected. Then re-enter the credentials on the reported draft steps and publish
+a new version. Published versions are immutable: an affected version has to be
+retired rather than edited, and the credential it carried must be rotated at the
+destination, because it was readable in the snapshot.
+
 ## Accepted Flow Dispatch Exhaustion
 
 A queued run with `dispatch_exhausted_at` set remains queued when at least one
