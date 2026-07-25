@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
-from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ProviderDispatch,
+)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -34,6 +37,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
+    TokenCountSource,
 )
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
@@ -384,6 +388,72 @@ def _typed_context_window_error(
         input_payload_for_result=prepared.input_payload_for_result,
         effective_prompt=effective_prompt,
     )
+
+
+def build_provider_call_receipts(
+    *,
+    dispatches: Sequence[ProviderDispatch],
+    fallback_provider_response_id: str | None,
+    first_call_index: int,
+    aggregate_num_tokens_input: int,
+    aggregate_num_tokens_output: int,
+    aggregate_input_source: TokenCountSource,
+    aggregate_output_source: TokenCountSource,
+    requested_model: str | None,
+    response_model: str | None,
+    provider: str | None,
+    mapped_call: MappedProviderCallProvenance | None,
+) -> list[ProviderCallTokenReceipt]:
+    """One receipt per request the provider served, in dispatch order.
+
+    Adapters that report their dispatches give a receipt each, carrying that
+    dispatch's own usage. Adapters that do not report them still yield a single
+    receipt holding the aggregate, which is what the caller could observe: an
+    invented per-call split would be worse than an honest single total.
+    """
+    if len(dispatches) <= 1:
+        return [
+            ProviderCallTokenReceipt(
+                call_index=first_call_index,
+                num_tokens_input=aggregate_num_tokens_input,
+                num_tokens_output=aggregate_num_tokens_output,
+                input_source=aggregate_input_source,
+                output_source=aggregate_output_source,
+                requested_model=requested_model,
+                response_model=response_model,
+                provider=provider,
+                provider_response_id=fallback_provider_response_id,
+                mapped_call=mapped_call,
+            )
+        ]
+
+    receipts: list[ProviderCallTokenReceipt] = []
+    for offset, dispatch in enumerate(dispatches):
+        usage = dispatch.usage
+        prompt_tokens = usage.prompt_tokens if usage is not None else None
+        completion_tokens = usage.completion_tokens if usage is not None else None
+        receipts.append(
+            ProviderCallTokenReceipt(
+                call_index=first_call_index + offset,
+                num_tokens_input=prompt_tokens or 0,
+                num_tokens_output=completion_tokens or 0,
+                # Per-dispatch counts come from the provider when it reported
+                # them for that request; otherwise this dispatch's share is
+                # genuinely unknown rather than estimated.
+                input_source="provider"
+                if prompt_tokens is not None
+                else ("not_applicable"),
+                output_source="provider"
+                if completion_tokens is not None
+                else ("not_applicable"),
+                requested_model=requested_model,
+                response_model=dispatch.response_model or response_model,
+                provider=provider,
+                provider_response_id=dispatch.provider_response_id,
+                mapped_call=mapped_call,
+            )
+        )
+    return receipts
 
 
 async def call_assistant_with_timeout(
@@ -1360,22 +1430,26 @@ async def complete_step_execution(
         if response_usage is not None and response_usage.completion_tokens is not None
         else "estimated"
     )
-    call_index = state.provider_call_count_by_step.get(step.step_id, 0) + 1
-    receipt = ProviderCallTokenReceipt(
-        call_index=call_index,
-        num_tokens_input=num_tokens_input,
-        num_tokens_output=num_tokens_output,
-        input_source=input_token_source,
-        output_source=output_token_source,
+    # One receipt per request the provider actually served. A completion that
+    # needed tool rounds sent several and merged their usage, so recording a
+    # single receipt would undercount what was billed.
+    receipts = build_provider_call_receipts(
+        dispatches=tuple(getattr(completion, "provider_dispatches", ()) or ()),
+        fallback_provider_response_id=getattr(completion, "provider_response_id", None),
+        first_call_index=state.provider_call_count_by_step.get(step.step_id, 0) + 1,
+        aggregate_num_tokens_input=num_tokens_input,
+        aggregate_num_tokens_output=num_tokens_output,
+        aggregate_input_source=input_token_source,
+        aggregate_output_source=output_token_source,
         requested_model=requested_model_name(prepared.assistant),
         response_model=getattr(response_model_info, "name", None),
         provider=getattr(response_model_info, "provider_type", None),
-        provider_response_id=getattr(completion, "provider_response_id", None),
         mapped_call=deps.mapped_call_context,
     )
     if deps.record_provider_call_receipt is not None:
-        await deps.record_provider_call_receipt(receipt)
-    state.provider_call_count_by_step[step.step_id] = call_index
+        for receipt in receipts:
+            await deps.record_provider_call_receipt(receipt)
+    state.provider_call_count_by_step[step.step_id] = receipts[-1].call_index
 
     rag_metadata = apply_prompt_context_trace(
         rag_metadata,
@@ -1470,5 +1544,5 @@ async def complete_step_execution(
         ),
         input_token_source=input_token_source,
         output_token_source=output_token_source,
-        provider_call_receipts=[receipt],
+        provider_call_receipts=receipts,
     )
