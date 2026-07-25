@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -199,40 +198,6 @@ class CitationsProvenance(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-ResolvedInputSourceKind = Literal[
-    "flow_input",
-    "previous_step",
-    "all_previous_steps",
-    "runtime_input",
-    "http_get",
-]
-
-
-class ResolvedInputEdge(BaseModel):
-    """One source that actually supplied part of an attempt's input.
-
-    Recorded from what resolution consumed, not from what the step was
-    configured to consume. A step configured for ``previous_step`` whose value
-    was replaced by a flow-input binding produces no upstream edge, because no
-    upstream value was read.
-
-    ``source_attempt_no`` pins which attempt of the upstream step was consumed,
-    so a rerun that produces a new attempt is distinguishable from the one the
-    downstream step actually saw.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_kind: ResolvedInputSourceKind
-    selector: str | None = None
-    source_step_id: UUID | None = None
-    source_step_order: int | None = None
-    source_attempt_no: int | None = None
-    value_sha256: str | None = None
-    value_byte_size: int | None = None
-    entered_provider_request: bool = True
-
-
 class FlowAttemptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -251,7 +216,6 @@ class FlowAttemptProvenance(BaseModel):
     guards: GuardsProvenance | None = None
     citations: CitationsProvenance | None = None
     token_usage: TokenUsageProvenance | None = None
-    resolved_input_edges: tuple[ResolvedInputEdge, ...] | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -564,9 +528,6 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
         guards=_validate_extra_model(GuardsProvenance, raw.get("guards")),
         citations=_validate_extra_model(CitationsProvenance, raw.get("citations")),
         token_usage=_validate_extra_model(TokenUsageProvenance, raw.get("token_usage")),
-        resolved_input_edges=_validate_resolved_input_edges(
-            raw.get("resolved_input_edges")
-        ),
     )
 
 
@@ -586,17 +547,6 @@ def _corruption_marker(
         persisted_schema_version=persisted_schema_version,
         unknown_keys=unknown_keys,
     )
-
-
-def _validate_resolved_input_edges(
-    raw: object,
-) -> tuple[ResolvedInputEdge, ...] | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, (list, tuple)):
-        raise ValueError("resolved_input_edges must be a list")
-    items = cast(Sequence[object], raw)
-    return tuple(ResolvedInputEdge.model_validate(item) for item in items)
 
 
 def _validate_extra_model(model: type[ModelT], value: Any) -> ModelT | None:

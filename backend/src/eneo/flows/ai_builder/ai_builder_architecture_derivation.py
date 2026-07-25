@@ -223,15 +223,16 @@ def _step_output_mode_value(output_mode: FlowOutputMode) -> StepOutputMode | Non
     match output_mode:
         case FlowOutputMode.PASS_THROUGH:
             return "pass_through"
-        case FlowOutputMode.HTTP_POST:
-            return "http_post"
         case FlowOutputMode.TRANSCRIBE_ONLY:
             return "transcribe_only"
         case FlowOutputMode.TEMPLATE_FILL:
             return "template_fill"
         case FlowOutputMode.RENDER_VERBATIM:
             return "render_verbatim"
-        case FlowOutputMode.COMPOSE_TEXT:
+        case FlowOutputMode.COMPOSE_TEXT | FlowOutputMode.HTTP_POST:
+            # Neither is an authored planner value: compose_text is the implicit
+            # default and http_post is server-injected, so the planner's
+            # vocabulary has no member for either.
             return None
 
 

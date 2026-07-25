@@ -427,8 +427,6 @@ def _build_attempt_provenance(
     }
     if attempt_start is not None:
         provenance_payload["attempt_start"] = attempt_start
-    if output.resolved_input_edges:
-        provenance_payload["resolved_input_edges"] = output.resolved_input_edges
     if output.rag_metadata is not None:
         provenance_payload["rag"] = output.rag_metadata
     if output.runtime_input_metadata is not None:
