@@ -21,6 +21,7 @@ from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     MappedAdmissionProvenance,
     MappedProviderCallProvenance,
+    ResolvedInputEdge,
 )
 
 if TYPE_CHECKING:
@@ -146,6 +147,9 @@ class StepExecutionOutput:
     provider_call_receipts: list[ProviderCallTokenReceipt] = field(
         default_factory=_empty_provider_call_receipts
     )
+    # Carried from input resolution so the attempt records which sources it
+    # actually read, not which ones it was configured to read.
+    resolved_input_edges: tuple[ResolvedInputEdge, ...] = ()
 
 
 @dataclass
@@ -160,6 +164,9 @@ class StepInputValue:
     diagnostics: list[StepDiagnostic] = field(default_factory=_empty_step_diagnostics)
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
+    # What actually supplied this input, as opposed to what the step was
+    # configured to read. Empty when nothing upstream was consumed.
+    resolved_edges: tuple[ResolvedInputEdge, ...] = ()
 
 
 @dataclass

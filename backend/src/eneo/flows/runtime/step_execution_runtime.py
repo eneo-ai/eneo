@@ -1438,6 +1438,7 @@ async def complete_step_execution(
     return StepExecutionOutput(
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
+        resolved_input_edges=prepared.step_input.resolved_edges,
         input_source=prepared.step_input.input_source,
         used_question_binding=prepared.step_input.used_question_binding,
         full_text=full_text,

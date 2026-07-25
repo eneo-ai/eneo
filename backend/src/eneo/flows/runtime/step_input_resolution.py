@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -24,6 +25,10 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
+from eneo.flows.flow_run_provenance import (
+    ResolvedInputEdge,
+    ResolvedInputSourceKind,
+)
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     effective_question_binding,
@@ -383,7 +388,93 @@ async def resolve_step_input(
         diagnostics=diagnostics,
         transcription_metadata=transcription_metadata,
         runtime_input_metadata=runtime_input_metadata,
+        resolved_edges=build_resolved_input_edges(
+            step=step,
+            source_text=source_text,
+            used_question_binding=used_question_binding,
+            prior_results=prior_results,
+            state=state,
+        ),
     )
+
+
+def build_resolved_input_edges(
+    *,
+    step: RuntimeStep,
+    source_text: str,
+    used_question_binding: bool,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+) -> tuple[ResolvedInputEdge, ...]:
+    """Name the sources that actually supplied this attempt's input.
+
+    Driven by what resolution consumed rather than by ``step.input_source``.
+    When a flow-input binding supplied the value, no upstream edge is recorded
+    even though the step is configured to read the previous step: no upstream
+    value was read, and claiming one would be a configuration-derived guess.
+    """
+    if used_question_binding:
+        return (
+            ResolvedInputEdge(
+                source_kind="flow_input",
+                selector="question",
+                value_sha256=_text_sha256(source_text),
+                value_byte_size=len(source_text.encode("utf-8")),
+            ),
+        )
+
+    if step.input_source == "previous_step":
+        previous = next(
+            (r for r in prior_results if r.step_order == step.step_order - 1),
+            None,
+        )
+        if previous is None:
+            return ()
+        return (_edge_from_result("previous_step", previous, source_text),)
+
+    if step.input_source == "all_previous_steps":
+        consumed = (
+            list(state.completed_by_order.values()) if state else list(prior_results)
+        )
+        return tuple(
+            _edge_from_result("all_previous_steps", result, None)
+            for result in sorted(consumed, key=lambda r: r.step_order)
+            if result.step_order < step.step_order
+        )
+
+    if step.input_source in ("flow_input", "http_get"):
+        return (
+            ResolvedInputEdge(
+                source_kind="http_get"
+                if step.input_source == "http_get"
+                else ("flow_input"),
+                value_sha256=_text_sha256(source_text),
+                value_byte_size=len(source_text.encode("utf-8")),
+            ),
+        )
+
+    return ()
+
+
+def _edge_from_result(
+    source_kind: ResolvedInputSourceKind,
+    result: FlowStepResult,
+    source_text: str | None,
+) -> ResolvedInputEdge:
+    return ResolvedInputEdge(
+        source_kind=source_kind,
+        source_step_id=result.step_id,
+        source_step_order=result.step_order,
+        source_attempt_no=result.current_attempt_no,
+        value_sha256=_text_sha256(source_text) if source_text is not None else None,
+        value_byte_size=(
+            len(source_text.encode("utf-8")) if source_text is not None else None
+        ),
+    )
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _resolve_compose_source_refs_input(
