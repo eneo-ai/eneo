@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from eneo.flows.http_transport.authored_config import (
@@ -17,6 +17,7 @@ from eneo.flows.infrastructure.flow_secret_inventory import (
     FlowSecretConfigSource,
     PersistedFlowConfig,
     inventory_persisted_flow_secrets,
+    published_version_configs,
 )
 
 TENANT_ID = uuid4()
@@ -25,10 +26,14 @@ FLOW_ID = uuid4()
 
 @dataclass
 class _FakeEncryption:
+    """Reversible prefix scheme; only registered ciphertexts decrypt."""
+
     prefix: str = "ENC:"
+    active: bool = True
+    undecryptable: set[str] = field(default_factory=set)
 
     def is_active(self) -> bool:
-        return True
+        return self.active
 
     def is_encrypted(self, value: str) -> bool:
         return value.startswith(self.prefix)
@@ -37,6 +42,8 @@ class _FakeEncryption:
         return f"{self.prefix}{plaintext}"
 
     def decrypt(self, ciphertext: str) -> str:
+        if ciphertext in self.undecryptable:
+            raise ValueError("Decryption failed: invalid token or wrong key")
         return ciphertext[len(self.prefix) :]
 
 
@@ -87,7 +94,7 @@ def test_inventory_reports_plaintext_draft_secret() -> None:
     )
 
     assert not inventory.is_clean
-    assert len(inventory.unprotected) == 1
+    assert inventory.unprotected_count == 1
     finding = inventory.unprotected[0]
     assert finding.secret_fields == ("auth.token",)
     assert finding.location.source is FlowSecretConfigSource.DRAFT_STEP
@@ -114,7 +121,7 @@ def test_inventory_reports_sentinel_shaped_stored_value() -> None:
     assert inventory.unprotected[0].secret_fields == ("auth.token",)
 
 
-def test_inventory_accepts_encrypted_secret() -> None:
+def test_inventory_accepts_secret_the_active_key_decrypts() -> None:
     inventory = inventory_persisted_flow_secrets(
         [_draft(_persisted_config(auth=HttpAuthBearer(token="ENC:token")))],
         _FakeEncryption(),
@@ -122,6 +129,17 @@ def test_inventory_accepts_encrypted_secret() -> None:
 
     assert inventory.is_clean
     assert inventory.authored_http_configs == 1
+
+
+def test_inventory_reports_prefixed_value_the_key_cannot_decrypt() -> None:
+    """A row written before encryption can hold a typed prefix-shaped literal."""
+    token = "ENC:not-really-ciphertext"
+    inventory = inventory_persisted_flow_secrets(
+        [_draft(_persisted_config(auth=HttpAuthBearer(token=token)))],
+        _FakeEncryption(undecryptable={token}),
+    )
+
+    assert inventory.unprotected[0].secret_fields == ("auth.token",)
 
 
 def test_inventory_counts_secret_custom_headers() -> None:
@@ -150,6 +168,15 @@ def test_inventory_treats_every_stored_secret_as_unprotected_without_a_key() -> 
     assert inventory.unprotected[0].secret_fields == ("auth.token",)
 
 
+def test_inventory_treats_stored_secret_as_unprotected_when_key_is_inactive() -> None:
+    inventory = inventory_persisted_flow_secrets(
+        [_draft(_persisted_config(auth=HttpAuthBearer(token="ENC:token")))],
+        _FakeEncryption(active=False),
+    )
+
+    assert inventory.unprotected[0].secret_fields == ("auth.token",)
+
+
 def test_inventory_skips_configs_that_are_not_authored_http() -> None:
     inventory = inventory_persisted_flow_secrets(
         [_draft({"prompt": "hello"}), _draft(None)],
@@ -169,12 +196,79 @@ def test_inventory_reports_authored_config_that_no_longer_parses() -> None:
     )
 
     assert not inventory.is_clean
-    assert inventory.unreadable == (
-        FlowSecretConfigLocation(
-            source=FlowSecretConfigSource.DRAFT_STEP,
+    assert inventory.unreadable_count == 1
+    assert inventory.unreadable[0].step_order == 1
+
+
+def test_inventory_caps_samples_but_not_counts() -> None:
+    configs = [
+        _draft(_persisted_config(auth=HttpAuthBearer(token="plain-token")))
+        for _ in range(5)
+    ]
+
+    inventory = inventory_persisted_flow_secrets(
+        configs,
+        _FakeEncryption(),
+        sample_limit=2,
+    )
+
+    assert inventory.unprotected_count == 5
+    assert len(inventory.unprotected) == 2
+    assert inventory.samples_truncated
+    assert not inventory.is_clean
+
+
+# --- published_version_configs ---
+
+
+def _version_configs(definition_json: dict[str, object]) -> list[PersistedFlowConfig]:
+    return list(
+        published_version_configs(
             tenant_id=TENANT_ID,
             flow_id=FLOW_ID,
-            config_field="input_config",
-            step_order=1,
-        ),
+            version=2,
+            definition_json=definition_json,
+        )
     )
+
+
+def test_published_version_yields_each_step_config() -> None:
+    items = _version_configs(
+        {
+            "steps": [
+                {
+                    "step_order": 1,
+                    "input_config": _persisted_config(
+                        auth=HttpAuthBearer(token="plain-token")
+                    ),
+                }
+            ]
+        }
+    )
+
+    inventory = inventory_persisted_flow_secrets(items, _FakeEncryption())
+
+    assert inventory.unprotected[0].location.flow_version == 2
+    assert inventory.unprotected[0].location.step_order == 1
+
+
+def test_published_version_without_a_step_list_is_unreadable() -> None:
+    """A version whose envelope cannot be read must not be reported clean."""
+    inventory = inventory_persisted_flow_secrets(
+        _version_configs({"steps": "not-a-list"}),
+        _FakeEncryption(),
+    )
+
+    assert not inventory.is_clean
+    assert inventory.unreadable_count == 1
+    assert inventory.unreadable[0].flow_version == 2
+    assert inventory.unreadable[0].config_field is None
+
+
+def test_published_version_with_a_non_object_step_is_unreadable() -> None:
+    inventory = inventory_persisted_flow_secrets(
+        _version_configs({"steps": ["not-an-object"]}),
+        _FakeEncryption(),
+    )
+
+    assert inventory.unreadable_count == 1

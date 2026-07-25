@@ -92,11 +92,14 @@ def unprotected_stored_secret_fields(
 ) -> tuple[str, ...]:
     """Name the declared secret fields whose STORED value is not protected.
 
-    Unlike the authored-value checks, provenance is already known here: the
-    config was loaded from its row, so a value that carries the encryption
-    prefix really is ciphertext and the prefix is a legitimate signal. Without
-    a service nothing can be recognised as ciphertext, so every stored secret
-    counts as unprotected.
+    Protection has to be proved, not recognised. The encryption prefix is
+    authored syntax here too: a row written before authored secrets were
+    encrypted can hold a plaintext literal that merely starts with the prefix,
+    and those are exactly the rows this check exists to find. A stored value
+    counts as protected only when the active key actually decrypts it.
+
+    Without an active key nothing can be proved, so every stored secret counts
+    as unprotected — silence would otherwise read as an all-clear.
 
     A sentinel is reported too: it is not a credential, and a definition built
     from one would carry the sentinel where the secret belongs.
@@ -107,9 +110,17 @@ def unprotected_stored_secret_fields(
             return True
         if not isinstance(value, str) or not value:
             return False
-        if encryption_service is None:
+        if encryption_service is None or not encryption_service.is_active():
             return True
-        return not encryption_service.is_encrypted(value)
+        if not encryption_service.is_encrypted(value):
+            return True
+        try:
+            encryption_service.decrypt(value)
+        except ValueError:
+            # Prefixed but undecryptable: a typed literal, a corrupted token, or
+            # a token from a different key. None of them is a protected secret.
+            return True
+        return False
 
     return tuple(
         path

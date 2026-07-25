@@ -729,10 +729,10 @@ class FlowService:
                 if unprotected:
                     raise FlowStepValidationError(
                         f"Step {step.step_order}: {label} stores HTTP credentials "
-                        f"({', '.join(unprotected)}) that are not encrypted, so "
-                        "publishing would copy them into a published version. "
-                        "Configure ENCRYPTION_KEY and re-enter the credentials "
-                        "before publishing.",
+                        f"({', '.join(unprotected)}) whose protection cannot be "
+                        "proved, so publishing would copy them into a published "
+                        "version. Configure ENCRYPTION_KEY and re-enter the "
+                        "credentials before publishing.",
                         step_order=step.step_order,
                     )
 
