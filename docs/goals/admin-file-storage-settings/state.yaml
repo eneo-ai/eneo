@@ -1,0 +1,633 @@
+# Goal Maker v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "Admin-Controlled File Storage Settings"
+  slug: "admin-file-storage-settings"
+  kind: specific
+  tranche: "Deliver, review, and merge issue #569 PR 1 only."
+  status: active
+
+roadmap_after_current_tranche:
+  - "1. #569 PR 1: admin-controlled placement and typed business upload limits (active tranche)."
+  - "2. #569 PR 2: verified storage moves."
+  - "3. #571 PR 1: knowledge generations."
+  - "4. #571 PR 2: robust ingestion."
+  - "5. #571 PR 3: publication, retrieval, and deletion."
+  - "6. Defer #586 until a concrete consumer and product contract exists."
+  - "Flow remains deferred."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f976e-206b-74e1-a560-32726d290dda"
+  previous_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  rotation_count: 0
+  completed_write_tasks_in_thread: 1
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "ffe4f6ff0c131eeef49aad923fddee02cf76e3d0"
+
+active_task: T014
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map current canonical owners, legacy configuration, producers, admin/API/UI contracts, migrations, documentation, and exact verification commands for issue #569 PR 1."
+    inputs:
+      - "Issue #569 and epic #549"
+      - "Repository AGENTS.md and relevant engineering standards"
+      - "Existing admin settings, object-content, File/Icon, migration, frontend, generated client, and docs-site sources"
+    constraints:
+      - "Read-only except for the PM-owned board receipt."
+      - "Use file:line evidence."
+      - "Keep PR 2, knowledge, Flow, and per-tenant concerns out of scope."
+      - "Identify reuse, consolidation, and deletion opportunities before new code."
+    expected_output:
+      - "Current and proposed canonical owners"
+      - "Legacy setting and migration seed map"
+      - "Closed business upload use cases"
+      - "API/admin UI and bounded inventory design evidence"
+      - "Verification commands and environmental prerequisites"
+      - "Candidate exact Worker scope"
+    receipt:
+      result: ready_for_judge
+      note: "notes/T001-source-map.md"
+      summary: "Mapped canonical owners and verified that platform-admin authority, target-aware remote write lifecycle, concurrency, ceilings, migration seeding, and audit semantics must be frozen before implementation."
+      evidence:
+        - "backend/src/eneo/main/config.py:357-361"
+        - "backend/src/eneo/object_content/content_service.py:242-370"
+        - "backend/src/eneo/object_content/runtime.py:61-150"
+        - "backend/src/eneo/object_content/reconciliation_repository.py:1065-1121"
+        - "backend/src/eneo/files/file_service.py:141-194"
+        - "backend/src/eneo/icons/icon_service.py:94-128"
+        - "backend/src/eneo/roles/permissions.py:14-55"
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Freeze the smallest complete PR 1 plan after challenging ownership, data model, migration, API/admin UX, failure modes, security, complexity, and verification."
+    inputs:
+      - "T001 receipt and evidence note"
+      - "Claude peer-loop pass 1 artifact"
+    constraints:
+      - "Read-only except for the PM-owned board receipt."
+      - "Reject parallel ownership, generic policy engines, hidden business caps, and incomplete migration ownership."
+      - "Select an executable Worker with exact allowed_files, verify commands, and stop conditions."
+    expected_output:
+      - "Decision and frozen slice"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Deferred scope"
+    receipt:
+      result: ready_for_worker
+      decision: "Proceed with sequential T003 backend/database and T004 generated-client/admin-UI/docs slices under the frozen contract."
+      note: "notes/T002-frozen-plan.md"
+      summary: "Froze a two-slice plan: super-key-only deployment mutation, read-only tenant-admin projection, CAS revisions, exact one-time seed, target-aware all-or-nothing File/Icon writes, target-specific ceilings, bounded sanitized facts, and truthful operational logging."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T051523Z.md"
+        - "backend/src/eneo/sysadmin/sysadmin_router.py:86-90"
+        - "backend/src/eneo/object_content/content_service.py:213-240"
+        - "backend/src/eneo/object_content/content_repository.py:524-575"
+        - "backend/src/eneo/database/tables/audit_log_table.py:14-20"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Implement Option B authority and the deployment-policy persistence/API foundation using behavior-first tests, leaving producers and legacy runtime settings unchanged."
+    allowed_files:
+      - "backend/alembic/versions/20260725*_add_object_content_deployment_policy.py"
+      - "backend/src/eneo/database/tables/__init__.py"
+      - "backend/src/eneo/database/tables/object_content_policy_table.py"
+      - "backend/src/eneo/database/tables/users_table.py"
+      - "backend/src/eneo/users/user.py"
+      - "backend/src/eneo/users/user_repo.py"
+      - "backend/src/eneo/users/user_router.py"
+      - "backend/src/eneo/authentication/auth_dependencies.py"
+      - "backend/src/eneo/sysadmin/sysadmin_router.py"
+      - "backend/src/eneo/sysadmin/sysadmin_service.py"
+      - "backend/src/eneo/object_content/deployment_policy*.py"
+      - "backend/src/eneo/object_content/runtime.py"
+      - "backend/src/eneo/object_content/reconciliation_repository.py"
+      - "backend/src/eneo/main/exceptions.py"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/src/eneo/server/routers.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/src/eneo/admin/admin_router.py"
+      - "backend/tests/test_settings_override.py"
+      - "backend/tests/unittests/object_content/**"
+      - "backend/tests/unittests/users/**"
+      - "backend/tests/unittests/authentication/**"
+      - "backend/tests/unittests/server/**"
+      - "backend/tests/unittests/sysadmin/**"
+      - "backend/tests/integration/object_content/**"
+      - "backend/tests/integration/migrations/**"
+      - "backend/tests/integration/users/**"
+      - "backend/tests/integration/sysadmin/**"
+    verify:
+      - "cd backend && uv run alembic heads"
+      - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/users tests/unittests/authentication tests/unittests/server tests/unittests/sysadmin"
+      - "cd backend && uv run pytest -q -m integration tests/integration/object_content tests/integration/migrations tests/integration/users tests/integration/sysadmin"
+      - "cd backend && uv run ruff check src/eneo/object_content src/eneo/users src/eneo/authentication src/eneo/sysadmin src/eneo/admin tests/unittests/object_content tests/unittests/users tests/unittests/authentication tests/unittests/sysadmin tests/integration/object_content tests/integration/migrations tests/integration/users tests/integration/sysadmin"
+      - "cd backend && uv run pyright"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "A second authority or policy source becomes necessary."
+      - "Dormant or deleted grants cannot be revoked without reconstructing an invalid user."
+      - "Migration seed/FK upgrade and downgrade safety cannot be proven."
+      - "Verification fails twice for the same unexplained reason."
+    receipt:
+      result: ready_for_commit_gate
+      summary: "Implemented the inert authority/policy foundation without registering the policy router or changing producers/legacy settings."
+      changed_files:
+        - "backend/alembic/versions/202607251700_add_object_content_deployment_policy.py"
+        - "backend/src/eneo/database/tables/object_content_policy_table.py"
+        - "backend/src/eneo/object_content/deployment_policy.py"
+        - "backend/src/eneo/object_content/deployment_policy_router.py"
+        - "focused existing authority, runtime, repository, and test files"
+      red:
+        - "Base-revision replay failed during collection with ImportError for require_platform_admin."
+      green:
+        - "uv run alembic heads => 202607251700 (one head)"
+        - "focused policy tests => 9 passed"
+        - "required unit directories => 205 passed"
+        - "applicable integration directories => 109 passed, 52 skipped"
+        - "whole-backend pyright => 0 errors"
+        - "changed-file Ruff/format and git diff --check => pass"
+      commands:
+        - "cd backend && uv run alembic heads"
+        - "cd backend && uv run pytest -q tests/unittests/object_content/test_deployment_policy.py"
+        - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/users tests/unittests/authentication tests/unittests/server"
+        - "cd backend && uv run pytest -q -m integration tests/integration/object_content tests/integration/migrations tests/integration/sysadmin"
+        - "cd backend && uv run pyright"
+        - "changed-file Ruff check and format --check"
+        - "git diff --check"
+      risks:
+        - "Board path tests/integration/users does not exist; applicable existing integration directories ran."
+        - "Broad-path Ruff includes unrelated pre-existing failures; changed-file scope passed."
+      next_allowed_task: T012
+
+  - id: T008
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Resolve the escalated authority decision required for an editable deployment-wide policy in the existing admin panel."
+    inputs:
+      - "Issue #569 acceptance criteria"
+      - "T002 frozen plan and Claude Pass 1"
+      - "T003 interrupted receipt"
+      - "notes/T002A-authority-escalation.md"
+    constraints:
+      - "Do not authorize tenant administrators across tenants implicitly."
+      - "Do not place ENEO_SUPER_API_KEY in the browser."
+      - "Do not introduce per-tenant policy."
+      - "Do not resume implementation before owner direction."
+    expected_output:
+      - "Owner choice among explicit tenant-admin deployment trust, session-backed platform admin, or knowingly reduced super-key-only outcome"
+      - "Revised Judge contract and Worker scope"
+    receipt:
+      result: done
+      note: "notes/T002A-authority-escalation.md"
+      summary: "Owner explicitly approved Option B and authorized continuation through the fully reviewed, green, merged #569 PR 1 while keeping the platform-admin authority minimal."
+      decision: "Use users.is_platform_admin as the smallest session-backed deployment authority; super-key-only grant/revoke; policy PUT requires tenant Admin plus platform-admin; no control tenant, per-tenant storage policy, or generic authorization framework."
+      evidence:
+        - "Issue #569 requires administrators to select the backend and change limits in the admin UI."
+        - "backend/src/eneo/server/api_documentation.py:89-101"
+        - "frontend/apps/web/src/routes/(app)/admin/+layout.ts:10-25"
+        - "Owner delegation received 2026-07-25 approving Option B and full #569 PR 1 continuation."
+      next_allowed_task: T009
+
+  - id: T009
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Revise the frozen #569 PR 1 contract and exact T003/T004 Worker scopes for approved Option B without expanding multi-tenancy or authorization machinery."
+    inputs:
+      - "notes/T002-frozen-plan.md"
+      - "notes/T002A-authority-escalation.md"
+      - "Owner Option B approval and ordered roadmap"
+      - "Claude Pass 1 artifact and source evidence"
+    constraints:
+      - "Read-only; PM alone edits the board."
+      - "Keep one deployment-wide policy and the smallest users.is_platform_admin authority."
+      - "Grant/revoke only through the existing super-key sysadmin boundary."
+      - "Policy mutation requires a real session user with tenant Admin plus platform-admin."
+      - "No control-tenant registry, per-tenant storage policy, generic authorization framework, PR 2, #571, #586, or Flow."
+      - "Preserve the target-aware all-or-nothing producer, exact seed, ceiling, bounded facts, and truthful attribution contracts already accepted."
+    expected_output:
+      - "Revised frozen contract"
+      - "Exact T003/T004 objectives and allowed_files"
+      - "Behavior-first tests and verification"
+      - "Claude plan-gate brief changes"
+      - "Stop conditions and deferred scope"
+    receipt:
+      result: ready_for_claude_plan_gate
+      decision: "Use three serial Worker commits: T003 authority/policy foundation, T010 consumers/producers, and T004 generated UI/docs, each followed by a same-session Claude pre-commit gate."
+      note: "notes/T009-option-b-frozen-plan.md"
+      summary: "Refroze approved Option B as the smallest user-row authority, locked super-key grant lifecycle, session-only policy mutation, and three reviewable implementation commits."
+      next_allowed_task: T011
+
+  - id: T011
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Resume the existing Claude session against the revised Option B plan and require green with MIN_SCORE >= 8 before implementation."
+    inputs:
+      - "notes/T009-option-b-frozen-plan.md"
+      - "Claude Pass 1 artifact"
+      - "Owner Option B approval"
+    constraints:
+      - "Use session eneo-admin-file-storage-settings; never create a replacement session."
+      - "Stable Opus 5 1M, high effort, safe/read-only mode."
+      - "Verify every finding locally and apply only genuine in-scope plan corrections."
+      - "No implementation before green and MIN_SCORE >= 8."
+    expected_output:
+      - "Claude artifact, identity/model evidence, verdict, and MIN_SCORE"
+      - "Finding-by-finding local verification"
+      - "Corrected Worker scopes or exact blocker"
+    receipt:
+      result: green
+      iteration: 4
+      note: "notes/T011-claude-plan-gate-iteration-4.md"
+      prior_notes:
+        - "notes/T011-claude-plan-gate-iteration-2.md"
+        - "notes/T011-claude-plan-gate-iteration-3.md"
+      summary: "Same-session Claude gate verified the corrected frozen Option B plan in source and returned GREEN_LIGHT yes with MIN_SCORE 8; T003 is authorized."
+      artifact: ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T160914Z.md"
+      next_allowed_task: T003
+
+  - id: T012
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Run the required same-session Claude pre-commit gate over the exact T003 intended delta and focused validation, fix verified findings, and create commit 1 only after green/MIN_SCORE >= 8."
+    receipt:
+      result: green_committed
+      commit: "84285c386af57924ab7862cc2f66ed53c0466950"
+      staged_diff_sha256: "d8049360295a4212781c8aa8284db88053cc4546503a29c35c92393af4a90c07"
+      summary: "Independently corrected all genuine iteration-5 findings, received same-session Claude green/MIN_SCORE 8 on the exact final staged foundation, and created commit 1."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T165907Z.md"
+        - ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T170202Z.md"
+      validation:
+        - "focused object-content/users/auth/server/sysadmin unit suites => 208 passed"
+        - "exact PostgreSQL policy and platform-grant integration subset => 7 passed"
+        - "migration upgrade/downgrade/re-upgrade isolation => 4 passed"
+        - "whole-backend Pyright => 0 errors, 0 warnings, 0 informations"
+        - "changed-file Ruff, format, and git diff --cached --check => passed"
+      review_disposition:
+        - "Producer readiness remains a mandatory second check inside T010's write path; no fallback."
+        - "Missing policy singleton remains an honest 500 for a broken/restored-without-migration deployment; T004 must document recovery."
+        - "Claude's claim that exception code strings were not serialized was rejected: the canonical handler sets GeneralError.code from exc.code."
+      next_allowed_task: T010
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Move the closed upload-limit consumers to the persisted policy, implement target-pinned File/Icon writes with product visibility derived from whole-family AVAILABLE content, then remove the four runtime Settings fields plus required_inline_bytes. T004 owns environment templates and documentation cleanup."
+    allowed_files:
+      - "backend/src/eneo/object_content/content.py"
+      - "backend/src/eneo/object_content/content_service.py"
+      - "backend/src/eneo/object_content/configuration.py"
+      - "backend/src/eneo/object_content/runtime.py"
+      - "backend/src/eneo/object_content/deployment_policy*.py"
+      - "backend/src/eneo/files/file_protocol.py"
+      - "backend/src/eneo/files/file_router.py"
+      - "backend/src/eneo/files/file_service.py"
+      - "backend/src/eneo/files/file_repo.py"
+      - "backend/src/eneo/icons/icon_service.py"
+      - "backend/src/eneo/icons/api/icon_router.py"
+      - "backend/src/eneo/icons/icon_repo.py"
+      - "backend/src/eneo/jobs/task_service.py"
+      - "backend/src/eneo/limits/*.py"
+      - "backend/src/eneo/apps/apps/api/app_assembler.py"
+      - "backend/src/eneo/apps/apps/api/app_router.py"
+      - "backend/src/eneo/groups_legacy/api/group_router.py"
+      - "backend/src/eneo/spaces/api/space_router.py"
+      - "backend/src/eneo/main/config.py"
+      - "backend/src/eneo/main/exceptions.py"
+      - "backend/src/eneo/main/container/container.py"
+      - "backend/src/eneo/server/dependencies/lifespan.py"
+      - "backend/src/eneo/server/dependencies/container.py"
+      - "backend/src/eneo/server/routers.py"
+      - "backend/src/eneo/server/exception_handlers.py"
+      - "backend/tests/test_settings_override.py"
+      - "backend/tests/integration/conftest.py"
+      - "backend/tests/unittests/object_content/**"
+      - "backend/tests/unittests/files/**"
+      - "backend/tests/unittests/icons/**"
+      - "backend/tests/unittests/jobs/**"
+      - "backend/tests/unittests/limits/**"
+      - "backend/tests/unittests/apps/api/**"
+      - "backend/tests/unittests/server/**"
+      - "backend/tests/integration/object_content/**"
+      - "backend/tests/integration/files/**"
+      - "backend/tests/integration/icons/**"
+      - "backend/tests/integration/server/**"
+      - "backend/tests/unit/test_api_key_route_coverage.py"
+      - "backend/tests/unit/test_endpoint_audit_verification.py"
+      - "backend/tests/unit/test_file_service.py"
+    verify:
+      - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/files tests/unittests/icons tests/unittests/jobs tests/unittests/limits tests/unittests/apps/api tests/unittests/server"
+      - "cd backend && uv run pytest -q -m integration tests/integration/object_content tests/integration/test_file_usage_relations.py"
+      - "cd backend && uv run ruff check src/eneo/object_content src/eneo/files src/eneo/icons src/eneo/jobs src/eneo/limits src/eneo/apps/apps/api tests/unittests/object_content tests/unittests/files tests/unittests/icons tests/unittests/jobs tests/unittests/limits tests/unittests/apps/api tests/integration/object_content tests/integration/test_file_usage_relations.py"
+      - "cd backend && uv run pyright"
+      - "PostgreSQL EXPLAIN (ANALYZE, BUFFERS) and query-count proof for the root-plus-direct-derivative readiness predicate."
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Runtime code cannot stop requiring the four legacy environment names without editing deployment templates or documentation before T004."
+      - "Remote failure can leave a visible File family or Icon."
+      - "A fifth limit consumer or ambiguous eligible producer appears outside the explicit File-family, Icon-create, and inline-only generated-image contract."
+      - "Fallback, dual write, moves, or a second runtime policy source becomes necessary."
+      - "A producer cannot re-check the selected target's current readiness inside its write path before exposing a File family or Icon."
+      - "Product visibility cannot be derived once from ObjectContents.state with explicit unfiltered lifecycle/deletion access."
+      - "Verification fails twice for the same unexplained reason."
+    receipt:
+      result: ready_for_commit_gate
+      note: "notes/T010-runtime-validation.md"
+      summary: "Moved every closed upload consumer to one persisted admission snapshot and implemented target-pinned, no-fallback File-family and Icon writes whose product visibility derives from complete AVAILABLE content."
+      canonical_owners:
+        - "object_content.deployment_policy owns persisted projections and admission snapshots"
+        - "ObjectContentService owns target capture/readiness/storage verification"
+        - "FileService/FileRepository and IconService/IconRepository own aggregate lifecycle and visibility"
+        - "LimitService remains the public business-limit projection"
+      changed_files:
+        - "backend/src/eneo/object_content and focused runtime/container owners"
+        - "backend/src/eneo/files, backend/src/eneo/icons, and closed upload consumers"
+        - "backend/tests focused unit, PostgreSQL lifecycle, query-plan, route, and isolation coverage"
+      commands:
+        - "cd backend && uv run pytest -q tests/unittests/object_content tests/unittests/files tests/unittests/icons tests/unittests/jobs tests/unittests/limits tests/unittests/apps/api tests/unittests/server"
+        - "cd backend && uv run pytest -q -m integration tests/integration/object_content tests/integration/test_file_usage_relations.py --tb=short"
+        - "cd backend && uv run pyright"
+        - "cd backend && uv run ruff check <application source and relevant tests>"
+        - "cd backend && uv run ruff format --check <application source and relevant tests>"
+        - "cd backend && uv run alembic heads"
+        - "git diff --check"
+      validation:
+        - "relevant unit directories => 269 passed"
+        - "focused deployment policy/lifecycle/adoption => 144 unit and 16 integration passed"
+        - "broad object-content and File-usage integration => 107 passed"
+        - "whole-backend Pyright => 0 errors, 0 warnings, 0 informations"
+        - "relevant Ruff and format checks => passed"
+        - "Alembic => exactly one 202607251700 head"
+        - "git diff --check and zero legacy source-name scan => passed"
+        - "PostgreSQL constant-query/index-plan proof => passed with no object_contents sequential scan"
+      risks:
+        - "Caught failures compensate, but a process crash can retain an invisible pending/failed aggregate; automatic cleanup remains deliberately excluded."
+        - "Templates and documentation still contain the four upgrade-only legacy seed names until T004."
+      next_allowed_task: T013
+
+  - id: T015
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Resolve the T010 publication-boundary escalation, freeze the corrected derived-readiness plan, and obtain same-session Claude green/MIN_SCORE >= 8 before resuming the Worker."
+    inputs:
+      - "notes/T015-derived-publication-plan.md"
+      - ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T170957Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-eneo-file-icon-publication-boundary-20260725T171535Z.md"
+    constraints:
+      - "Reuse session eneo-admin-file-storage-settings; do not create another Claude session."
+      - "No implementation while this gate is active."
+      - "No publication marker, automatic aggregate cleanup, generic lifecycle helper, or PR2 work without new source evidence overturning the decision."
+    expected_output:
+      - "GREEN_LIGHT yes and MIN_SCORE >= 8, or exact blocker"
+      - "Finding-by-finding local disposition"
+      - "T010 reactivated only after green"
+    receipt:
+      result: green
+      iteration: 10
+      note: "notes/T015-derived-publication-plan.md"
+      artifact: ".codex/artifacts/claude-peer-loop-eneo-admin-file-storage-settings-20260725T171941Z.md"
+      summary: "Resolved the disputed publication boundary in favor of derived ObjectContents.state readiness, rejected duplicate File/Icon markers and automatic cleanup, and received same-session Claude GREEN_LIGHT yes with MIN_SCORE 8."
+      review_disposition:
+        - "Goal Maker Judge marker/reconciler expansion rejected: marker stays true after AVAILABLE-to-FAILED and automatic deletion violates the PR1 non-goal."
+        - "Antigravity independently selected derived readiness and supplied the marker crash/invalidation proof."
+        - "Product metadata predicates and literal lifecycle bypasses are frozen; File/Icon reference projections remain unfiltered to avoid historical collection-wide failures."
+      next_allowed_task: T010
+
+  - id: T013
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Run the required same-session Claude pre-commit gate over the exact T010 intended delta and focused validation, fix verified findings, and create commit 2 only after green/MIN_SCORE >= 8."
+    receipt:
+      result: green_and_committed
+      commit: ffe4f6ff0c131eeef49aad923fddee02cf76e3d0
+      final_staged_sha256: e0d62bfa13bda9f08d338e7d860946e8b12f90cb54045e6d1a61488564ca089e
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-t010-persisted-upload-policy-and-target-pinned-file-icon-writes-20260725T181718Z.md"
+        - ".codex/artifacts/claude-peer-loop-t010-simplified-persisted-upload-policy-and-file-icon-lifecycle-20260725T182506Z.md"
+        - ".codex/artifacts/claude-peer-loop-t010-final-exact-commit-gate-20260725T182740Z.md"
+      summary: "Same-session iterations 11-13 returned green/MIN_SCORE 8, genuine duplication findings were consolidated, the final exact hash had no findings, and commit 2 was created."
+      validation:
+        - "final relevant unit directories => 269 passed"
+        - "final focused lifecycle and generated-image guards => 44 unit and 13 integration passed"
+        - "broad object-content/File-usage integration => 107 passed"
+        - "whole-backend Pyright => 0 errors"
+        - "relevant Ruff/format, one Alembic head, query plan, legacy-name, and diff checks => passed"
+      next_allowed_task: T004
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Complete the generated contracts, editable admin UI, documentation, and exact-head cleanups required by the frozen PR 1 plan, including loading/degraded capability states and restored-without-migration recovery guidance."
+    allowed_files:
+      - "frontend/packages/eneo-js/index.*"
+      - "frontend/packages/eneo-js/src/eneo.js"
+      - "frontend/packages/eneo-js/src/types/schema.d.ts"
+      - "frontend/packages/eneo-js/src/types/resources.d.ts"
+      - "frontend/packages/eneo-js/src/endpoints/object-content-policy*"
+      - "frontend/apps/web/src/routes/(app)/admin/+layout.ts"
+      - "frontend/apps/web/src/routes/(app)/admin/AdminMenu.svelte"
+      - "frontend/apps/web/src/routes/(app)/admin/storage/**"
+      - "frontend/apps/web/src/lib/core/AppContext.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "backend/.env.template"
+      - "backend/README.md"
+      - "backend/tests/unittests/files/test_file_protocol.py"
+      - "docs/INSTALLATION.md"
+      - "docs/DEPLOYMENT.md"
+      - "docs/TROUBLESHOOTING.md"
+      - "docs/deployment/**"
+      - "frontend/apps/docs-site/src/content/guides/deployment.mdx"
+      - "frontend/apps/docs-site/src/content/guides/object-content-storage.mdx"
+      - ".github/workflows/ci.yml"
+      - "docker-compose.e2e*.yml"
+      - "scripts/sync-frontend-with-backend.sh"
+    verify:
+      - "Regenerate frontend/packages/eneo-js/src/types/schema.d.ts from the exact backend OpenAPI document."
+      - "cd frontend/packages/eneo-js && bun test"
+      - "cd frontend && bun run --cwd apps/web i18n:compile"
+      - "cd frontend && bun run --cwd apps/web test:unit"
+      - "cd frontend && bun run check"
+      - "cd frontend && bun run lint"
+      - "cd frontend && bun run --cwd apps/docs-site build"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Required infrastructure or credentials are unavailable."
+      - "Validation fails twice for the same unexplained reason."
+    receipt:
+      result: ready_for_commit_gate
+      note: "notes/T004-frontend-docs-validation.md"
+      summary: "Generated the exact client contract; added the session-backed platform-admin Storage page, EN/SV copy, sanitized projections, and deployment/docs-site guidance; removed current deployment ownership of the four legacy business settings."
+      changed_files:
+        - "frontend/packages/eneo-js/src/{eneo.js,endpoints/object-content-policy.js,types/resources.d.ts,types/schema.d.ts}"
+        - "frontend/apps/web/src/routes/(app)/admin/{AdminMenu.svelte,storage/**}"
+        - "frontend/apps/web/messages/{en.json,sv.json}"
+        - "backend/.env.template, backend/README.md, .github/workflows/ci.yml, docker-compose.e2e.ci.yml"
+        - "docs/{INSTALLATION.md,DEPLOYMENT.md,TROUBLESHOOTING.md,deployment/**}"
+        - "frontend/apps/docs-site/src/content/guides/{deployment.mdx,object-content-storage.mdx}"
+        - "scripts/sync-frontend-with-backend.sh"
+      red:
+        - "The new client endpoint test initially failed with ERR_MODULE_NOT_FOUND."
+        - "The first page behavior test initially failed because the Storage page did not exist."
+      green:
+        - "exact backend OpenAPI regeneration => schema.d.ts matched"
+        - "Eneo JS => 15 passed; lint passed"
+        - "focused Storage page browser suite => 9 passed, including mid-session authority revocation"
+        - "full web unit suite stable rerun => 59 files, 333 passed"
+        - "Svelte check => 0 errors, 0 warnings"
+        - "frontend lint and docs-site production build => passed"
+        - "FileProtocol regression => 14 passed; focused Ruff/format passed"
+        - "shipping legacy-setting, shell syntax, board, and diff checks => passed"
+      commands:
+        - "exact backend OpenAPI regeneration and generated-schema comparison"
+        - "cd frontend/packages/eneo-js && bun test && bun run lint"
+        - "cd frontend/apps/web && bun run test:unit"
+        - "cd frontend && bun run --cwd apps/web check && bun run lint"
+        - "cd frontend && bun run --cwd apps/docs-site build"
+        - "cd backend && uv run pytest -q tests/unittests/files/test_file_protocol.py"
+        - "bash -n scripts/sync-frontend-with-backend.sh && git diff --check"
+      next_allowed_task: T014
+
+  - id: T014
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Run the required same-session Claude pre-commit gate over the exact T004 intended delta and focused validation, fix verified findings, and create commit 3 only after green/MIN_SCORE >= 8."
+    receipt: null
+
+  - id: T005
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: high
+    objective: "Run the complete exact-head local validation and required same-session Claude pre-push gate, freeze the immutable SHA, then push and publish a ready PR with accurate scope and validation."
+    inputs:
+      - "All implementation receipts"
+      - "Exact validation evidence"
+    constraints:
+      - "Use session eneo-admin-file-storage-settings and the required safe Opus 5 1M/high-effort configuration before every push."
+      - "Do not treat provider or authentication failure as green."
+      - "Do not publish before local required gates are proven."
+    expected_output:
+      - "Claude GREEN_LIGHT and MIN_SCORE >= 8, or exact blocker"
+      - "Immutable head SHA"
+      - "Ready PR URL and description audit"
+    receipt: null
+
+  - id: T006
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: high
+    objective: "Post top-level /review, wait for complete repository review and CI on the exact head, fix verified findings, and repeat until current and green."
+    constraints:
+      - "Never merge while anything required is pending, stale, unexpectedly skipped, failing, or unverified."
+      - "Re-run /review after every pushed fix."
+      - "Every review-fix commit and push requires a fresh same-session Claude pre-commit and pre-push gate with green and MIN_SCORE >= 8."
+    expected_output:
+      - "Exact-head review result"
+      - "Required CI/check result"
+      - "Resolved or rejected findings with evidence"
+    receipt: null
+
+  - id: T007
+    type: pm
+    assignee: PM
+    status: queued
+    reasoning_hint: high
+    objective: "Squash-merge the fully green PR to develop and verify merge SHA, develop state, issue/epic/Project status, and docs coverage."
+    constraints:
+      - "Stop without merging if any required gate is not proven."
+      - "Do not start issue #569 PR 2 or adjacent roadmap work."
+    expected_output:
+      - "Merge SHA and develop verification"
+      - "Issue, epic, and Project status audit"
+      - "Docs-site coverage audit"
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Audit whether issue #569 PR 1 is complete against the original objective and exact merge evidence."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Merge and external-state evidence"
+    constraints:
+      - "Read-only except for the PM-owned board receipt."
+      - "Reject completion if any required Worker or publication task remains queued or active."
+      - "Reject completion if PR 2 or adjacent work was started."
+    expected_output:
+      - "complete | not_complete"
+      - "Missing evidence"
+      - "Exact next task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: "goal-board-only"
+  last_verification:
+    result: passed
+    task: T004
+    commands:
+      - "exact backend OpenAPI regeneration and generated-schema comparison"
+      - "cd frontend/packages/eneo-js && bun test && bun run lint"
+      - "cd frontend/apps/web && bun run test:unit"
+      - "cd frontend && bun run --cwd apps/web check && bun run lint"
+      - "cd frontend && bun run --cwd apps/docs-site build"
+      - "cd backend && uv run pytest -q tests/unittests/files/test_file_protocol.py"
+      - "git diff --check and shipping legacy-setting scan"

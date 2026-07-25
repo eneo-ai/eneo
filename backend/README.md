@@ -96,10 +96,7 @@ docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
 | MOBILITYGUARD_DISCOVERY_ENDPOINT |          |                                                          |
 | MOBILITYGUARD_CLIENT_ID          |          |                                                          |
 | MOBILITYGUARD_CLIENT_SECRET      |          |                                                          |
-| UPLOAD_FILE_TO_SESSION_MAX_SIZE  | x        | Max text file size for uploading to a session            |
-| UPLOAD_IMAGE_TO_SESSION_MAX_SIZE | x        | Max image file size for uploading to a session           |
-| UPLOAD_MAX_FILE_SIZE             | x        | Max file size for uploading to a collection              |
-| TRANSCRIPTION_MAX_FILE_SIZE      | x        | Max file size for uploading to a collection              |
+| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |

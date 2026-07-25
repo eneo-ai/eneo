@@ -1,9 +1,4 @@
-"""Tests for FileProtocol type-specific size limits.
-
-Verifies that each file type handler (text, image, audio) uses its own
-configured max_size from settings when no explicit override is passed —
-which is the normal path from FileService.save_file().
-"""
+"""Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
 from io import BytesIO
 from pathlib import Path
@@ -342,11 +337,7 @@ async def test_to_domain_routes_text_mime_types(protocol):
 
 @pytest.mark.asyncio
 async def test_audio_limit_is_independent_of_text_limit(protocol):
-    """
-    Regression test for the original bug: audio was limited by UPLOAD_MAX_FILE_SIZE (10 MB)
-    instead of TRANSCRIPTION_MAX_FILE_SIZE (200 MB). A 15 MB audio file should succeed
-    even though TEXT_MAX is 25 MB — the point is it uses AUDIO_MAX, not the old global limit.
-    """
+    """Audio admission uses the persisted transcription policy, not the text policy."""
     upload, size = _make_upload("audio/mpeg", 15_000_000)
     protocol.file_size_service.get_file_size.return_value = size
 

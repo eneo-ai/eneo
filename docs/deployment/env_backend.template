@@ -377,7 +377,7 @@ CRAWL_MAX_LENGTH=14400
 # [OPTIONAL] Max items before stopping (default: 20000)
 CLOSESPIDER_ITEMCOUNT=20000
 # [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# Separate from UPLOAD_MAX_FILE_SIZE - controls crawler's DOWNLOAD_MAXSIZE
+# This controls crawler downloads, not the upload policy in Admin > Storage.
 DOWNLOAD_MAX_SIZE=10485760
 # [OPTIONAL] Respect robots.txt (default: True)
 OBEY_ROBOTS=True
@@ -414,12 +414,10 @@ TESTING=false
 DEV=false
 
 # ============================================================================
-# FILE UPLOAD LIMITS
+# OBJECT CONTENT SAFETY AND UPLOAD BEHAVIOR
 # ============================================================================
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760    # 10MB - max file size in chat session
-UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760   # 10MB - max image size in chat session
-UPLOAD_MAX_FILE_SIZE=10485760               # 10MB - global upload limit
-TRANSCRIPTION_MAX_FILE_SIZE=10485760        # 10MB - max audio file for transcription
+# Platform admins set upload limits and new-write placement in Admin > Storage.
+# Updates take effect without restarting backend or worker processes.
 MAX_IN_QUESTION=1                           # Max file attachments per chat message
 
 # ----------------------------------------------------------------------------

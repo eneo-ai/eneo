@@ -3972,7 +3972,7 @@ export interface paths {
     put?: never;
     /**
      * Upload icon
-     * @description Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.
+     * @description Upload an icon image (PNG, JPEG, WebP) within the active deployment image limit. Returns the icon ID.
      */
     post: operations["create_icon_api_v1_icons__post"];
     delete?: never;
@@ -5859,6 +5859,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/object-content-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Deployment Policy */
+    get: operations["get_deployment_policy_api_v1_admin_object_content_policy_get"];
+    /** Replace Deployment Policy */
+    put: operations["replace_deployment_policy_api_v1_admin_object_content_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/skills/": {
     parameters: {
       query?: never;
@@ -6648,6 +6666,23 @@ export interface paths {
      * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/users/{user_id}/platform-admin": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Set Platform Admin */
+    put: operations["set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -9741,6 +9776,15 @@ export interface components {
       /** Code Verifier */
       code_verifier?: string | null;
     };
+    /** CapabilityPublic */
+    CapabilityPublic: {
+      target: components["schemas"]["StorageKind"];
+      /** Configured */
+      configured: boolean;
+      /** Selectable */
+      selectable: boolean;
+      readiness_code: components["schemas"]["ObjectContentReadinessCode"];
+    };
     /**
      * CategoryConfig
      * @description Category configuration for API responses.
@@ -10280,10 +10324,20 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /**
+     * ConstrainingSource
+     * @enum {string}
+     */
+    ConstrainingSource: "admin_policy" | "operator_ceiling";
+    /**
      * ContentDisposition
      * @enum {string}
      */
     ContentDisposition: "attachment" | "inline";
+    /**
+     * ContentState
+     * @enum {string}
+     */
+    ContentState: "pending" | "available" | "retained" | "failed" | "delete_pending" | "tombstoned";
     /**
      * ContinueTurnRequest
      * @description Body for ``POST /runs/{run_id}/turns/`` — follow-up turn.
@@ -11072,6 +11126,55 @@ export interface components {
        */
       deleted_keys: string[];
     };
+    /** DeploymentPolicyPublic */
+    DeploymentPolicyPublic: {
+      policy: components["schemas"]["DeploymentPolicyPublicValues"];
+      /** Limits */
+      limits: components["schemas"]["UploadLimitProjection"][];
+      /** Capabilities */
+      capabilities: components["schemas"]["CapabilityPublic"][];
+      /** Inventory */
+      inventory: components["schemas"]["InventoryPublic"][];
+    };
+    /** DeploymentPolicyPublicValues */
+    DeploymentPolicyPublicValues: {
+      /** Revision */
+      revision: number;
+      new_write_storage_target: components["schemas"]["StorageKind"];
+      /** Session File Limit Bytes */
+      session_file_limit_bytes: number;
+      /** Session Image Limit Bytes */
+      session_image_limit_bytes: number;
+      /** Knowledge File Limit Bytes */
+      knowledge_file_limit_bytes: number;
+      /** Transcription Audio Limit Bytes */
+      transcription_audio_limit_bytes: number;
+      updated_by_actor: components["schemas"]["PolicyActor"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** DeploymentPolicyUpdate */
+    DeploymentPolicyUpdate: {
+      /** Expected Revision */
+      expected_revision: number;
+      new_write_storage_target: components["schemas"]["StorageKind"];
+      /** Session File Limit Bytes */
+      session_file_limit_bytes: number;
+      /** Session Image Limit Bytes */
+      session_image_limit_bytes: number;
+      /** Knowledge File Limit Bytes */
+      knowledge_file_limit_bytes: number;
+      /** Transcription Audio Limit Bytes */
+      transcription_audio_limit_bytes: number;
+    };
     /**
      * EffectiveConfigPublic
      * @description Frontend hint surface for personal-assistant governance.
@@ -11524,7 +11627,9 @@ export interface components {
       | 9042
       | 9043
       | 9044
-      | 9045;
+      | 9045
+      | 9046
+      | 9047;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -12527,6 +12632,17 @@ export interface components {
      * @enum {string}
      */
     IntegrationType: "confluence" | "sharepoint";
+    /** InventoryPublic */
+    InventoryPublic: {
+      target: components["schemas"]["StorageKind"];
+      state: components["schemas"]["ContentState"];
+      /** Count */
+      count: number;
+      /** Bytes */
+      bytes: number;
+      /** Oldest Created At */
+      oldest_created_at: string | null;
+    };
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -13650,6 +13766,17 @@ export interface components {
       /** Backend */
       backend: string;
     };
+    /**
+     * ObjectContentReadinessCode
+     * @enum {string}
+     */
+    ObjectContentReadinessCode:
+      | "ready"
+      | "object_store_not_configured"
+      | "not_initialized"
+      | "configuration_required"
+      | "database_unavailable"
+      | "store_degraded";
     /** OpenIdConnectLogin */
     OpenIdConnectLogin: {
       /** Code */
@@ -14855,6 +14982,26 @@ export interface components {
       /** Description */
       description: string;
     };
+    /** PlatformAdminGrantRequest */
+    PlatformAdminGrantRequest: {
+      /** Enabled */
+      enabled: boolean;
+    };
+    /** PlatformAdminGrantResponse */
+    PlatformAdminGrantResponse: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Is Platform Admin */
+      is_platform_admin: boolean;
+    };
+    /**
+     * PolicyActor
+     * @enum {string}
+     */
+    PolicyActor: "migration" | "platform_admin";
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -16885,6 +17032,11 @@ export interface components {
       /** Items */
       items: components["schemas"]["StorageSpaceInfoModel"][];
     };
+    /**
+     * StorageKind
+     * @enum {string}
+     */
+    StorageKind: "postgres_inline" | "object_store";
     /** StorageModel */
     StorageModel: {
       /** Total Used */
@@ -18319,6 +18471,24 @@ export interface components {
     UpdateStatusRequest: {
       status: components["schemas"]["HelperRunStatus"];
     };
+    /** UploadLimitProjection */
+    UploadLimitProjection: {
+      use_case: components["schemas"]["UploadLimitUseCase"];
+      /** Configured Bytes */
+      configured_bytes: number;
+      /** Effective Bytes */
+      effective_bytes: number;
+      storage_target: components["schemas"]["StorageKind"] | null;
+      /** Operator Ceiling Bytes */
+      operator_ceiling_bytes: number | null;
+      constraining_source: components["schemas"]["ConstrainingSource"];
+    };
+    /**
+     * UploadLimitUseCase
+     * @enum {string}
+     */
+    UploadLimitUseCase:
+      "session_file" | "session_image" | "session_audio" | "knowledge_file" | "knowledge_audio";
     /** UseTools */
     UseTools: {
       /** Assistants */
@@ -18515,6 +18685,11 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
+      /**
+       * Is Platform Admin
+       * @default false
+       */
+      is_platform_admin?: boolean;
       access_token?: components["schemas"]["AccessToken"] | null;
       /** Modules */
       readonly modules: string[];
@@ -18690,6 +18865,11 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
+      /**
+       * Is Platform Admin
+       * @default false
+       */
+      is_platform_admin?: boolean;
       /** Modules */
       readonly modules: string[];
       /** User Groups Ids */
@@ -18770,6 +18950,11 @@ export interface components {
        * @default 0
        */
       quota_used?: number;
+      /**
+       * Is Platform Admin
+       * @default false
+       */
+      is_platform_admin?: boolean;
       /** Truncated Api Key */
       truncated_api_key?: string | null;
       /** Quota Limit */
@@ -33380,6 +33565,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_file_api_v1_files__id___get: {
@@ -39392,6 +39586,86 @@ export interface operations {
       };
     };
   };
+  get_deployment_policy_api_v1_admin_object_content_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeploymentPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_deployment_policy_api_v1_admin_object_content_policy_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeploymentPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeploymentPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_skills_api_v1_spaces__space_id__skills__get: {
     parameters: {
       query?: {
@@ -42058,6 +42332,68 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PlatformAdminGrantRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PlatformAdminGrantResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

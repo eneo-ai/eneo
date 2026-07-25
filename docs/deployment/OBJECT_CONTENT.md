@@ -7,13 +7,16 @@ offline reference shipped beside the Compose templates.
 ## TL;DR
 
 - Eneo runs normally without S3-compatible storage. PostgreSQL inline is the
-  default.
-- File and Icon now use the shared content identity, typed variants, integrity,
-  and lifecycle owner. New writes in this slice remain PostgreSQL inline.
+  complete ready-to-use default.
+- Platform admins choose one deployment-wide target for eligible new File and
+  Icon writes in **Admin > Storage**. Policy changes need no backend or worker
+  restart.
 - PostgreSQL owns identity, SHA-256, size/type, references, access, retention,
   and lifecycle. Exactly one selected backend owns each payload.
-- Enabling SeaweedFS, MinIO, or another endpoint does not move existing bytes.
-  Placement and migration are explicit later workflows.
+- Compatible object storage is optional. Enabling or selecting it never moves
+  existing bytes; migration is always explicit and verified.
+- Eneo never falls back, dual-writes, or creates provider-specific product
+  modes.
 - Use the docs-site guide above to choose and configure a path. Continue here
   only for the full offline operations and recovery reference.
 
@@ -29,6 +32,11 @@ state, audit, and reconciliation facts. The chosen byte backend owns only the
 payload. Selection is explicit when content is created and never changes
 silently after a failure.
 
+| Owner | Responsibility |
+| --- | --- |
+| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage** |
+| Operator | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+
 The default deployment uses PostgreSQL-inline storage and does not start
 SeaweedFS or require S3-compatible configuration. Operators can enable the
 bundled profile or connect an external endpoint when object size, capacity, or
@@ -39,9 +47,10 @@ or provider-specific product branch.
 File and Icon are the first adopted product owners. Their legacy bytes are
 copied in bounded batches, verified against PostgreSQL-owned SHA-256 and size,
 switched to concrete typed references, and only then removed from the old
-columns. New File and Icon content remains PostgreSQL inline in this slice.
-InfoBlob generations, Flow artifacts, and administrator-selected placement are
-separate follow-up work.
+columns. Eligible new File and Icon writes use the target selected in **Admin >
+Storage**. InfoBlob generations and Flow artifacts remain separate follow-up
+work. A target change affects new writes only; moving existing content remains
+a separate migration workflow.
 
 ## Choose the endpoint
 
@@ -179,6 +188,11 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
+After readiness reports `ready`, a platform admin can select **Object store**
+in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+or incompatible. The policy update takes effect without restarting backend or
+worker.
+
 HTTP 200 alone can also represent degraded remote storage while inline content
 remains available, so deployment checks must verify the explicit code.
 
@@ -213,6 +227,10 @@ The backend and worker receive the same variables through Compose pass-through;
 the optional service receives the matching credentials. There is deliberately
 no usable mutable-tag default.
 
+When readiness reports `ready`, a platform admin can select **Object store** in
+**Admin > Storage**. The same deployment-wide policy applies to bundled and
+external endpoints; there is no provider or vendor product branch.
+
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
 leave every remote-only variable absent. Core settings such as
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` and reconciliation bounds are valid
@@ -245,13 +263,11 @@ endpoint URL, command line, image, repository, logs, or backup manifest.
 
 Inline capacity and common reconciliation tuning live in `env_backend.env`.
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
-bounds PostgreSQL row and process memory exposure; it is documented and
-configurable, not a hidden business limit. Lowering it affects new writes, not
-reads of existing rows. User-facing upload limits remain business settings
-owned by application/admin configuration. Keep this ceiling at least as large
-as the largest File upload limit; backend and worker fail during startup when
-those settings conflict, before an upload can be accepted and then rejected by
-storage.
+bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
+business limit. Lowering it affects new inline writes, not reads of existing
+rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
+of the admin policy and this ceiling. **Admin > Storage** shows the configured
+limit, effective limit, and constraining source.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -267,7 +283,7 @@ logs.
 
 ## Runtime and health
 
-Object content has five explicit runtime outcomes:
+Object content has these explicit runtime outcomes:
 
 | Deployment state | Process | Readiness / operations |
 | --- | --- | --- |
@@ -277,6 +293,12 @@ Object content has five explicit runtime outcomes:
 | Complete settings; PostgreSQL and endpoint available | Starts inline + object-store capable | Healthy `ready` |
 | Complete settings; endpoint temporarily unavailable | Stays live | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
 | Reachable bucket not paired with this PostgreSQL database | Startup fails | `configuration_required`; reconciliation does not mutate rows or objects |
+
+Selecting **Object store** in **Admin > Storage** fails clearly while the
+endpoint is unavailable or incompatible; the previous committed policy remains
+active. If the endpoint fails after selection, eligible new remote-target writes
+fail. Eneo does not fall back to PostgreSQL inline or dual-write. Existing remote
+content remains unavailable until the configured endpoint recovers.
 
 Each API and worker process evaluates its deployment environment independently,
 so supply the same settings to all of them. Process liveness and core readiness
@@ -437,6 +459,26 @@ credentials, bucket, or deployment ID. Verify liveness, readiness, single and
 multipart upload, range read, delete visibility, and reconciliation before
 reopening traffic.
 
+The deployment-policy migration creates revision 1 with `postgres_inline`
+selected. It reads the four former upload-limit environment values once as
+migration seeds. A present positive integer is preserved exactly; an absent
+value uses the fresh-install default (10 MiB for session File, session image,
+and knowledge File; 200 MiB for transcription audio). Blank, non-integer, zero,
+or negative values stop the migration with a named remediation error. After the
+migration, environment changes and restarts never overwrite the database
+policy. During an upgrade, keep the old release's values available until
+`db-init` succeeds, then remove them from active backend and worker
+configuration. Fresh installations do not need them.
+
+If a restore predates this migration, keep backend and worker stopped and run:
+
+```bash
+docker compose run --rm db-init
+```
+
+`db-init` runs Alembic `upgrade head`. The runtime does not create or repair a
+missing policy table.
+
 For the File/Icon normalization upgrade, stop backend and worker producers
 before Alembic starts and do not restart them until the migration succeeds. If
 it stops, retry the migration before accepting new uploads; intervening writes
@@ -448,10 +490,19 @@ copied payloads with the legacy File/Icon columns once and contracts the old
 schema. Measure this pass on a restored production-size database and reserve a
 maintenance window proportional to total File/Icon bytes.
 
-Rollback means restoring the previous application/image version and the matching
-database/object backup pair. Do not roll back only Alembic or only the object
-store after writes have resumed. Do not introduce a second writable store as a
-rollback path.
+Policy rollback does not move bytes. To stop new remote placement while keeping
+the current version, select
+`postgres_inline` in **Admin > Storage**. Existing remote content still needs
+the endpoint, credentials, certificates, and paired backup. Selection never
+migrates it implicitly.
+
+Before rolling back to a release that predates the stored policy, export its
+four current business limits and restore them as that old release's four legacy
+environment settings; old code cannot read the singleton policy. Full
+application/schema rollback then means restoring the previous image and the
+matching database/object backup pair. Do not roll back only Alembic or only the
+object store after writes have resumed. Do not introduce a second writable
+store as a rollback path.
 
 Authoritative external references:
 

@@ -291,16 +291,19 @@ curl -fsS https://your-domain.com/version
       **Backup your ENCRYPTION_KEY securely.** Without it, encrypted credentials and federation secrets cannot be decrypted. If lost, you must re-enter all tenant API keys and reconfigure all IdP settings.
     </Callout>
 
-    **Upload Limits:**
+    **Upload policy:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `UPLOAD_MAX_FILE_SIZE` | `10485760` | Max file size in bytes (10MB) |
     | `MAX_IN_QUESTION` | `1` | Max files per chat message |
-    | `TRANSCRIPTION_MAX_FILE_SIZE` | `10485760` | Max audio file size (10MB) |
 
     <Callout type="info">
-      **Can't upload multiple files?** Increase `MAX_IN_QUESTION` in backend env.
+      Platform admins set byte limits and new-write placement in **Admin >
+      Storage**. Those changes take effect without restarting backend or worker.
+      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL,
+      backup, and process safety ceiling. For an inline session upload, the
+      effective limit is the smaller value; the admin page shows the configured
+      value, effective value, and constraining source.
     </Callout>
 
     **Crawler Settings:**
@@ -412,6 +415,16 @@ existing storage platform or multi-node availability can instead use another
 compatible endpoint, including MinIO. Both object-store paths use the same
 contract and fail closed when configuration or the database/bucket binding does
 not match.
+
+| Owner          | Responsibility                                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform admin | Choose one deployment-wide target for eligible new File and Icon writes and set business upload limits in **Admin > Storage**           |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` |
+
+Policy changes take effect without a backend or worker restart. They affect
+eligible new writes only; existing content stays in its recorded backend until
+an explicit verified migration moves it. The product has one provider-neutral
+object-store path, not vendor-specific storage modes.
 
 Follow [Object Content Storage](/guides/object-content-storage) for the image
 digest, credentials, MinIO policy, TLS, readiness, backup, and troubleshooting
@@ -641,7 +654,7 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 | Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                    | Set to `true`, restart backend                                                      |
 | Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                | Set to external URL (not localhost in prod)                                         |
 | Can't upload multiple files          | `MAX_IN_QUESTION=1`                                | Increase value in backend env                                                       |
-| Large file uploads fail              | `UPLOAD_MAX_FILE_SIZE` too low                     | Increase value (default 10MB = 10485760 bytes)                                      |
+| Large file uploads fail              | Admin policy or inline operator ceiling is lower   | Review configured, effective, and source values in Admin > Storage                  |
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                | Set correct key or re-enter credentials                                             |
 | Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                 | Set to `true`, requires `ENCRYPTION_KEY`                                            |
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                           | Must match in backend, frontend, AND IdP config                                     |
