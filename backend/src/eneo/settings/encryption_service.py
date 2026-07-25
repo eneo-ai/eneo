@@ -185,12 +185,20 @@ class EncryptionService:
         return self._authenticated_plaintext(token) is not None
 
     def _authenticated_plaintext(self, token: str) -> str | None:
-        """Decrypt one Fernet token, or None when it does not authenticate."""
+        """Decrypt one Fernet token, or None when it does not authenticate.
+
+        A token can be cryptographically authentic and still not hold a
+        credential this service can return: anything written by another
+        producer may not decode as UTF-8. That is a failure to recover the
+        plaintext, not a different kind of event, so it is reported the same
+        way — `decrypt` raises its documented ValueError and `can_decrypt`
+        answers False.
+        """
         if not self._fernet:
             return None
         try:
             return self._fernet.decrypt(token.encode()).decode()
-        except InvalidToken:
+        except (InvalidToken, UnicodeDecodeError):
             return None
 
     @staticmethod

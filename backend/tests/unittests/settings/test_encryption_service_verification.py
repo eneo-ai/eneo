@@ -59,6 +59,36 @@ def test_can_decrypt_rejects_ciphertext_from_another_key(
     assert not service.can_decrypt(other.encrypt("api-key"))
 
 
+def _authentic_token_holding_non_utf8(service: EncryptionService) -> str:
+    """Ciphertext this key authenticates, whose plaintext is not a string."""
+    fernet: Fernet = getattr(service, "_fernet")
+    token = fernet.encrypt(b"\xff").decode()
+    return EncryptionService.VERSION_PREFIX + token
+
+
+def test_can_decrypt_rejects_authentic_ciphertext_that_is_not_text(
+    service: EncryptionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authentic but undecodable is still a failure to recover the credential."""
+    records = _capture_service_logger(monkeypatch)
+
+    assert not service.can_decrypt(_authentic_token_holding_non_utf8(service))
+    assert records == []
+
+
+def test_decrypt_turns_undecodable_plaintext_into_its_documented_error(
+    service: EncryptionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = _capture_service_logger(monkeypatch)
+
+    with pytest.raises(ValueError):
+        service.decrypt(_authentic_token_holding_non_utf8(service))
+
+    assert [level for level, _ in records] == ["error"]
+
+
 def test_can_decrypt_rejects_everything_without_a_key() -> None:
     keyless = EncryptionService(None)
 
