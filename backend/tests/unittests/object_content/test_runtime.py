@@ -190,6 +190,7 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     runtime.start()
     await runtime.validate_configuration()
     readiness = await runtime.readiness()
+    capabilities = await runtime.storage_capabilities()
     reconciliation = await runtime.reconcile_once()
 
     assert runtime.state is ObjectContentRuntimeState.ENABLED
@@ -197,6 +198,15 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     assert runtime.object_store_configured is False
     assert readiness.ready is True
     assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    assert runtime.inline_maximum_bytes == 200 * 1024**2
+    assert capabilities[0].configured is True
+    assert capabilities[0].selectable is True
+    assert capabilities[1].configured is False
+    assert capabilities[1].selectable is False
+    assert (
+        capabilities[1].readiness_code
+        is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    )
     assert reconciliation.content_processed == 0
     assert reconciliation.object_cycle_completed is False
     assert runtime.service.object_store_configured is False

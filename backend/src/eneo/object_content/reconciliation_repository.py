@@ -1063,25 +1063,7 @@ class ObjectContentReconciliationRepository:
         await self._session.flush()
 
     async def health_facts(self) -> ObjectContentHealthFacts:
-        grouped = await self._session.execute(
-            select(
-                ObjectContents.storage_kind,
-                ObjectContents.state,
-                func.count(),
-                func.coalesce(func.sum(ObjectContents.size_bytes), 0),
-                func.min(ObjectContents.created_at),
-            ).group_by(ObjectContents.storage_kind, ObjectContents.state)
-        )
-        states = tuple(
-            ContentStateFacts(
-                storage_kind=StorageKind(storage_kind),
-                state=ContentState(state),
-                count=int(count),
-                size_bytes=int(size_bytes),
-                oldest_created_at=oldest,
-            )
-            for storage_kind, state, count, size_bytes, oldest in grouped.all()
-        )
+        states = await self.inventory_facts()
         integrity_failures = await self._session.scalar(
             select(func.count()).where(
                 ObjectContents.failure_code.in_(
@@ -1118,6 +1100,27 @@ class ObjectContentReconciliationRepository:
             orphan_candidates=int(orphan_row[0]),
             oldest_orphan_created_at=orphan_row[1],
             last_object_cycle_completed_at=last_cycle,
+        )
+
+    async def inventory_facts(self) -> tuple[ContentStateFacts, ...]:
+        grouped = await self._session.execute(
+            select(
+                ObjectContents.storage_kind,
+                ObjectContents.state,
+                func.count(),
+                func.coalesce(func.sum(ObjectContents.size_bytes), 0),
+                func.min(ObjectContents.created_at),
+            ).group_by(ObjectContents.storage_kind, ObjectContents.state)
+        )
+        return tuple(
+            ContentStateFacts(
+                storage_kind=StorageKind(storage_kind),
+                state=ContentState(state),
+                count=int(count),
+                size_bytes=int(size_bytes),
+                oldest_created_at=oldest,
+            )
+            for storage_kind, state, count, size_bytes, oldest in grouped.all()
         )
 
     async def get_or_initialize_store_binding(

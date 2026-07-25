@@ -21,6 +21,10 @@ from eneo.object_content.content import (
     ObjectContentStateError,
     ObjectContentUnavailableError,
 )
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyConflict,
+    ObjectStoreTargetNotSelectable,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -127,6 +131,16 @@ def add_exception_handlers(app: FastAPI):
         ),
         ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
         InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
+        DeploymentPolicyConflict: (
+            409,
+            None,
+            ErrorCodes.DEPLOYMENT_POLICY_CONFLICT,
+        ),
+        ObjectStoreTargetNotSelectable: (
+            409,
+            None,
+            ErrorCodes.OBJECT_STORE_NOT_SELECTABLE,
+        ),
     }
     exception_handlers = (
         *EXCEPTION_MAP.items(),

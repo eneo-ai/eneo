@@ -27,7 +27,9 @@ from eneo.object_content.reconciliation import (
     ObjectContentReconciler,
     ReconciliationResult,
 )
-from eneo.object_content.reconciliation_repository import ObjectContentHealthFacts
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentHealthFacts,
+)
 from eneo.object_content.s3_object_store import S3ObjectStore
 
 _ACTIVE_CONTENT_STATES = tuple(
@@ -51,6 +53,14 @@ class ObjectContentReadinessCode(StrEnum):
 class ObjectContentReadiness:
     ready: bool
     code: ObjectContentReadinessCode
+
+
+@dataclass(frozen=True, slots=True)
+class StorageCapability:
+    target: StorageKind
+    configured: bool
+    selectable: bool
+    readiness_code: ObjectContentReadinessCode
 
 
 class ObjectContentRuntimeState(StrEnum):
@@ -150,6 +160,15 @@ class ObjectContentRuntime:
         return self._settings is not None
 
     @property
+    def inline_maximum_bytes(self) -> int:
+        settings = self._core_settings
+        if settings is None:
+            raise ObjectContentUnavailableError(
+                "Durable object content is not initialized"
+            )
+        return settings.inline_maximum_bytes
+
+    @property
     def service(self) -> ObjectContentService:
         service = self._service
         if service is None:
@@ -190,6 +209,30 @@ class ObjectContentRuntime:
                 monotonic() + _READINESS_CACHE_SECONDS,
             )
             return readiness
+
+    async def storage_capabilities(self) -> tuple[StorageCapability, ...]:
+        readiness = await self.readiness()
+        return (
+            StorageCapability(
+                target=StorageKind.POSTGRES_INLINE,
+                configured=True,
+                selectable=self.enabled,
+                readiness_code=(
+                    ObjectContentReadinessCode.READY
+                    if self.enabled
+                    else ObjectContentReadinessCode.NOT_INITIALIZED
+                ),
+            ),
+            StorageCapability(
+                target=StorageKind.OBJECT_STORE,
+                configured=self.object_store_configured,
+                selectable=(
+                    self.object_store_configured
+                    and readiness.code is ObjectContentReadinessCode.READY
+                ),
+                readiness_code=readiness.code,
+            ),
+        )
 
     def _cached_readiness(self) -> ObjectContentReadiness | None:
         cached = self._readiness_cache

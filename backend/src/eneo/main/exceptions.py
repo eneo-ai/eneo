@@ -68,6 +68,8 @@ class ErrorCodes(int, Enum):
     SKILL_REVISION_CONFLICT = 9043
     FILE_IN_USE = 9044
     FILE_ORIGINAL_NOT_FOUND = 9045
+    DEPLOYMENT_POLICY_CONFLICT = 9046
+    OBJECT_STORE_NOT_SELECTABLE = 9047
 
 
 class NotFoundException(Exception):
