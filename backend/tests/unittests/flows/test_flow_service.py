@@ -1473,6 +1473,39 @@ async def test_create_flow_rejects_secret_disguised_with_encryption_prefix(user)
 
 
 @pytest.mark.asyncio
+async def test_create_flow_rejects_url_userinfo_behind_a_templated_host(user):
+    """Userinfo is authored literally, so a template must not defer it past save."""
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    flow_repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_FakeEncryptionService(),
+    )
+    step = _step(step_order=1).model_copy(
+        update={
+            "input_source": "http_get",
+            "input_config": {
+                "url": "https://alice:secret@{{host}}/input",
+                "auth": {"mode": "none"},
+            },
+        }
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.create_flow(
+            space_id=uuid4(),
+            name="Flow",
+            steps=[step],
+            metadata_json=None,
+        )
+
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_flow_persists_secret_free_http_config_when_encryption_inactive(
     user,
 ):
@@ -2949,6 +2982,34 @@ async def test_publish_flow_rejects_unencrypted_stored_http_secret(user):
 
     assert "ENCRYPTION_KEY" in str(excinfo.value)
     assert "legacy-plaintext-secret" not in str(excinfo.value)
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_stored_secret_the_key_cannot_decrypt(user):
+    """A row written before encryption can hold a typed prefix-shaped literal."""
+
+    class _RejectingEncryptionService(_FakeEncryptionService):
+        def decrypt(self, ciphertext: str) -> str:
+            raise ValueError("Decryption failed: invalid token or wrong key")
+
+    stored = _published_flow_for_update(
+        user, [_http_step_with_token("enc:not-really-ciphertext")]
+    )
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    version_repo = AsyncMock()
+    version_repo.get_latest.return_value = None
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_RejectingEncryptionService(),
+    )
+
+    with pytest.raises(BadRequestException):
+        await service.publish_flow(flow_id=stored.id)
+
     version_repo.create.assert_not_awaited()
 
 

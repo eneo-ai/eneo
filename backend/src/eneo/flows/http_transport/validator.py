@@ -29,6 +29,10 @@ def validate_authored_config(
     # Template URLs are validated after interpolation by the draft/runtime sender.
     if url_error is not None and not _contains_template_marker(config.url):
         errors.append(url_error)
+    elif contains_url_userinfo(config.url):
+        # Userinfo is authored literally even when the host is a template, so
+        # deferring it to interpolation would let the credential be stored.
+        errors.append(HttpTransportError.INVALID_URL)
 
     # Auth credentials validation (skip sentinel values — already stored)
     match config.auth:
@@ -75,11 +79,29 @@ def validate_http_url(url: str) -> HttpTransportError | None:
         return HttpTransportError.INVALID_URL
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return HttpTransportError.INVALID_URL
-    # Userinfo would carry a credential in a field that is stored, logged and
-    # previewed as an ordinary URL, outside the encrypted auth fields entirely.
-    if "@" in parsed.netloc:
+    if contains_url_userinfo(url):
         return HttpTransportError.INVALID_URL
     return None
+
+
+def contains_url_userinfo(url: str) -> bool:
+    """Whether the URL authority carries userinfo, template markers or not.
+
+    Userinfo would put a credential in a field that is stored, logged and
+    previewed as an ordinary URL, outside the encrypted auth fields entirely.
+    The authority is read from the literal string rather than through a parser
+    so that a templated host does not hide an authored ``user:pass@``.
+    """
+    stripped = url.strip()
+    scheme_separator = stripped.find("://")
+    if scheme_separator == -1:
+        return False
+    authority = stripped[scheme_separator + len("://") :]
+    for terminator in ("/", "?", "#"):
+        end = authority.find(terminator)
+        if end != -1:
+            authority = authority[:end]
+    return "@" in authority
 
 
 def _contains_template_marker(value: str) -> bool:

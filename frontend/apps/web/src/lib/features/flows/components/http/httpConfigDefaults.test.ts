@@ -170,6 +170,26 @@ describe("validateHttpConfig", () => {
     expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
   });
 
+  it("reports userinfo even when the host is a template", () => {
+    const errors = validateHttpConfig(
+      makeConfig({ url: "https://alice:secret@{{host}}/api" }),
+      "output",
+      "POST"
+    );
+
+    expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
+  });
+
+  it("does not treat an at sign in the path as userinfo", () => {
+    const errors = validateHttpConfig(
+      makeConfig({ url: "https://example.com/users/a@b" }),
+      "output",
+      "POST"
+    );
+
+    expect(errors).toEqual([]);
+  });
+
   it("reports unparseable URL", () => {
     const errors = validateHttpConfig(makeConfig({ url: "not-a-url" }), "output", "POST");
 

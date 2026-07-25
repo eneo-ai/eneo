@@ -140,6 +140,19 @@ def test_url_with_username_only_userinfo_returns_invalid_url() -> None:
     assert HttpTransportError.INVALID_URL in errors
 
 
+def test_url_with_userinfo_and_a_templated_host_returns_invalid_url() -> None:
+    """Userinfo is authored literally; deferring it to interpolation stores it."""
+    errors = _validate(_config(url="https://alice:secret@{{host}}/api"))
+
+    assert HttpTransportError.INVALID_URL in errors
+
+
+def test_at_sign_in_the_path_is_not_userinfo() -> None:
+    errors = _validate(_config(url="https://example.org/users/a@b"))
+
+    assert HttpTransportError.INVALID_URL not in errors
+
+
 def test_template_expression_url_is_validated_after_interpolation() -> None:
     errors = _validate(_config(url="{{base_url}}/api"))
 
