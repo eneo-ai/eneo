@@ -306,6 +306,11 @@ active. If the endpoint fails after selection, eligible new remote-target writes
 fail. Eneo does not fall back to PostgreSQL inline or dual-write. Existing remote
 content remains unavailable until the configured endpoint recovers.
 
+If the admin's save request loses its response, the commit outcome is unknown:
+the browser keeps the submitted draft but blocks another save until the admin
+reloads the current persisted revision. Do not infer the active target from the
+failed request alone.
+
 Each API and worker process evaluates its deployment environment independently,
 so supply the same settings to all of them. Process liveness and core readiness
 do not depend on an optional endpoint. Health output includes only a status and

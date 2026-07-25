@@ -8,10 +8,24 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
+from eneo.database.database import get_session
 from eneo.icons.api import icon_router
 from eneo.icons.icon_service import IconDownload
 from eneo.object_content.content import ObjectContentUnavailableError
 from eneo.server.exception_handlers import add_exception_handlers
+
+
+def test_public_icon_route_uses_a_non_transactional_request_container() -> None:
+    route = next(
+        route
+        for route in icon_router.router.routes
+        if isinstance(route, APIRoute) and route.endpoint is icon_router.get_icon
+    )
+
+    assert len(route.dependant.dependencies) == 1
+    container_dependency = route.dependant.dependencies[0]
+    assert len(container_dependency.dependencies) == 1
+    assert container_dependency.dependencies[0].call is get_session
 
 
 async def test_public_icon_response_consumes_the_downstream_stream_incrementally() -> (

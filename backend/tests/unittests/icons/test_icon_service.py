@@ -183,6 +183,24 @@ async def test_open_icon_exposes_the_content_stream_incrementally() -> None:
     pulls: list[bytes] = []
     closed = False
 
+    class Session:
+        def __init__(self) -> None:
+            self.active = False
+
+        def in_transaction(self) -> bool:
+            return self.active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self.active
+            self.active = True
+            try:
+                yield
+            finally:
+                self.active = False
+
+    session = Session()
+
     async def source():
         for chunk in (b"abc", b"def"):
             pulls.append(chunk)
@@ -191,6 +209,7 @@ async def test_open_icon_exposes_the_content_stream_incrementally() -> None:
     @asynccontextmanager
     async def open_content(_grant):
         nonlocal closed
+        assert not session.in_transaction()
         try:
             yield ContentRead(
                 chunks=source(),
@@ -202,8 +221,18 @@ async def test_open_icon_exposes_the_content_stream_incrementally() -> None:
             closed = True
 
     repository = MagicMock()
-    repository.get = AsyncMock(return_value=metadata)
-    repository.get_primary_reference = AsyncMock(return_value=reference)
+    repository.session = session
+
+    async def get(_icon_id):
+        assert session.in_transaction()
+        return metadata
+
+    async def get_primary_reference(_icon_id):
+        assert session.in_transaction()
+        return reference
+
+    repository.get = AsyncMock(side_effect=get)
+    repository.get_primary_reference = AsyncMock(side_effect=get_primary_reference)
     object_content = MagicMock()
     object_content.open_content.side_effect = open_content
     service = IconService(

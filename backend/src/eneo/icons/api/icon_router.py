@@ -11,7 +11,9 @@ from eneo.server.protocol import responses
 
 router = APIRouter()
 
-_Container = Annotated[Container, Depends(get_container())]
+_NonTransactionalContainer = Annotated[
+    Container, Depends(get_container(with_transaction=False))
+]
 _ContainerWithUser = Annotated[
     Container, Depends(get_container(with_user=True, with_transaction=False))
 ]
@@ -38,7 +40,7 @@ _ContainerWithUploadAdmission = Annotated[
         404: {"description": "Icon not found"},
     },
 )
-async def get_icon(id: UUID, container: _Container) -> Response:
+async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
     icon_service = container.icon_service()
     download = await icon_service.open_icon(id)
 

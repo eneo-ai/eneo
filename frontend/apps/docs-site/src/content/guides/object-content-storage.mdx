@@ -352,6 +352,7 @@ File/Icon bytes.
 | ----------------------------------------------------- | ------------------------------------------------------------------------ |
 | No endpoint configured and no remote rows             | Healthy inline operation                                                 |
 | Object-store selection is unavailable or incompatible | Admin update fails clearly; the previous committed policy remains active |
+| Admin save loses its response                         | Outcome is unknown; keep the draft and reload the persisted policy       |
 | Endpoint fails after object store was selected        | New remote-target writes fail; Eneo does not fall back or dual-write     |
 | Existing remote content during an outage              | Remote operations return a typed temporary failure                       |
 | Remote rows exist but configuration is missing        | Fails closed with `configuration_required`                               |

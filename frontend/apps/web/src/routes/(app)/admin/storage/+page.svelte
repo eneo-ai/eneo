@@ -30,7 +30,7 @@
   let reloading = $state(false);
   let loadError = $state(false);
   let saving = $state(false);
-  let saveError = $state(false);
+  let saveOutcomeUnknown = $state(false);
   let saveSuccess = $state(false);
   let stale = $state(false);
   let targetUnavailable = $state(false);
@@ -87,7 +87,7 @@
       applyPolicy(await eneo.objectContentPolicy.get());
       stale = false;
       targetUnavailable = false;
-      saveError = false;
+      saveOutcomeUnknown = false;
       saveSuccess = false;
     } catch {
       loadError = true;
@@ -104,7 +104,16 @@
   }
 
   async function savePolicy() {
-    if (!canEdit || !deploymentPolicy || !dirty || !validDraft || saving) return;
+    if (
+      !canEdit ||
+      !deploymentPolicy ||
+      !dirty ||
+      !validDraft ||
+      saving ||
+      stale ||
+      saveOutcomeUnknown
+    )
+      return;
 
     const replacement: DeploymentPolicyUpdate = {
       expected_revision: deploymentPolicy.policy.revision,
@@ -116,7 +125,7 @@
     };
 
     saving = true;
-    saveError = false;
+    saveOutcomeUnknown = false;
     saveSuccess = false;
     stale = false;
     targetUnavailable = false;
@@ -132,7 +141,7 @@
         error.code === OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE
       ) {
         targetUnavailable = true;
-      } else saveError = true;
+      } else saveOutcomeUnknown = true;
     } finally {
       saving = false;
     }
@@ -296,11 +305,21 @@
             </Alert.Root>
           {/if}
 
-          {#if saveError}
+          {#if saveOutcomeUnknown}
             <Alert.Root variant="destructive" aria-live="assertive">
               <AlertCircle />
-              <Alert.Title>{m.storage_settings_save_error_title()}</Alert.Title>
-              <Alert.Description>{m.storage_settings_save_error_description()}</Alert.Description>
+              <Alert.Title>{m.storage_settings_save_outcome_unknown_title()}</Alert.Title>
+              <Alert.Description>
+                <p>{m.storage_settings_save_outcome_unknown_description()}</p>
+                <Button class="mt-3" variant="outline" disabled={reloading} onclick={loadPolicy}>
+                  {#if reloading}
+                    <Loader2 class="animate-spin" />
+                    {m.storage_settings_reloading()}
+                  {:else}
+                    {m.storage_settings_reload_latest()}
+                  {/if}
+                </Button>
+              </Alert.Description>
             </Alert.Root>
           {/if}
 
@@ -502,7 +521,10 @@
                 <p class="text-muted mr-auto text-sm" aria-live="polite">
                   {dirty ? m.storage_settings_unsaved_changes() : m.storage_settings_no_changes()}
                 </p>
-                <Button type="submit" disabled={!dirty || !validDraft || saving || stale}>
+                <Button
+                  type="submit"
+                  disabled={!dirty || !validDraft || saving || stale || saveOutcomeUnknown}
+                >
                   {#if saving}
                     <Loader2 class="animate-spin" />
                     {m.storage_settings_saving()}

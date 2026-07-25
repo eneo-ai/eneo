@@ -606,9 +606,13 @@ class FileService:
         *,
         range_header: str | None = None,
     ) -> FileDownload:
-        metadata = await self.repo.get_by_id(file_id=file_id)
-        references = await self.repo.get_content_references([file_id])
-        reference = self._primary_reference(metadata, references)
+        session = self.repo.session
+        if session.in_transaction():
+            raise RuntimeError("File downloads require a non-ambient transaction")
+        async with session.begin():
+            metadata = await self.repo.get_by_id(file_id=file_id)
+            references = await self.repo.get_content_references([file_id])
+            reference = self._primary_reference(metadata, references)
         return await self._open_download(
             metadata,
             reference,
@@ -628,7 +632,10 @@ class FileService:
         *,
         range_header: str | None = None,
     ) -> FileDownload:
-        async with self.repo.session.begin():
+        session = self.repo.session
+        if session.in_transaction():
+            raise RuntimeError("File downloads require a non-ambient transaction")
+        async with session.begin():
             metadata = await self.repo.get_by_id(file_id=file_id)
             references = await self.repo.get_content_references([file_id])
             reference = self._original_reference(references)

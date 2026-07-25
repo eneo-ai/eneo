@@ -579,13 +579,14 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
         ):
             async with object_content_database.session() as session:
                 async with session.begin():
-                    download = await _service(
-                        session=session,
-                        user=await _user(session),
-                        protocol=_PreparedFileProtocol(prepared("unused.mp3")),
-                        object_content=content_service,
-                        snapshot=snapshot_inline,
-                    ).get_download_no_auth(file_id)
+                    user = await _user(session)
+                download = await _service(
+                    session=session,
+                    user=user,
+                    protocol=_PreparedFileProtocol(prepared("unused.mp3")),
+                    object_content=content_service,
+                    snapshot=snapshot_inline,
+                ).get_download_no_auth(file_id)
                 downloaded.append(b"".join([chunk async for chunk in download.chunks]))
 
         assert downloaded == [payload, payload]

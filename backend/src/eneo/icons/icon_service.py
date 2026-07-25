@@ -190,12 +190,18 @@ class IconService:
         return metadata
 
     async def open_icon(self, icon_id: UUID) -> IconDownload:
-        metadata = await self.icon_repo.get(icon_id)
-        if metadata is None:
-            raise NotFoundException(f"Icon with id {icon_id} not found")
-        reference = await self.icon_repo.get_primary_reference(icon_id)
-        if reference is None:
-            raise NotFoundException(f"Icon with id {icon_id} has no durable content")
+        session = self.icon_repo.session
+        if session.in_transaction():
+            raise RuntimeError("Icon reads require a non-ambient transaction")
+        async with session.begin():
+            metadata = await self.icon_repo.get(icon_id)
+            if metadata is None:
+                raise NotFoundException(f"Icon with id {icon_id} not found")
+            reference = await self.icon_repo.get_primary_reference(icon_id)
+            if reference is None:
+                raise NotFoundException(
+                    f"Icon with id {icon_id} has no durable content"
+                )
 
         read_context = self.object_content.open_content(
             ContentReadGrant(

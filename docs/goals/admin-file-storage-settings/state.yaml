@@ -639,7 +639,39 @@ tasks:
         - "full web unit suite => 59 files, 334 passed; focused admin page => 10 passed"
         - "Svelte check => 0 errors, 0 warnings; frontend lint and docs-site build => passed"
         - "generated client => 15 passed; Ruff/format and bounded secret scan => passed"
-      next_gate: "Stage the exact reviewed delta, create the review-fix commit, run exact-head pre-push validation and a fresh same-session Claude push gate, then push and post one top-level /review."
+      review_3:
+        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
+        head: "5b5af9eb3db28a9e61a2b2f25305cfb1f2b35a61"
+        coverage: "complete: 98 of 98 changed paths"
+        confirmed_resolved:
+          - "F1"
+          - "F2"
+          - "F3"
+          - "F4"
+          - "F5"
+          - "F6"
+        dispositions:
+          - "F8 genuine/in-scope: public Icon GET used an ambient request transaction across remote verification. The route now uses a non-transactional container and IconService owns only the metadata/reference read transaction."
+          - "F9 genuine/in-scope: generic mutation failure has an unknown commit outcome. The UI keeps the draft, blocks re-save, and requires a persisted-policy reload without claiming the old target won."
+          - "F7 genuine/out-of-scope: crash leftovers are the explicitly documented PR1 residual risk; goal.md and the frozen publication plan prohibit the proposed automatic aggregate cleanup/reaper."
+          - "Claude iteration 31 sibling check verified genuine: legacy signed File download also held its request transaction across object-content open. It now shares the non-ambient route and short metadata-transaction contract already used by original download and Icon."
+        red:
+          - "F8 service metadata reads ran without an owned transaction and the route dependency resolved get_session_with_transaction."
+          - "F9 generic replacement failure had no outcome-unknown/reload-required presentation."
+        focused_green:
+          - "Icon unit/router => 13 passed."
+          - "Storage page browser suite => 10 passed."
+          - "Real PostgreSQL/object-store Icon lifecycle/adoption => 14 passed after direct callers adopted the non-ambient read contract."
+          - "File signed-download unit red/green => 3 passed; real File lifecycle/adoption => 15 passed."
+        commit_validation:
+          - "Whole backend non-integration => 3963 passed; coverage-enabled run also exited 0."
+          - "Combined PostgreSQL/object-content policy, public route, File, and Icon integrations => 33 passed."
+          - "Whole-backend Pyright => 0 errors, 0 warnings, 0 informations."
+          - "Changed Python Ruff and format checks => passed."
+          - "Full web unit/browser suite => 59 files, 334 tests passed; Svelte check and lint passed."
+          - "docs.eneo.ai build => 32 routes and 28 indexed pages; only the pre-existing img warning remained."
+          - "Goal board checker, diff checks, and bounded secret scan => passed."
+      next_gate: "Complete exact review-3 validation, same-session Claude commit gate, commit/push gate, then push and post one fresh top-level /review."
 
   - id: T007
     type: pm

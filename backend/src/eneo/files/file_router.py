@@ -399,7 +399,10 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
 async def download_file_signed(
     id: UUID,
     token: Annotated[str, Query(description="The signed token for file access")],
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_transaction=False)),
+    ],
     range: Annotated[str | None, Header()] = None,
 ):
     content_disposition = _validate_download_claims(

@@ -239,9 +239,18 @@ describe("admin storage settings page", () => {
       .toBeDisabled();
   });
 
-  test("keeps a rejected save retryable without discarding the draft", async () => {
+  test("requires a reload when a generic save failure has an unknown outcome", async () => {
     testUser.isPlatformAdmin = true;
-    getPolicy.mockResolvedValue(policy());
+    const initial = policy();
+    const committed = policy({
+      policy: {
+        ...initial.policy,
+        revision: 5,
+        new_write_storage_target: "object_store",
+        session_file_limit_bytes: 40 * 1024 * 1024
+      }
+    });
+    getPolicy.mockResolvedValueOnce(initial).mockResolvedValueOnce(committed);
     replacePolicy.mockRejectedValue(new Error("failed"));
 
     render(StoragePage);
@@ -250,9 +259,20 @@ describe("admin storage settings page", () => {
     await sessionFileInput.fill("32505856");
     await page.getByRole("button", { name: "storage_settings_save" }).click();
 
-    await expect.element(page.getByText("storage_settings_save_error_title")).toBeVisible();
+    await expect
+      .element(page.getByText("storage_settings_save_outcome_unknown_title"))
+      .toBeVisible();
     await expect.element(sessionFileInput).toHaveValue(32_505_856);
-    await expect.element(page.getByRole("button", { name: "storage_settings_save" })).toBeEnabled();
+    await expect
+      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .toBeDisabled();
+
+    await page.getByRole("button", { name: "storage_settings_reload_latest" }).click();
+
+    await expect.element(sessionFileInput).toHaveValue(40 * 1024 * 1024);
+    await expect
+      .element(page.getByText("storage_settings_save_outcome_unknown_title"))
+      .not.toBeInTheDocument();
   });
 
   test("switches to read-only when platform-admin authority is revoked before save", async () => {
@@ -271,7 +291,7 @@ describe("admin storage settings page", () => {
       .element(page.getByRole("button", { name: "storage_settings_save" }))
       .not.toBeInTheDocument();
     await expect
-      .element(page.getByText("storage_settings_save_error_title"))
+      .element(page.getByText("storage_settings_save_outcome_unknown_title"))
       .not.toBeInTheDocument();
   });
 

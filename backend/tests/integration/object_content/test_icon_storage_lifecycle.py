@@ -218,19 +218,19 @@ async def test_inline_and_object_store_icons_are_immediately_byte_identical(
                     assert descriptor is not None
                     remote_object_key = descriptor.object_key
 
-        for icon_id, _target in created:
-            async with object_content_database.session() as session, session.begin():
-                assert (
-                    await _read_icon_bytes(
-                        IconService(
-                            icon_repo=IconRepository(session),
-                            file_size_service=FileSizeService(),
-                            object_content=content_service,
-                        ),
-                        icon_id,
+            for icon_id, _target in created:
+                async with object_content_database.session() as session:
+                    assert (
+                        await _read_icon_bytes(
+                            IconService(
+                                icon_repo=IconRepository(session),
+                                file_size_service=FileSizeService(),
+                                object_content=content_service,
+                            ),
+                            icon_id,
+                        )
+                        == payload
                     )
-                    == payload
-                )
     finally:
         if remote_object_key is not None:
             await real_object_store.store.delete_and_confirm(remote_object_key)
@@ -279,6 +279,8 @@ async def test_policy_sized_object_store_icon_spools_and_streams_in_chunks(
             )
             assert descriptor is not None
             remote_object_key = descriptor.object_key
+
+        async with object_content_database.session() as session:
             opened = await IconService(
                 icon_repo=IconRepository(session),
                 file_size_service=FileSizeService(),
@@ -354,18 +356,18 @@ async def test_pending_icon_is_hidden_until_final_remote_promotion(
             assert descriptor is not None
             remote_object_key = descriptor.object_key
 
-        async with object_content_database.session() as session, session.begin():
-            assert (
-                await _read_icon_bytes(
-                    IconService(
-                        icon_repo=IconRepository(session),
-                        file_size_service=FileSizeService(),
-                        object_content=content_service,
-                    ),
-                    icon_id,
+            async with object_content_database.session() as session:
+                assert (
+                    await _read_icon_bytes(
+                        IconService(
+                            icon_repo=IconRepository(session),
+                            file_size_service=FileSizeService(),
+                            object_content=content_service,
+                        ),
+                        icon_id,
+                    )
+                    == payload
                 )
-                == payload
-            )
     finally:
         if remote_object_key is not None:
             await real_object_store.store.delete_and_confirm(remote_object_key)
@@ -571,6 +573,9 @@ async def test_failed_icon_stays_hidden_and_tenant_deletable(
         repository = IconRepository(session)
         assert await repository.get(created.id) is None
         assert await repository.get_for_lifecycle(created.id) is not None
+
+    async with object_content_database.session() as session:
+        repository = IconRepository(session)
         with pytest.raises(NotFoundException):
             await _read_icon_bytes(
                 IconService(

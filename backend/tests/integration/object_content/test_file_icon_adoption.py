@@ -159,20 +159,21 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
         assert len({row.content_id for row in references}) == 2
 
     assert file_id is not None
-    async with object_content_database.session() as session, session.begin():
-        user = await _user(session)
-        service = FileService(
-            user=user,
-            repo=FileRepository(session),
-            protocol=FileProtocol(
-                file_size_service=FileSizeService(),
-                text_extractor=TextExtractor(),
-                image_extractor=ImageExtractor(),
-            ),
-            object_content=_content_service(object_content_database),
-            upload_admission=_inline_upload_admission(),
-        )
-        hydrated = await service.get_file_content(file_id)
+    async with object_content_database.session() as session:
+        async with session.begin():
+            user = await _user(session)
+            service = FileService(
+                user=user,
+                repo=FileRepository(session),
+                protocol=FileProtocol(
+                    file_size_service=FileSizeService(),
+                    text_extractor=TextExtractor(),
+                    image_extractor=ImageExtractor(),
+                ),
+                object_content=_content_service(object_content_database),
+                upload_admission=_inline_upload_admission(),
+            )
+            hydrated = await service.get_file_content(file_id)
         download = await service.get_download_no_auth(file_id)
         downloaded = b"".join([chunk async for chunk in download.chunks])
 
@@ -434,25 +435,33 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
                 )
             )
 
-    async with object_content_database.session() as session, session.begin():
-        user = await _user(session)
-        service = FileService(
-            user=user,
-            repo=FileRepository(session),
-            protocol=_PreparedFileProtocol(cases[0][0]),
-            object_content=_content_service(object_content_database),
-        )
+    async with object_content_database.session() as session:
+        async with session.begin():
+            user = await _user(session)
+            service = FileService(
+                user=user,
+                repo=FileRepository(session),
+                protocol=_PreparedFileProtocol(cases[0][0]),
+                object_content=_content_service(object_content_database),
+            )
+            for (
+                file_id,
+                _expected_bytes,
+                _expected_media_type,
+                _expected_name,
+                expected_file_media_type,
+            ) in saved_cases:
+                hydrated = await service.get_file_content(file_id)
+                assert hydrated.mimetype == expected_file_media_type
         for (
             file_id,
             expected_bytes,
             expected_media_type,
             expected_name,
-            expected_file_media_type,
+            _expected_file_media_type,
         ) in saved_cases:
-            hydrated = await service.get_file_content(file_id)
             download = await service.get_download_no_auth(file_id)
             downloaded = b"".join([chunk async for chunk in download.chunks])
-            assert hydrated.mimetype == expected_file_media_type
             assert downloaded == expected_bytes
             assert download.media_type == expected_media_type
             assert download.filename == expected_name
@@ -573,7 +582,7 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
         assert control.verified_media_type == "image/png"
         assert control.size_bytes == len(icon)
 
-    async with object_content_database.session() as session, session.begin():
+    async with object_content_database.session() as session:
         opened_icon = await IconService(
             icon_repo=IconRepository(session),
             file_size_service=FileSizeService(),
@@ -585,8 +594,9 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
             await opened_icon.aclose()
 
     assert audio_id is not None
-    async with object_content_database.session() as session, session.begin():
-        user = await _user(session)
+    async with object_content_database.session() as session:
+        async with session.begin():
+            user = await _user(session)
         file_service = FileService(
             user=user,
             repo=FileRepository(session),

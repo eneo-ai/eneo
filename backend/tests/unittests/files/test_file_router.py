@@ -1,11 +1,14 @@
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
+from eneo.database.database import get_session
 from eneo.files import file_router
 from eneo.files.file_models import (
     ContentDisposition,
@@ -314,7 +317,30 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
     assert response.body == b""
 
 
-async def test_interrupted_original_download_closes_content_context_once():
+def test_processing_download_route_uses_a_non_transactional_request_container() -> None:
+    route = next(
+        route
+        for route in file_router.router.routes
+        if isinstance(route, APIRoute)
+        and route.endpoint is file_router.download_file_signed
+    )
+
+    container_dependency = next(
+        dependency
+        for dependency in route.dependant.dependencies
+        if dependency.name == "container"
+    )
+    assert len(container_dependency.dependencies) == 1
+    assert container_dependency.dependencies[0].call is get_session
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ["get_download_no_auth", "get_original_download_no_auth"],
+)
+async def test_interrupted_download_closes_content_context_once(
+    method_name: str,
+) -> None:
     file_id = uuid4()
     content_id = uuid4()
     tenant_id = uuid4()
@@ -349,20 +375,50 @@ async def test_interrupted_original_download_closes_content_context_once():
         yield b"abc"
         yield b"def"
 
+    class Session:
+        def __init__(self) -> None:
+            self.active = False
+
+        def in_transaction(self) -> bool:
+            return self.active
+
+        @asynccontextmanager
+        async def begin(self):
+            assert not self.active
+            self.active = True
+            try:
+                yield
+            finally:
+                self.active = False
+
+    session = Session()
     read_context = MagicMock()
-    read_context.__aenter__ = AsyncMock(
-        return_value=ContentRead(
+    read_context.__aenter__ = AsyncMock()
+
+    async def enter_read_context():
+        assert not session.in_transaction()
+        return ContentRead(
             chunks=chunks(),
             content_length=6,
             media_type="application/pdf",
             content_range=None,
         )
-    )
+
+    read_context.__aenter__.side_effect = enter_read_context
     read_context.__aexit__ = AsyncMock(return_value=None)
     repo = MagicMock()
-    repo.session = MagicMock()
-    repo.get_by_id = AsyncMock(return_value=metadata)
-    repo.get_content_references = AsyncMock(return_value=[reference])
+    repo.session = session
+
+    async def get_by_id(*, file_id):
+        assert session.in_transaction()
+        return metadata
+
+    async def get_content_references(_file_ids):
+        assert session.in_transaction()
+        return [reference]
+
+    repo.get_by_id = AsyncMock(side_effect=get_by_id)
+    repo.get_content_references = AsyncMock(side_effect=get_content_references)
     object_content = MagicMock()
     object_content.open_content.return_value = read_context
     service = FileService(
@@ -372,7 +428,7 @@ async def test_interrupted_original_download_closes_content_context_once():
         object_content=object_content,
     )
 
-    download = await service.get_original_download_no_auth(file_id)
+    download = await getattr(service, method_name)(file_id)
     assert await anext(download.chunks) == b"abc"
     await download.chunks.aclose()
     await download.aclose()
