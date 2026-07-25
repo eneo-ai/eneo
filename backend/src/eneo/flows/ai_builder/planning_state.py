@@ -103,9 +103,13 @@ TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
 TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX = ":template_placeholder_source"
 
 StepOutputType = Literal["text", "json", "pdf", "docx"]
+# Mirrors AIBuilderOutputMode, the authoring vocabulary. Server-injected modes
+# are excluded: http_post is applied by the server, never authored, and no
+# writer could produce it here — a hand-edited value used to degrade silently
+# to pass-through. test_planning_state holds this list and the enum together.
 StepOutputMode = Literal[
     "pass_through",
-    "http_post",
+    "compose_text",
     "transcribe_only",
     "template_fill",
     "render_verbatim",

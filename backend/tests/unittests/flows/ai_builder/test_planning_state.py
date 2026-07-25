@@ -591,3 +591,18 @@ def test_fcm_version_has_one_home() -> None:
 
     assert planning_state_module.FCM_VERSION is CANONICAL
     assert PlanningState.empty().fcm_version == CANONICAL
+
+
+def test_step_output_mode_literal_matches_the_authoring_enum() -> None:
+    """One vocabulary home.
+
+    The Literal used to admit http_post, which the server injects and no writer
+    here can produce; a hand-edited value degraded silently to pass-through.
+    """
+    from typing import get_args
+
+    from eneo.flows.ai_builder.planning_state import StepOutputMode
+    from eneo.flows.enums import AIBuilderOutputMode
+
+    assert set(get_args(StepOutputMode)) == {mode.value for mode in AIBuilderOutputMode}
+    assert "http_post" not in get_args(StepOutputMode)
