@@ -5866,9 +5866,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Deployment Policy */
+    /**
+     * Get Deployment Policy
+     * @description Get the deployment-wide new-write storage target, upload limits, and sanitized capability and inventory facts.
+     */
     get: operations["get_deployment_policy_api_v1_admin_object_content_policy_get"];
-    /** Replace Deployment Policy */
+    /**
+     * Replace Deployment Policy
+     * @description Replace the deployment-wide new-write storage target and upload limits using the expected revision. The target affects eligible new writes only and never moves existing content.
+     */
     put: operations["replace_deployment_policy_api_v1_admin_object_content_policy_put"];
     post?: never;
     delete?: never;
@@ -6680,7 +6686,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Set Platform Admin */
+    /**
+     * Set Platform Admin
+     * @description Grant or revoke session-backed platform-administrator authority for a user. Granting requires an active tenant administrator; revoking does not.
+     */
     put: operations["set_platform_admin_api_v1_sysadmin_users__user_id__platform_admin_put"];
     post?: never;
     delete?: never;

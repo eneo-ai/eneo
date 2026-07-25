@@ -123,6 +123,10 @@ async def _read_projection(
 @router.get(
     "/object-content-policy",
     response_model=DeploymentPolicyPublic,
+    description=(
+        "Get the deployment-wide new-write storage target, upload limits, "
+        "and sanitized capability and inventory facts."
+    ),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
     responses=responses.get_responses([403]),
 )
@@ -135,6 +139,11 @@ async def get_deployment_policy(
 @router.put(
     "/object-content-policy",
     response_model=DeploymentPolicyPublic,
+    description=(
+        "Replace the deployment-wide new-write storage target and upload limits "
+        "using the expected revision. The target affects eligible new writes only "
+        "and never moves existing content."
+    ),
     dependencies=[
         Depends(require_session_auth),
         Depends(require_user_identity),

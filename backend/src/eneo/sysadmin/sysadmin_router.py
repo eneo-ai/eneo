@@ -109,6 +109,11 @@ class PlatformAdminGrantResponse(BaseModel):
 @router.put(
     "/users/{user_id}/platform-admin",
     response_model=PlatformAdminGrantResponse,
+    description=(
+        "Grant or revoke session-backed platform-administrator authority "
+        "for a user. Granting requires an active tenant administrator; "
+        "revoking does not."
+    ),
     responses=responses.get_responses([404, 409]),
 )
 async def set_platform_admin(
