@@ -41,13 +41,14 @@ continuity:
   rotate_when_slow: true
   current_thread_id: "019f976e-206b-74e1-a560-32726d290dda"
   previous_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  continuity_note: "previous_thread_id is the originating orchestrator, not a Goal Maker rotation; the owner required this task to continue without creating a duplicate Goal, task, worktree, branch, or Claude session."
   rotation_count: 0
-  completed_write_tasks_in_thread: 1
+  completed_write_tasks_in_thread: 2
   handoff_note: notes/handoff.md
   last_handoff_at: null
-  last_verified_revision: "ffe4f6ff0c131eeef49aad923fddee02cf76e3d0"
+  last_verified_revision: "31aad9731ddc0e7d6b38dc7c66f499d2cf50be5e"
 
-active_task: T014
+active_task: T005
 
 tasks:
   - id: T001
@@ -543,15 +544,32 @@ tasks:
   - id: T014
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Run the required same-session Claude pre-commit gate over the exact T004 intended delta and focused validation, fix verified findings, and create commit 3 only after green/MIN_SCORE >= 8."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Same-session iterations 14-15 reviewed the exact generated-client/admin-UI/docs delta. Three genuine P3 findings were fixed and retested; the revised exact staged hash received green/MIN_SCORE 8 and commit 3 was created."
+      evidence:
+        - ".codex/artifacts/claude-peer-loop-claude-peer-loop-20260725T185654Z.md"
+        - ".codex/artifacts/claude-peer-loop-claude-peer-loop-20260725T190248Z.md"
+        - "staged diff SHA-256 a7ac44e1995807851d4355a4cef7ce303d32ee16f132924863440cd93336355c"
+        - "commit 31aad9731ddc0e7d6b38dc7c66f499d2cf50be5e"
+      fixes:
+        - "A mid-session PUT 403 now conservatively switches the page to its existing read-only presentation."
+        - "Capability and inventory tables now have localized screen-reader captions."
+        - "The touched FileProtocol test header names the persisted admission snapshot rather than deleted settings."
+      validation:
+        - "focused Storage page browser suite => 9 passed"
+        - "full web unit suite => 59 files, 333 passed"
+        - "Svelte check => 0 errors, 0 warnings"
+        - "FileProtocol => 14 passed; focused Ruff/format passed"
+      next_allowed_task: T005
 
   - id: T005
     type: pm
     assignee: PM
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Run the complete exact-head local validation and required same-session Claude pre-push gate, freeze the immutable SHA, then push and publish a ready PR with accurate scope and validation."
     inputs:
@@ -622,12 +640,10 @@ checks:
   dirty_fingerprint: "goal-board-only"
   last_verification:
     result: passed
-    task: T004
+    task: T014
     commands:
-      - "exact backend OpenAPI regeneration and generated-schema comparison"
-      - "cd frontend/packages/eneo-js && bun test && bun run lint"
+      - "same-session Claude iterations 14-15 => GREEN_LIGHT yes, MIN_SCORE 8"
       - "cd frontend/apps/web && bun run test:unit"
-      - "cd frontend && bun run --cwd apps/web check && bun run lint"
-      - "cd frontend && bun run --cwd apps/docs-site build"
+      - "cd frontend/apps/web && bun run check"
       - "cd backend && uv run pytest -q tests/unittests/files/test_file_protocol.py"
-      - "git diff --check and shipping legacy-setting scan"
+      - "git diff --cached --check and exact staged SHA verification"
