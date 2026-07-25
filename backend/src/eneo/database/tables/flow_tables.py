@@ -995,6 +995,22 @@ class FlowRunRerunOperations(BasePublic):
         JSONB, nullable=True
     )
     root_step_input_override_requested: Mapped[bool] = mapped_column(nullable=False)
+    # The run row keeps only the current inputs, so each accepted rerun records
+    # the payload it replaced. Walking reruns in order and finishing at the run
+    # row rebuilds every input revision. Null on operations accepted before the
+    # chain existed, and on operations that never reached acceptance.
+    prior_input_hash: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    resulting_input_hash: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    changed_input_paths: Mapped[Optional[list[str]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    prior_input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     requested_by_principal_type: Mapped[str] = mapped_column(
         sa.String(32), nullable=False
     )

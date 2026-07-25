@@ -36,6 +36,9 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
+from eneo.flows.domain.flow_run_input_revision import (
+    build_flow_run_input_revision,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     start_flow_dispatch_epoch,
 )
@@ -386,6 +389,22 @@ class FlowRunRerunRepository:
         execution_input_payload = build_rerun_execution_input_envelope(
             current=run_row.input_payload_json,
             override=rerun_input_override,
+        )
+        # Recorded before the run row is overwritten: afterwards the payload
+        # this rerun replaced is gone, and the revision chain with it.
+        input_revision = build_flow_run_input_revision(
+            prior=run_row.input_payload_json,
+            resulting=execution_input_payload,
+        )
+        await self.session.execute(
+            sa.update(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.id == operation_row.id)
+            .values(
+                prior_input_hash=input_revision.prior_input_hash,
+                resulting_input_hash=input_revision.resulting_input_hash,
+                changed_input_paths=list(input_revision.changed_paths),
+                prior_input_payload_json=input_revision.prior_input_payload,
+            )
         )
         await self.session.execute(
             sa.update(FlowStepResults)

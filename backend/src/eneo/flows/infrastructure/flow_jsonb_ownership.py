@@ -426,6 +426,37 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         ),
     ),
     _owner(
+        "flow_run_rerun_operations",
+        "changed_input_paths",
+        owner_module="eneo.flows.domain.flow_run_input_revision",
+        envelope_name="FlowRunInputRevision",
+        owner_symbols=("build_flow_run_input_revision", "changed_input_paths"),
+        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        rationale=(
+            "The changed field paths are a flat list of strings derived from the "
+            "two payloads, useful for showing what a rerun altered without "
+            "reading either payload."
+        ),
+    ),
+    _owner(
+        "flow_run_rerun_operations",
+        "prior_input_payload_json",
+        owner_module="eneo.flows.domain.flow_run_input_revision",
+        envelope_name="FlowRunInputRevision",
+        owner_symbols=("build_flow_run_input_revision",),
+        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        rationale=(
+            "The run row keeps only current inputs, so each rerun stores the "
+            "payload it replaced; walking reruns in order rebuilds every input "
+            "revision. Same data class as the run's own input payload, on a row "
+            "that cascade-deletes with the run."
+        ),
+    ),
+    _owner(
         "flow_step_attempts",
         "provenance_json",
         owner_module="eneo.flows.flow_run_provenance",
