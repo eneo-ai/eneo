@@ -75,6 +75,10 @@ def validate_http_url(url: str) -> HttpTransportError | None:
         return HttpTransportError.INVALID_URL
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return HttpTransportError.INVALID_URL
+    # Userinfo would carry a credential in a field that is stored, logged and
+    # previewed as an ordinary URL, outside the encrypted auth fields entirely.
+    if "@" in parsed.netloc:
+        return HttpTransportError.INVALID_URL
     return None
 
 

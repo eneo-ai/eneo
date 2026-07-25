@@ -39,7 +39,11 @@ export function getAuthoredHttpUrlError(url: string): HttpUrlValidationCode | nu
 
   try {
     const parsed = new URL(trimmed);
-    return ["http:", "https:"].includes(parsed.protocol) ? null : "HTTP_INVALID_URL";
+    if (!["http:", "https:"].includes(parsed.protocol)) return "HTTP_INVALID_URL";
+    // Userinfo puts a credential in a plain URL field, outside the auth fields
+    // the backend encrypts. The backend refuses it too.
+    if (parsed.username || parsed.password) return "HTTP_INVALID_URL";
+    return null;
   } catch {
     return "HTTP_INVALID_URL";
   }

@@ -127,6 +127,19 @@ def test_url_without_scheme_returns_invalid_url() -> None:
     assert HttpTransportError.INVALID_URL in errors
 
 
+def test_url_with_password_userinfo_returns_invalid_url() -> None:
+    """Userinfo would store a credential outside the encrypted auth fields."""
+    errors = _validate(_config(url="https://user:pass@example.org/api"))
+
+    assert HttpTransportError.INVALID_URL in errors
+
+
+def test_url_with_username_only_userinfo_returns_invalid_url() -> None:
+    errors = _validate(_config(url="https://user@example.org/api"))
+
+    assert HttpTransportError.INVALID_URL in errors
+
+
 def test_template_expression_url_is_validated_after_interpolation() -> None:
     errors = _validate(_config(url="{{base_url}}/api"))
 

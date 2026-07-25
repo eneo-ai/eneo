@@ -160,6 +160,16 @@ describe("validateHttpConfig", () => {
     expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
   });
 
+  it("reports a URL that carries credentials in its userinfo", () => {
+    const errors = validateHttpConfig(
+      makeConfig({ url: "https://user:pass@example.com/api" }),
+      "output",
+      "POST"
+    );
+
+    expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
+  });
+
   it("reports unparseable URL", () => {
     const errors = validateHttpConfig(makeConfig({ url: "not-a-url" }), "output", "POST");
 
