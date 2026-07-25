@@ -134,3 +134,83 @@ async def test_late_capability_rejection_is_not_safe_to_repeat_without_capabilit
     assert exc_info.value.retry_without_capability_safe is False
     assert mocked_acompletion.await_count == 2
     assert mcp_proxy.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_round_records_each_provider_dispatch_separately():
+    """Tool rounds accumulate usage into one completion.
+
+    Without a per-dispatch record, a caller counting provider requests sees one
+    where two were sent and billed.
+    """
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+
+    first_message = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            SimpleNamespace(
+                id="call_1",
+                function=SimpleNamespace(name="server__tool", arguments='{"q":"x"}'),
+            )
+        ],
+    )
+    first_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")],
+        id="resp-initial",
+    )
+    follow_up_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="final answer", tool_calls=None),
+                finish_reason="stop",
+            )
+        ],
+        id="resp-final",
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[first_response, follow_up_response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert [d.ordinal for d in completion.provider_dispatches] == [1, 2]
+    assert [d.reason for d in completion.provider_dispatches] == [
+        "initial",
+        "tool_round",
+    ]
+    assert [d.provider_response_id for d in completion.provider_dispatches] == [
+        "resp-initial",
+        "resp-final",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_single_call_records_one_dispatch():
+    adapter = _make_adapter()
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="answer", tool_calls=None),
+                finish_reason="stop",
+            )
+        ],
+        id="resp-only",
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=[response]),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+
+    assert len(completion.provider_dispatches) == 1
+    assert completion.provider_dispatches[0].ordinal == 1
+    assert completion.provider_dispatches[0].reason == "initial"

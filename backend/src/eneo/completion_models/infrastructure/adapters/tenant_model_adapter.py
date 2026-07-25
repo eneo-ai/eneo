@@ -26,6 +26,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     McpToolReference,
     ModelKwargs,
+    ProviderDispatch,
     ResponseType,
     TokenUsage,
     ToolCallMetadata,
@@ -543,6 +544,27 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return cast(dict[str, Any], parsed)
 
+    def _provider_dispatch(
+        self,
+        *,
+        ordinal: int,
+        response: _LiteLLMResponse,
+        reason: Literal["initial", "tool_round"],
+    ) -> ProviderDispatch:
+        """Record one request that was actually sent to the provider.
+
+        Tool rounds accumulate their usage into the returned completion, so the
+        per-dispatch usage recorded here is the only place the individual calls
+        remain visible.
+        """
+        return ProviderDispatch(
+            ordinal=ordinal,
+            response_model=getattr(response, "model", None),
+            provider_response_id=extract_provider_response_id(response),
+            usage=self._extract_usage(response),
+            reason=reason,
+        )
+
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -828,6 +850,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
+            dispatches: list[ProviderDispatch] = [
+                self._provider_dispatch(
+                    ordinal=completed_provider_calls,
+                    response=response,
+                    reason="initial",
+                )
+            ]
 
             completion = Completion()
             if response.choices:
@@ -923,6 +952,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                         ),
                     )
                     completed_provider_calls += 1
+                    dispatches.append(
+                        self._provider_dispatch(
+                            ordinal=completed_provider_calls,
+                            response=response,
+                            reason="tool_round",
+                        )
+                    )
                     usage = self._accumulate_usage(usage, response)
                     if not response.choices:
                         break
@@ -937,6 +973,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.stop = choice.finish_reason == "stop"
 
             completion.usage = usage
+            completion.provider_dispatches = tuple(dispatches)
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Completion successful"
             )

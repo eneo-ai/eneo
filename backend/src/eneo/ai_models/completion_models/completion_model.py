@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, computed_field, model_validator
@@ -33,6 +33,23 @@ class TokenUsage(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
+
+
+class ProviderDispatch(BaseModel):
+    """One request actually sent to the provider.
+
+    A single completion can require several dispatches — an initial request
+    plus one per tool round — and their usage is accumulated into one result.
+    Callers that need to know how many requests were billed, or which model
+    answered each one, cannot recover that from the accumulated totals, so
+    each dispatch is recorded as it happens.
+    """
+
+    ordinal: int
+    response_model: Optional[str] = None
+    provider_response_id: Optional[str] = None
+    usage: Optional["TokenUsage"] = None
+    reason: Literal["initial", "tool_round"] = "initial"
 
 
 class ResponseType(str, Enum):
@@ -122,6 +139,9 @@ class Completion:
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None
+    # One entry per request actually sent to the provider. Empty when the
+    # adapter does not report them.
+    provider_dispatches: tuple[ProviderDispatch, ...] = ()
 
 
 class CompletionModelBase(BaseModel):
