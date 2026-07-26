@@ -1202,6 +1202,7 @@ class AssistantService:
                     attachments is not None
                     or completion_model is not None
                     or prompt_obj is not None
+                    or skill_binding_intents is not None
                     or mcp_server_ids is not None
                     or mcp_tools is not None
                 ),
@@ -2543,7 +2544,33 @@ class AssistantService:
         if mcp_server_id in existing_server_ids:
             raise BadRequestException("MCP server already associated with assistant")
 
-        # Add new association
+        available_mcp_servers = (
+            effective_config.available_mcp_servers
+            if effective_config is not None and effective_config.mcp_enforced
+            else space.mcp_servers
+        )
+        new_mcp_server = next(
+            (server for server in available_mcp_servers if server.id == mcp_server_id),
+            None,
+        )
+        if new_mcp_server is None:
+            raise BadRequestException("MCP server is not available to this assistant")
+
+        staged_mcp_servers = list(assistant.mcp_servers)
+        staged_mcp_servers.append(new_mcp_server)
+        projected_mcp_servers = await self.space_repo.project_assistant_mcp_servers(
+            space_id=space.id,
+            assistant_id=assistant_id,
+            mcp_servers=staged_mcp_servers,
+        )
+        await self._validate_attachments_fit(
+            assistant,
+            space=space,
+            validate_all_on_demand_candidates=True,
+            mcp_servers_override=projected_mcp_servers,
+        )
+
+        # Persist only after the complete post-add provider payload is accepted.
         existing_server_ids.append(mcp_server_id)
         # Update via repository
         from eneo.database.tables.assistant_table import Assistants

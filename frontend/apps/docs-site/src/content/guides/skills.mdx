@@ -99,6 +99,11 @@ instead of letting saved Skill context fill the model window. Live discovery,
 user permissions, approvals, and tool availability can still change later, so
 runtime remains the source of truth and fails closed.
 
+Eneo repeats that validation when a save changes Skill bindings, the selected
+model, prompt, attachments, or the stored MCP catalogue. If an existing
+on-demand Skill would no longer be activatable, the complete save is rejected
+and the previous configuration is kept.
+
 ## Create and attach a Skill
 
 1. Open **Skills** in the relevant Space. Tenant admins use

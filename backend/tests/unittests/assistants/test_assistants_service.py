@@ -393,7 +393,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         setup.service._validate_attachments_fit.await_args.kwargs[
             "validate_all_on_demand_candidates"
         ]
-        is False
+        is True
     )
 
 
