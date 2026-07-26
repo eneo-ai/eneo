@@ -6002,6 +6002,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Assistant Skill Configuration */
+    get: operations["get_assistant_skill_configuration_api_v1_spaces__space_id__assistants__assistant_id__skills_configuration__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{space_id}/apps/{app_id}/skills/": {
     parameters: {
       query?: never;
@@ -9221,6 +9238,76 @@ export interface components {
        * @default false
        */
       is_help_assistant?: boolean;
+    };
+    /** AssistantSkillBindingInput */
+    AssistantSkillBindingInput: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      activation_mode?: components["schemas"]["SkillActivationMode"] | null;
+    };
+    /** AssistantSkillBindingSummary */
+    AssistantSkillBindingSummary: {
+      /**
+       * Skill Id
+       * Format: uuid
+       */
+      skill_id: string;
+      /**
+       * Skill Revision Id
+       * Format: uuid
+       */
+      skill_revision_id: string;
+      /** Attachable Revision Id */
+      attachable_revision_id: string | null;
+      /** Slug */
+      slug: string;
+      /** Revision Number */
+      revision_number: number;
+      /** Attachable Revision Number */
+      attachable_revision_number: number | null;
+      /** Display Name */
+      display_name: string;
+      /** Description */
+      description: string;
+      /** Content Digest */
+      content_digest: string;
+      /** Position */
+      position: number;
+      /** Is Active */
+      is_active: boolean;
+      source: components["schemas"]["SkillBindingSource"];
+      /** Execution Blocked */
+      execution_blocked: boolean;
+      activation_mode: components["schemas"]["SkillActivationMode"];
+    };
+    /** AssistantSkillConfigurationPublic */
+    AssistantSkillConfigurationPublic: {
+      /** Bindings */
+      bindings: components["schemas"]["AssistantSkillBindingSummary"][];
+      runtime: components["schemas"]["AssistantSkillRuntimeSummary"] | null;
+    };
+    /** AssistantSkillRuntimeSummary */
+    AssistantSkillRuntimeSummary: {
+      /**
+       * Effective Model Id
+       * Format: uuid
+       */
+      effective_model_id: string;
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      token_count_source: components["schemas"]["TokenCountSource"];
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -14613,7 +14700,7 @@ export interface components {
        */
       icon_id?: string | null;
       /** Skill Bindings */
-      skill_bindings?: components["schemas"]["SkillBindingReferenceInput"][] | null;
+      skill_bindings?: components["schemas"]["AssistantSkillBindingInput"][] | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {
@@ -16176,6 +16263,22 @@ export interface components {
       /** Expires At */
       expires_at: number;
     };
+    /**
+     * SkillActivationFallbackReason
+     * @enum {string}
+     */
+    SkillActivationFallbackReason:
+      | "model_lacks_tool_calling"
+      | "catalog_budget_exceeded"
+      | "token_measurement_unavailable"
+      | "selective_activation_disabled";
+    /**
+     * SkillActivationMode
+     * @description Closed Assistant/Governance Policy binding mode; Apps compose eagerly
+     *     and carry the fixed ALWAYS value without a persisted column.
+     * @enum {string}
+     */
+    SkillActivationMode: "always" | "on_demand";
     /** SkillActiveUpdateRequest */
     SkillActiveUpdateRequest: {
       /** Is Active */
@@ -16573,6 +16676,19 @@ export interface components {
       /** Models */
       models: components["schemas"]["SkillRuntimeModelProjection"][];
     };
+    /** SkillRuntimePolicyEditableBounds */
+    SkillRuntimePolicyEditableBounds: {
+      max_attached_skills: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+      context_share_percent: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+      max_activations_per_turn: components["schemas"]["SkillRuntimePolicyFieldBounds"];
+    };
+    /** SkillRuntimePolicyFieldBounds */
+    SkillRuntimePolicyFieldBounds: {
+      /** Minimum */
+      minimum: number;
+      /** Maximum */
+      maximum: number;
+    };
     /** SkillRuntimePolicyPublic */
     SkillRuntimePolicyPublic: {
       /** Selective Activation Enabled */
@@ -16583,6 +16699,7 @@ export interface components {
       context_share_percent: number;
       /** Max Activations Per Turn */
       max_activations_per_turn: number;
+      editable_bounds: components["schemas"]["SkillRuntimePolicyEditableBounds"];
     };
     /**
      * SkillRuntimePolicyUpdate
@@ -16643,6 +16760,11 @@ export interface components {
        */
       updated_at: string;
     };
+    /**
+     * SkillTurnEffectiveMode
+     * @enum {string}
+     */
+    SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
@@ -17873,6 +17995,11 @@ export interface components {
       /** Enabled */
       enabled: boolean;
     };
+    /**
+     * TokenCountSource
+     * @enum {string}
+     */
+    TokenCountSource: "litellm" | "fallback_estimate";
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -39945,6 +40072,56 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SkillBindingSummary"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_assistant_skill_configuration_api_v1_spaces__space_id__assistants__assistant_id__skills_configuration__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantSkillConfigurationPublic"];
         };
       };
       /** @description Forbidden */

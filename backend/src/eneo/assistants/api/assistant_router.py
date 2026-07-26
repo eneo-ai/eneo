@@ -54,8 +54,8 @@ from eneo.sessions.session_protocol import (
     to_sessions_paginated_response,
 )
 from eneo.skills.presentation.skill_assembler import (
+    assistant_skill_binding_intents_from_input,
     skill_binding_audit_entries,
-    skill_binding_references_from_input,
 )
 from eneo.spaces.api.space_models import TransferApplicationRequest
 
@@ -644,9 +644,11 @@ async def update_assistant(
     if assistant.completion_model_kwargs is not None:
         completion_model_kwargs = assistant.completion_model_kwargs
 
-    skill_references = None
+    skill_binding_intents = None
     if assistant.skill_bindings is not None:
-        skill_references = skill_binding_references_from_input(assistant.skill_bindings)
+        skill_binding_intents = assistant_skill_binding_intents_from_input(
+            assistant.skill_bindings
+        )
 
     # get original request dict to check if description was actually provided
     # (@partial_model overrides NOT_PROVIDED with None)
@@ -688,7 +690,7 @@ async def update_assistant(
         data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
-        skill_references=skill_references,
+        skill_binding_intents=skill_binding_intents,
     )
 
     changes, change_summary = _build_assistant_update_changes(

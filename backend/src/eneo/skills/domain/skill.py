@@ -638,9 +638,35 @@ class ResolvedSkillBinding:
 
 
 @dataclass(frozen=True)
+class SkillBindingIntent:
+    """Assistant binding identity plus an optional requested mode change."""
+
+    reference: SkillBindingReference
+    activation_mode: SkillActivationMode | None = None
+
+
+@dataclass(frozen=True)
+class AssistantSkillBindingReplacement:
+    bindings: tuple[ResolvedSkillBinding, ...]
+    changed_to_on_demand_skill_ids: frozenset[UUID]
+
+
+@dataclass(frozen=True)
 class SkillBindingProjection:
     binding: ResolvedSkillBinding
     execution_blocked: bool
+
+
+@dataclass(frozen=True)
+class AssistantSkillRuntimeProjection:
+    effective_model_id: UUID
+    snapshot: SkillActivationSnapshot
+
+
+@dataclass(frozen=True)
+class AssistantSkillConfigurationProjection:
+    bindings: tuple[SkillBindingProjection, ...]
+    runtime: AssistantSkillRuntimeProjection | None
 
 
 @dataclass(frozen=True)

@@ -14,6 +14,14 @@ class SkillContextMeasurement:
     source: TokenCountSource
 
 
+def skill_context_token_allowance(
+    *,
+    max_input_tokens: int,
+    context_share_percent: int,
+) -> int:
+    return max_input_tokens * context_share_percent // 100
+
+
 def _system_message(instructions: str) -> list[dict[str, str]]:
     if not instructions:
         return []
@@ -45,6 +53,9 @@ def measure_skill_context(
     )
     return SkillContextMeasurement(
         tokens=message_delta.tokens + tool_delta.tokens,
-        limit=max_input_tokens * context_share_percent // 100,
+        limit=skill_context_token_allowance(
+            max_input_tokens=max_input_tokens,
+            context_share_percent=context_share_percent,
+        ),
         source=source,
     )

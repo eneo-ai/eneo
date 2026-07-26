@@ -62,11 +62,15 @@ from eneo.roles.permissions import (
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
 from eneo.skills.domain.skill import (
+    AssistantSkillConfigurationProjection,
+    AssistantSkillRuntimeProjection,
     SkillActivationEvidenceV1,
-    SkillBindingReference,
+    SkillActivationFallbackReason,
+    SkillBindingIntent,
     SkillComposition,
     SkillExecutionReference,
     SkillRuntimeResolution,
+    SkillTurnEffectiveMode,
     SkillTurnPlan,
     compose_skill_instructions,
 )
@@ -80,6 +84,28 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+_ON_DEMAND_REJECTION_DEFAULT = (
+    "On-demand Skills cannot be enabled for this configuration"
+)
+_ON_DEMAND_REJECTION_MESSAGES: dict[
+    SkillActivationFallbackReason | None,
+    str,
+] = {
+    None: _ON_DEMAND_REJECTION_DEFAULT,
+    SkillActivationFallbackReason.SELECTIVE_ACTIVATION_DISABLED: (
+        "On-demand Skills are disabled by the organisation runtime policy"
+    ),
+    SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING: (
+        "The selected completion model does not support on-demand Skills"
+    ),
+    SkillActivationFallbackReason.CATALOG_BUDGET_EXCEEDED: (
+        "The on-demand Skill catalogue exceeds the configured context allowance"
+    ),
+    SkillActivationFallbackReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
+        "The selected completion model cannot measure the Skill catalogue exactly"
+    ),
+}
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
@@ -275,26 +301,6 @@ class AssistantService:
         ):
             return effective_config.enforced_prompt_text
         return assistant.get_prompt_text()
-
-    async def _compose_assistant_prompt(
-        self,
-        *,
-        assistant: Assistant,
-        effective_config: "EffectiveConfig | None",
-        space_is_personal: bool,
-    ) -> SkillComposition:
-        base_instructions = self._governed_base_instructions(
-            assistant, effective_config
-        )
-        resolution = await self._resolve_assistant_skill_runtime(
-            assistant=assistant,
-            effective_config=effective_config,
-            space_is_personal=space_is_personal,
-        )
-        return compose_skill_instructions(
-            base_instructions=base_instructions,
-            bindings=list(resolution.eligible),
-        )
 
     async def _resolve_assistant_skill_runtime(
         self,
@@ -537,7 +543,11 @@ class AssistantService:
         return await self.file_service.with_derived_images(persistent_attachments)
 
     async def _validate_attachments_fit(
-        self, assistant: Assistant, *, space: "Space"
+        self,
+        assistant: Assistant,
+        *,
+        space: "Space",
+        explicit_on_demand_skill_ids: frozenset[UUID] = frozenset(),
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -560,19 +570,47 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        composition = await self._compose_assistant_prompt(
+        skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
+        available_skill_ids = {
+            binding.binding.skill_id for binding in skill_plan.available
+        }
+        if not explicit_on_demand_skill_ids <= available_skill_ids:
+            raise BadRequestException(
+                "Blocked organisation Skills cannot receive new or changed bindings"
+            )
+
         model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
+            if explicit_on_demand_skill_ids:
+                raise BadRequestException(
+                    "Choose a completion model before enabling on-demand Skills"
+                )
             return
+
+        runtime = skill_plan.to_activation_runtime(
+            selected_model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+        )
+        snapshot = runtime.snapshot()
+        if (
+            explicit_on_demand_skill_ids
+            and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+        ):
+            message = _ON_DEMAND_REJECTION_MESSAGES.get(
+                snapshot.fallback_reason,
+                _ON_DEMAND_REJECTION_DEFAULT,
+            )
+            raise BadRequestException(message)
 
         await self._assert_persistent_baseline_fits(
             assistant=assistant,
             model=model,
-            prompt_text=composition.prompt,
+            prompt_text=runtime.prompt,
         )
 
     @staticmethod
@@ -743,7 +781,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-        skill_references: list[SkillBindingReference] | None = None,
+        skill_binding_intents: list[SkillBindingIntent] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -796,7 +834,7 @@ class AssistantService:
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
-                skill_references,
+                skill_binding_intents,
             )
         ) or any(
             is_provided(value)
@@ -1011,12 +1049,14 @@ class AssistantService:
             knowledge_changing=knowledge_changing,
         )
 
-        if skill_references is not None:
-            await self.skill_service.replace_assistant_bindings(
+        changed_to_on_demand_skill_ids: frozenset[UUID] = frozenset()
+        if skill_binding_intents is not None:
+            replacement = await self.skill_service.replace_assistant_bindings(
                 space_id=assistant.space_id,
                 assistant_id=assistant_id,
-                references=skill_references,
+                intents=skill_binding_intents,
             )
+            changed_to_on_demand_skill_ids = replacement.changed_to_on_demand_skill_ids
 
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
@@ -1027,9 +1067,13 @@ class AssistantService:
             attachments is not None
             or completion_model is not None
             or prompt_obj is not None
-            or skill_references is not None
+            or skill_binding_intents is not None
         ):
-            await self._validate_attachments_fit(assistant, space=space)
+            await self._validate_attachments_fit(
+                assistant,
+                space=space,
+                explicit_on_demand_skill_ids=changed_to_on_demand_skill_ids,
+            )
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
@@ -1147,13 +1191,74 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        composition = await self._compose_assistant_prompt(
+        skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
+        model = self._context_model(assistant, effective_config=effective_config)
+        prompt = skill_plan.composition.prompt
+        if model is not None:
+            prompt = skill_plan.to_activation_runtime(
+                selected_model_route=model.get_model_route(),
+                max_input_tokens=model.max_input_tokens,
+                supports_tool_calling=model.supports_tool_calling,
+            ).prompt
 
-        return composition.prompt, assistant.attachments
+        return prompt, assistant.attachments
+
+    async def get_skill_configuration(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+    ) -> AssistantSkillConfigurationProjection:
+        """Return saved Assistant bindings and their exact initial runtime state.
+
+        The binding projection intentionally runs first because it owns both
+        Assistant and Skill-read authorization. Runtime resolution then follows
+        the same turn-plan path as ask and save validation.
+        """
+        bindings = await self.skill_service.list_assistant_binding_projections(
+            space_id=space_id,
+            assistant_id=assistant_id,
+        )
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        if space.is_personal() and assistant.is_default:
+            return AssistantSkillConfigurationProjection(
+                bindings=tuple(bindings),
+                runtime=None,
+            )
+
+        effective_config = await self._resolve_effective_config(
+            space=space,
+            assistant=assistant,
+        )
+        model = self._context_model(assistant, effective_config=effective_config)
+        if model is None:
+            return AssistantSkillConfigurationProjection(
+                bindings=tuple(bindings),
+                runtime=None,
+            )
+
+        skill_plan = await self._create_skill_turn_plan(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space.is_personal(),
+        )
+        runtime = skill_plan.to_activation_runtime(
+            selected_model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+        )
+        return AssistantSkillConfigurationProjection(
+            bindings=tuple(bindings),
+            runtime=AssistantSkillRuntimeProjection(
+                effective_model_id=model.id,
+                snapshot=runtime.snapshot(),
+            ),
+        )
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.

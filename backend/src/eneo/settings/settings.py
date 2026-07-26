@@ -108,11 +108,23 @@ class SkillExecutionBlockState(BaseModel):
         )
 
 
+class SkillRuntimePolicyFieldBounds(BaseModel):
+    minimum: int
+    maximum: int
+
+
+class SkillRuntimePolicyEditableBounds(BaseModel):
+    max_attached_skills: SkillRuntimePolicyFieldBounds
+    context_share_percent: SkillRuntimePolicyFieldBounds
+    max_activations_per_turn: SkillRuntimePolicyFieldBounds
+
+
 class SkillRuntimePolicyPublic(BaseModel):
     selective_activation_enabled: bool
     max_attached_skills: int
     context_share_percent: int
     max_activations_per_turn: int
+    editable_bounds: SkillRuntimePolicyEditableBounds
 
     @classmethod
     def from_domain(cls, policy: SkillRuntimePolicy) -> "SkillRuntimePolicyPublic":
@@ -121,6 +133,20 @@ class SkillRuntimePolicyPublic(BaseModel):
             max_attached_skills=policy.max_attached_skills,
             context_share_percent=policy.context_share_percent,
             max_activations_per_turn=policy.max_activations_per_turn,
+            editable_bounds=SkillRuntimePolicyEditableBounds(
+                max_attached_skills=SkillRuntimePolicyFieldBounds(
+                    minimum=MIN_SKILL_ATTACHMENT_LIMIT,
+                    maximum=MAX_SKILL_ATTACHMENT_LIMIT,
+                ),
+                context_share_percent=SkillRuntimePolicyFieldBounds(
+                    minimum=MIN_SKILL_CONTEXT_SHARE_PERCENT,
+                    maximum=MAX_SKILL_CONTEXT_SHARE_PERCENT,
+                ),
+                max_activations_per_turn=SkillRuntimePolicyFieldBounds(
+                    minimum=MIN_SKILL_ACTIVATIONS_PER_TURN,
+                    maximum=MAX_SKILL_ACTIVATIONS_PER_TURN,
+                ),
+            ),
         )
 
 
