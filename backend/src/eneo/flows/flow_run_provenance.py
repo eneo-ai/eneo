@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -305,6 +306,34 @@ class FlowAttemptProvenanceParseResult:
         return None
 
 
+class FlowAttemptProvenanceWriteError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        status: Literal["corrupt", "retention_purged"],
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+    ):
+        self.status = status
+        self.run_id = run_id
+        self.step_id = step_id
+        self.attempt_no = attempt_no
+        self.tenant_id = tenant_id
+        super().__init__(
+            "Attempt provenance cannot be updated because persisted evidence is "
+            f"{status} (run_id={run_id}, step_id={step_id}, "
+            f"attempt_no={attempt_no}, tenant_id={tenant_id})."
+        )
+
+
+@dataclass(frozen=True)
+class FlowAttemptTerminalizationEvidence:
+    provenance_json: dict[str, Any] | None
+    write_runtime_payloads: bool
+
+
 def default_rag_tracking() -> dict[str, Any]:
     return {
         "retrieval_tracked": True,
@@ -365,27 +394,66 @@ def normalize_attempt_provenance(
     return parse_result.provenance if parse_result.status == "tracked" else None
 
 
-def merge_attempt_token_usage(
+def attempt_provenance_for_write(
+    raw: Any,
+    *,
+    run_id: UUID,
+    step_id: UUID,
+    attempt_no: int,
+    tenant_id: UUID,
+) -> FlowAttemptProvenance:
+    """Return writable provenance without repairing unavailable evidence."""
+    parsed = parse_attempt_provenance(raw)
+    if parsed.status in ("corrupt", "retention_purged"):
+        raise FlowAttemptProvenanceWriteError(
+            status=parsed.status,
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+        )
+    if parsed.provenance is None:
+        return FlowAttemptProvenance()
+    return parsed.provenance
+
+
+def resolve_attempt_terminalization_evidence(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Keep committed provider-call receipts when an attempt later terminalizes."""
-    if incoming is None:
-        return existing
+) -> FlowAttemptTerminalizationEvidence:
+    """Preserve unavailable evidence and committed receipts during terminalization."""
     existing_result = parse_attempt_provenance(existing)
+    if existing_result.status in ("corrupt", "retention_purged"):
+        return FlowAttemptTerminalizationEvidence(
+            provenance_json=existing,
+            write_runtime_payloads=existing_result.status == "corrupt",
+        )
+    if incoming is None:
+        return FlowAttemptTerminalizationEvidence(
+            provenance_json=existing,
+            write_runtime_payloads=True,
+        )
     incoming_result = parse_attempt_provenance(incoming)
     if incoming_result.status != "tracked" or incoming_result.provenance is None:
-        return incoming
+        return FlowAttemptTerminalizationEvidence(
+            provenance_json=incoming,
+            write_runtime_payloads=True,
+        )
     if (
         incoming_result.provenance.token_usage is not None
         or existing_result.status != "tracked"
         or existing_result.provenance is None
         or existing_result.provenance.token_usage is None
     ):
-        return incoming
-    return incoming_result.provenance.model_copy(
-        update={"token_usage": existing_result.provenance.token_usage}
-    ).to_payload()
+        provenance_json = incoming
+    else:
+        provenance_json = incoming_result.provenance.model_copy(
+            update={"token_usage": existing_result.provenance.token_usage}
+        ).to_payload()
+    return FlowAttemptTerminalizationEvidence(
+        provenance_json=provenance_json,
+        write_runtime_payloads=True,
+    )
 
 
 def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:

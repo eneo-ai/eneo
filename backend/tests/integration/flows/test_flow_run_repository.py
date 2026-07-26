@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -22,6 +23,7 @@ from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
     FlowStep,
@@ -35,6 +37,12 @@ from eneo.flows.domain.flow_run_recovery_policy import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_retention_tombstone import (
+    FLOW_RETENTION_ACTOR_SOURCE,
+    FlowAttemptRetentionMarker,
+    FlowRetentionTombstone,
+    RunDebugAttemptRetentionCounts,
+)
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunDispatchErrorKind,
@@ -45,7 +53,10 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
+    AttemptStartProvenance,
+    FlowAttemptProvenanceWriteError,
     MappedProviderCallProvenance,
+    ModelParameterSnapshot,
     ProviderCallTokenReceiptProvenance,
     parse_attempt_provenance,
 )
@@ -119,6 +130,117 @@ def _build_flow(
             ),
         ],
     )
+
+
+def _attempt_retention_marker_payload(
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    trace_id: UUID,
+    object_id: UUID,
+) -> FlowPersistedJsonObject:
+    now = datetime.now(timezone.utc)
+    return FlowAttemptRetentionMarker(
+        tombstone=FlowRetentionTombstone(
+            tenant_id=str(tenant_id),
+            run_id=str(run_id),
+            trace_id=str(trace_id),
+            data_class="run_debug_evidence",
+            object_type="flow_step_attempt",
+            object_id=str(object_id),
+            policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
+            cutoff=now,
+            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
+            counts=RunDebugAttemptRetentionCounts(cleared_field_count=1),
+            timestamp=now,
+            retention_state="retention_purged",
+        )
+    ).to_payload()
+
+
+@dataclass(frozen=True)
+class _AttemptProvenanceTestContext:
+    run_id: UUID
+    flow_id: UUID
+    step_id: UUID
+    tenant_id: UUID
+    trace_id: UUID
+    attempt_start: AttemptStartProvenance
+
+
+@pytest.fixture
+async def attempt_provenance_context(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> _AttemptProvenanceTestContext:
+    async with sessionmanager.session() as session, session.begin():
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows attempt provenance space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow attempt provenance assistant",
+            model.id,
+            space_id=space.id,
+        )
+        flow = await FlowRepository(session=session).create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        await FlowVersionRepository(session=session).create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        run = await FlowRunRepository(session=session).create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "attempt-provenance"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        return _AttemptProvenanceTestContext(
+            run_id=run.id,
+            flow_id=flow.id,
+            step_id=flow.steps[0].id,
+            tenant_id=admin_user.tenant_id,
+            trace_id=run.trace_id,
+            attempt_start=AttemptStartProvenance(
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                deadline_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+                resolved_timeout_seconds=600,
+                effective_prompt_length=20,
+                input_text_length=10,
+                input_tokens_estimate=3,
+                model_parameter_snapshot=ModelParameterSnapshot(),
+            ),
+        )
 
 
 async def _insert_service_key(
@@ -2599,6 +2721,244 @@ async def test_create_or_get_attempt_started_is_idempotent(
             .where(FlowStepAttempts.attempt_no == 1)
         )
         assert row_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("unavailable_status", ["corrupt", "retention_purged"])
+async def test_attempt_provenance_writers_preserve_unavailable_evidence(
+    attempt_provenance_context,
+    unavailable_status,
+):
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        run_repo = FlowRunRepository(session=session)
+        attempt = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id=f"{unavailable_status}-attempt-provenance",
+        )
+        if unavailable_status == "corrupt":
+            persisted_provenance = {
+                "schema_version": "flow-attempt-provenance.v1",
+                "unexpected": {},
+            }
+        else:
+            persisted_provenance = _attempt_retention_marker_payload(
+                tenant_id=context.tenant_id,
+                run_id=context.run_id,
+                trace_id=context.trace_id,
+                object_id=attempt.id,
+            )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(provenance_json=persisted_provenance)
+        )
+
+        with pytest.raises(FlowAttemptProvenanceWriteError) as start_error:
+            await run_repo.record_attempt_start_provenance(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                attempt_start=context.attempt_start,
+            )
+        assert start_error.value.status == unavailable_status
+        assert start_error.value.run_id == context.run_id
+        assert start_error.value.step_id == context.step_id
+        assert start_error.value.attempt_no == 1
+        assert start_error.value.tenant_id == context.tenant_id
+
+        persisted = await session.get(FlowStepAttempts, attempt.id)
+        assert persisted is not None
+        assert persisted.provenance_json == persisted_provenance
+        assert persisted.requested_model is None
+        assert persisted.provider is None
+
+        with pytest.raises(FlowAttemptProvenanceWriteError) as receipt_error:
+            await run_repo.append_attempt_provider_call_receipt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                receipt=ProviderCallTokenReceiptProvenance(
+                    call_index=1,
+                    num_tokens_input=5,
+                    num_tokens_output=2,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+        assert receipt_error.value.status == unavailable_status
+        assert receipt_error.value.run_id == context.run_id
+        assert receipt_error.value.step_id == context.step_id
+        assert receipt_error.value.attempt_no == 1
+        assert receipt_error.value.tenant_id == context.tenant_id
+
+        finished = await run_repo.finish_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.FAILED,
+            provenance_json={
+                "schema_version": "flow-attempt-provenance.v1",
+                "artifacts": {"generated_count": 1},
+            },
+            input_payload_json={"secret": "runtime-input"},
+            output_payload_json={"secret": "runtime-output"},
+        )
+
+        assert finished is not None
+        assert finished.provenance_json == persisted_provenance
+        if unavailable_status == "retention_purged":
+            assert finished.input_payload_json is None
+            assert finished.output_payload_json is None
+        else:
+            assert finished.input_payload_json == {"secret": "runtime-input"}
+            assert finished.output_payload_json == {"secret": "runtime-output"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_attempt_provenance_writers_preserve_tracked_sections(
+    attempt_provenance_context,
+):
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        run_repo = FlowRunRepository(session=session)
+        attempt = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="tracked-attempt-provenance",
+        )
+        await session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.id == attempt.id)
+            .values(
+                provenance_json={
+                    "schema_version": "flow-attempt-provenance.v1",
+                    "artifacts": {"generated_count": 1},
+                }
+            )
+        )
+        assert await run_repo.append_attempt_provider_call_receipt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=1,
+                num_tokens_input=5,
+                num_tokens_output=2,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        for _ in range(2):
+            updated = await run_repo.record_attempt_start_provenance(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                attempt_start=context.attempt_start,
+            )
+            assert updated is not None
+
+        persisted = await session.get(FlowStepAttempts, attempt.id)
+        assert persisted is not None
+        parsed = parse_attempt_provenance(persisted.provenance_json)
+        assert parsed.provenance is not None
+        assert parsed.provenance.artifacts is not None
+        assert parsed.provenance.artifacts.model_dump() == {"generated_count": 1}
+        assert parsed.provenance.attempt_start == context.attempt_start
+        assert parsed.provenance.token_usage is not None
+        assert len(parsed.provenance.token_usage.completed_provider_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_finish_attempt_refreshes_locked_row_before_merging_receipt(
+    attempt_provenance_context,
+):
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        attempt = await FlowRunRepository(
+            session=session
+        ).create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="attempt-receipt-race",
+        )
+        attempt_id = attempt.id
+
+    async with sessionmanager.session() as finish_session, finish_session.begin():
+        preloaded = await finish_session.scalar(
+            sa.select(FlowStepAttempts).where(FlowStepAttempts.id == attempt_id)
+        )
+        assert preloaded is not None
+        assert preloaded.provenance_json is None
+
+        async with sessionmanager.session() as receipt_session, receipt_session.begin():
+            appended = await FlowRunRepository(
+                session=receipt_session
+            ).append_attempt_provider_call_receipt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=1,
+                tenant_id=context.tenant_id,
+                receipt=ProviderCallTokenReceiptProvenance(
+                    call_index=1,
+                    num_tokens_input=8,
+                    num_tokens_output=3,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+            assert appended is True
+
+        finished = await FlowRunRepository(session=finish_session).finish_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            provenance_json={
+                "schema_version": "flow-attempt-provenance.v1",
+                "artifacts": {"generated_count": 1},
+            },
+        )
+        assert finished is not None
+        parsed = parse_attempt_provenance(finished.provenance_json)
+        assert parsed.provenance is not None
+        assert parsed.provenance.token_usage is not None
+        assert parsed.provenance.token_usage.num_tokens_input == 8
+        assert parsed.provenance.token_usage.num_tokens_output == 3
+
+    async with sessionmanager.session() as session, session.begin():
+        persisted = await session.get(FlowStepAttempts, attempt_id)
+        assert persisted is not None
+        parsed = parse_attempt_provenance(persisted.provenance_json)
+        assert parsed.provenance is not None
+        assert parsed.provenance.token_usage is not None
+        assert len(parsed.provenance.token_usage.completed_provider_calls) == 1
 
 
 @pytest.mark.asyncio

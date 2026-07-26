@@ -60,12 +60,11 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
-    FlowAttemptProvenance,
     ProviderCallTokenReceiptProvenance,
     TokenCountSource,
     TokenUsageProvenance,
-    merge_attempt_token_usage,
-    parse_attempt_provenance,
+    attempt_provenance_for_write,
+    resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
@@ -1445,25 +1444,32 @@ class FlowRunRepository:
         provider: str | None,
         attempt_start: AttemptStartProvenance,
     ) -> FlowStepAttempt | None:
-        provenance_json = FlowAttemptProvenance(
-            attempt_start=attempt_start
-        ).to_payload()
         row = await self.session.scalar(
-            sa.update(FlowStepAttempts)
+            sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
             .where(FlowStepAttempts.step_id == step_id)
             .where(FlowStepAttempts.attempt_no == attempt_no)
             .where(FlowStepAttempts.tenant_id == tenant_id)
             .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
-            .values(
-                requested_model=requested_model,
-                provider=provider,
-                provenance_json=provenance_json,
-            )
-            .returning(FlowStepAttempts)
+            .execution_options(populate_existing=True)
+            .with_for_update()
         )
         if row is None:
             return None
+        provenance = attempt_provenance_for_write(
+            row.provenance_json,
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+        )
+        row.requested_model = requested_model
+        row.provider = provider
+        row.provenance_json = provenance.model_copy(
+            update={"attempt_start": attempt_start}
+        ).to_payload()
+        await self.session.flush()
+        await self.session.refresh(row)
         return FlowStepAttempt.model_validate(row)
 
     async def append_attempt_provider_call_receipt(
@@ -1482,15 +1488,17 @@ class FlowRunRepository:
             .where(FlowStepAttempts.attempt_no == attempt_no)
             .where(FlowStepAttempts.tenant_id == tenant_id)
             .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+            .execution_options(populate_existing=True)
             .with_for_update()
         )
         if row is None:
             return False
-        parsed = parse_attempt_provenance(row.provenance_json)
-        provenance = (
-            parsed.provenance
-            if parsed.status == "tracked" and parsed.provenance is not None
-            else FlowAttemptProvenance()
+        provenance = attempt_provenance_for_write(
+            row.provenance_json,
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
         )
         usage = provenance.token_usage
         receipts = list(usage.completed_provider_calls) if usage is not None else []
@@ -1548,44 +1556,39 @@ class FlowRunRepository:
         input_payload_json: FlowPersistedJsonObject | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
-        current_provenance = await self.session.scalar(
-            sa.select(FlowStepAttempts.provenance_json)
-            .where(FlowStepAttempts.flow_run_id == run_id)
-            .where(FlowStepAttempts.step_id == step_id)
-            .where(FlowStepAttempts.attempt_no == attempt_no)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-        )
-        provenance_json = merge_attempt_token_usage(
-            current_provenance,
-            provenance_json,
-        )
         row = await self.session.scalar(
-            sa.update(FlowStepAttempts)
+            sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
             .where(FlowStepAttempts.step_id == step_id)
             .where(FlowStepAttempts.attempt_no == attempt_no)
             .where(FlowStepAttempts.tenant_id == tenant_id)
             .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
-            .values(
-                status=status.value,
-                error_code=error_code,
-                error_message=error_message,
-                requested_model=requested_model,
-                response_model=response_model,
-                provider=provider,
-                finish_reason=finish_reason,
-                provider_response_id=provider_response_id,
-                num_tokens_input=num_tokens_input,
-                num_tokens_output=num_tokens_output,
-                provenance_json=provenance_json,
-                input_payload_json=input_payload_json,
-                output_payload_json=output_payload_json,
-                finished_at=datetime.now(timezone.utc),
-            )
-            .returning(FlowStepAttempts)
+            .execution_options(populate_existing=True)
+            .with_for_update()
         )
         if row is None:
             return None
+        terminalization_evidence = resolve_attempt_terminalization_evidence(
+            row.provenance_json,
+            provenance_json,
+        )
+        row.status = status.value
+        row.error_code = error_code
+        row.error_message = error_message
+        row.requested_model = requested_model
+        row.response_model = response_model
+        row.provider = provider
+        row.finish_reason = finish_reason
+        row.provider_response_id = provider_response_id
+        row.num_tokens_input = num_tokens_input
+        row.num_tokens_output = num_tokens_output
+        row.provenance_json = terminalization_evidence.provenance_json
+        if terminalization_evidence.write_runtime_payloads:
+            row.input_payload_json = input_payload_json
+            row.output_payload_json = output_payload_json
+        row.finished_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(row)
         if status == FlowStepAttemptStatus.COMPLETED:
             await self._mark_predecessor_superseded_by_attempt(
                 completed_attempt_row=row,
