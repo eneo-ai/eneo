@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Mapping
 from typing import Any, cast
 from uuid import UUID
 
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.main.exceptions import BadRequestException
 
@@ -51,14 +50,14 @@ def build_assistant_execution_snapshot(
         ),
         "knowledge_refs": knowledge_refs,
     }
-    snapshot["execution_surface_hash"] = stable_hash(
+    snapshot["execution_surface_hash"] = canonical_json_hash(
         _execution_surface_from_snapshot(snapshot)
     )
     return snapshot
 
 
 def assistant_execution_surface_hash(snapshot: dict[str, Any]) -> str:
-    return stable_hash(_execution_surface_from_snapshot(snapshot))
+    return canonical_json_hash(_execution_surface_from_snapshot(snapshot))
 
 
 def validate_assistant_execution_snapshot(
@@ -186,16 +185,6 @@ def _validate_knowledge_refs(value: object) -> None:
             or not _is_optional_string(knowledge_ref.get("name"))
         ):
             raise BadRequestException("Assistant snapshot knowledge_refs is invalid.")
-
-
-def stable_hash(value: Any) -> str:
-    serialized = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _execution_surface_from_snapshot(

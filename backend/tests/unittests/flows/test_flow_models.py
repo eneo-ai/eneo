@@ -946,6 +946,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "accepted_run_revision": 2,
                     "reason": "Reviewer corrected the step output.",
                     "input_payload_json": {"question": "Updated input"},
+                    "input_revision": {"status": "not_recorded"},
                     "root_step_input_override": {
                         "step_id": str(step_id),
                         "file_ids": [],
@@ -1208,6 +1209,7 @@ def _flow_run_rerun_operation_public_payload() -> dict[str, object]:
         "accepted_run_revision": 2,
         "reason": "Retry the failed step.",
         "input_payload_json": {"question": "Updated input"},
+        "input_revision": {"status": "not_recorded"},
         "root_step_input_override_requested": False,
         "requested_by_principal_type": "user",
         "requested_by_user_id": str(uuid4()),

@@ -1095,6 +1095,7 @@ Use this when you want the rich evidence payload for one run, including:
 - `definition_integrity`, containing `status`, `expected_checksum`, and `current_checksum`
 - step results
 - step attempts
+- rerun operations, input revisions, and invalidated-step lineage
 - the debug export payload
 
 When `definition_integrity.status = "verified"`, the evidence run uses the same
@@ -1113,6 +1114,48 @@ and start a new run; keep the old run for evidence.
 In redacted evidence, `current_checksum` still describes the original stored snapshot,
 not the redacted projection.
 
+##### Rerun input revisions
+
+Every item in `rerun_operations` has a required `input_revision` discriminated
+union. Branch on `input_revision.status`:
+
+- `tracked` contains `prior_input_hash`, `resulting_input_hash`, `changed_paths`,
+  and the superseded `prior_input_payload` snapshot
+- `not_recorded` means the operation predates input-revision tracking or never
+  reached the acceptance point that records a revision
+- `unavailable` with reason `invalid_persisted_revision` means stored revision
+  evidence was incomplete or invalid; that row is isolated and neighboring
+  rerun evidence remains readable
+
+At `flow_evidence >= read`, tracked superseded snapshots are part of the evidence
+view and use the same recursive redaction policy as the rest of the response.
+Hashes and changed-path labels remain correlation/integrity evidence, but they are
+not a secrecy mechanism: small or predictable input domains may still be guessed.
+
+The evidence view's redacted `run.input_payload_json` is the visible terminal
+snapshot of the revision chain. The ordinary run endpoint intentionally applies
+the semantic Flow-input projection and may omit orchestration-owned fields, so do
+not use it to verify the persisted chain. Only a permitted raw export contains the
+unredacted prior snapshots and final stored run payload needed to recompute each
+hash. Redacted hashes still identify the original raw payload; they are not hashes
+of the masked projection.
+
+```ts
+for (const operation of evidence.rerun_operations) {
+  switch (operation.input_revision.status) {
+    case "tracked":
+      showChangedInputs(operation.input_revision.changed_paths);
+      break;
+    case "not_recorded":
+      showHistoricalGap();
+      break;
+    case "unavailable":
+      showUnavailableEvidence(operation.input_revision.reason);
+      break;
+  }
+}
+```
+
 #### Evidence export
 
 ```http
@@ -1126,7 +1169,8 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v10`. Its required
+The JSON response uses manifest schema `flow-evidence-export.v11`. Version 11 adds
+the typed rerun `input_revision` evidence to the hashed bundle. Its required
 `actor` identifies the caller that performed the export, not the run owner.
 Branch on `actor.type`: a user actor contains only `user_id`, while a
 `service_key` actor contains only `key_id`. Both actor variants reject additional

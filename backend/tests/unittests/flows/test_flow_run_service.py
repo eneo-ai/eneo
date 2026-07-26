@@ -44,6 +44,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
+from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.run_step_input_exceptions import (
     FlowRunRuntimeUploadBindingRaceError,
 )
@@ -461,6 +462,7 @@ def _rerun_command_result(
         accepted_run_revision=run.revision,
         reason="Fix source",
         input_payload_json=None,
+        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
         root_step_input_override_requested=False,
         root_step_input_override=None,
         requested_by_principal_type=PrincipalType.USER,
@@ -4199,7 +4201,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v10"
+        assert export["schema_version"] == "flow-evidence-export.v11"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]

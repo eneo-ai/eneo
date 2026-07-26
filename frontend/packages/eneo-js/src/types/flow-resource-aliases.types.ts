@@ -52,6 +52,7 @@ import type {
   FlowRunEvidence,
   FlowRunEvidenceExport,
   FlowRunEvidenceWithTypedSteps,
+  FlowRunInputRevision,
   FlowRunOutputPayload,
   FlowRunRedispatchRequest,
   FlowRunRedispatchResult,
@@ -402,6 +403,21 @@ function describeFlowRunResult(result: FlowRunResult): string {
   }
 }
 
+function describeFlowRunInputRevision(revision: FlowRunInputRevision): string {
+  switch (revision.status) {
+    case "tracked":
+      return revision.changed_paths.join(", ");
+    case "not_recorded":
+      return "not recorded";
+    case "unavailable":
+      return revision.reason;
+    default: {
+      const unreachable: never = revision;
+      return unreachable;
+    }
+  }
+}
+
 const validFlowRun = {
   id: runId,
   flow_id: flowId,
@@ -489,6 +505,13 @@ const validRerunOperation: FlowRunRerunOperation = {
   expected_run_revision: 1,
   accepted_run_revision: 2,
   reason: "Refresh the source document.",
+  input_revision: {
+    status: "tracked",
+    prior_input_hash: "sha256:prior",
+    resulting_input_hash: "sha256:resulting",
+    changed_paths: ["case_id"],
+    prior_input_payload: { case_id: "CASE-1" }
+  },
   input_payload: { case_id: "CASE-2" },
   root_step_input_override: {
     step_id: stepId,
@@ -626,11 +649,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 const validUntypedFlowEvidence: FlowRunEvidence = validFlowEvidence;
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v10",
+  schema_version: "flow-evidence-export.v11",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v10",
+    schema_version: "flow-evidence-export.v11",
     app_version: "DEV",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
@@ -866,6 +889,7 @@ void describeFlowRunResult(validFileBackedTextResult);
 void describeFlowRunResult(validStructuredResult);
 void describeFlowRunResult(validArtifactResult);
 void describeFlowRunResult(validOutboundResult);
+void describeFlowRunInputRevision(validRerunOperation.input_revision);
 void validFlowRunTokenUsage;
 void validFlowRunError;
 void validFlowRunRedispatchRequest;

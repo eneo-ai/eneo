@@ -21,6 +21,7 @@ from pydantic import (
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevision
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -456,6 +457,7 @@ class FlowRunRerunOperation(BaseModel):
     accepted_run_revision: int
     reason: str
     input_payload_json: FlowPersistedJsonObject | None = None
+    input_revision: FlowRunInputRevision
     root_step_input_override_requested: bool
     root_step_input_override: RerunStepInputOverride | None
     requested_by_principal_type: PrincipalType

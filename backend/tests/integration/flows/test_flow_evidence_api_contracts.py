@@ -41,6 +41,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     EVIDENCE_EXPORT_SCHEMA_VERSION,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_run_input_revision import canonical_input_hash
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -511,6 +512,8 @@ async def _seed_flow_run_contract_data(
         rerun_invalidated_step_id: str | None = None
         replacement_attempt_id: str | None = None
         review_checkpoint_id: str | None = None
+        prior_input_hash: str | None = None
+        resulting_input_hash: str | None = None
         if include_review_checkpoint_lineage:
             reviewed_payload = {
                 "summary": "Reviewed by human",
@@ -547,6 +550,13 @@ async def _seed_flow_run_contract_data(
             await session.flush()
             review_checkpoint_id = str(checkpoint.id)
         if include_rerun_lineage:
+            prior_input_payload = dict(run.input_payload_json or {})
+            resulting_input_payload = {
+                "question": "What changed?",
+                "api_key": "super-secret",
+            }
+            prior_input_hash = canonical_input_hash(prior_input_payload)
+            resulting_input_hash = canonical_input_hash(resulting_input_payload)
             rerun_operation = FlowRunRerunOperations(
                 tenant_id=admin_user.tenant_id,
                 flow_id=flow.id,
@@ -564,6 +574,16 @@ async def _seed_flow_run_contract_data(
                     "api_key": "super-secret",
                 },
                 root_step_input_override_requested=True,
+                prior_input_hash=prior_input_hash,
+                resulting_input_hash=resulting_input_hash,
+                changed_input_paths=sorted(
+                    [
+                        "question",
+                        "webhook_url",
+                        "https://example.org/revision?token=revision-path-secret",
+                    ]
+                ),
+                prior_input_payload_json=prior_input_payload,
                 requested_by_principal_type=PrincipalType.USER.value,
                 requested_by_user_id=admin_user.id,
                 failure_code=None,
@@ -624,6 +644,8 @@ async def _seed_flow_run_contract_data(
             await session.flush()
 
             rerun_operation.root_attempt_id = replacement_attempt.id
+            run.input_payload_json = resulting_input_payload
+            run.revision = 2
             initial_attempt.superseded_by_attempt_id = replacement_attempt.id
             step_result.current_attempt_no = replacement_attempt.attempt_no
             invalidated_step = FlowRunRerunInvalidatedSteps(
@@ -653,12 +675,17 @@ async def _seed_flow_run_contract_data(
         seeded: dict[str, str] = {
             "flow_id": str(flow.id),
             "run_id": str(run.id),
+            "step_id": str(step.id),
             "space_id": str(space.id),
             "trace_id": str(run.trace_id),
         }
         if rerun_operation_id is not None:
+            assert prior_input_hash is not None
+            assert resulting_input_hash is not None
             seeded["rerun_operation_id"] = rerun_operation_id
             seeded["rerun_runtime_input_file_id"] = str(runtime_input_file.id)
+            seeded["prior_input_hash"] = prior_input_hash
+            seeded["resulting_input_hash"] = resulting_input_hash
         if rerun_invalidated_step_id is not None:
             seeded["rerun_invalidated_step_id"] = rerun_invalidated_step_id
         if replacement_attempt_id is not None:
@@ -1143,6 +1170,13 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
     assert payload["rerun_operations"][0]["expected_run_revision"] == 1
     assert payload["rerun_operations"][0]["accepted_run_revision"] == 2
     assert payload["rerun_operations"][0]["input_payload"]["api_key"] == ("[REDACTED]")
+    input_revision = payload["rerun_operations"][0]["input_revision"]
+    assert input_revision["status"] == "tracked"
+    assert input_revision["prior_input_hash"] == seeded["prior_input_hash"]
+    assert input_revision["resulting_input_hash"] == seeded["resulting_input_hash"]
+    assert input_revision["prior_input_payload"]["api_key"] == "[REDACTED]"
+    assert "revision-path-secret" not in str(input_revision["changed_paths"])
+    assert "token=%5BREDACTED%5D" in str(input_revision["changed_paths"])
     assert payload["rerun_operations"][0]["root_step_input_override"] == {
         "step_id": payload["rerun_operations"][0]["rerun_step_id"],
         "file_ids": [seeded["rerun_runtime_input_file_id"]],
@@ -1175,6 +1209,83 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
         payload["step_attempts"][1]["predecessor_attempt_id"]
         == (payload["step_attempts"][0]["id"])
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_endpoint_isolates_invalid_rerun_revision(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_rerun_lineage=True,
+    )
+    common_fields = {
+        "tenant_id": admin_user.tenant_id,
+        "flow_id": UUID(seeded["flow_id"]),
+        "flow_run_id": UUID(seeded["run_id"]),
+        "rerun_step_id": UUID(seeded["step_id"]),
+        "rerun_step_order": 1,
+        "root_step_input_override_requested": False,
+        "requested_by_principal_type": PrincipalType.USER.value,
+        "requested_by_user_id": admin_user.id,
+    }
+    async with db_container() as container:
+        session = container.session()
+        session.add_all(
+            [
+                FlowRunRerunOperations(
+                    **common_fields,
+                    root_attempt_no=3,
+                    status=FlowRunRerunOperationStatus.COMPLETED.value,
+                    request_fingerprint="legacy-rerun-revision",
+                    expected_run_revision=2,
+                    accepted_run_revision=3,
+                    reason="Legacy operation without revision evidence.",
+                ),
+                FlowRunRerunOperations(
+                    **common_fields,
+                    root_attempt_no=4,
+                    status=FlowRunRerunOperationStatus.FAILED.value,
+                    request_fingerprint="malformed-rerun-revision",
+                    expected_run_revision=3,
+                    accepted_run_revision=4,
+                    reason="Operation with malformed persisted revision evidence.",
+                    prior_input_hash="malformed-secret",
+                    resulting_input_hash="b" * 64,
+                    changed_input_paths={"credential": "malformed-secret"},
+                    prior_input_payload_json={"credential": "malformed-secret"},
+                ),
+            ]
+        )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    revisions = [
+        operation["input_revision"] for operation in response.json()["rerun_operations"]
+    ]
+    assert revisions[0]["status"] == "tracked"
+    assert revisions[1] == {"status": "not_recorded"}
+    assert revisions[2] == {
+        "status": "unavailable",
+        "reason": "invalid_persisted_revision",
+    }
+    assert "malformed-secret" not in response.text
 
 
 @pytest.mark.asyncio
@@ -1451,6 +1562,19 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     redacted_operation = redacted_bundle["rerun_operations"][0]
     assert raw_operation["input_payload_json"]["api_key"] == "super-secret"
     assert redacted_operation["input_payload_json"]["api_key"] == "[REDACTED]"
+    raw_revision = raw_operation["input_revision"]
+    redacted_revision = redacted_operation["input_revision"]
+    assert raw_revision["status"] == "tracked"
+    assert raw_revision["prior_input_payload"]["api_key"] == "super-secret"
+    assert redacted_revision["prior_input_payload"]["api_key"] == "[REDACTED]"
+    assert raw_revision["prior_input_hash"] == canonical_input_hash(
+        raw_revision["prior_input_payload"]
+    )
+    assert raw_revision["resulting_input_hash"] == canonical_input_hash(
+        raw_bundle["run"]["input_payload_json"]
+    )
+    assert "revision-path-secret" in str(raw_revision["changed_paths"])
+    assert "revision-path-secret" not in str(redacted_revision["changed_paths"])
     assert "step_inputs_json" not in raw_operation
     assert "step_inputs_json" not in redacted_operation
     assert raw_operation["root_step_input_override"] == {

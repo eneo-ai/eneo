@@ -13065,7 +13065,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v10";
+      schema_version: "flow-evidence-export.v11";
       /** App Version */
       app_version: string;
       /** Provenance Schema Version Min */
@@ -16880,7 +16880,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v10",
+     *         "schema_version": "flow-evidence-export.v11",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -16900,7 +16900,7 @@ export interface components {
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v10",
+     *       "schema_version": "flow-evidence-export.v11",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -17218,7 +17218,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v10";
+      schema_version: "flow-evidence-export.v11";
       /**
        * Generated At
        * Format: date-time
@@ -17533,6 +17533,60 @@ export interface components {
        * @description Exact terminal text produced by the published final step.
        */
       text: string;
+    };
+    /**
+     * FlowRunInputRevisionNotRecorded
+     * @description Revision evidence predates tracking or never reached acceptance.
+     */
+    FlowRunInputRevisionNotRecorded: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "not_recorded";
+    };
+    /**
+     * FlowRunInputRevisionTracked
+     * @description What one rerun did to a run's inputs.
+     *
+     *     The run row keeps only the current payload, so without this the chain from
+     *     the original submission to the values a step actually consumed cannot be
+     *     rebuilt. Recording the prior payload rather than the resulting one means
+     *     every revision is recoverable by walking the reruns in order and finishing
+     *     at the run row.
+     */
+    FlowRunInputRevisionTracked: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "tracked";
+      /** Prior Input Hash */
+      prior_input_hash: string;
+      /** Resulting Input Hash */
+      resulting_input_hash: string;
+      /** Changed Paths */
+      changed_paths: string[];
+      /** Prior Input Payload */
+      prior_input_payload: {
+        [key: string]: components["schemas"]["JsonValue"];
+      } | null;
+    };
+    /**
+     * FlowRunInputRevisionUnavailable
+     * @description Persisted revision evidence exists but cannot be read safely.
+     */
+    FlowRunInputRevisionUnavailable: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      status: "unavailable";
+      /**
+       * Reason
+       * @constant
+       */
+      reason: "invalid_persisted_revision";
     };
     /**
      * FlowRunLifecycleSource
@@ -17854,6 +17908,14 @@ export interface components {
       accepted_run_revision: number;
       /** Reason */
       reason: string;
+      /**
+       * Input Revision
+       * @description Input revision evidence for this rerun. `tracked` includes hashes, changed paths, and the superseded input snapshot; `not_recorded` identifies older or unaccepted operations; `unavailable` isolates invalid persisted evidence without hiding neighboring operations.
+       */
+      input_revision:
+        | components["schemas"]["FlowRunInputRevisionTracked"]
+        | components["schemas"]["FlowRunInputRevisionNotRecorded"]
+        | components["schemas"]["FlowRunInputRevisionUnavailable"];
       /**
        * Input Payload
        * @description Inline rerun input payload recorded at rerun acceptance time.

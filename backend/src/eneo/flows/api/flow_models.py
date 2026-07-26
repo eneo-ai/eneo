@@ -69,6 +69,7 @@ from eneo.flows.domain.flow import (
     FlowStepRetrievalPolicy,
     parse_flow_step_retrieval_policy,
 )
+from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevision
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -1738,6 +1739,14 @@ class FlowRunRerunOperationPublic(BaseModel):
     expected_run_revision: int
     accepted_run_revision: int
     reason: str
+    input_revision: FlowRunInputRevision = Field(
+        description=(
+            "Input revision evidence for this rerun. `tracked` includes hashes, "
+            "changed paths, and the superseded input snapshot; `not_recorded` "
+            "identifies older or unaccepted operations; `unavailable` isolates "
+            "invalid persisted evidence without hiding neighboring operations."
+        )
+    )
     input_payload: dict[str, Any] | None = Field(
         default=None,
         description="Inline rerun input payload recorded at rerun acceptance time.",
@@ -1992,11 +2001,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v10",
+                "schema_version": "flow-evidence-export.v11",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v10",
+                    "schema_version": "flow-evidence-export.v11",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
@@ -2373,7 +2382,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v10"]
+    schema_version: Literal["flow-evidence-export.v11"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

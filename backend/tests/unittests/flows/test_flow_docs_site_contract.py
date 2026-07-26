@@ -3705,13 +3705,36 @@ def test_flow_api_guide_documents_evidence_export_actor_contract() -> None:
         maxsplit=1,
     )[0]
 
-    assert "`flow-evidence-export.v10`" in evidence_export
+    assert "`flow-evidence-export.v11`" in evidence_export
     assert "`actor.type`" in evidence_export
     assert "`user_id`" in evidence_export
     assert "`key_id`" in evidence_export
     assert "caller that performed the export" in evidence_export
     assert "run owner" in evidence_export
     assert "exported_by_user_id" not in evidence_export
+
+
+def test_flow_api_guide_documents_rerun_input_revision_evidence() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_view = guide.split("#### Evidence view", maxsplit=1)[1].split(
+        "#### Evidence export",
+        maxsplit=1,
+    )[0]
+
+    for state in ("`tracked`", "`not_recorded`", "`unavailable`"):
+        assert state in evidence_view
+    for field in (
+        "`prior_input_hash`",
+        "`resulting_input_hash`",
+        "`changed_paths`",
+        "`prior_input_payload`",
+    ):
+        assert field in evidence_view
+    assert "`invalid_persisted_revision`" in evidence_view
+    assert "`run.input_payload_json`" in evidence_view
+    assert "semantic Flow-input projection" in evidence_view
+    assert "Only a permitted raw export" in evidence_view
+    assert "not a secrecy mechanism" in evidence_view
 
 
 def test_flow_api_guide_documents_step_output_text_overflow() -> None:

@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import cast
+import re
+from collections.abc import Mapping
+from typing import Annotated, Literal, TypeAlias, cast
 
-from pydantic import JsonValue
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
 
-from eneo.flows.assistant_execution_snapshot import stable_hash
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.json_types import JsonObject
 
-FLOW_RUN_INPUT_REVISION_SCHEMA_VERSION = 1
+_CANONICAL_HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+_JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 
-@dataclass(frozen=True, slots=True)
-class FlowRunInputRevision:
+class FlowRunInputRevisionTracked(BaseModel):
     """What one rerun did to a run's inputs.
 
     The run row keeps only the current payload, so without this the chain from
@@ -23,14 +30,38 @@ class FlowRunInputRevision:
     at the run row.
     """
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["tracked"]
     prior_input_hash: str
     resulting_input_hash: str
     changed_paths: tuple[str, ...]
     prior_input_payload: JsonObject | None
 
-    @property
-    def changed(self) -> bool:
-        return self.prior_input_hash != self.resulting_input_hash
+
+class FlowRunInputRevisionNotRecorded(BaseModel):
+    """Revision evidence predates tracking or never reached acceptance."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["not_recorded"]
+
+
+class FlowRunInputRevisionUnavailable(BaseModel):
+    """Persisted revision evidence exists but cannot be read safely."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["unavailable"]
+    reason: Literal["invalid_persisted_revision"]
+
+
+FlowRunInputRevision: TypeAlias = Annotated[
+    FlowRunInputRevisionTracked
+    | FlowRunInputRevisionNotRecorded
+    | FlowRunInputRevisionUnavailable,
+    Field(discriminator="status"),
+]
 
 
 def canonical_input_hash(payload: Mapping[str, object] | None) -> str:
@@ -39,7 +70,7 @@ def canonical_input_hash(payload: Mapping[str, object] | None) -> str:
     A missing payload and an empty one are deliberately distinct: the first
     means no inputs were supplied, the second means an empty object was.
     """
-    return stable_hash(None if payload is None else dict(payload))
+    return canonical_json_hash(None if payload is None else dict(payload))
 
 
 def changed_input_paths(
@@ -53,7 +84,12 @@ def changed_input_paths(
     diff would name positions that mean nothing once a list is reordered.
     """
     paths: list[str] = []
-    _collect_changed_paths(prior, resulting, prefix="", into=paths)
+    _collect_changed_paths(
+        {} if prior is None else prior,
+        {} if resulting is None else resulting,
+        prefix="",
+        into=paths,
+    )
     return tuple(sorted(paths))
 
 
@@ -99,9 +135,9 @@ _MISSING = _Missing()
 
 def build_flow_run_input_revision(
     *,
-    prior: Mapping[str, object] | None,
-    resulting: Mapping[str, object] | None,
-) -> FlowRunInputRevision:
+    prior: Mapping[str, JsonValue] | None,
+    resulting: Mapping[str, JsonValue] | None,
+) -> FlowRunInputRevisionTracked:
     """Record one input revision, keeping the prior payload so it stays rebuildable.
 
     The prior payload is stored verbatim. It is the same class of data the run
@@ -109,36 +145,96 @@ def build_flow_run_input_revision(
     with the run, so it inherits the run's retention rather than creating a new
     place inputs outlive their flow.
     """
-    return FlowRunInputRevision(
+    return FlowRunInputRevisionTracked(
+        status="tracked",
         prior_input_hash=canonical_input_hash(prior),
         resulting_input_hash=canonical_input_hash(resulting),
         changed_paths=changed_input_paths(prior, resulting),
-        prior_input_payload=_as_json_object(prior),
+        prior_input_payload=None if prior is None else dict(prior),
     )
 
 
-def _as_json_object(payload: Mapping[str, object] | None) -> JsonObject | None:
-    if payload is None:
+def parse_flow_run_input_revision(
+    *,
+    prior_input_hash: object,
+    resulting_input_hash: object,
+    changed_input_paths: object,
+    prior_input_payload: object,
+) -> FlowRunInputRevision:
+    """Read one revision without letting a malformed row hide other evidence."""
+
+    persisted_values = (
+        prior_input_hash,
+        resulting_input_hash,
+        changed_input_paths,
+        prior_input_payload,
+    )
+    if all(value is None for value in persisted_values):
+        return FlowRunInputRevisionNotRecorded(status="not_recorded")
+
+    if not (
+        isinstance(prior_input_hash, str)
+        and _CANONICAL_HASH_PATTERN.fullmatch(prior_input_hash)
+        and isinstance(resulting_input_hash, str)
+        and _CANONICAL_HASH_PATTERN.fullmatch(resulting_input_hash)
+    ):
+        return _unavailable_revision()
+
+    paths = _parse_changed_input_paths(changed_input_paths)
+    if paths is None:
+        return _unavailable_revision()
+
+    if prior_input_payload is None:
+        payload = None
+    else:
+        try:
+            payload = _JSON_OBJECT_ADAPTER.validate_python(
+                prior_input_payload,
+                strict=True,
+            )
+        except ValidationError:
+            return _unavailable_revision()
+
+    if canonical_input_hash(payload) != prior_input_hash:
+        return _unavailable_revision()
+
+    return FlowRunInputRevisionTracked(
+        status="tracked",
+        prior_input_hash=prior_input_hash,
+        resulting_input_hash=resulting_input_hash,
+        changed_paths=paths,
+        prior_input_payload=payload,
+    )
+
+
+def _parse_changed_input_paths(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, list):
         return None
-    return {str(key): _as_json_value(value) for key, value in payload.items()}
+
+    paths: list[str] = []
+    for item in cast(list[object], value):
+        if not isinstance(item, str) or not item:
+            return None
+        paths.append(item)
+
+    parsed = tuple(paths)
+    return parsed if parsed == tuple(sorted(set(parsed))) else None
 
 
-def _as_json_value(value: object) -> JsonValue:
-    if isinstance(value, Mapping):
-        mapping = cast(Mapping[object, object], value)
-        return {str(key): _as_json_value(item) for key, item in mapping.items()}
-    if isinstance(value, (list, tuple)):
-        items = cast(Sequence[object], value)
-        return [_as_json_value(item) for item in items]
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
+def _unavailable_revision() -> FlowRunInputRevisionUnavailable:
+    return FlowRunInputRevisionUnavailable(
+        status="unavailable",
+        reason="invalid_persisted_revision",
+    )
 
 
 __all__ = [
-    "FLOW_RUN_INPUT_REVISION_SCHEMA_VERSION",
     "FlowRunInputRevision",
+    "FlowRunInputRevisionNotRecorded",
+    "FlowRunInputRevisionTracked",
+    "FlowRunInputRevisionUnavailable",
     "build_flow_run_input_revision",
     "canonical_input_hash",
     "changed_input_paths",
+    "parse_flow_run_input_revision",
 ]

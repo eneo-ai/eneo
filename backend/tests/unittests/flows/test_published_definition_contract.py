@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 import eneo.flows.published_definition as published_definition_module
-from eneo.flows.assistant_execution_snapshot import stable_hash
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -516,7 +516,7 @@ def test_parser_rejects_corrupt_definition_with_named_error(
     assert exc_info.value.code == error_code
 
 
-def test_checksum_uses_stable_hash_contract() -> None:
+def test_checksum_uses_canonical_json_hash_contract() -> None:
     definition = build_published_definition_json(
         flow_id=uuid4(),
         name="Flow",
@@ -525,7 +525,7 @@ def test_checksum_uses_stable_hash_contract() -> None:
         steps=[_step(order=1)],
     )
 
-    assert published_definition_checksum(definition) == stable_hash(definition)
+    assert published_definition_checksum(definition) == canonical_json_hash(definition)
 
 
 def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
@@ -536,7 +536,7 @@ def test_verified_parser_rejects_checksum_mismatch_with_typed_context() -> None:
         metadata_json=None,
         steps=[_step(order=1)],
     )
-    expected_checksum = stable_hash({"different": "snapshot"})
+    expected_checksum = canonical_json_hash({"different": "snapshot"})
 
     with pytest.raises(FlowBadRequestException) as exc_info:
         published_definition_module.parse_verified_published_definition(

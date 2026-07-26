@@ -40,6 +40,10 @@ from eneo.flows.domain.flow import (
     RerunStepInputOverride,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from eneo.flows.domain.flow_run_input_revision import (
+    FlowRunInputRevisionTracked,
+    canonical_input_hash,
+)
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
     FlowRunRerunInvalidTransitionError,
@@ -919,6 +923,14 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         assert replayed.run.revision == 2
         assert replayed.run.input_payload_json == accepted.run.input_payload_json
         assert accepted.operation.input_payload_json == {"case_id": "case-456"}
+        assert isinstance(
+            accepted.operation.input_revision,
+            FlowRunInputRevisionTracked,
+        )
+        assert accepted.operation.input_revision.prior_input_payload == {
+            "case_id": "case-123"
+        }
+        assert accepted.operation.input_revision.changed_paths == ("case_id",)
         assert accepted.operation.root_step_input_override is not None
         assert (
             accepted.operation.root_step_input_override.step_id == scenario.root_step_id
@@ -1020,8 +1032,117 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
 
         assert replayed_after_run_update.created is False
         assert replayed_after_run_update.operation.id == accepted.operation.id
-        assert replayed_after_run_update.run.status == FlowRunStatus.RUNNING
-        assert replayed_after_run_update.run.revision == 2
+    assert replayed_after_run_update.run.status == FlowRunStatus.RUNNING
+    assert replayed_after_run_update.run.revision == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_two_accepted_reruns_reconstruct_jsonb_input_revision_chain(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        metadata_v0: dict[str, object] = {
+            "municipality": "Malmö",
+            "score": 1.25,
+            "population": 9_007_199_254_740_993,
+            "items": ["åtgärd", None, {"approved": False}],
+        }
+        v0: dict[str, object] = {
+            "subject": "Ursprung",
+            "metadata": metadata_v0,
+            "note": None,
+        }
+        v1: dict[str, object] = {**v0, "subject": "Redigerad"}
+        v2: dict[str, object] = {
+            **v1,
+            "metadata": {
+                **metadata_v0,
+                "items": ["åtgärd", None, {"approved": True}],
+            },
+        }
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(input_payload_json=v0)
+        )
+
+        await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            fingerprint="input-revision-v1",
+            inline_payload_json=v1,
+            root_step_file_ids=None,
+        )
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.tenant_id == scenario.tenant_id)
+            .values(
+                status=FlowStepResultStatus.COMPLETED.value,
+                output_payload_json={"text": "first rerun completed"},
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        rerun_repo = FlowRunRerunRepository(session=session)
+        assert (
+            await rerun_repo.close_active_rerun_operations_for_terminal_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                target_status=FlowRunStatus.COMPLETED,
+            )
+            == 1
+        )
+        completed_run = await FlowRunRepository(session=session).terminalize_run_status(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.COMPLETED,
+            output_payload_json={"answer": "first rerun completed"},
+        )
+        assert completed_run is not None
+
+        second = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            fingerprint="input-revision-v2",
+            expected_run_revision=2,
+            inline_payload_json=v2,
+            root_step_file_ids=None,
+        )
+        await session.flush()
+        session.expunge_all()
+        operations = await rerun_repo.list_rerun_operations_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+
+        assert [operation.accepted_run_revision for operation in operations] == [1, 2]
+        first_revision, second_revision = [
+            operation.input_revision for operation in operations
+        ]
+        assert isinstance(first_revision, FlowRunInputRevisionTracked)
+        assert isinstance(second_revision, FlowRunInputRevisionTracked)
+        assert first_revision.prior_input_payload == v0
+        assert first_revision.changed_paths == ("subject",)
+        assert first_revision.resulting_input_hash == second_revision.prior_input_hash
+        assert second_revision.prior_input_payload == v1
+        assert second_revision.changed_paths == ("metadata.items",)
+        assert second_revision.resulting_input_hash == canonical_input_hash(v2)
+        assert second.run.input_payload_json == v2
 
 
 @pytest.mark.asyncio

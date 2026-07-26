@@ -38,6 +38,7 @@ from eneo.flows.domain.flow_run_exceptions import (
 )
 from eneo.flows.domain.flow_run_input_revision import (
     build_flow_run_input_revision,
+    parse_flow_run_input_revision,
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
     start_flow_dispatch_epoch,
@@ -124,11 +125,18 @@ def _rerun_operation_from_row(
     *,
     root_step_input_override: RerunStepInputOverride | None,
 ) -> FlowRunRerunOperation:
+    computed_fields = {"input_revision", "root_step_input_override"}
     payload = {
         field_name: getattr(row, field_name)
         for field_name in FlowRunRerunOperation.model_fields
-        if field_name != "root_step_input_override"
+        if field_name not in computed_fields
     }
+    payload["input_revision"] = parse_flow_run_input_revision(
+        prior_input_hash=row.prior_input_hash,
+        resulting_input_hash=row.resulting_input_hash,
+        changed_input_paths=row.changed_input_paths,
+        prior_input_payload=row.prior_input_payload_json,
+    )
     payload["root_step_input_override"] = root_step_input_override
     return FlowRunRerunOperation.model_validate(payload)
 
@@ -396,7 +404,7 @@ class FlowRunRerunRepository:
             prior=run_row.input_payload_json,
             resulting=execution_input_payload,
         )
-        await self.session.execute(
+        operation_row = await self.session.scalar(
             sa.update(FlowRunRerunOperations)
             .where(FlowRunRerunOperations.id == operation_row.id)
             .values(
@@ -405,7 +413,16 @@ class FlowRunRerunRepository:
                 changed_input_paths=list(input_revision.changed_paths),
                 prior_input_payload_json=input_revision.prior_input_payload,
             )
+            .returning(FlowRunRerunOperations)
+            .execution_options(populate_existing=True)
         )
+        if operation_row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="record_rerun_input_revision",
+                run_id=flow_run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
         await self.session.execute(
             sa.update(FlowStepResults)
             .where(FlowStepResults.flow_run_id == flow_run_id)
@@ -494,6 +511,7 @@ class FlowRunRerunRepository:
                     .where(FlowRunRerunOperations.flow_run_id == run_id)
                     .where(FlowRunRerunOperations.tenant_id == tenant_id)
                     .order_by(
+                        FlowRunRerunOperations.accepted_run_revision.asc(),
                         FlowRunRerunOperations.created_at.asc(),
                         FlowRunRerunOperations.id.asc(),
                     )

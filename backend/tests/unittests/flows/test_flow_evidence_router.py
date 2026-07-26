@@ -501,6 +501,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
                 "expected_run_revision": 1,
                 "accepted_run_revision": 2,
                 "reason": "Refresh output",
+                "input_revision": {"status": "not_recorded"},
                 "root_step_input_override_requested": False,
                 "requested_by_principal_type": "service_key",
                 "requested_by_service_id": str(rerun_service_id),

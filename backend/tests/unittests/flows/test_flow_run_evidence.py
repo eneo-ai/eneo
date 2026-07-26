@@ -39,6 +39,7 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
+from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -609,6 +610,7 @@ def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
         accepted_run_revision=2,
         reason="refresh evidence",
         input_payload_json=None,
+        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
         root_step_input_override_requested=False,
         root_step_input_override=None,
         requested_by_principal_type=PrincipalType.USER,

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from eneo.flows.assistant_execution_snapshot import stable_hash
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
@@ -810,4 +810,4 @@ def parse_published_runtime_steps(
 
 
 def published_definition_checksum(definition_json: Mapping[str, object]) -> str:
-    return stable_hash(definition_json)
+    return canonical_json_hash(definition_json)

@@ -389,6 +389,9 @@ REQUIRED_SCHEMAS = {
     "FlowRunReviewCheckpointEvidencePublic",
     "FlowServicePrincipalActorPublic",
     "FlowRunRerunOperationPublic",
+    "FlowRunInputRevisionTracked",
+    "FlowRunInputRevisionNotRecorded",
+    "FlowRunInputRevisionUnavailable",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
     "EvidenceExportUserActor",
@@ -3305,6 +3308,50 @@ def test_openapi_flow_evidence_exposes_definition_integrity(
     assert export_example["bundle"]["definition_integrity"] == example_integrity
 
 
+def test_openapi_flow_evidence_requires_closed_input_revision_union(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    operation = schemas["FlowRunRerunOperationPublic"]
+    revision_property = operation["properties"]["input_revision"]
+
+    assert "input_revision" in operation["required"]
+    assert revision_property["discriminator"]["propertyName"] == "status"
+    variants = [
+        _resolve_component_ref(openapi_spec, variant)
+        for variant in revision_property["oneOf"]
+    ]
+    variants_by_status = {
+        next(
+            iter(
+                _extract_enum_values(
+                    openapi_spec,
+                    variant["properties"]["status"],
+                )
+            )
+        ): variant
+        for variant in variants
+    }
+
+    assert set(variants_by_status) == {"tracked", "not_recorded", "unavailable"}
+    assert set(variants_by_status["tracked"]["required"]) == {
+        "status",
+        "prior_input_hash",
+        "resulting_input_hash",
+        "changed_paths",
+        "prior_input_payload",
+    }
+    assert set(variants_by_status["not_recorded"]["required"]) == {"status"}
+    assert set(variants_by_status["unavailable"]["required"]) == {
+        "status",
+        "reason",
+    }
+    assert _extract_enum_values(
+        openapi_spec,
+        variants_by_status["unavailable"]["properties"]["reason"],
+    ) == {"invalid_persisted_revision"}
+
+
 def test_openapi_flow_evidence_export_documents_json_attachment(
     openapi_spec: dict,
 ) -> None:
@@ -3343,7 +3390,7 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
     }
     assert _extract_enum_values(
         openapi_spec, manifest_properties["schema_version"]
-    ) == {"flow-evidence-export.v10"}
+    ) == {"flow-evidence-export.v11"}
     assert "actor" in manifest.get("required", [])
     assert "exported_by_user_id" not in manifest_properties
     actor_schema = cast(dict[str, Any], manifest_properties["actor"])

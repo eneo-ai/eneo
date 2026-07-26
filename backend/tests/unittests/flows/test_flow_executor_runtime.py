@@ -23,8 +23,8 @@ from eneo.authentication.auth_models import (
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
-    stable_hash,
 )
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunRerunInvalidatedStep,
@@ -41,6 +41,7 @@ from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
+from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.rerun_exceptions import (
     FlowRunRerunAttemptLineageConflictError,
@@ -198,7 +199,7 @@ def _published_flow_version(
                 "metadata_json": definition_json.get("metadata_json"),
                 "steps": steps,
             }
-        definition_checksum = stable_hash(definition_json)
+        definition_checksum = canonical_json_hash(definition_json)
     return FlowVersionModel(
         flow_id=flow_id,
         version=version,
@@ -501,6 +502,7 @@ def _active_rerun_operation(
         accepted_run_revision=2,
         reason="rerun",
         input_payload_json=None,
+        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
         root_step_input_override_requested=(
             root_step_input_override is not None
             if root_step_input_override_requested is None
@@ -3481,7 +3483,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum=stable_hash(definition_json),
+            definition_checksum=canonical_json_hash(definition_json),
             definition_json=definition_json,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -3536,7 +3538,7 @@ async def test_execute_terminalizes_malformed_definition_envelope(user):
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum=stable_hash(definition_json),
+            definition_checksum=canonical_json_hash(definition_json),
             definition_json=definition_json,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -3587,7 +3589,7 @@ async def test_execute_terminalizes_definition_without_executable_steps(user):
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum=stable_hash(definition_json),
+            definition_checksum=canonical_json_hash(definition_json),
             definition_json=definition_json,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -5391,7 +5393,7 @@ async def test_execute_terminalizes_checksum_drift_before_step_claim(user):
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum=stable_hash({"steps": []}),
+            definition_checksum=canonical_json_hash({"steps": []}),
             definition_json={
                 "steps": [
                     {

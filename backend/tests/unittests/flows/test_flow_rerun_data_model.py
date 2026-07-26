@@ -84,6 +84,7 @@ def _rerun_operation_public_payload() -> dict[str, object]:
         "expected_run_revision": 1,
         "accepted_run_revision": 1,
         "reason": "Refresh output",
+        "input_revision": {"status": "not_recorded"},
         "root_step_input_override_requested": False,
         "requested_by_principal_type": PrincipalType.SERVICE_KEY,
         "requested_by_service_principal": _service_principal_actor(),
@@ -109,6 +110,7 @@ def _rerun_operation_domain_payload() -> dict[str, object]:
         "accepted_run_revision": 1,
         "reason": "Refresh output",
         "input_payload_json": None,
+        "input_revision": {"status": "not_recorded"},
         "root_step_input_override_requested": False,
         "root_step_input_override": None,
         "requested_by_principal_type": PrincipalType.USER,
@@ -133,6 +135,33 @@ def test_rerun_operation_public_projects_input_payload_from_internal_column():
     assert operation.input_payload == {"case_id": "CASE-1"}
     assert "input_payload" in dumped
     assert "input_payload_json" not in dumped
+
+
+def test_rerun_operation_public_requires_input_revision_state() -> None:
+    payload = _rerun_operation_public_payload()
+    payload.pop("input_revision")
+
+    with pytest.raises(ValidationError, match="input_revision"):
+        FlowRunRerunOperationPublic.model_validate(payload)
+
+
+def test_rerun_operation_public_accepts_redaction_collapsed_changed_paths() -> None:
+    payload = _rerun_operation_public_payload()
+    payload["input_revision"] = {
+        "status": "tracked",
+        "prior_input_hash": "a" * 64,
+        "resulting_input_hash": "b" * 64,
+        "changed_paths": ["[REDACTED]", "[REDACTED]"],
+        "prior_input_payload": {"api_key": "[REDACTED]"},
+    }
+
+    operation = FlowRunRerunOperationPublic.model_validate(payload)
+
+    assert operation.input_revision.status == "tracked"
+    assert operation.input_revision.changed_paths == (
+        "[REDACTED]",
+        "[REDACTED]",
+    )
 
 
 def test_rerun_operation_public_projects_explicit_file_override():
