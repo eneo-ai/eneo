@@ -882,6 +882,62 @@ async def test_flow_run_evidence_endpoint_requires_trace_permission(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_flow_run_evidence_keeps_unreported_provider_usage_unknown(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        attempt_provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": None,
+                "num_tokens_output": 0,
+                "input_source": "not_reported",
+                "output_source": "provider",
+                "completed_provider_calls": [
+                    {
+                        "call_index": 1,
+                        "num_tokens_input": None,
+                        "num_tokens_output": 0,
+                        "input_source": "not_reported",
+                        "output_source": "provider",
+                    }
+                ],
+            },
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    usage = response.json()["step_attempts"][0]["provenance_json"]["token_usage"]
+    assert "num_tokens_input" not in usage
+    assert usage["input_source"] == "not_reported"
+    assert usage["num_tokens_output"] == 0
+    assert usage["output_source"] == "provider"
+    call = usage["completed_provider_calls"][0]
+    assert "num_tokens_input" not in call
+    assert call["input_source"] == "not_reported"
+    assert call["num_tokens_output"] == 0
+    assert call["output_source"] == "provider"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_completed_verified_evidence_projects_redacted_structured_result(
     client,
     db_container,

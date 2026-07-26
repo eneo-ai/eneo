@@ -77,7 +77,7 @@ from eneo.flows.flow_run_provenance import (
     LlmProvenance,
     ModelParameterSnapshot,
     ProviderCallTokenReceiptProvenance,
-    TokenUsageProvenance,
+    build_provider_call_token_usage,
     normalize_json_preview,
     normalize_text_preview,
 )
@@ -469,12 +469,8 @@ def _build_attempt_provenance(
     if output.citation_sidecar is not None:
         provenance_payload["citations"] = output.citation_sidecar
     if output.provider_call_receipts:
-        provenance_payload["token_usage"] = TokenUsageProvenance(
-            num_tokens_input=output.num_tokens_input or 0,
-            num_tokens_output=output.num_tokens_output or 0,
-            input_source=output.input_token_source,
-            output_source=output.output_token_source,
-            completed_provider_calls=tuple(
+        provenance_payload["token_usage"] = build_provider_call_token_usage(
+            tuple(
                 ProviderCallTokenReceiptProvenance(
                     call_index=receipt.call_index,
                     num_tokens_input=receipt.num_tokens_input,
@@ -488,7 +484,7 @@ def _build_attempt_provenance(
                     mapped_call=receipt.mapped_call,
                 )
                 for receipt in output.provider_call_receipts
-            ),
+            )
         )
     return FlowAttemptProvenance.model_validate(provenance_payload).to_payload()
 

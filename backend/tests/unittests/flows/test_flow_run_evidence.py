@@ -61,9 +61,12 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    ProviderCallTokenReceiptProvenance,
+    build_provider_call_token_usage,
     normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
+    sum_complete_token_counts,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -920,6 +923,98 @@ def test_parse_attempt_provenance_preserves_independent_token_receipts() -> None
         for receipt in result.provenance.token_usage.completed_provider_calls
     ] == ["response-1", "response-2"]
     assert result.to_export_payload() == result.provenance.to_payload()
+
+
+def test_parse_attempt_provenance_preserves_unreported_usage_as_unknown() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": None,
+                "num_tokens_output": 4,
+                "input_source": "mixed",
+                "output_source": "provider",
+                "completed_provider_calls": [
+                    {
+                        "call_index": 1,
+                        "num_tokens_input": 8,
+                        "num_tokens_output": 4,
+                        "input_source": "provider",
+                        "output_source": "provider",
+                    },
+                    {
+                        "call_index": 2,
+                        "num_tokens_input": None,
+                        "num_tokens_output": 0,
+                        "input_source": "not_reported",
+                        "output_source": "provider",
+                    },
+                ],
+            },
+        }
+    )
+
+    assert result.status == "tracked"
+    assert result.provenance is not None
+    assert result.provenance.token_usage is not None
+    assert result.provenance.token_usage.num_tokens_input is None
+    assert result.provenance.token_usage.num_tokens_output == 4
+    assert result.provenance.token_usage.completed_provider_calls[1].input_source == (
+        "not_reported"
+    )
+    assert (
+        result.provenance.token_usage.completed_provider_calls[1].num_tokens_input
+        is None
+    )
+
+
+def test_provider_call_aggregate_keeps_fully_unreported_usage_unknown() -> None:
+    usage = build_provider_call_token_usage(
+        (
+            ProviderCallTokenReceiptProvenance(
+                call_index=1,
+                input_source="not_reported",
+                output_source="not_reported",
+            ),
+            ProviderCallTokenReceiptProvenance(
+                call_index=2,
+                input_source="not_reported",
+                output_source="not_reported",
+            ),
+        )
+    )
+
+    assert usage.num_tokens_input is None
+    assert usage.num_tokens_output is None
+    assert usage.input_source == "not_reported"
+    assert usage.output_source == "not_reported"
+
+
+def test_complete_token_sum_is_unknown_when_any_count_is_unknown() -> None:
+    assert sum_complete_token_counts((5, None, 2)) is None
+    assert sum_complete_token_counts(()) is None
+    assert sum_complete_token_counts((0, 0)) == 0
+
+
+def test_parse_attempt_provenance_keeps_legacy_not_applicable_zero_readable() -> None:
+    result = parse_attempt_provenance(
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": 0,
+                "num_tokens_output": 0,
+                "input_source": "not_applicable",
+                "output_source": "not_applicable",
+                "completed_provider_calls": [],
+            },
+        }
+    )
+
+    assert result.status == "tracked"
+    assert result.provenance is not None
+    assert result.provenance.token_usage is not None
+    assert result.provenance.token_usage.num_tokens_input == 0
+    assert result.provenance.token_usage.input_source == "not_applicable"
 
 
 def test_parse_attempt_provenance_rejects_invalid_token_source() -> None:

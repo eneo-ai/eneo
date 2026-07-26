@@ -435,17 +435,17 @@ def build_provider_call_receipts(
         receipts.append(
             ProviderCallTokenReceipt(
                 call_index=first_call_index + offset,
-                num_tokens_input=prompt_tokens or 0,
-                num_tokens_output=completion_tokens or 0,
+                num_tokens_input=prompt_tokens,
+                num_tokens_output=completion_tokens,
                 # Per-dispatch counts come from the provider when it reported
                 # them for that request; otherwise this dispatch's share is
                 # genuinely unknown rather than estimated.
                 input_source="provider"
                 if prompt_tokens is not None
-                else ("not_applicable"),
+                else "not_reported",
                 output_source="provider"
                 if completion_tokens is not None
-                else ("not_applicable"),
+                else "not_reported",
                 requested_model=requested_model,
                 response_model=dispatch.response_model or response_model,
                 provider=provider,
@@ -1541,7 +1541,5 @@ async def complete_step_execution(
             and bool(citation_sidecar.get("citation_observed"))
             else None
         ),
-        input_token_source=input_token_source,
-        output_token_source=output_token_source,
         provider_call_receipts=receipts,
     )

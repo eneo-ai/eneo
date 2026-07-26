@@ -20,7 +20,10 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_provenance import MappedProviderCallProvenance
+from eneo.flows.flow_run_provenance import (
+    MappedProviderCallProvenance,
+    sum_complete_token_counts,
+)
 from eneo.flows.runtime.output_formats import JSON_OUTPUT_FORMAT, resolve_format_spec
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
@@ -35,12 +38,10 @@ from eneo.flows.runtime.step_handlers.base import (
     PreviewAssistantStepFn,
 )
 from eneo.flows.runtime.step_handlers.mapped_outputs import (
-    aggregate_token_source,
     mapped_admission_payload,
     mapped_output_diagnostics,
     mapped_provider_call_receipts,
     mapped_rag_metadata,
-    sum_optional_token_counts,
 )
 from eneo.flows.runtime_input import build_runtime_input_config
 from eneo.flows.source_identity import without_runtime_source_identity_json_fields
@@ -317,10 +318,10 @@ async def _assemble_per_source_output(
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=_per_source_tool_metadata(per_source_calls),
-        num_tokens_input=sum_optional_token_counts(
+        num_tokens_input=sum_complete_token_counts(
             call.output.num_tokens_input for call in per_source_calls
         ),
-        num_tokens_output=sum_optional_token_counts(
+        num_tokens_output=sum_complete_token_counts(
             call.output.num_tokens_output for call in per_source_calls
         ),
         effective_prompt=first_output.effective_prompt,
@@ -342,12 +343,6 @@ async def _assemble_per_source_output(
         transcription_metadata=None,
         runtime_input_metadata=runtime_metadata,
         raw_completion_text=None,
-        input_token_source=aggregate_token_source(
-            (call.output for call in per_source_calls), dimension="input"
-        ),
-        output_token_source=aggregate_token_source(
-            (call.output for call in per_source_calls), dimension="output"
-        ),
         provider_call_receipts=mapped_provider_call_receipts(
             call.output for call in per_source_calls
         ),

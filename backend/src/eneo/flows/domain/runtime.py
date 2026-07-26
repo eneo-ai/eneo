@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.flows.domain.flow import (
@@ -21,6 +21,7 @@ from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     MappedAdmissionProvenance,
     MappedProviderCallProvenance,
+    TokenCountSource,
 )
 
 if TYPE_CHECKING:
@@ -95,14 +96,11 @@ class StepDiagnostic:
     severity: str = "warning"
 
 
-TokenCountSource = Literal["provider", "estimated", "mixed", "not_applicable"]
-
-
 @dataclass(frozen=True, slots=True)
 class ProviderCallTokenReceipt:
     call_index: int
-    num_tokens_input: int
-    num_tokens_output: int
+    num_tokens_input: int | None
+    num_tokens_output: int | None
     input_source: TokenCountSource
     output_source: TokenCountSource
     requested_model: str | None = None
@@ -141,8 +139,6 @@ class StepExecutionOutput:
     output_payload_extensions: dict[str, Any] | None = None
     citation_sidecar: dict[str, Any] | None = None
     raw_completion_text: str | None = None
-    input_token_source: TokenCountSource = "not_applicable"
-    output_token_source: TokenCountSource = "not_applicable"
     provider_call_receipts: list[ProviderCallTokenReceipt] = field(
         default_factory=_empty_provider_call_receipts
     )

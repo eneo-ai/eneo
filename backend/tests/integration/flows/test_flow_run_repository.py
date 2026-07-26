@@ -2891,6 +2891,69 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_provider_call_receipts_keep_unreported_usage_unknown(
+    attempt_provenance_context,
+):
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        run_repo = FlowRunRepository(session=session)
+        attempt = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="unreported-provider-usage",
+        )
+        assert await run_repo.append_attempt_provider_call_receipt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=1,
+                num_tokens_input=5,
+                num_tokens_output=0,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        assert await run_repo.append_attempt_provider_call_receipt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            tenant_id=context.tenant_id,
+            receipt=ProviderCallTokenReceiptProvenance(
+                call_index=2,
+                num_tokens_input=None,
+                num_tokens_output=2,
+                input_source="not_reported",
+                output_source="provider",
+            ),
+        )
+
+        persisted = await session.get(FlowStepAttempts, attempt.id)
+        assert persisted is not None
+        parsed = parse_attempt_provenance(persisted.provenance_json)
+        assert parsed.status == "tracked"
+        assert parsed.provenance is not None
+        usage = parsed.provenance.token_usage
+        assert usage is not None
+        assert usage.num_tokens_input is None
+        assert usage.input_source == "mixed"
+        assert usage.num_tokens_output == 2
+        assert usage.output_source == "provider"
+        assert usage.completed_provider_calls[0].num_tokens_output == 0
+        assert usage.completed_provider_calls[1].num_tokens_input is None
+
+        raw_usage = persisted.provenance_json["token_usage"]
+        assert "num_tokens_input" not in raw_usage
+        assert "num_tokens_input" not in raw_usage["completed_provider_calls"][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_finish_attempt_refreshes_locked_row_before_merging_receipt(
     attempt_provenance_context,
 ):

@@ -71,9 +71,32 @@ def test_dispatch_without_reported_usage_is_unknown_not_estimated() -> None:
         )
     )
 
-    assert all(r.input_source == "not_applicable" for r in receipts)
-    assert all(r.output_source == "not_applicable" for r in receipts)
-    assert all(r.num_tokens_input == 0 for r in receipts)
+    assert all(r.input_source == "not_reported" for r in receipts)
+    assert all(r.output_source == "not_reported" for r in receipts)
+    assert all(r.num_tokens_input is None for r in receipts)
+    assert all(r.num_tokens_output is None for r in receipts)
+
+
+def test_provider_reported_zero_is_preserved_as_measured_zero() -> None:
+    receipts = _build(
+        (
+            ProviderDispatch(
+                ordinal=1,
+                usage=TokenUsage(prompt_tokens=0, completion_tokens=0),
+                reason="initial",
+            ),
+            ProviderDispatch(
+                ordinal=2,
+                usage=TokenUsage(prompt_tokens=4, completion_tokens=2),
+                reason="tool_round",
+            ),
+        )
+    )
+
+    assert receipts[0].num_tokens_input == 0
+    assert receipts[0].num_tokens_output == 0
+    assert receipts[0].input_source == "provider"
+    assert receipts[0].output_source == "provider"
 
 
 def test_adapter_reporting_no_dispatches_still_yields_the_aggregate_receipt() -> None:

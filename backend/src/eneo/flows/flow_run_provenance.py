@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, TypeAlias, TypeVar, cast
@@ -135,15 +135,17 @@ class AttemptStartProvenance(BaseModel):
     mapped_admission: MappedAdmissionProvenance | None = None
 
 
-TokenCountSource = Literal["provider", "estimated", "mixed", "not_applicable"]
+TokenCountSource = Literal[
+    "provider", "estimated", "mixed", "not_applicable", "not_reported"
+]
 
 
 class ProviderCallTokenReceiptProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     call_index: int
-    num_tokens_input: int
-    num_tokens_output: int
+    num_tokens_input: int | None = Field(default=None, ge=0)
+    num_tokens_output: int | None = Field(default=None, ge=0)
     input_source: TokenCountSource
     output_source: TokenCountSource
     requested_model: str | None = None
@@ -152,15 +154,112 @@ class ProviderCallTokenReceiptProvenance(BaseModel):
     provider_response_id: str | None = None
     mapped_call: MappedProviderCallProvenance | None = None
 
+    @model_validator(mode="after")
+    def _usage_source_matches_count(self) -> "ProviderCallTokenReceiptProvenance":
+        _validate_provider_call_count_source(
+            count=self.num_tokens_input,
+            source=self.input_source,
+            dimension="input",
+        )
+        _validate_provider_call_count_source(
+            count=self.num_tokens_output,
+            source=self.output_source,
+            dimension="output",
+        )
+        return self
+
 
 class TokenUsageProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    num_tokens_input: int
-    num_tokens_output: int
+    num_tokens_input: int | None = Field(default=None, ge=0)
+    num_tokens_output: int | None = Field(default=None, ge=0)
     input_source: TokenCountSource
     output_source: TokenCountSource
     completed_provider_calls: tuple[ProviderCallTokenReceiptProvenance, ...] = ()
+
+    @model_validator(mode="after")
+    def _aggregate_source_matches_count(self) -> "TokenUsageProvenance":
+        _validate_aggregate_count_source(
+            count=self.num_tokens_input,
+            source=self.input_source,
+            dimension="input",
+        )
+        _validate_aggregate_count_source(
+            count=self.num_tokens_output,
+            source=self.output_source,
+            dimension="output",
+        )
+        return self
+
+
+def _validate_provider_call_count_source(
+    *, count: int | None, source: TokenCountSource, dimension: str
+) -> None:
+    if (count is None) != (source == "not_reported"):
+        raise ValueError(
+            f"Provider call {dimension} count must be absent exactly when its "
+            "source is not_reported."
+        )
+
+
+def _validate_aggregate_count_source(
+    *, count: int | None, source: TokenCountSource, dimension: str
+) -> None:
+    if count is None and source not in ("mixed", "not_reported"):
+        raise ValueError(
+            f"Aggregate {dimension} count can be absent only for mixed or "
+            "not_reported usage."
+        )
+    if count is not None and source == "not_reported":
+        raise ValueError(
+            f"Aggregate {dimension} count cannot be measured when its source is "
+            "not_reported."
+        )
+
+
+def build_provider_call_token_usage(
+    receipts: Sequence[ProviderCallTokenReceiptProvenance],
+) -> TokenUsageProvenance:
+    if not receipts:
+        raise ValueError("Provider call token usage requires at least one receipt.")
+
+    input_sources: set[TokenCountSource] = {
+        receipt.input_source for receipt in receipts
+    }
+    output_sources: set[TokenCountSource] = {
+        receipt.output_source for receipt in receipts
+    }
+    return TokenUsageProvenance(
+        num_tokens_input=sum_complete_token_counts(
+            [receipt.num_tokens_input for receipt in receipts]
+        ),
+        num_tokens_output=sum_complete_token_counts(
+            [receipt.num_tokens_output for receipt in receipts]
+        ),
+        input_source=_aggregate_token_count_sources(input_sources),
+        output_source=_aggregate_token_count_sources(output_sources),
+        completed_provider_calls=tuple(receipts),
+    )
+
+
+def sum_complete_token_counts(counts: Iterable[int | None]) -> int | None:
+    total = 0
+    observed = False
+    for count in counts:
+        if count is None:
+            return None
+        total += count
+        observed = True
+    return total if observed else None
+
+
+def _aggregate_token_count_sources(
+    sources: set[TokenCountSource],
+) -> TokenCountSource:
+    if len(sources) == 1:
+        return next(iter(sources))
+    return "mixed"
 
 
 class RagProvenance(BaseModel):

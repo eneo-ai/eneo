@@ -8,7 +8,6 @@ from eneo.flows.domain.runtime import (
     ProviderCallTokenReceipt,
     StepDiagnostic,
     StepExecutionOutput,
-    TokenCountSource,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
@@ -16,31 +15,6 @@ from eneo.flows.flow_run_provenance import (
     MappedExecutionMode,
 )
 from eneo.main.exceptions import TypedIOValidationException
-
-
-def sum_optional_token_counts(values: Iterable[int | None]) -> int | None:
-    total = 0
-    observed = False
-    for value in values:
-        if isinstance(value, int):
-            total += value
-            observed = True
-    return total if observed else None
-
-
-def aggregate_token_source(
-    outputs: Iterable[StepExecutionOutput], *, dimension: str
-) -> TokenCountSource:
-    sources: set[TokenCountSource] = {
-        output.input_token_source
-        if dimension == "input"
-        else output.output_token_source
-        for output in outputs
-    }
-    sources.discard("not_applicable")
-    if not sources:
-        return "not_applicable"
-    return next(iter(sources)) if len(sources) == 1 else "mixed"
 
 
 def mapped_provider_call_receipts(

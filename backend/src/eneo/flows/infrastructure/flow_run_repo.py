@@ -61,9 +61,8 @@ from eneo.flows.flow_run_input_envelope import (
 from eneo.flows.flow_run_provenance import (
     AttemptStartProvenance,
     ProviderCallTokenReceiptProvenance,
-    TokenCountSource,
-    TokenUsageProvenance,
     attempt_provenance_for_write,
+    build_provider_call_token_usage,
     resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -1508,28 +1507,8 @@ class FlowRunRepository:
                 f"Provider call receipt index must be {expected_index}, got {receipt.call_index}."
             )
         receipts.append(receipt)
-        input_sources: set[TokenCountSource] = {item.input_source for item in receipts}
-        output_sources: set[TokenCountSource] = {
-            item.output_source for item in receipts
-        }
         provenance = provenance.model_copy(
-            update={
-                "token_usage": TokenUsageProvenance(
-                    num_tokens_input=sum(item.num_tokens_input for item in receipts),
-                    num_tokens_output=sum(item.num_tokens_output for item in receipts),
-                    input_source=(
-                        next(iter(input_sources))
-                        if len(input_sources) == 1
-                        else "mixed"
-                    ),
-                    output_source=(
-                        next(iter(output_sources))
-                        if len(output_sources) == 1
-                        else "mixed"
-                    ),
-                    completed_provider_calls=tuple(receipts),
-                )
-            }
+            update={"token_usage": build_provider_call_token_usage(receipts)}
         )
         row.provenance_json = provenance.to_payload()
         await self.session.flush()

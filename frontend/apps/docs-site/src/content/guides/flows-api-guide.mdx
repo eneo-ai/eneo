@@ -1114,6 +1114,32 @@ and start a new run; keep the old run for evidence.
 In redacted evidence, `current_checksum` still describes the original stored snapshot,
 not the redacted projection.
 
+##### Provider token usage
+
+For provider-backed attempts, inspect
+`step_attempts[].provenance_json.token_usage.completed_provider_calls`. Input and
+output usage are independent: each receipt has a count and a matching `*_source`.
+
+- `provider` means the provider reported that count. An explicit `0` is a real,
+  measured zero.
+- `not_reported` means the provider did not report that dimension for the call.
+  Its count is `null` or omitted; treat it as unknown, never as zero.
+- `mixed` on an attempt aggregate means its calls do not share one source. If any
+  call is `not_reported`, the affected aggregate count is also `null` or omitted;
+  summing only the known calls would understate usage. Always check whether the
+  count is null instead of branching on the source alone.
+- `not_applicable` remains readable in historical evidence and for work where a
+  provider count does not apply. It is not the new representation for missing
+  provider usage.
+
+The current `completed_provider_calls` list contains dispatch evidence returned
+by the model adapter. On a failed, cancelled, or interrupted attempt, an absent
+receipt does not prove that no provider request was sent. Use the attempt status
+and error together, and do not infer zero spend from an empty list.
+
+Run and attempt token totals are best-effort summaries that can include estimated
+counts. Use `completed_provider_calls` when you need the per-call evidence.
+
 ##### Rerun input revisions
 
 Every item in `rerun_operations` has a required `input_revision` discriminated

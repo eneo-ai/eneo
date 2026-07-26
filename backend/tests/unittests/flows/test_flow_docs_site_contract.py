@@ -3737,6 +3737,24 @@ def test_flow_api_guide_documents_rerun_input_revision_evidence() -> None:
     assert "not a secrecy mechanism" in evidence_view
 
 
+def test_flow_api_guide_documents_unknown_provider_token_usage() -> None:
+    guide = _read(FLOW_API_GUIDE)
+    evidence_view = guide.split("#### Evidence view", maxsplit=1)[1].split(
+        "#### Evidence export",
+        maxsplit=1,
+    )[0]
+
+    assert "`completed_provider_calls`" in evidence_view
+    assert "`not_reported`" in evidence_view
+    assert "measured zero" in evidence_view
+    assert "treat it as unknown, never as zero" in evidence_view
+    assert "aggregate count is also `null` or omitted" in evidence_view
+    assert "count is null instead of branching" in evidence_view
+    assert "does not prove that no provider request was sent" in evidence_view
+    assert "do not infer zero spend" in evidence_view
+    assert "best-effort summaries that can include estimated" in evidence_view
+
+
 def test_flow_api_guide_documents_step_output_text_overflow() -> None:
     guide = _read(FLOW_API_GUIDE)
     integrating = _read(FLOW_CONSUMER_INTEGRATING_GUIDE)
