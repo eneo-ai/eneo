@@ -129,7 +129,7 @@ describe("SkillBindingsEditor", () => {
       onGetSkillPreview: getPreview
     });
 
-    const activation = page.getByRole("combobox", {
+    const activation = page.getByRole("button", {
       name: m.skills_activation_mode_label({ name: skill.display_name })
     });
     await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
@@ -168,7 +168,7 @@ describe("SkillBindingsEditor", () => {
       onGetSkillPreview: getPreview
     });
 
-    const activation = page.getByRole("combobox", {
+    const activation = page.getByRole("button", {
       name: m.skills_activation_mode_label({ name: skill.display_name })
     });
     await activation.click();
@@ -193,7 +193,7 @@ describe("SkillBindingsEditor", () => {
 
     await expect
       .element(
-        page.getByRole("combobox", {
+        page.getByRole("button", {
           name: m.skills_activation_mode_label({ name: skill.display_name })
         })
       )
@@ -231,7 +231,7 @@ describe("SkillBindingsEditor", () => {
 
     await expect
       .element(
-        page.getByRole("combobox", {
+        page.getByRole("button", {
           name: m.skills_activation_mode_label({ name: skill.display_name })
         })
       )
