@@ -8,6 +8,7 @@ from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
     MCPServerRepository,
 )
+from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
 )
@@ -19,6 +20,7 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.users.user import UserInDB
 
 
 class McpSessionLifecycleService:
@@ -29,15 +31,22 @@ class McpSessionLifecycleService:
         state_repo: ChatSessionMcpStateRepo,
         mcp_server_repo: MCPServerRepository,
         proxy_factory: MCPProxySessionFactory,
+        user: "UserInDB | None" = None,
     ):
         self._state_repo = state_repo
         self._mcp_server_repo = mcp_server_repo
         self._proxy_factory = proxy_factory
+        self._user = user
 
     async def terminate_for_chat_session(self, chat_session_id: UUID) -> None:
         states = await self._state_repo.list_for_chat_session(chat_session_id)
         if not states:
             return
+
+        # Same identity as the chat requests that created these sessions, so a
+        # forward_identity server accepts the DELETE. Empty in worker contexts
+        # with no acting user; the client sends nothing for opted-out servers.
+        identity_headers = build_identity_headers(self._user, None)
 
         targets: list[tuple[MCPServer, UUID, str]] = []
         for server_id, mcp_session_id in states:
@@ -59,7 +68,9 @@ class McpSessionLifecycleService:
             server: MCPServer, server_id: UUID, mcp_session_id: str
         ) -> None:
             try:
-                await self._proxy_factory.terminate(server, mcp_session_id)
+                await self._proxy_factory.terminate(
+                    server, mcp_session_id, identity_headers=identity_headers
+                )
             except Exception:
                 # Local deletion must still complete. Server-side idle TTL is
                 # the fallback when a remote server cannot be reached.

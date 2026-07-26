@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -10,6 +11,17 @@ from eneo.governance_policy.domain.governance_policy import (
     PolicyMcpServer,
     PolicyScope,
 )
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillBindingSource,
+    SkillRuntimeResolution,
+)
+
+
+def _resolution(
+    *eligible: ResolvedSkillBinding,
+) -> SkillRuntimeResolution:
+    return SkillRuntimeResolution(eligible=eligible, blocked=())
 
 
 async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
@@ -49,6 +61,11 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
                 ]
             )
         ),
+        skill_service=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -82,6 +99,11 @@ async def test_resolve_for_all_restrictions_disabled_skips_catalog_fetches():
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
+        skill_service=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -103,6 +125,11 @@ async def test_resolve_for_non_personal_space_short_circuits_before_repos():
         prompt_library_repo=AsyncMock(),
         completion_model_crud_service=AsyncMock(),
         mcp_server_settings_service=AsyncMock(),
+        skill_service=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                return_value=_resolution()
+            )
+        ),
     )
 
     cfg = await service.resolve_for(
@@ -112,3 +139,108 @@ async def test_resolve_for_non_personal_space_short_circuits_before_repos():
     assert cfg.models_enforced is False
     assert cfg.mcp_enforced is False
     policy_repo.get_by_tenant.assert_not_called()
+
+
+async def test_resolve_for_loads_exact_governance_skill_revisions():
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=3,
+        current_revision_number=3,
+        display_name="Payroll",
+        description="Answers payroll questions",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.ORGANIZATION,
+    )
+    skill_service = AsyncMock(
+        resolve_governance_bindings_for_runtime=AsyncMock(
+            return_value=_resolution(binding)
+        )
+    )
+    service = EffectiveConfigService(
+        user=SimpleNamespace(tenant_id=tenant_id),
+        policy_repo=AsyncMock(get_by_tenant=AsyncMock(return_value=policy)),
+        prompt_library_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        mcp_server_settings_service=AsyncMock(),
+        skill_service=skill_service,
+    )
+
+    cfg = await service.resolve_for(
+        SimpleNamespace(is_default=True), space_is_personal=True
+    )
+
+    assert cfg.governance_skill_resolution == _resolution(binding)
+    skill_service.resolve_governance_bindings_for_runtime.assert_awaited_once_with(
+        policy_id=policy.id,
+    )
+
+
+async def test_resolve_for_does_not_overlap_request_scoped_repository_calls():
+    tenant_id = uuid4()
+    prompt_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
+    policy.set_prompt_enforcement(enabled=True, prompt_library_id=prompt_id)
+    binding = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug="payroll",
+        revision_number=1,
+        current_revision_number=1,
+        display_name="Payroll",
+        description="Answers payroll questions",
+        instructions="Use the payroll handbook.",
+        content_digest="a" * 64,
+        position=0,
+        source=SkillBindingSource.ORGANIZATION,
+    )
+    active_calls = 0
+    peak_active_calls = 0
+
+    async def guarded_result(value):
+        nonlocal active_calls, peak_active_calls
+        active_calls += 1
+        peak_active_calls = max(peak_active_calls, active_calls)
+        await asyncio.sleep(0)
+        active_calls -= 1
+        return value
+
+    async def get_prompt(**_):
+        return await guarded_result(SimpleNamespace(text="Enforced prompt"))
+
+    async def list_policy_bindings(**_):
+        return await guarded_result(_resolution(binding))
+
+    service = EffectiveConfigService(
+        user=SimpleNamespace(tenant_id=tenant_id),
+        policy_repo=AsyncMock(get_by_tenant=AsyncMock(return_value=policy)),
+        prompt_library_repo=AsyncMock(get=AsyncMock(side_effect=get_prompt)),
+        completion_model_crud_service=AsyncMock(),
+        mcp_server_settings_service=AsyncMock(),
+        skill_service=AsyncMock(
+            resolve_governance_bindings_for_runtime=AsyncMock(
+                side_effect=list_policy_bindings
+            )
+        ),
+    )
+
+    cfg = await service.resolve_for(
+        SimpleNamespace(is_default=True), space_is_personal=True
+    )
+
+    assert cfg.enforced_prompt_text == "Enforced prompt"
+    assert cfg.governance_skill_resolution == _resolution(binding)
+    assert peak_active_calls == 1

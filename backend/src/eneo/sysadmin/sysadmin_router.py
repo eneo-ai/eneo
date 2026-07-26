@@ -78,7 +78,13 @@ from eneo.tenants.tenant import (
     TenantUpdatePublic,
     TenantWithMaskedCredentials,
 )
-from eneo.users.user import UserAddSuperAdmin, UserCreated, UserInDB, UserUpdatePublic
+from eneo.users.user import (
+    UserAddSuperAdmin,
+    UserCreated,
+    UserInDB,
+    UserUpdatePublic,
+)
+from eneo.users.user_repo import PlatformAdminGrantIneligible, UsersRepository
 from eneo.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direct
 
 logger = get_logger(__name__)
@@ -89,6 +95,56 @@ router = APIRouter(
     # can return 401. Declared once here instead of per-route get_responses.
     responses=responses.get_responses([401]),
 )
+
+
+class PlatformAdminGrantRequest(BaseModel):
+    enabled: bool
+
+
+class PlatformAdminGrantResponse(BaseModel):
+    user_id: UUID
+    is_platform_admin: bool
+
+
+@router.put(
+    "/users/{user_id}/platform-admin",
+    response_model=PlatformAdminGrantResponse,
+    description=(
+        "Grant or revoke session-backed platform-administrator authority "
+        "for a user. Granting requires an active tenant administrator; "
+        "revoking does not."
+    ),
+    responses=responses.get_responses([404, 409]),
+)
+async def set_platform_admin(
+    user_id: UUID,
+    request: PlatformAdminGrantRequest,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> PlatformAdminGrantResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        try:
+            changed = await UsersRepository(session).set_platform_admin(
+                user_id, enabled=request.enabled
+            )
+        except PlatformAdminGrantIneligible as error:
+            raise HTTPException(
+                status_code=409,
+                detail="User is not eligible for platform administration.",
+            ) from error
+        if changed is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        before, after = changed
+    logger.info(
+        "platform_admin.authority_changed",
+        extra={
+            "target_user_id": str(user_id),
+            "before": before,
+            "after": after,
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+        },
+    )
+    return PlatformAdminGrantResponse(user_id=user_id, is_platform_admin=after)
 
 
 class OIDCDebugToggleRequest(BaseModel):

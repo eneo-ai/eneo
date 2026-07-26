@@ -1,0 +1,316 @@
+version: 2
+
+goal:
+  title: "Optional object-content inline core"
+  slug: "object-content-inline-core"
+  kind: specific
+  tranche: "Implement, verify, document, and publish Slice 1 without producer cutover."
+  status: done
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+continuity:
+  rotate_threads: false
+  rotation_authorized_by: null
+  rotate_after_completed_write_tasks: 2
+  rotate_after_hours: 6
+  rotate_when_slow: true
+  current_thread_id: "019f64db-c1fa-7250-97d3-e4c12a889f71"
+  previous_thread_id: null
+  rotation_count: 0
+  completed_write_tasks_in_thread: 0
+  handoff_note: notes/handoff.md
+  last_handoff_at: null
+  last_verified_revision: "29c8b0df378f701be2830f6d889ea68011c3f4be"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Audit the post-PR #560 object-content schema, service, runtime, migrations, tests, and documentation; freeze the smallest closed Slice 1 contract."
+    inputs:
+      - "docs/adr/object-content-and-knowledge-ingestion.md in the accepted design worktree"
+      - "backend/src/eneo/object_content/"
+      - "backend/src/eneo/database/tables/object_content_table.py"
+      - "backend/migrations/versions/"
+      - "backend/tests/"
+      - "docs/deployment/object-content-storage.md"
+      - "frontend/apps/docs-site/src/content/docs/object-content-storage.mdx"
+    constraints:
+      - "Read-only except for PM-owned goal files."
+      - "Do not change producers, public APIs, generated SDKs, or frontend product code."
+      - "Prefer existing owners and identify concrete consolidation/deletion work."
+    expected_output:
+      - "Current owner and dependency map"
+      - "Frozen schema and service contract"
+      - "First RED behavior test"
+      - "Validation and rollback plan"
+    receipt:
+      result: done
+      summary: "Confirmed that eneo.object_content is the correct owner, but its common row, repository, service, runtime, reconciliation, and docs still assume one mandatory remote byte backend. Froze Slice 1 around two closed storage kinds, split backend rows, one deferred reverse-ownership fence, exhaustive service dispatch, and capability-scoped remote health."
+      evidence:
+        - "origin/develop and branch base 71de15e5013a566a4a54875b0bd189f0d258e205"
+        - "one Alembic head: 202607221700"
+        - "object_contents currently owns object_key, multipart state, remote observation, and remote deletion"
+        - "existing reference triggers already serialize content IDs, enforce same-transaction first ownership, and maintain reference_count"
+        - "existing runtime disables the whole module without remote configuration and makes remote outage a global readiness failure"
+        - "existing real-store suite owns qualified S3-compatible process, range, multipart, TLS, integrity, binding, and reconciliation behavior"
+      decisions:
+        - "Reuse and deepen ObjectContents, ObjectContentRepository, ObjectContentService, ObjectContentRuntime, and the existing reference/lifecycle triggers."
+        - "Move remote-only facts to ObjectStoreObjects; add InlineContentPayloads for bounded BYTEA; keep common payload_deleted_at."
+        - "Keep exactly one explicit StorageKind enum and one exhaustive service dispatch; do not add a port, registry, or provider branch."
+        - "Keep tenant foreign keys and authorization fences required by current behavior, but add no tenant storage topology or policy."
+        - "Treat absent object-store configuration as healthy inline mode; invalid partial configuration still fails startup; remote outage degrades only remote operations."
+      commands:
+        - cmd: "cd backend && uv run alembic heads"
+          status: "pass: 202607221700 (head)"
+        - cmd: "Docker availability"
+          status: "pass: Docker 29.4.0 linux/arm64"
+        - cmd: "CI-env uv run pytest -q tests/unittests/object_content"
+          status: "pass: 77 tests"
+        - cmd: "CI-env uv run pytest -q tests/integration/object_content/test_reference_fence.py"
+          status: "pass: 5 PostgreSQL 13 integration tests"
+      first_red: "An inline control row, inline payload, and first concrete reference cannot currently commit atomically because the common row requires an object key and the reverse backend ownership does not exist."
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the backend-neutral control schema, split backend rows, deferred ownership fence, and reversible data migration."
+    allowed_files:
+      - "backend/src/eneo/database/tables/object_content_table.py"
+      - "backend/src/eneo/object_content/content.py"
+      - "backend/src/eneo/object_content/content_repository.py"
+      - "backend/src/eneo/object_content/reconciliation_repository.py"
+      - "backend/migrations/versions/*object_content*"
+      - "backend/tests/integration/object_content/"
+      - "backend/tests/integration/migrations/"
+      - "backend/tests/unittests/object_content/"
+    verify:
+      - "Behavior-first schema and migration tests"
+      - "Alembic one-head and upgrade/downgrade/re-upgrade"
+      - "PostgreSQL ownership, reference, tombstone, and concurrency invariants"
+      - "ORM/schema parity"
+    stop_if:
+      - "The migration cannot copy and verify existing remote rows before contracting old columns."
+      - "A required change reaches a producer or public API."
+      - "The closed storage-kind model needs a third backend."
+    receipt:
+      result: done
+      summary: "Split common control facts from backend-owned bytes with a closed storage kind, copied and verified every legacy row into object_store_objects, added bounded inline_content_payloads, and enforced one matching backend plus exactly one first reference with deferred PostgreSQL fences."
+      changed_files:
+        - "backend/src/eneo/database/tables/object_content_table.py"
+        - "backend/src/eneo/object_content/content.py"
+        - "backend/src/eneo/object_content/content_repository.py"
+        - "backend/src/eneo/object_content/reconciliation_repository.py"
+        - "backend/alembic/versions/202607231200_split_object_content_backends.py"
+        - "backend/tests/integration/migrations/test_object_content_backend_split.py"
+        - "backend/tests/integration/object_content/test_storage_ownership.py"
+      evidence:
+        - "Populated PostgreSQL 13 upgrade/downgrade/re-upgrade preserves legacy remote descriptors and failure codes."
+        - "Downgrade fails before mutation when any inline row exists."
+        - "30 PostgreSQL integration tests pass for ownership, reference, lifecycle, and concurrency behavior."
+        - "Fresh migration ORM parity now includes both backend tables."
+      commands:
+        - cmd: "CI-env uv run pytest -q tests/integration/object_content/test_storage_ownership.py tests/integration/object_content/test_reference_fence.py tests/integration/object_content/test_lifecycle.py"
+          status: "pass: 30 PostgreSQL 13 integration tests"
+        - cmd: "CI-env uv run pytest -m migration_isolation -q tests/integration/migrations/test_object_content_backend_split.py"
+          status: "pass: populated upgrade/downgrade/re-upgrade and inline downgrade refusal"
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement bounded inline capture/read/delete, exhaustive service dispatch, optional remote capability, and backend-specific reconciliation."
+    allowed_files:
+      - "backend/src/eneo/object_content/"
+      - "backend/src/eneo/main/container/"
+      - "backend/src/eneo/server/"
+      - "backend/src/eneo/worker/object_content_tasks.py"
+      - "backend/tests/integration/object_content/"
+      - "backend/tests/unittests/object_content/"
+      - "backend/tests/unit/"
+    verify:
+      - "Inline maximum and maximum-plus-one behavior without whole-file materialization"
+      - "Inline and object-store capture/read/delete behavior"
+      - "Remote outage degrades only remote operations"
+      - "Existing real S3-compatible store process, range, multipart, integrity, and reconciliation contracts"
+      - "Worker scheduling remains a thin adapter"
+    stop_if:
+      - "Implementation requires silent fallback, dual write, or a provider registry."
+      - "The inline safety ceiling becomes a hidden business policy."
+      - "Object-store health becomes a global application readiness dependency."
+    receipt:
+      result: done
+      summary: "Added a bounded PostgreSQL-inline store, explicit exhaustive service dispatch, optional remote composition, capability-scoped readiness, local reconciliation without S3, and retained the existing queue-neutral worker seam."
+      changed_files:
+        - "backend/src/eneo/object_content/inline_content_store.py"
+        - "backend/src/eneo/object_content/content_service.py"
+        - "backend/src/eneo/object_content/configuration.py"
+        - "backend/src/eneo/object_content/runtime.py"
+        - "backend/src/eneo/object_content/reconciliation.py"
+        - "backend/src/eneo/object_content/s3_object_store.py"
+        - "backend/src/eneo/worker/object_content_tasks.py"
+        - "backend/tests/unittests/object_content/"
+        - "backend/tests/integration/object_content/"
+      evidence:
+        - "81 object-content unit tests pass."
+        - "63 real-dependency object-content integration tests pass, including SeaweedFS upload/read/range/multipart/corruption/delete/reconciliation and process recovery."
+        - "Exact inline maximum passes and maximum-plus-one fails before persistence."
+        - "Transient remote outage reports degraded readiness while inline/local work remains available; missing or foreign remote authority fails closed."
+      commands:
+        - cmd: "CI-env uv run pytest -q tests/unittests/object_content"
+          status: "pass: 81 tests"
+        - cmd: "CI-env uv run pytest -q tests/integration/object_content"
+          status: "pass: 63 real PostgreSQL 13 and SeaweedFS integration tests"
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Complete Slice 1 validation, operator and docs-site documentation, peer review, publication, and the Ready-for-review handoff."
+    allowed_files:
+      - "docs/deployment/"
+      - "docs/ARCHITECTURE.md"
+      - "docs/goals/object-content-inline-core/"
+      - "frontend/apps/docs-site/src/content/docs/"
+      - "frontend/apps/docs-site/src/content/guides/"
+      - ".env.example"
+      - ".devcontainer/docker-compose.yml"
+    verify:
+      - "Changed-path Ruff and formatting"
+      - "Strict whole-backend Pyright"
+      - "Focused unit and PostgreSQL integration suites"
+      - "Migration round trip and one Alembic head"
+      - "Real compatible-store contract and bounded I/O evidence"
+      - "Docs-site lint, links, and build"
+      - "Repository pre-push checks"
+      - "One final Fable Medium architecture, reliability, data-model, complexity, and scope review after local gates are green"
+      - "GitHub required checks after publishing"
+    stop_if:
+      - "A mandatory gate is red or unknown."
+      - "Publishing would include unrelated worktree changes."
+      - "The PR cannot be made Ready for review without credentials or owner action."
+    receipt:
+      result: done
+      summary: "Completed the optional deployment shape, task-oriented docs-site experience, full local and published validation, final Fable review, and PR/roadmap publication for Slice 1."
+      changed_files:
+        - ".devcontainer/docker-compose.yml"
+        - "docker-compose.e2e.ci.yml"
+        - "docker/seaweedfs/smoke-reference-deployment.sh"
+        - "docs/deployment/"
+        - "frontend/apps/docs-site/src/content/docs/"
+        - "frontend/apps/docs-site/src/content/guides/"
+        - "docs/goals/object-content-inline-core/"
+      evidence:
+        - "Default Compose has no object-store service, image, endpoint, bucket, or credentials; the optional overlay adds the Eneo SeaweedFS reference only when selected."
+        - "docs.eneo.ai opens with PostgreSQL-inline as the default and explains SeaweedFS, external MinIO, data residency, capacity, paired backup/restore, outages, RAG/vector separation, and a practical FAQ."
+        - "Strict whole-backend Pyright passed with zero errors and zero warnings; Ruff and formatting passed."
+        - "81 object-content unit tests, 30 PostgreSQL ownership/reference/lifecycle tests, and 63 real PostgreSQL 13/SeaweedFS integration tests passed."
+        - "Populated migration upgrade/downgrade/re-upgrade, legacy tombstone preservation, inline downgrade refusal, ORM parity, and one Alembic head passed."
+        - "Docs-site Prettier, lint, production build, Mermaid, links, and Pagefind passed."
+        - "Fable Medium final gate returned green, GREEN_LIGHT yes, minimum score 8."
+        - "PR #573 publishes the two focused source/docs commits against develop and closes task #568."
+        - "Epic #549 and tasks #551, #568, #569, and #571 describe the same optional, phased architecture in Project 5."
+      commands:
+        - cmd: "cd backend && uv run ruff check <changed Python paths> && uv run ruff format --check <changed Python paths>"
+          status: "pass"
+        - cmd: "cd backend && uv run pyright"
+          status: "pass: 0 errors, 0 warnings"
+        - cmd: "CI-env uv run pytest -q tests/unittests/object_content"
+          status: "pass: 81 tests"
+        - cmd: "CI-env uv run pytest -q tests/integration/object_content"
+          status: "pass: 63 real-dependency tests"
+        - cmd: "CI-env uv run pytest -q tests/integration/object_content/test_storage_ownership.py tests/integration/object_content/test_reference_fence.py tests/integration/object_content/test_lifecycle.py"
+          status: "pass: 30 PostgreSQL 13 tests"
+        - cmd: "CI-env uv run pytest -m migration_isolation -q tests/integration/migrations/test_object_content_backend_split.py"
+          status: "pass: 2 migration-isolation tests"
+        - cmd: "docker compose config for default and optional object-content deployments"
+          status: "pass"
+        - cmd: "docs-site Prettier, lint, production build, Mermaid, links, and Pagefind"
+          status: "pass"
+        - cmd: "python3 scripts/pre_push_check.py and normal push hooks"
+          status: "pass"
+      review:
+        session: "eneo-object-content-inline-core-20260723"
+        model: "Fable"
+        effort: "Medium"
+        verdict: "green"
+        green_light: true
+        minimum_score: 8
+        artifact: ".codex/artifacts/claude-peer-loop-optional-durable-content-slice-1-final-gate-20260723T113721Z.md"
+      commits:
+        - "eafa430626c6099ba19e2e0429a8b8578d5d902e"
+        - "29c8b0df378f701be2830f6d889ea68011c3f4be"
+      pull_request: "https://github.com/eneo-ai/eneo/pull/573"
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether Slice 1 satisfies the accepted architecture and user outcome without starting producer cutover."
+    inputs:
+      - "T001-T004 receipts"
+      - "Current branch diff and validation"
+      - "Published pull request and /review state"
+    constraints:
+      - "Do not implement."
+      - "Reject completion while any required Slice 1 Worker remains queued or active."
+      - "Reject completion if storage ownership, failure semantics, bounds, or migration recovery remain ambiguous."
+    expected_output:
+      - "complete | not_complete"
+      - "Evidence mapped to the accepted Slice 1 contract"
+      - "Remaining risks and the next deferred slice"
+    receipt:
+      result: complete
+      decision: complete
+      summary: "Slice 1 satisfies the accepted optional-content architecture without producer cutover. The final publication transition is authorized: push this audit-only commit, require the final PR head checks to pass, mark PR #573 Ready, then post exactly /review."
+      contract_evidence:
+        - "Canonical owner: eneo.object_content owns one lifecycle and exhaustive dispatch; no second subsystem or provider registry was introduced."
+        - "Ownership: PostgreSQL enforces one common control row, one matching backend row, and one first concrete reference."
+        - "Failure semantics: no automatic fallback or dual write; remote outage degrades only remote capability while missing authority fails closed."
+        - "Bounds: inline capture uses bounded spooling and maximum-plus-one rejection; remote streaming/range/multipart behavior remains real-store tested."
+        - "Migration: legacy remote descriptors copy and verify before contraction; downgrade refuses inline data loss."
+        - "Operations: default deployment is inline-only; optional compatible storage has explicit health, backup, restore, capacity, and recovery guidance."
+        - "Scope: File, InfoBlob, Icon, Flow, admin policy, and knowledge ingestion remain in linked later tasks."
+      remaining_risks:
+        - "PostgreSQL-inline raises WAL, database, and backup volume; the deployment ceiling and capacity guidance must remain measured."
+        - "Object storage adds a paired recovery dependency and cannot be removed while active remote rows exist."
+        - "Producer adoption and backend migration are intentionally deferred to #551, #569, and #571."
+      next_slice: "#551 adopts File and Icon bytes after #568 merges; it must not force object storage."
+
+checks:
+  dirty_fingerprint: "Only the final tracked Goal Maker receipt remained before the audit commit."
+  last_verification:
+    result: pass
+    task: T999
+    commands:
+      - "81 object-content unit tests"
+      - "30 PostgreSQL ownership/reference/lifecycle integration tests"
+      - "63 real-dependency object-content integration tests"
+      - "Populated PostgreSQL 13 migration round trip and inline downgrade fence"
+      - "Default-inline and optional object-content Compose profiles render successfully"
+      - "Strict whole-backend Pyright 0 errors / 0 warnings"
+      - "Docs-site formatting, lint, production build, Mermaid, links, and Pagefind"
+      - "Fable Medium final gate: green, minimum score 8"
+      - "PR #573 and Project 5 epic/task traceability verified"

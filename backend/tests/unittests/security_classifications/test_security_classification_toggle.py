@@ -1,14 +1,14 @@
 import uuid
-from unittest.mock import patch, MagicMock
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
-from eneo.spaces.space import Space
-from eneo.security_classifications.presentation.security_classification_models import (
-    SecurityClassificationPublic,
-)
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
+from eneo.security_classifications.presentation.security_classification_models import (
+    SecurityClassificationPublic,
+)
+from eneo.spaces.space import Space
 
 
 def test_toggle_security_classification():

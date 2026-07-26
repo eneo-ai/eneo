@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.skills.domain.skill import SkillRuntimeResolution
+
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -42,6 +44,9 @@ class EffectiveConfig:
     default_disabled_mcp_server_ids: list[UUID] = field(
         default_factory=lambda: []  # noqa: C408
     )
+    governance_skill_resolution: SkillRuntimeResolution = field(
+        default_factory=lambda: SkillRuntimeResolution(eligible=(), blocked=())
+    )
 
 
 _EMPTY = EffectiveConfig(
@@ -64,6 +69,7 @@ def resolve(
     tenant_completion_models: list["CompletionModel"],
     tenant_mcp_servers: list["MCPServer"],
     library_prompt_text: str | None,
+    governance_skill_resolution: SkillRuntimeResolution | None = None,
 ) -> EffectiveConfig:
     """Compute the effective config for a personal assistant.
 
@@ -152,6 +158,11 @@ def resolve(
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
+        governance_skill_resolution=(
+            governance_skill_resolution
+            if governance_skill_resolution is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        ),
     )
 
 

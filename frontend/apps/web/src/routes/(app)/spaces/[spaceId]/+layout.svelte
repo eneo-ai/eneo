@@ -35,7 +35,7 @@
 >
   <div class="border-default flex flex-col border-r-[0.5px] md:max-w-[17rem] md:min-w-[17rem]">
     <SpaceSelector></SpaceSelector>
-    <SpaceMenu></SpaceMenu>
+    <SpaceMenu space={$currentSpace}></SpaceMenu>
   </div>
   <slot />
   <div

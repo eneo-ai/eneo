@@ -1,15 +1,15 @@
 """Unit tests for RetentionService - audit log retention policy management."""
 
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, timezone
+
+import pytest
 
 from eneo.audit.application.retention_service import (
-    RetentionService,
     RetentionPolicyModel,
+    RetentionService,
 )
-
 
 # === Constants ===
 MINIMUM_RETENTION_DAYS = 1

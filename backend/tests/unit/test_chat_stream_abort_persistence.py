@@ -15,7 +15,8 @@ exercised in tests/integration/services/test_conversation_stream_abort.py.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -66,6 +67,55 @@ def _make_session_in_db() -> SimpleNamespace:
     return SimpleNamespace(id=uuid4(), questions=[])
 
 
+def _skill_runtime_args(
+    *,
+    changed: bool = False,
+    initial_skill_context_tokens: int = 0,
+    final_skill_context_tokens: int = 0,
+) -> dict[str, object]:
+    snapshot = SimpleNamespace(
+        changed=changed,
+        measurement=SimpleNamespace(tokens=final_skill_context_tokens),
+    )
+    return {
+        "skill_plan": SimpleNamespace(
+            active_provenance=MagicMock(return_value=()),
+            activation_evidence=MagicMock(
+                return_value=SimpleNamespace(effective_mode="selective")
+            ),
+        ),
+        "skill_runtime": SimpleNamespace(snapshot=MagicMock(return_value=snapshot)),
+        "selected_model_route": "openai/gpt-4",
+        "initial_skill_context_tokens": initial_skill_context_tokens,
+    }
+
+
+@contextmanager
+def _independent_placeholder_store(service: SessionService) -> Iterator[None]:
+    @asynccontextmanager
+    async def _session_scope():
+        yield service.question_repo.session
+
+    @asynccontextmanager
+    async def _transaction_scope():
+        yield
+
+    service.question_repo.session.begin.return_value = _transaction_scope()
+    with (
+        patch.object(
+            session_service_module.sessionmanager,
+            "session",
+            _session_scope,
+        ),
+        patch.object(
+            session_service_module,
+            "QuestionRepository",
+            return_value=service.question_repo,
+        ),
+    ):
+        yield
+
+
 # ----- SessionService.create_question_placeholder ---------------------------
 
 
@@ -77,9 +127,12 @@ async def test_create_question_placeholder_inserts_row_with_seeded_question_toke
     new_question_id = uuid4()
     service = _make_session_service(question_id=new_question_id)
 
-    with patch.object(
-        session_service_module, "count_tokens", return_value=42
-    ) as count_mock:
+    with (
+        patch.object(
+            session_service_module, "count_tokens", return_value=42
+        ) as count_mock,
+        _independent_placeholder_store(service),
+    ):
         returned = await service.create_question_placeholder(
             question="how do I cancel a stream?",
             session=_make_session_in_db(),
@@ -114,7 +167,10 @@ async def test_create_question_placeholder_falls_back_to_zero_when_count_tokens_
     def boom(*_: object, **__: object) -> int:
         raise KeyError("unknown model")
 
-    with patch.object(session_service_module, "count_tokens", side_effect=boom):
+    with (
+        patch.object(session_service_module, "count_tokens", side_effect=boom),
+        _independent_placeholder_store(service),
+    ):
         await service.create_question_placeholder(
             question="test",
             session=_make_session_in_db(),
@@ -134,7 +190,10 @@ async def test_create_question_placeholder_without_model_records_zero_tokens():
     even try to count — store 0 and move on."""
     service = _make_session_service()
 
-    with patch.object(session_service_module, "count_tokens") as count_mock:
+    with (
+        patch.object(session_service_module, "count_tokens") as count_mock,
+        _independent_placeholder_store(service),
+    ):
         await service.create_question_placeholder(
             question="test",
             session=_make_session_in_db(),
@@ -302,12 +361,10 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
 
     async def fake_completion_stream():
         for text in ["hello ", "wor", "ld"]:
-            yield SimpleNamespace(
+            yield Completion(
                 reasoning_token_count=0,
-                usage=None,
                 response_type=ResponseType.TEXT,
                 text=text,
-                reference_chunks=[],
             )
 
     response = SimpleNamespace(
@@ -351,6 +408,7 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
             stream=True,
             assistant_id=uuid4(),
             question_id=question_id,
+            **_skill_runtime_args(),
         )
 
         # Pull 2 chunks then close — simulates the SSE client disconnecting after
@@ -374,17 +432,72 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
 
 
 @pytest.mark.asyncio
+async def test_streaming_abort_persists_changed_skill_evidence_without_text():
+    async def fake_completion_stream():
+        yield Completion(
+            reasoning_token_count=0,
+            response_type=ResponseType.ENEO_EVENT,
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=5,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(
+                info_blobs=[],
+                no_duplicate_chunks=[],
+            ),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(changed=True),
+        )
+
+        await _drain_until(gen, 1)
+        await gen.aclose()
+        await asyncio.sleep(0)
+
+    assert len(persist_calls) == 1
+    assert persist_calls[0]["answer"] == ""
+    assert persist_calls[0]["skill_provenance"] == ()
+    assert persist_calls[0]["skill_activation"] is not None
+    session_service_mock.complete_question_with_answer.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_streaming_handle_response_no_partial_save_on_normal_completion():
     """When the stream completes naturally, complete_question_with_answer must be
     called (once) and no partial-save task should be scheduled."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="ok",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -425,6 +538,10 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
             stream=True,
             assistant_id=uuid4(),
             question_id=question_id,
+            **_skill_runtime_args(
+                initial_skill_context_tokens=2,
+                final_skill_context_tokens=7,
+            ),
         )
 
         # Drain the generator fully — this is the "normal completion" path.
@@ -438,9 +555,62 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
     update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
     assert update_kwargs["question_id"] == question_id
     assert update_kwargs["answer"] == "ok"
+    assert update_kwargs["num_tokens_question"] == 8
+    assert update_kwargs["skill_provenance"] == ()
+    assert update_kwargs["skill_activation"] is not None
 
     # Crucially: no partial-save task was scheduled on a clean finish.
     assert persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_persists_cumulative_input_estimate():
+    async def fake_completion_stream():
+        yield Completion(
+            reasoning_token_count=0,
+            response_type=ResponseType.TEXT,
+            text="ok",
+        )
+        yield Completion(
+            reasoning_token_count=0,
+            stop=True,
+            input_token_estimate=41,
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+        assistant_selector_tokens=2,
+        **_skill_runtime_args(
+            initial_skill_context_tokens=2,
+            final_skill_context_tokens=7,
+        ),
+    )
+    async for _ in gen:
+        pass
+
+    persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
+    assert persisted["num_tokens_question"] == 43
 
 
 @pytest.mark.asyncio
@@ -502,6 +672,7 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
         stream=True,
         assistant_id=uuid4(),
         question_id=uuid4(),
+        **_skill_runtime_args(),
     )
     async for _ in gen:
         pass
@@ -517,18 +688,15 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
 
     async def fake_completion_stream():
         for reasoning in ["let me ", "think"]:
-            yield SimpleNamespace(
+            yield Completion(
                 reasoning_token_count=0,
-                usage=None,
                 response_type=ResponseType.REASONING,
                 reasoning_content=reasoning,
             )
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=2,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="ok",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -556,6 +724,7 @@ async def test_streaming_handle_response_persists_reasoning_separately_from_answ
         stream=True,
         assistant_id=uuid4(),
         question_id=uuid4(),
+        **_skill_runtime_args(),
     )
 
     async for _ in gen:
@@ -574,18 +743,15 @@ async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort()
     transparency record even for interrupted turns."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.REASONING,
             reasoning_content="thinking hard",
         )
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="never reached",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -622,6 +788,7 @@ async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort()
             stream=True,
             assistant_id=uuid4(),
             question_id=uuid4(),
+            **_skill_runtime_args(),
         )
 
         chunks = await _drain_until(gen, 1)
@@ -684,6 +851,7 @@ async def test_streaming_handle_response_skips_partial_save_when_no_content():
             stream=True,
             assistant_id=uuid4(),
             question_id=uuid4(),
+            **_skill_runtime_args(),
         )
 
         with pytest.raises(RuntimeError, match="upstream LLM unreachable"):
@@ -706,21 +874,17 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
     save through with num_tokens_answer=0."""
 
     async def fake_completion_stream():
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="partial",
-            reference_chunks=[],
         )
         # Hang on the next chunk — the consumer will aclose() in between.
         await asyncio.sleep(10)
-        yield SimpleNamespace(
+        yield Completion(
             reasoning_token_count=0,
-            usage=None,
             response_type=ResponseType.TEXT,
             text="lost",
-            reference_chunks=[],
         )
 
     response = SimpleNamespace(
@@ -763,6 +927,7 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
             stream=True,
             assistant_id=uuid4(),
             question_id=uuid4(),
+            **_skill_runtime_args(),
         )
 
         first = await _drain_until(gen, 1)

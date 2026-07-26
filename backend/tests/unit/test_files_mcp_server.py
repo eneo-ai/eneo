@@ -13,8 +13,8 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.signed_urls import (
-    build_signed_download_url,
-    generate_signed_token,
+    build_signed_original_download_url,
+    generate_file_original_download_token,
 )
 from eneo.files.file_models import ContentDisposition, FileType
 from eneo.internal_mcp.files import (
@@ -33,12 +33,11 @@ from eneo.main.exceptions import NotFoundException
 
 
 def _signed_url(file_id, tenant_id, base_url="https://eneo.example"):
-    return build_signed_download_url(
+    return build_signed_original_download_url(
         file_id=file_id,
         base_url=base_url,
         expires_in=3600,
         tenant_id=tenant_id,
-        variant="original",
     )
 
 
@@ -70,12 +69,21 @@ def _patch_tool_context(
             return file
 
         container = SimpleNamespace(
-            file_repo=lambda: SimpleNamespace(get_by_id=get_by_id)
+            file_repo=lambda: SimpleNamespace(get_by_id=get_by_id),
+            object_content_service=lambda: None,
         )
         user = SimpleNamespace(tenant_id=user_tenant_id)
         yield SimpleNamespace(container=container, user=user, assistant_id=uuid4())
 
+    class _FakeLoader:
+        def __init__(self, repo, object_content):
+            pass
+
+        async def load(self, metadata):
+            return {entry.id: file for entry in metadata}
+
     monkeypatch.setattr("eneo.internal_mcp.files.internal_tool_context", fake_context)
+    monkeypatch.setattr("eneo.internal_mcp.files.FileContentLoader", _FakeLoader)
 
 
 class TestBuildFilesMcpServer:
@@ -135,7 +143,7 @@ class TestParseReferenceUrl:
 
     def test_accepts_path_without_trailing_slash(self):
         file_id = uuid4()
-        url = f"https://eneo.example/api/v1/files/{file_id}/download?token=tok"
+        url = f"https://eneo.example/api/v1/files/{file_id}/original/download?token=tok"
 
         parsed = _parse_reference_url(url)
         assert parsed == (file_id, "tok")
@@ -144,7 +152,7 @@ class TestParseReferenceUrl:
         file_id = uuid4()
         assert (
             _parse_reference_url(
-                f"https://eneo.example/api/v1/files/{file_id}/download/"
+                f"https://eneo.example/api/v1/files/{file_id}/original/download/"
             )
             is None
         )
@@ -174,14 +182,16 @@ class TestReadFileAuthorization:
     @pytest.mark.asyncio
     async def test_expired_token_reads_as_invalid_link(self):
         file_id = uuid4()
-        token = generate_signed_token(
+        token = generate_file_original_download_token(
             file_id=file_id,
             expires_at=int(time.time()) - 10,
             content_disposition=ContentDisposition.ATTACHMENT,
             tenant_id=uuid4(),
-            variant="original",
         )
-        url = f"https://eneo.example/api/v1/files/{file_id}/download/?token={token}"
+        url = (
+            f"https://eneo.example/api/v1/files/{file_id}/original/download/"
+            f"?token={token}"
+        )
 
         content = await read_file(url, ctx=None)
         assert content[0].text == INVALID_LINK_MESSAGE
@@ -191,7 +201,10 @@ class TestReadFileAuthorization:
         # A valid token spliced onto another file's URL must not resolve.
         other_url = _signed_url(uuid4(), tenant_id=uuid4())
         token = other_url.split("token=")[1]
-        url = f"https://eneo.example/api/v1/files/{uuid4()}/download/?token={token}"
+        url = (
+            f"https://eneo.example/api/v1/files/{uuid4()}/original/download/"
+            f"?token={token}"
+        )
 
         content = await read_file(url, ctx=None)
         assert content[0].text == INVALID_LINK_MESSAGE

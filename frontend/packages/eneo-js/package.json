@@ -6,6 +6,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
+    "test": "node --test src/endpoints/*.test.js",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
     "update": "node update.js"

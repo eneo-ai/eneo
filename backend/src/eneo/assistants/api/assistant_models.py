@@ -44,6 +44,7 @@ from eneo.main.models import (
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.questions.question import UseTools
 from eneo.sessions.session import SessionInDB
+from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
@@ -265,6 +266,7 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
 
 
 class AssistantCreate(AssistantBase):

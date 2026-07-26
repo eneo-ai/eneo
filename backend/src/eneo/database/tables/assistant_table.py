@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,7 +95,15 @@ class Assistants(BasePublic):
         viewonly=True
     )
 
-    __table_args__ = {"extend_existing": True}  # Temporary
+    __table_args__ = (
+        Index(
+            "uq_assistants_space_id_id",
+            "space_id",
+            "id",
+            unique=True,
+        ),
+        {"extend_existing": True},  # Temporary
+    )
 
 
 class AssistantsGroups(BaseCrossReference):
@@ -126,6 +134,8 @@ class AssistantsFiles(BaseCrossReference):
 
     # Relationships
     file: Mapped[Files] = relationship()
+
+    __table_args__ = (Index("ix_assistants_files_file_id", "file_id"),)
 
 
 class AssistantIntegrationKnowledge(BasePublic):

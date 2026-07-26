@@ -159,8 +159,9 @@ async def test_preflight_file_tokens_match_context_builder_output():
 
 @pytest.mark.asyncio
 async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkeypatch):
-    """A stored file is sent as a URL (not inlined) when the assistant disables
-    inlining, so its text must not be counted toward the context window."""
+    """A file with a stored original is sent as a URL (not inlined) when the
+    assistant disables inlining, so its text must not be counted toward the
+    context window."""
     settings = SimpleNamespace(
         file_reference_base_url="http://host.docker.internal:8123",
         public_origin=None,
@@ -174,7 +175,7 @@ async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkey
     text_file.file_type = FileType.TEXT
     text_file.text = "the quick brown fox" * 100
     text_file.name = "big.csv"
-    text_file.storage_key = "tenant/uuid/big.csv"
+    text_file.original_available = True
 
     assistant = _make_assistant()
     assistant.inline_file_text = False
@@ -209,7 +210,7 @@ async def test_preflight_counts_assistant_attachments_despite_inline_disabled(
     attachment.file_type = FileType.TEXT
     attachment.text = "policy document body " * 50
     attachment.name = "policy.pdf"
-    attachment.storage_key = "tenant/uuid/policy.pdf"
+    attachment.original_available = True
 
     assistant = _make_assistant()
     assistant.inline_file_text = False

@@ -21,11 +21,13 @@ from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
-    count_attachment_tokens,
     count_tokens,
 )
 from eneo.completion_models.infrastructure.web_search import WebSearch
-from eneo.files.attachment_budget import attachment_token_ceiling
+from eneo.files.attachment_budget import (
+    assert_prompt_and_files_fit_context,
+    attachment_token_ceiling,
+)
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_file_ids
 from eneo.files.file_service import FileService
@@ -69,6 +71,21 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.skills.domain.skill import (
+    AssistantSkillConfigurationProjection,
+    AssistantSkillRuntimeProjection,
+    SkillActivationEvidenceV1,
+    SkillActivationFallbackReason,
+    SkillActivationMode,
+    SkillActivationRejectionReason,
+    SkillBindingIntent,
+    SkillComposition,
+    SkillExecutionReference,
+    SkillRuntimeResolution,
+    SkillTurnEffectiveMode,
+    SkillTurnPlan,
+    compose_skill_instructions,
+)
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
@@ -79,6 +96,38 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+_ON_DEMAND_REJECTION_DEFAULT = (
+    "On-demand Skills cannot be enabled for this configuration"
+)
+_ON_DEMAND_REJECTION_MESSAGES: dict[SkillActivationFallbackReason, str] = {
+    SkillActivationFallbackReason.SELECTIVE_ACTIVATION_DISABLED: (
+        "On-demand Skills are disabled by the organisation runtime policy"
+    ),
+    SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING: (
+        "The selected completion model does not support on-demand Skills"
+    ),
+    SkillActivationFallbackReason.CATALOG_BUDGET_EXCEEDED: (
+        "The on-demand Skill catalogue exceeds the configured context allowance"
+    ),
+    SkillActivationFallbackReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
+        "The selected completion model cannot measure the Skill catalogue exactly"
+    ),
+}
+_ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
+    SkillActivationRejectionReason,
+    str,
+] = {
+    SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED: (
+        "exceeds the configured context allowance"
+    ),
+    SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
+        "cannot be measured exactly by the selected completion model"
+    ),
+    SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED: (
+        "does not fit the selected completion model context"
+    ),
+}
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
@@ -92,6 +141,9 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.completion_models.application import CompletionModelCRUDService
     from eneo.completion_models.domain.completion_model import CompletionModel
+    from eneo.completion_models.domain.skill_activation import (
+        SkillActivationRuntime,
+    )
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
@@ -109,6 +161,7 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
+    from eneo.skills.application.skill_service import SkillService
     from eneo.spaces.api.space_models import TemplateCreate
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
@@ -215,6 +268,7 @@ class AssistantService:
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
         auth_service: AuthService,
+        skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
@@ -241,6 +295,7 @@ class AssistantService:
             help_assistant_assignment_history_repo
         )
         self.auth_service = auth_service
+        self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
@@ -287,6 +342,65 @@ class AssistantService:
             return None
         return await self.effective_config_service.resolve_for(
             assistant, space_is_personal=space.is_personal()
+        )
+
+    @staticmethod
+    def _governed_base_instructions(
+        assistant: Assistant, effective_config: "EffectiveConfig | None"
+    ) -> str:
+        if (
+            effective_config is not None
+            and effective_config.prompt_enforced
+            and effective_config.enforced_prompt_text
+        ):
+            return effective_config.enforced_prompt_text
+        return assistant.get_prompt_text()
+
+    async def _resolve_assistant_skill_runtime(
+        self,
+        *,
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
+    ) -> SkillRuntimeResolution:
+        assistant_id = cast(UUID | None, assistant.id)
+        direct_resolution = (
+            await self.skill_service.resolve_assistant_bindings_for_runtime(
+                assistant_id=assistant_id
+            )
+            if assistant_id is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
+        )
+
+        if not (space_is_personal and assistant.is_default):
+            return direct_resolution
+        if direct_resolution.eligible or direct_resolution.blocked:
+            raise BadRequestException(
+                "Personal default Assistant has invalid direct Skill bindings"
+            )
+        if effective_config is None:
+            return SkillRuntimeResolution(eligible=(), blocked=())
+        return effective_config.governance_skill_resolution
+
+    async def _create_skill_turn_plan(
+        self,
+        *,
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        space_is_personal: bool,
+    ) -> SkillTurnPlan:
+        base_instructions = self._governed_base_instructions(
+            assistant,
+            effective_config,
+        )
+        resolution = await self._resolve_assistant_skill_runtime(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space_is_personal,
+        )
+        return await self.skill_service.create_turn_plan(
+            base_instructions=base_instructions,
+            resolution=resolution,
         )
 
     async def _ensure_governance_policy_allows_update(
@@ -483,7 +597,13 @@ class AssistantService:
         return await self.file_service.with_derived_images(persistent_attachments)
 
     async def _validate_attachments_fit(
-        self, assistant: Assistant, *, space: "Space"
+        self,
+        assistant: Assistant,
+        *,
+        space: "Space",
+        on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
+        validate_all_on_demand_candidates: bool = False,
+        mcp_servers_override: list["MCPServer"] | None = None,
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -498,72 +618,218 @@ class AssistantService:
 
         Attachments are sent whole (never truncated), so a set that doesn't fit
         can't run — a clear rejection beats silently sending part of a document.
-        The prompt counts toward the ceiling on its own, so a prompt that alone
-        overflows is rejected even with no attachments. Skipped only when no
-        model is resolved."""
-        model = assistant.completion_model
-        enforced_prompt: str | None = None
-
+        On-demand candidates are staged one at a time against the provider-visible
+        baseline, including the activation transcript and configured MCP schemas.
+        Combinations and live per-user MCP narrowing remain turn-time decisions.
+        Skipped only when no model is resolved."""
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        if effective_config is not None:
-            if effective_config.models_enforced:
-                resolved_model = select_effective_completion_model(
-                    current_model=model, effective_config=effective_config
-                )
-                if resolved_model is not None:
-                    model = resolved_model  # type: ignore[assignment]
-            if (
-                effective_config.prompt_enforced
-                and effective_config.enforced_prompt_text
-            ):
-                enforced_prompt = effective_config.enforced_prompt_text
-
+        skill_plan = await self._create_skill_turn_plan(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space.is_personal(),
+        )
+        validation_plan = (
+            skill_plan.for_full_save_validation()
+            if validate_all_on_demand_candidates
+            else skill_plan
+        )
+        candidate_ids = set(on_demand_skill_ids_requiring_validation)
+        if validate_all_on_demand_candidates:
+            candidate_ids.update(
+                binding.binding.skill_id
+                for binding in validation_plan.available
+                if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
+            )
+        candidate_skill_ids = frozenset(candidate_ids)
+        model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
+            if candidate_skill_ids:
+                raise BadRequestException(
+                    "Choose a completion model before enabling on-demand Skills"
+                )
             return
 
-        prompt_text = (
-            enforced_prompt
-            if enforced_prompt is not None
-            else assistant.get_prompt_text()
+        runtime = validation_plan.to_activation_runtime(
+            selected_model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
         )
+        snapshot = runtime.snapshot()
+        if (
+            candidate_skill_ids
+            and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
+        ):
+            message = (
+                _ON_DEMAND_REJECTION_MESSAGES.get(
+                    snapshot.fallback_reason,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+                if snapshot.fallback_reason is not None
+                else _ON_DEMAND_REJECTION_DEFAULT
+            )
+            raise BadRequestException(message)
+
+        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
+        rejected_assessment = next(
+            (
+                assessment
+                for assessment in assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejected_assessment is not None:
+            rejection_reason = rejected_assessment.rejection_reason
+            assert rejection_reason is not None
+            raise BadRequestException(
+                f'on-demand Skill "{rejected_assessment.display_name}" '
+                + _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                    rejection_reason,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+            )
+
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
-        self._assert_files_fit_context(
+        await self._assert_persistent_baseline_fits(
+            assistant=assistant,
             model=model,
+            prompt_text=runtime.prompt,
+            completion_prompt_files=completion_prompt_files,
+        )
+
+        if not candidate_skill_ids:
+            return
+
+        if effective_config is not None and effective_config.mcp_enforced:
+            effective_mcp_servers = effective_config.available_mcp_servers
+        elif mcp_servers_override is not None:
+            effective_mcp_servers = mcp_servers_override
+        else:
+            effective_mcp_servers = assistant.mcp_servers
+        if assistant.has_knowledge():
+            effective_mcp_servers = []
+
+        provider_input = (
+            await self.completion_service.prepare_skill_activation_preflight(
+                model=cast("AICompletionModel", model),
+                prompt=runtime.prompt,
+                prompt_files=completion_prompt_files,
+                mcp_servers=effective_mcp_servers,
+                skill_runtime=runtime,
+            )
+        )
+        provider_assessments = runtime.assess_provider_payload_candidates(
+            candidate_skill_ids,
+            messages=provider_input.messages,
+            provider_tools=provider_input.tools,
+            provider_input_token_limit=attachment_token_ceiling(model.max_input_tokens),
+        )
+        rejected_provider_assessment = next(
+            (
+                assessment
+                for assessment in provider_assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejected_provider_assessment is not None:
+            rejection_reason = rejected_provider_assessment.rejection_reason
+            assert rejection_reason is not None
+            message = _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                rejection_reason,
+                _ON_DEMAND_REJECTION_DEFAULT,
+            )
+            raise BadRequestException(
+                f'on-demand Skill "{rejected_provider_assessment.display_name}" '
+                f"{message}"
+            )
+
+    @staticmethod
+    def _context_model(
+        assistant: Assistant, *, effective_config: "EffectiveConfig | None"
+    ) -> "CompletionModel | None":
+        model = assistant.completion_model
+        if effective_config is None or not effective_config.models_enforced:
+            return model
+        resolved_model = select_effective_completion_model(
+            current_model=model, effective_config=effective_config
+        )
+        if resolved_model is None:
+            raise BadRequestException(
+                "Personal assistant governance policy has no allowed models — "
+                "contact admin"
+            )
+        return resolved_model
+
+    async def _assert_persistent_baseline_fits(
+        self,
+        *,
+        assistant: Assistant,
+        model: "CompletionModel",
+        prompt_text: str,
+        completion_prompt_files: list[File] | None = None,
+    ) -> None:
+        if completion_prompt_files is None:
+            completion_prompt_files = await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+            )
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=model.max_input_tokens,
+            model_name=model.get_model_route(),
             prompt_text=prompt_text,
             files=completion_prompt_files,
         )
 
-    def _assert_files_fit_context(
-        self,
-        *,
-        model: "CompletionModel",
-        prompt_text: str,
-        files: list["File"],
-    ) -> None:
-        """Reject when the system prompt + whole files exceed the model's input
-        window with room left to ask. Files are inlined whole (never truncated),
-        so a set that doesn't fit can't run — a clear rejection beats a
-        provider-side context-length error. Pass files already expanded with any
-        document-derived images, since that is what the request sends. Shared by
-        the save-time persistent check and the per-message ask-time check."""
-        ceiling = attachment_token_ceiling(model.max_input_tokens)
-        used = count_tokens(prompt_text, model.name) + count_attachment_tokens(
-            text_files=[f for f in files if f.file_type == FileType.TEXT],
-            image_files=[f for f in files if f.file_type == FileType.IMAGE],
-            model_name=model.name,
+    async def assert_personal_default_governance_context_fit(self) -> None:
+        """Reject a candidate governance baseline that existing chats cannot run.
+
+        Policy and Skill writes are staged in the request transaction before
+        this method runs, so the effective-config read sees the candidate state.
+        The policy catalogs are identical for every personal default Assistant;
+        resolve them once, then select the actual runtime model per Assistant.
+        The scan is intentionally linear because prompts and attachments differ,
+        and runs only for admin changes that alter the persistent baseline.
+        Disabling governance may still fail closed if the stored baseline that
+        becomes effective is itself too large for its model.
+        """
+        if self.effective_config_service is None:
+            raise RuntimeError(
+                "EffectiveConfigService is required for governance context preflight"
+            )
+        assistants = await self.repo.get_personal_defaults_for_tenant(
+            tenant_id=self.user.tenant_id
         )
-        if used > ceiling:
-            raise BadRequestException(
-                f"The prompt and attachments need ~{used} tokens, but only "
-                f"{ceiling} fit this model's context window. Remove content or "
-                f"choose a model with a larger context."
+        if not assistants:
+            return
+
+        effective_config = await self.effective_config_service.resolve_for(
+            assistants[0], space_is_personal=True
+        )
+        for assistant in assistants:
+            # Personal-default binding writes are rejected at their boundary.
+            # Ask/save still detect corrupt direct bindings for one Assistant;
+            # this tenant scan avoids repeating that empty query for every user.
+            composition = compose_skill_instructions(
+                base_instructions=self._governed_base_instructions(
+                    assistant, effective_config
+                ),
+                bindings=list(effective_config.governance_skill_resolution.eligible),
+            )
+            model = self._context_model(assistant, effective_config=effective_config)
+            if model is None:
+                continue
+            await self._assert_persistent_baseline_fits(
+                assistant=assistant,
+                model=model,
+                prompt_text=composition.prompt,
             )
 
     async def _assert_message_attachments_fit(
@@ -573,16 +839,19 @@ class AssistantService:
         model: "CompletionModel",
         prompt_text: str,
         files: list["File"],
+        validate_persistent_baseline: bool = False,
     ) -> None:
         """Per-message ask-time guard. Persistent attachments are gated on save,
         but a chat message's own uploads are not — and they are now inlined whole
         on the send and on every later replay. Count the persistent baseline plus
         this message's files (both expanded with derived images, as the request
         sends them) against the same ceiling, so an upload that can't fit is
-        rejected up front instead of failing at the provider. No uploads this
-        turn means nothing new to check: the baseline was validated on save and
-        history is budget-evicted downstream."""
-        if not files:
+        rejected up front instead of failing at the provider. A zero-Skill turn
+        with no uploads keeps the existing fast path because its baseline was
+        validated on save. Skill turns recheck the baseline because bindings can
+        change independently of the Assistant. History is budget-evicted
+        downstream."""
+        if not files and not validate_persistent_baseline:
             return
         # URL-only uploads are sent as a signed URL — no inlined text, no
         # derived images — so they cost ~nothing. Count only the files whose
@@ -600,8 +869,9 @@ class AssistantService:
             if model.vision
             else countable
         )
-        self._assert_files_fit_context(
-            model=model,
+        assert_prompt_and_files_fit_context(
+            max_input_tokens=model.max_input_tokens,
+            model_name=model.name,
             prompt_text=prompt_text,
             files=persistent_files + message_files,
         )
@@ -660,6 +930,7 @@ class AssistantService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        skill_binding_intents: list[SkillBindingIntent] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -714,6 +985,7 @@ class AssistantService:
                 insight_enabled,
                 inline_file_text,
                 knowledge_mode,
+                skill_binding_intents,
             )
         ) or any(
             is_provided(value)
@@ -880,6 +1152,30 @@ class AssistantService:
             effective_config=mcp_effective_config,
         )
 
+        mcp_servers_for_validation: list["MCPServer"] | None = None
+        if mcp_server_ids is not None or mcp_tools is not None:
+            assert space.id is not None
+            selected_ids = (
+                set(mcp_server_ids)
+                if mcp_server_ids is not None
+                else {server.id for server in assistant.mcp_servers}
+            )
+            source_servers = (
+                space.mcp_servers
+                if mcp_server_ids is not None
+                else assistant.mcp_servers
+            )
+            mcp_servers_for_validation = (
+                await self.space_repo.project_assistant_mcp_servers(
+                    space_id=space.id,
+                    assistant_id=assistant_id,
+                    mcp_servers=[
+                        server for server in source_servers if server.id in selected_ids
+                    ],
+                    tool_settings=mcp_tools,
+                )
+            )
+
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
         setattr(assistant, "_mcp_tool_settings", mcp_tools)
@@ -917,6 +1213,17 @@ class AssistantService:
             knowledge_changing=knowledge_changing,
         )
 
+        on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset()
+        if skill_binding_intents is not None:
+            replacement = await self.skill_service.replace_assistant_bindings(
+                space_id=assistant.space_id,
+                assistant_id=assistant_id,
+                intents=skill_binding_intents,
+            )
+            on_demand_skill_ids_requiring_validation = (
+                replacement.on_demand_skill_ids_requiring_validation
+            )
+
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
         # no longer fits — after switching to a smaller-context model OR enlarging
@@ -926,8 +1233,26 @@ class AssistantService:
             attachments is not None
             or completion_model is not None
             or prompt_obj is not None
+            or skill_binding_intents is not None
+            or mcp_server_ids is not None
+            or mcp_tools is not None
         ):
-            await self._validate_attachments_fit(assistant, space=space)
+            await self._validate_attachments_fit(
+                assistant,
+                space=space,
+                on_demand_skill_ids_requiring_validation=(
+                    on_demand_skill_ids_requiring_validation
+                ),
+                validate_all_on_demand_candidates=(
+                    attachments is not None
+                    or completion_model is not None
+                    or prompt_obj is not None
+                    or skill_binding_intents is not None
+                    or mcp_server_ids is not None
+                    or mcp_tools is not None
+                ),
+                mcp_servers_override=mcp_servers_for_validation,
+            )
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
@@ -1042,8 +1367,77 @@ class AssistantService:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
         self._authorize_read_assistant(space=space, assistant=assistant)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        skill_plan = await self._create_skill_turn_plan(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space.is_personal(),
+        )
+        model = self._context_model(assistant, effective_config=effective_config)
+        prompt = skill_plan.composition.prompt
+        if model is not None:
+            prompt = skill_plan.to_activation_runtime(
+                selected_model_route=model.get_model_route(),
+                max_input_tokens=model.max_input_tokens,
+                supports_tool_calling=model.supports_tool_calling,
+            ).prompt
 
-        return assistant.get_prompt_text(), assistant.attachments
+        return prompt, assistant.attachments
+
+    async def get_skill_configuration(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+    ) -> AssistantSkillConfigurationProjection:
+        """Return saved Assistant bindings and their exact initial runtime state.
+
+        The binding projection intentionally runs first because it owns both
+        Assistant and Skill-read authorization. Runtime resolution then follows
+        the same turn-plan path as ask and save validation.
+        """
+        bindings = await self.skill_service.list_assistant_binding_projections(
+            space_id=space_id,
+            assistant_id=assistant_id,
+        )
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        if space.is_personal() and assistant.is_default:
+            return AssistantSkillConfigurationProjection(
+                bindings=tuple(bindings),
+                runtime=None,
+            )
+
+        effective_config = await self._resolve_effective_config(
+            space=space,
+            assistant=assistant,
+        )
+        model = self._context_model(assistant, effective_config=effective_config)
+        if model is None:
+            return AssistantSkillConfigurationProjection(
+                bindings=tuple(bindings),
+                runtime=None,
+            )
+
+        skill_plan = await self._create_skill_turn_plan(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=space.is_personal(),
+        )
+        runtime = skill_plan.to_activation_runtime(
+            selected_model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+        )
+        return AssistantSkillConfigurationProjection(
+            bindings=tuple(bindings),
+            runtime=AssistantSkillRuntimeProjection(
+                effective_model_id=model.id,
+                snapshot=runtime.snapshot(),
+            ),
+        )
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
@@ -1202,6 +1596,10 @@ class AssistantService:
         stream: bool,
         assistant_id: UUID,
         question_id: UUID,
+        skill_plan: SkillTurnPlan,
+        skill_runtime: "SkillActivationRuntime",
+        selected_model_route: str,
+        initial_skill_context_tokens: int,
         version: int = 1,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
@@ -1209,6 +1607,22 @@ class AssistantService:
         # Capture tenant_id outside the generator so the abort-path background save
         # doesn't depend on self.user being safely accessible during teardown.
         tenant_id = self.user.tenant_id
+
+        def _final_skill_runtime_state() -> tuple[
+            tuple[SkillExecutionReference, ...],
+            SkillActivationEvidenceV1,
+        ]:
+            assert completion_model is not None
+            snapshot = skill_runtime.snapshot()
+            return (
+                skill_plan.active_provenance(snapshot),
+                skill_plan.activation_evidence(
+                    selected_model_id=completion_model.id,
+                    selected_model_route=selected_model_route,
+                    snapshot=snapshot,
+                ),
+            )
+
         if stream:
 
             async def response_stream() -> AsyncGenerator[Completion, None]:
@@ -1223,6 +1637,7 @@ class AssistantService:
                 # that legitimately share a URI.
                 mcp_ref_seen: set[UUID] = set()
                 stream_usage: TokenUsage | None = None
+                stream_input_token_estimate: int | None = None
                 completed = False
 
                 try:
@@ -1234,6 +1649,8 @@ class AssistantService:
                         reasoning_token_count = chunk.reasoning_token_count
                         if chunk.usage:
                             stream_usage = chunk.usage
+                        if chunk.input_token_estimate is not None:
+                            stream_input_token_estimate = chunk.input_token_estimate
 
                         if chunk.response_type == ResponseType.TEXT:
                             response_string = f"{response_string}{chunk.text}"
@@ -1418,8 +1835,18 @@ class AssistantService:
                             actual=stream_usage.prompt_tokens,
                         )
                     else:
+                        final_skill_tokens = skill_runtime.snapshot().measurement.tokens
+                        base_input_tokens = (
+                            stream_input_token_estimate
+                            if stream_input_token_estimate is not None
+                            else response.total_token_count
+                            + max(
+                                final_skill_tokens - initial_skill_context_tokens,
+                                0,
+                            )
+                        )
                         num_tokens_question = (
-                            response.total_token_count + assistant_selector_tokens
+                            base_input_tokens + assistant_selector_tokens
                         )
                         input_source = "litellm"
 
@@ -1443,6 +1870,7 @@ class AssistantService:
                     num_tokens_context = (
                         stream_usage.context_prompt_tokens if stream_usage else None
                     )
+                    skill_provenance, skill_activation = _final_skill_runtime_state()
                     await self.session_service.complete_question_with_answer(
                         question_id=question_id,
                         answer=response_string,
@@ -1463,6 +1891,8 @@ class AssistantService:
                         )
                         or None,
                         reasoning=reasoning_string or None,
+                        skill_provenance=skill_provenance,
+                        skill_activation=skill_activation,
                     )
                     completed = True
 
@@ -1485,7 +1915,11 @@ class AssistantService:
                     # abort) must be saved via a fresh DB session because the
                     # request-scoped AsyncSession may already be torn down and
                     # `await` across GeneratorExit is fragile.
-                    if not completed and (response_string or reasoning_string):
+                    if not completed and (
+                        response_string
+                        or reasoning_string
+                        or skill_runtime.snapshot().changed
+                    ):
                         from eneo.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
@@ -1501,6 +1935,9 @@ class AssistantService:
                             safe_count_tokens(response_string, model_name)
                             + reasoning_token_count
                         )
+                        skill_provenance, skill_activation = (
+                            _final_skill_runtime_state()
+                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -1508,6 +1945,8 @@ class AssistantService:
                                 answer=response_string,
                                 num_tokens_answer=partial_tokens_answer,
                                 reasoning=reasoning_string or None,
+                                skill_provenance=skill_provenance,
+                                skill_activation=skill_activation,
                             )
                         )
                         logger.info(
@@ -1577,6 +2016,7 @@ class AssistantService:
                 f"output={num_tokens_answer} ({output_source})"
             )
 
+            skill_provenance, skill_activation = _final_skill_runtime_state()
             await self.session_service.complete_question_with_answer(
                 question_id=question_id,
                 answer=final_answer,
@@ -1593,6 +2033,8 @@ class AssistantService:
                 web_search_results=list(web_search_results or []),
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
+                skill_provenance=skill_provenance,
+                skill_activation=skill_activation,
             )
 
             return final_answer
@@ -1826,6 +2268,38 @@ class AssistantService:
             ):
                 prompt_override = effective_config.enforced_prompt_text
 
+        effective_completion_model = (
+            completion_model_override or assistant_to_ask.completion_model
+        )
+        if effective_completion_model is None:
+            raise BadRequestException(
+                "No completion model configured for this conversation.",
+            )
+
+        skill_plan = await self._create_skill_turn_plan(
+            assistant=assistant_to_ask,
+            effective_config=effective_config,
+            space_is_personal=space.is_personal(),
+        )
+        model_route = effective_completion_model.get_model_route()
+        skill_runtime = skill_plan.to_activation_runtime(
+            selected_model_route=model_route,
+            max_input_tokens=effective_completion_model.max_input_tokens,
+            supports_tool_calling=effective_completion_model.supports_tool_calling,
+        )
+        initial_skill_snapshot = skill_runtime.snapshot()
+        skill_composition = SkillComposition(
+            prompt=skill_runtime.prompt,
+            provenance=skill_plan.active_provenance(initial_skill_snapshot),
+        )
+        if skill_runtime.prompt != skill_plan.base_instructions:
+            prompt_override = skill_runtime.prompt
+        skill_activation = skill_plan.activation_evidence(
+            selected_model_id=effective_completion_model.id,
+            selected_model_route=model_route,
+            snapshot=initial_skill_snapshot,
+        )
+
         # Per-request MCP opt-out from the composer toolbar: narrow whatever set
         # is effective (policy-granted servers above, or the assistant's own) by
         # the servers the user switched off for this message. Narrowing only — it
@@ -1841,29 +2315,27 @@ class AssistantService:
                 server for server in base_mcp_servers if server.id not in disabled_ids
             ]
 
-        effective_completion_model = (
-            completion_model_override or assistant_to_ask.completion_model
-        )
-        if effective_completion_model is None:
-            raise BadRequestException(
-                "No completion model configured for this conversation.",
-            )
-
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
         await self._assert_message_attachments_fit(
             assistant=assistant_to_ask,
             model=effective_completion_model,
-            prompt_text=(
-                prompt_override
-                if prompt_override is not None
-                else assistant_to_ask.get_prompt_text()
-            ),
+            prompt_text=skill_composition.prompt,
             files=files,
+            validate_persistent_baseline=bool(skill_composition.provenance)
+            or bool(
+                effective_config is not None
+                and (
+                    effective_config.models_enforced or effective_config.prompt_enforced
+                )
+            ),
         )
 
-        if session_id is not None:
+        question_id: UUID | None = None
+        is_new_session = session_id is None
+        if not is_new_session:
+            assert session_id is not None
             if group_chat_id is not None:
                 session = await self.session_service.get_session_by_uuid(
                     id=session_id, group_chat_id=group_chat_id
@@ -1878,12 +2350,36 @@ class AssistantService:
             if not name and files:
                 name = " ".join(file.name for file in files)
             if group_chat_id is not None:
-                session = await self.session_service.create_session(
-                    name=name, group_chat_id=group_chat_id
+                (
+                    session,
+                    question_id,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    question_assistant_id=assistant_to_ask.id,
+                    group_chat_id=group_chat_id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
+                    skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
                 )
             else:
-                session = await self.session_service.create_session(
-                    name=name, assistant_id=active_assistant.id
+                (
+                    session,
+                    question_id,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    session_assistant_id=active_assistant.id,
+                    question_assistant_id=assistant_to_ask.id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
+                    skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
                 )
 
         assert session is not None
@@ -1899,16 +2395,18 @@ class AssistantService:
             completion_model=effective_completion_model,
         )
 
-        # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
-        # with the router's setup transaction (conversations_router.py line 300/328), so
-        # the user's message is durable even if the stream is aborted mid-flight.
-        question_id = await self.session_service.create_question_placeholder(
-            question=question,
-            session=session,
-            files=files,
-            assistant_id=assistant_to_ask.id,
-            completion_model=cast("AICompletionModel", effective_completion_model),
-        )
+        if not is_new_session:
+            # Existing conversations need only the new placeholder transaction.
+            question_id = await self.session_service.create_question_placeholder(
+                question=question,
+                session=session,
+                files=files,
+                assistant_id=assistant_to_ask.id,
+                completion_model=cast("AICompletionModel", effective_completion_model),
+                skill_provenance=skill_composition.provenance or None,
+                skill_activation=skill_activation,
+            )
+        assert question_id is not None
 
         if use_web_search and version == 2:
             web_search = await self.web_search
@@ -1983,25 +2481,51 @@ class AssistantService:
             ),
         )
 
-        response, datastore_result = await assistant_to_ask.ask(
-            question=cleaned_question,
-            completion_service=self.completion_service,
-            references_service=self.references_service,
-            session=session,
-            files=completion_file_inputs.completion_message_files,
-            stream=stream,
-            version=version,
-            web_search_results=web_search_results,
-            require_tool_approval=require_tool_approval,
-            completion_model_override=completion_model_override,
-            mcp_servers_override=mcp_servers_override,
-            prompt_override=prompt_override,
-            completion_prompt_files=completion_file_inputs.completion_prompt_files,
-            knowledge_mcp_server=knowledge_mcp_server,
-            internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
-            ),
-        )
+        try:
+            response, datastore_result = await assistant_to_ask.ask(
+                question=cleaned_question,
+                completion_service=self.completion_service,
+                references_service=self.references_service,
+                session=session,
+                files=completion_file_inputs.completion_message_files,
+                stream=stream,
+                version=version,
+                web_search_results=web_search_results,
+                require_tool_approval=require_tool_approval,
+                completion_model_override=completion_model_override,
+                mcp_servers_override=mcp_servers_override,
+                prompt_override=prompt_override,
+                completion_prompt_files=completion_file_inputs.completion_prompt_files,
+                skill_runtime=skill_runtime,
+                knowledge_mcp_server=knowledge_mcp_server,
+                internal_mcp_servers=(
+                    [files_mcp_server] if files_mcp_server is not None else []
+                ),
+            )
+        except Exception:
+            failed_snapshot = skill_runtime.snapshot()
+            if failed_snapshot.changed:
+                try:
+                    from eneo.sessions.session_service import (
+                        persist_final_skill_runtime_state,
+                    )
+
+                    await persist_final_skill_runtime_state(
+                        tenant_id=self.user.tenant_id,
+                        question_id=question_id,
+                        skill_provenance=skill_plan.active_provenance(failed_snapshot),
+                        skill_activation=skill_plan.activation_evidence(
+                            selected_model_id=effective_completion_model.id,
+                            selected_model_route=model_route,
+                            snapshot=failed_snapshot,
+                        ),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not persist final Skill activation evidence after "
+                        "completion failure"
+                    )
+            raise
 
         # TODO: Separate the response based on stream true or false
 
@@ -2015,6 +2539,10 @@ class AssistantService:
             stream=stream,
             assistant_id=assistant_to_ask.id,
             question_id=question_id,
+            skill_plan=skill_plan,
+            skill_runtime=skill_runtime,
+            selected_model_route=model_route,
+            initial_skill_context_tokens=(initial_skill_snapshot.measurement.tokens),
             version=version,
             web_search_results=web_search_results,
             assistant_selector_tokens=assistant_selector_tokens,
@@ -2071,6 +2599,9 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        if publish:
+            await self._validate_attachments_fit(assistant, space=space)
 
         assistant.update(published=publish)
 
@@ -2175,7 +2706,33 @@ class AssistantService:
         if mcp_server_id in existing_server_ids:
             raise BadRequestException("MCP server already associated with assistant")
 
-        # Add new association
+        available_mcp_servers = (
+            effective_config.available_mcp_servers
+            if effective_config is not None and effective_config.mcp_enforced
+            else space.mcp_servers
+        )
+        new_mcp_server = next(
+            (server for server in available_mcp_servers if server.id == mcp_server_id),
+            None,
+        )
+        if new_mcp_server is None:
+            raise BadRequestException("MCP server is not available to this assistant")
+
+        staged_mcp_servers = list(assistant.mcp_servers)
+        staged_mcp_servers.append(new_mcp_server)
+        projected_mcp_servers = await self.space_repo.project_assistant_mcp_servers(
+            space_id=space.id,
+            assistant_id=assistant_id,
+            mcp_servers=staged_mcp_servers,
+        )
+        await self._validate_attachments_fit(
+            assistant,
+            space=space,
+            validate_all_on_demand_candidates=True,
+            mcp_servers_override=projected_mcp_servers,
+        )
+
+        # Persist only after the complete post-add provider payload is accepted.
         existing_server_ids.append(mcp_server_id)
         # Update via repository
         from eneo.database.tables.assistant_table import Assistants

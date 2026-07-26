@@ -1,4 +1,6 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
+from uuid import UUID
 
 from eneo.assistants.api.assistant_models import (
     AssistantSparse,
@@ -38,19 +40,24 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceDryRunResponse,
 )
 from eneo.spaces.space import Space
+from eneo.spaces.space_applications_projection import (
+    AppApplicationsProjection,
+    AssistantApplicationsProjection,
+    GroupChatApplicationsProjection,
+    ServiceApplicationsProjection,
+    SpaceApplicationsProjection,
+)
 from eneo.spaces.space_service import SpaceSecurityClassificationImpactAnalysis
 from eneo.transcription_models.presentation import TranscriptionModelPublic
 from eneo.users.user import UserInDB
 from eneo.websites.presentation.website_models import WebsitePublic
 
 if TYPE_CHECKING:
-    from eneo.actors import ActorManager
-    from eneo.apps.apps.app import App
+    from eneo.actors import ActorManager, SpaceActor
     from eneo.assistants.api.assistant_assembler import AssistantAssembler
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.presentation import CompletionModelAssembler
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
-    from eneo.group_chat.domain.entities.group_chat import GroupChat
 
 
 class SpaceAssembler:
@@ -67,22 +74,97 @@ class SpaceAssembler:
         self.completion_model_assembler = completion_model_assembler
         self.actor_manager = actor_manager
 
+    @staticmethod
+    def _required_datetime(value: datetime | None) -> datetime:
+        assert value is not None
+        return value
+
+    @staticmethod
+    def _assistant_user_id(assistant: "Assistant") -> UUID:
+        assert assistant.user is not None
+        return assistant.user.id
+
+    @staticmethod
+    def _applications_projection_from_space(
+        space: Space,
+    ) -> SpaceApplicationsProjection:
+        from eneo.actors.actors.space_actor import SpaceAccessFacts
+
+        return SpaceApplicationsProjection(
+            access=SpaceAccessFacts.from_space(space),
+            assistants=tuple(
+                AssistantApplicationsProjection(
+                    id=assistant.id,
+                    created_at=SpaceAssembler._required_datetime(assistant.created_at),
+                    updated_at=SpaceAssembler._required_datetime(assistant.updated_at),
+                    name=assistant.name,
+                    completion_model_kwargs=assistant.completion_model_kwargs,
+                    logging_enabled=assistant.logging_enabled,
+                    user_id=SpaceAssembler._assistant_user_id(assistant),
+                    published=assistant.published,
+                    description=assistant.description,
+                    metadata_json=assistant.metadata_json,
+                    icon_id=assistant.icon_id,
+                    completion_model_id=(
+                        assistant.completion_model.id
+                        if assistant.completion_model is not None
+                        else None
+                    ),
+                    insight_enabled=assistant.insight_enabled,
+                )
+                for assistant in space.assistants
+            ),
+            group_chats=tuple(
+                GroupChatApplicationsProjection(
+                    id=group_chat.id,
+                    created_at=SpaceAssembler._required_datetime(group_chat.created_at),
+                    updated_at=SpaceAssembler._required_datetime(group_chat.updated_at),
+                    name=group_chat.name,
+                    user_id=group_chat.user_id,
+                    published=group_chat.published,
+                    metadata_json=group_chat.metadata_json,
+                    icon_id=group_chat.icon_id,
+                    insight_enabled=group_chat.insight_enabled,
+                )
+                for group_chat in space.group_chats
+            ),
+            apps=tuple(
+                AppApplicationsProjection(
+                    id=app.id,
+                    created_at=SpaceAssembler._required_datetime(app.created_at),
+                    updated_at=SpaceAssembler._required_datetime(app.updated_at),
+                    name=app.name,
+                    description=app.description,
+                    published=app.published,
+                    user_id=app.user_id,
+                    icon_id=app.icon_id,
+                )
+                for app in space.apps
+                if app.id is not None
+            ),
+            services=tuple(
+                ServiceApplicationsProjection(
+                    id=service.id,
+                    created_at=SpaceAssembler._required_datetime(service.created_at),
+                    updated_at=SpaceAssembler._required_datetime(service.updated_at),
+                    name=service.name,
+                    prompt=service.prompt,
+                    completion_model_kwargs=service.completion_model_kwargs,
+                    user_id=service.user_id,
+                )
+                for service in space.services
+            ),
+        )
+
+    def from_applications_projection(
+        self, projection: SpaceApplicationsProjection
+    ) -> Applications:
+        applications = self._get_applications_model(projection)
+        self._apply_api_key_applications_caps(applications)
+        return applications
+
     def _set_permissions_on_resources(self, space: Space) -> None:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-
-        for assistant in space.assistants:
-            assistant.permissions = actor.get_assistant_permissions(assistant=assistant)
-
-        for group_chat in space.group_chats or []:
-            group_chat.permissions = actor.get_group_chat_permissions(
-                group_chat=group_chat
-            )
-
-        for app in space.apps:
-            app.permissions = actor.get_app_permissions()  # type: ignore[attr-defined]
-
-        for service in space.services:
-            service.permissions = actor.get_service_permissions()
 
         for collection in space.collections:
             collection.permissions = actor.get_collection_permissions()
@@ -150,6 +232,30 @@ class SpaceAssembler:
 
         cap = self._cap_permissions
 
+        self._apply_api_key_applications_caps(applications)
+
+        knowledge.groups.permissions = cap(
+            knowledge.groups.permissions, rp.knowledge.value
+        )
+        knowledge.websites.permissions = cap(
+            knowledge.websites.permissions, rp.knowledge.value
+        )
+        knowledge.integration_knowledge_list.permissions = cap(
+            knowledge.integration_knowledge_list.permissions, rp.knowledge.value
+        )
+
+        for collection in knowledge.groups.items:
+            if hasattr(collection, "permissions"):
+                collection.permissions = cap(collection.permissions, rp.knowledge.value)
+        for website in knowledge.websites.items:
+            if hasattr(website, "permissions"):
+                website.permissions = cap(website.permissions, rp.knowledge.value)
+
+    def _apply_api_key_applications_caps(self, applications: Applications) -> None:
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return
+        cap = self._cap_permissions
         applications.assistants.permissions = cap(
             applications.assistants.permissions, rp.assistants.value
         )
@@ -162,18 +268,6 @@ class SpaceAssembler:
         applications.services.permissions = cap(
             applications.services.permissions, rp.apps.value
         )
-
-        knowledge.groups.permissions = cap(
-            knowledge.groups.permissions, rp.knowledge.value
-        )
-        knowledge.websites.permissions = cap(
-            knowledge.websites.permissions, rp.knowledge.value
-        )
-        knowledge.integration_knowledge_list.permissions = cap(
-            knowledge.integration_knowledge_list.permissions, rp.knowledge.value
-        )
-
-        # Also cap per-item permissions
         for assistant in applications.assistants.items:
             assistant.permissions = cap(assistant.permissions, rp.assistants.value)
         for group_chat in applications.group_chats.items:
@@ -182,13 +276,6 @@ class SpaceAssembler:
             app.permissions = cap(app.permissions, rp.apps.value)
         for service in applications.services.items:
             service.permissions = cap(service.permissions, rp.apps.value)
-
-        for collection in knowledge.groups.items:
-            if hasattr(collection, "permissions"):
-                collection.permissions = cap(collection.permissions, rp.knowledge.value)
-        for website in knowledge.websites.items:
-            if hasattr(website, "permissions"):
-                website.permissions = cap(website.permissions, rp.knowledge.value)
 
     def _cap_space_permissions(
         self, permissions: list[ResourcePermission]
@@ -201,6 +288,12 @@ class SpaceAssembler:
 
     def _get_assistant_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
+        return self._get_assistant_permissions_from_actor(actor)
+
+    @staticmethod
+    def _get_assistant_permissions_from_actor(
+        actor: "SpaceActor",
+    ) -> list[ResourcePermission]:
         permissions: list[ResourcePermission] = []
 
         if actor.can_read_assistants():
@@ -214,7 +307,12 @@ class SpaceAssembler:
 
     def _get_group_chat_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
+        return self._get_group_chat_permissions_from_actor(actor)
 
+    @staticmethod
+    def _get_group_chat_permissions_from_actor(
+        actor: "SpaceActor",
+    ) -> list[ResourcePermission]:
         permissions: list[ResourcePermission] = []
         if actor.can_read_group_chats():
             permissions.append(ResourcePermission.READ)
@@ -227,6 +325,12 @@ class SpaceAssembler:
 
     def _get_app_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
+        return self._get_app_permissions_from_actor(actor)
+
+    @staticmethod
+    def _get_app_permissions_from_actor(
+        actor: "SpaceActor",
+    ) -> list[ResourcePermission]:
         permissions: list[ResourcePermission] = []
 
         if actor.can_read_apps():
@@ -240,12 +344,36 @@ class SpaceAssembler:
 
     def _get_service_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
+        return self._get_service_permissions_from_actor(actor)
+
+    @staticmethod
+    def _get_service_permissions_from_actor(
+        actor: "SpaceActor",
+    ) -> list[ResourcePermission]:
         permissions: list[ResourcePermission] = []
 
         if actor.can_read_services():
             permissions.append(ResourcePermission.READ)
         if actor.can_create_services():
             permissions.append(ResourcePermission.CREATE)
+
+        return permissions
+
+    def _get_skill_permissions(self, space: Space) -> list[ResourcePermission]:
+        if getattr(self.user, "active_api_key", None) is not None:
+            return []
+
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        permissions: list[ResourcePermission] = []
+
+        if actor.can_read_skills():
+            permissions.append(ResourcePermission.READ)
+        if actor.can_create_skills():
+            permissions.append(ResourcePermission.CREATE)
+        if actor.can_edit_skills():
+            permissions.append(ResourcePermission.EDIT)
+        if actor.can_delete_skills():
+            permissions.append(ResourcePermission.DELETE)
 
         return permissions
 
@@ -363,8 +491,11 @@ class SpaceAssembler:
             member for member in space.members.values() if member.id != self.user.id
         ]
 
-    def _get_assistant_model(self, assistant: "Assistant") -> AssistantSparse:
-        assert assistant.user is not None
+    def _get_assistant_model(
+        self,
+        assistant: AssistantApplicationsProjection,
+        permissions: list[ResourcePermission],
+    ) -> AssistantSparse:
         return AssistantSparse(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -372,21 +503,21 @@ class SpaceAssembler:
             name=assistant.name,
             completion_model_kwargs=assistant.completion_model_kwargs,
             logging_enabled=assistant.logging_enabled,
-            user_id=assistant.user.id,
+            user_id=assistant.user_id,
             published=assistant.published,
-            permissions=assistant.permissions,
+            permissions=permissions,
             description=assistant.description,
             type=AssistantType.ASSISTANT,
             metadata_json=assistant.metadata_json,
             icon_id=assistant.icon_id,
-            completion_model_id=assistant.completion_model.id
-            if assistant.completion_model
-            else None,
+            completion_model_id=assistant.completion_model_id,
         )
 
-    def _get_group_chat_model(self, group_chat: "GroupChat") -> GroupChatSparse:
-        assert group_chat.created_at is not None
-        assert group_chat.updated_at is not None
+    def _get_group_chat_model(
+        self,
+        group_chat: GroupChatApplicationsProjection,
+        permissions: list[ResourcePermission],
+    ) -> GroupChatSparse:
         return GroupChatSparse(
             created_at=group_chat.created_at,
             updated_at=group_chat.updated_at,
@@ -394,14 +525,17 @@ class SpaceAssembler:
             id=group_chat.id,
             user_id=group_chat.user_id,
             published=group_chat.published,
-            permissions=group_chat.permissions,
+            permissions=permissions,
             type="group-chat",
             metadata_json=group_chat.metadata_json,
             icon_id=group_chat.icon_id,
         )
 
-    def _get_app_model(self, app: "App") -> AppSparse:
-        assert app.id is not None
+    def _get_app_model(
+        self,
+        app: AppApplicationsProjection,
+        permissions: list[ResourcePermission],
+    ) -> AppSparse:
         return AppSparse(
             created_at=app.created_at,
             updated_at=app.updated_at,
@@ -410,55 +544,70 @@ class SpaceAssembler:
             description=app.description,
             published=app.published,
             user_id=app.user_id,
-            permissions=app.permissions,  # type: ignore[attr-defined]
+            permissions=permissions,
             icon_id=app.icon_id,
         )
 
     def _get_applications_model(
-        self, space: Space, only_published: bool = False
+        self,
+        projection: SpaceApplicationsProjection,
+        only_published: bool = False,
     ) -> Applications:
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        actor = self.actor_manager.get_space_actor(projection.access)
         return Applications(
             assistants=PaginatedPermissions[AssistantSparse](
                 items=[
-                    self._get_assistant_model(assistant)
-                    for assistant in space.assistants
+                    self._get_assistant_model(
+                        assistant,
+                        actor.get_assistant_permissions(assistant),
+                    )
+                    for assistant in projection.assistants
                     if actor.can_read_assistant(assistant=assistant)
                     and (not only_published or assistant.published)
                 ],
-                permissions=self._get_assistant_permissions(space),
+                permissions=self._get_assistant_permissions_from_actor(actor),
             ),
             group_chats=PaginatedPermissions[GroupChatSparse](
                 items=[
-                    self._get_group_chat_model(group_chat=group_chat)
-                    for group_chat in (space.group_chats or [])
+                    self._get_group_chat_model(
+                        group_chat,
+                        actor.get_group_chat_permissions(group_chat),
+                    )
+                    for group_chat in projection.group_chats
                     if actor.can_read_group_chat(group_chat=group_chat)
                     and (not only_published or group_chat.published)
                 ],
-                permissions=self._get_group_chat_permissions(space=space),
+                permissions=self._get_group_chat_permissions_from_actor(actor),
             ),
             apps=PaginatedPermissions[AppSparse](
                 items=[
-                    self._get_app_model(app)
-                    for app in space.apps
+                    self._get_app_model(app, actor.get_app_permissions())
+                    for app in projection.apps
                     if actor.can_read_app(app=app)
                     and (not only_published or app.published)
                 ],
-                permissions=self._get_app_permissions(space),
+                permissions=self._get_app_permissions_from_actor(actor),
             ),
             services=PaginatedPermissions[ServiceSparse](
                 items=[
-                    self._get_service_model(service)
-                    for service in space.services
+                    self._get_service_model(
+                        service,
+                        actor.get_service_permissions(),
+                    )
+                    for service in projection.services
                     if actor.can_read_services()
                 ]
                 if not only_published
                 else [],
-                permissions=self._get_service_permissions(space),
+                permissions=self._get_service_permissions_from_actor(actor),
             ),
         )
 
-    def _get_service_model(self, service: Service) -> ServiceSparse:
+    def _get_service_model(
+        self,
+        service: ServiceApplicationsProjection,
+        permissions: list[ResourcePermission],
+    ) -> ServiceSparse:
         return ServiceSparse(
             created_at=service.created_at,
             updated_at=service.updated_at,
@@ -467,7 +616,7 @@ class SpaceAssembler:
             prompt=service.prompt,
             completion_model_kwargs=service.completion_model_kwargs,
             user_id=service.user_id,
-            permissions=service.permissions,
+            permissions=permissions,
         )
 
     def _get_knowledge_model(self, space: Space) -> Knowledge:
@@ -516,7 +665,9 @@ class SpaceAssembler:
     ) -> SpacePublic:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         self._set_permissions_on_resources(space)
-        applications = self._get_applications_model(space)
+        applications = self._get_applications_model(
+            self._applications_projection_from_space(space)
+        )
         knowledge = self._get_knowledge_model(space)
         self._apply_api_key_resource_caps(applications, knowledge)
         members = PaginatedPermissions[SpaceMember](
@@ -600,6 +751,7 @@ class SpaceAssembler:
             knowledge=knowledge,
             members=members,
             group_members=group_members,
+            skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),
             permissions=self._cap_space_permissions(self._get_space_permissions(space)),
@@ -637,7 +789,10 @@ class SpaceAssembler:
                         permissions=self._get_default_assistant_permissions(space),
                     )
                 )
-            applications = self._get_applications_model(space, only_published=True)
+            applications = self._get_applications_model(
+                self._applications_projection_from_space(space),
+                only_published=True,
+            )
             space_sparse.applications = applications
             space_sparse.default_assistant = default_assistant
 
@@ -648,7 +803,8 @@ class SpaceAssembler:
     ) -> SpaceDashboard:
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(
-            space=space, only_published=only_published
+            self._applications_projection_from_space(space),
+            only_published=only_published,
         )
 
         default_assistant = None

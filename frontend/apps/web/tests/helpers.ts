@@ -1,6 +1,6 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
-export const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://localhost:8124";
+export const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8124";
 export const MOCK_REPLY = "E2E mock completion: pong";
 
 let counter = 0;

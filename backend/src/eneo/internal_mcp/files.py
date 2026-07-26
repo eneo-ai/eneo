@@ -7,8 +7,8 @@ When an assistant runs with ``inline_file_text`` disabled, attached text
 files reach the model as signed download URLs instead of inlined text. This
 server is the built-in consumer of those URLs: ``read_file`` verifies the
 signed token and returns the file's already-extracted text, paged. The URL is
-a capability handle, not a fetch instruction: content is served from the
-files table, never re-downloaded from object storage.
+a capability handle, not a fetch instruction: content is served through the
+durable object-content store, never fetched over HTTP.
 
 See :mod:`eneo.internal_mcp.foundation` for the hosting and authentication
 model shared by all internal servers.
@@ -24,7 +24,8 @@ from uuid import UUID
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import TextContent
 
-from eneo.authentication.signed_urls import verify_signed_token
+from eneo.authentication.signed_urls import verify_file_original_download_token
+from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import FileType
 from eneo.internal_mcp.constants import FILES_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -47,9 +48,12 @@ mcp = FastMCP(
     ),
 )
 
-# Path suffix of a signed download URL; matched host-agnostically because the
-# HMAC token is the sole authorizer (see _parse_reference_url).
-_DOWNLOAD_PATH = re.compile(r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/download/?$")
+# Path suffix of a signed original-download URL (the shape minted for file
+# references); matched host-agnostically because the HMAC token is the sole
+# authorizer (see _parse_reference_url).
+_DOWNLOAD_PATH = re.compile(
+    r"/api/v1/files/(?P<file_id>[0-9a-fA-F-]{36})/original/download/?$"
+)
 
 NOT_A_REFERENCE_MESSAGE = (
     'That is not an Eneo attachment URL. Pass the exact "url" value from an '
@@ -158,25 +162,33 @@ async def read_file(
         return _text(NOT_A_REFERENCE_MESSAGE)
     file_id, token = parsed
 
-    payload = verify_signed_token(token)
+    payload = verify_file_original_download_token(token)
     if payload is None or payload.get("file_id") != str(file_id):
         return _text(INVALID_LINK_MESSAGE)
 
     offset = max(0, offset)
     async with internal_tool_context(ctx) as tool_ctx:
         try:
-            file = await tool_ctx.container.file_repo().get_by_id(file_id)
+            metadata = await tool_ctx.container.file_repo().get_by_id(file_id)
         except NotFoundException:
             # Missing and inaccessible must be indistinguishable to the
             # caller (no existence oracle).
             logger.info("[FILES] read_file file=%s -> not found", file_id)
             return _text(NOT_FOUND_MESSAGE)
         if (
-            payload.get("tenant_id") != str(file.tenant_id)
-            or file.tenant_id != tool_ctx.user.tenant_id
+            payload.get("tenant_id") != str(metadata.tenant_id)
+            or metadata.tenant_id != tool_ctx.user.tenant_id
         ):
             logger.info("[FILES] read_file file=%s -> tenant mismatch", file_id)
             return _text(NOT_FOUND_MESSAGE)
+        # Bytes moved to object content; hydrate the extracted text the same
+        # way the completion layer does. Authorization happened above: the
+        # signed token plus tenant match gates access.
+        loader = FileContentLoader(
+            repo=tool_ctx.container.file_repo(),
+            object_content=tool_ctx.container.object_content_service(),
+        )
+        file = (await loader.load([metadata]))[metadata.id]
 
     logger.info(
         "[FILES] read_file file=%s type=%s offset=%d size=%d",

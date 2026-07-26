@@ -267,6 +267,43 @@ Export a slide-like committee roadmap SVG:
 GH_TOKEN=... node scripts/export_github_roadmap.mjs --owner eneo-ai --project 5 --format svg --audience committee --output committee-roadmap.svg
 ```
 
+Export the public website data contract:
+
+```bash
+GH_TOKEN=... node scripts/export_github_roadmap.mjs \
+  --owner eneo-ai \
+  --project 5 \
+  --repository eneo-ai/eneo \
+  --format json \
+  --audience default \
+  --output roadmap.json
+```
+
+JSON is always a public projection. It includes only real issue epics whose
+Project payload has `content.type: Issue` and the exact repository
+`eneo-ai/eneo`; Project draft items and issues from other repositories are
+excluded. Public item fields are an explicit allowlist. Adding a Project field
+or an internal exporter field never adds it to public JSON automatically.
+
+Schema version 1 exposes these item fields:
+
+- `number`, `url`, `title`, and the complete Epic `Summary`;
+- Project `status`, `roadmapVersion`, `area`, `priority`, `sponsor`,
+  `startDate`, and `targetDate`;
+- `group`: `in_progress`, `next`, `later`, or `delivered`.
+
+The envelope also exposes `unpublishedItemCount`. It counts epic-level Project
+items that are not public `eneo-ai/eneo` issues. A non-zero value is a
+transparency gap: convert the item to a public epic issue or reclassify it if it
+does not belong on the roadmap. The export still succeeds so the public page
+does not become stale, but consumers should surface or alert on the count.
+
+`Done` items are delivered. Active or blocked items are in progress. `Todo`
+items in the earliest concrete numeric release family among public `Todo` items
+are next; remaining items are later. The raw status and roadmap version remain
+in the projection so the website can change presentation without reparsing
+Project data.
+
 Export with explicit columns, for example when a committee deck should always show empty future buckets:
 
 ```bash
@@ -274,6 +311,53 @@ GH_TOKEN=... node scripts/export_github_roadmap.mjs --owner eneo-ai --project 5 
 ```
 
 The `Export roadmap graph` workflow can also be run manually in GitHub Actions. It uploads the generated roadmap as an artifact and lets the runner choose `default`, `committee`, or `standup` audience.
+
+The same workflow runs every six hours and uploads the public JSON projection
+as the stable artifact `eneo-roadmap-public-json` with 30-day retention.
+Scheduled exports are read-only and do not run the Project field setup script.
+Manual Markdown, Mermaid, and SVG artifacts can contain Project-only planning
+metadata, are not public website inputs, and have one-day retention.
+
+### Website automation handoff
+
+The website workflow should download the latest successful scheduled
+`eneo-roadmap-public-json` artifact, translate and cache only changed item
+content, then commit its own rendered data only when that downstream data
+changes.
+
+GitHub's automatic `GITHUB_TOKEN` is scoped to the repository where the
+workflow runs. A workflow in `eneo-ai-website` therefore needs a fine-grained
+token stored there as `ROADMAP_ARTIFACT_TOKEN` with read-only Actions access to
+`eneo-ai/eneo`. It does not need organization Project access when it consumes
+the artifact. Keep `ANTHROPIC_API_KEY` only in the website repository for the
+translation step.
+
+A shell-based consumer can resolve and download the artifact with:
+
+```bash
+run_id="$(
+  GH_TOKEN="$ROADMAP_ARTIFACT_TOKEN" gh run list \
+    --repo eneo-ai/eneo \
+    --workflow export-roadmap.yml \
+    --event schedule \
+    --status success \
+    --limit 1 \
+    --json databaseId \
+    --jq '.[0].databaseId'
+)"
+
+GH_TOKEN="$ROADMAP_ARTIFACT_TOKEN" gh run download "$run_id" \
+  --repo eneo-ai/eneo \
+  --name eneo-roadmap-public-json \
+  --dir data/roadmap-source
+```
+
+The website should retain its last committed roadmap if source download,
+schema validation, or translation fails. Pin `schemaVersion: 1`, reject unknown
+schema versions, and hash item `title` plus `summary` for translation caching;
+do not include the envelope `generatedAt` in that cache key. Alert or visibly
+flag a non-zero `unpublishedItemCount` instead of silently presenting the feed
+as complete.
 
 If an epic appears under `Unscheduled`, set its `Roadmap version` Project field or fill in the `Roadmap version` section in the epic issue body. The export does not use GitHub Releases, tags, or milestones as the roadmap source of truth.
 

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     )
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
+    from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
     from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
@@ -451,6 +452,7 @@ class Assistant(Entity):
         completion_prompt_files: list["File"] | None = None,
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
+        skill_runtime: "SkillActivationRuntime | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -541,6 +543,7 @@ class Assistant(Entity):
             web_search_results=list(web_search_results or []),
             mcp_servers=effective_mcp_servers,
             require_tool_approval=require_tool_approval,
+            skill_runtime=skill_runtime,
             inline_file_text=self.inline_file_text,
             knowledge_catalog=knowledge_catalog,
         )

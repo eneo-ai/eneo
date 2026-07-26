@@ -8,6 +8,7 @@ class EntityType(str, Enum):
     ASSISTANT = "assistant"
     SPACE = "space"
     APP = "app"
+    SKILL = "skill"
     FILE = "file"
     WEBSITE = "website"
     TENANT_SETTINGS = "tenant_settings"

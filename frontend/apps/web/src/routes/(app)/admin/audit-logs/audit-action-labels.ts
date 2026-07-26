@@ -237,6 +237,34 @@ const ACTION_MESSAGES = {
     name: m.audit_action_app_run_deleted,
     description: m.audit_action_app_run_deleted_description
   },
+  skill_created: {
+    name: m.audit_action_skill_created,
+    description: m.audit_action_skill_created_description
+  },
+  skill_revision_created: {
+    name: m.audit_action_skill_revision_created,
+    description: m.audit_action_skill_revision_created_description
+  },
+  skill_revision_restored: {
+    name: m.audit_action_skill_revision_restored,
+    description: m.audit_action_skill_revision_restored_description
+  },
+  skill_status_changed: {
+    name: m.audit_action_skill_status_changed,
+    description: m.audit_action_skill_status_changed_description
+  },
+  skill_published: {
+    name: m.audit_action_skill_published,
+    description: m.audit_action_skill_published_description
+  },
+  skill_unpublished: {
+    name: m.audit_action_skill_unpublished,
+    description: m.audit_action_skill_unpublished_description
+  },
+  skill_deleted: {
+    name: m.audit_action_skill_deleted,
+    description: m.audit_action_skill_deleted_description
+  },
   session_started: {
     name: m.audit_action_session_started,
     description: m.audit_action_session_started_description
@@ -256,6 +284,10 @@ const ACTION_MESSAGES = {
   file_deleted: {
     name: m.audit_action_file_deleted,
     description: m.audit_action_file_deleted_description
+  },
+  file_original_download_link_created: {
+    name: m.audit_action_file_original_download_link_created,
+    description: m.audit_action_file_original_download_link_created_description
   },
   file_signed_url_minted: {
     name: m.audit_action_file_signed_url_minted,

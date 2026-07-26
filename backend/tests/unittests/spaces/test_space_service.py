@@ -19,6 +19,7 @@ def actor():
 def service(actor: MagicMock):
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
 
     # Mock the repo with proper session.execute chain for MCP servers query
     repo = AsyncMock()
@@ -70,6 +71,31 @@ async def test_raise_not_found_if_user_not_member_of_space(
 
     with pytest.raises(UnauthorizedException):
         await service.get_space(uuid4())
+
+
+async def test_get_applications_projection_authorizes_sparse_access_facts(
+    service: SpaceService, actor: MagicMock
+):
+    projection = MagicMock()
+    service.repo.get_applications_projection.return_value = projection
+    actor.can_read_space.return_value = True
+    space_id = uuid4()
+
+    result = await service.get_applications_projection(space_id)
+
+    assert result is projection
+    service.repo.get_applications_projection.assert_awaited_once_with(space_id)
+    service.actor_manager.get_space_actor.assert_called_once_with(projection.access)
+
+
+async def test_get_applications_projection_rejects_unauthorized_access(
+    service: SpaceService, actor: MagicMock
+):
+    service.repo.get_applications_projection.return_value = MagicMock()
+    actor.can_read_space.return_value = False
+
+    with pytest.raises(UnauthorizedException):
+        await service.get_applications_projection(uuid4())
 
 
 async def test_raise_unauthorized_if_user_can_not_edit(

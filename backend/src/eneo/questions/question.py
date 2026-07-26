@@ -13,7 +13,7 @@ from pydantic import (
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.web_search import WebSearchResult
-from eneo.files.file_models import File, FilePublic
+from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
     LoggingDetails,
@@ -21,6 +21,10 @@ from eneo.logging.logging import (
     LoggingDetailsPublic,
 )
 from eneo.main.models import InDB
+from eneo.skills.domain.skill import (
+    SkillActivationEvidenceV1,
+    SkillExecutionReference,
+)
 
 
 # SubModels
@@ -42,7 +46,7 @@ class UseTools(BaseModel):
 
 class QuestionsFiles(BaseModel):
     type: str
-    file: File
+    file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -113,6 +117,8 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    skill_provenance: Optional[list[SkillExecutionReference]] = None
+    skill_activation: Optional[SkillActivationEvidenceV1] = None
     # Model reasoning/thinking text captured during streaming. Persisted so the
     # trace can be re-shown when a conversation is reloaded. None for turns
     # produced before this field existed or by models without reasoning.
@@ -141,19 +147,18 @@ class Question(QuestionAdd, InDB):
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
-    @model_validator(mode="after")
-    def process_files_from_db(self) -> "Question":
-        """
-        Process files from the database record.
-        User files have type="user", assistant files have type="assistant"
-        """
-        if self.questions_files:
-            self.files = [qf.file for qf in self.questions_files if qf.type == "user"]
-            self.generated_files = [
-                qf.file for qf in self.questions_files if qf.type == "assistant"
-            ]
-
-        return self
+    def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
+        """Attach byte-complete Files after the persistent row is authorized."""
+        self.files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "user"
+        ]
+        self.generated_files = [
+            files_by_id[question_file.file.id]
+            for question_file in self.questions_files
+            if question_file.type == "assistant"
+        ]
 
 
 class Message(QuestionBase, InDB):
@@ -166,6 +171,7 @@ class Message(QuestionBase, InDB):
     web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
+    skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
     # Default 0 keeps deserialization safe for rows persisted before token
     # measurement was introduced. The DB columns are NOT NULL int, so every

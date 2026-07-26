@@ -2,11 +2,12 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from eneo.database.database import AsyncSession, get_session_with_transaction
+from eneo.main.container.container import Container
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.server.dependencies.container import get_container
 
 
 def get_questions_repo(
-    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> QuestionRepository:
-    return QuestionRepository(session)
+    return container.question_repo()

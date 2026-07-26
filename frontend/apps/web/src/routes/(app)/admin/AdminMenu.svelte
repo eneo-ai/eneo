@@ -17,7 +17,15 @@
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { IconKey } from "@eneo/icons/key";
-  import { BookText, ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
+  import {
+    BookText,
+    ChartPie,
+    LayoutTemplate,
+    Cloud,
+    HardDrive,
+    Plug,
+    ShieldCheck
+  } from "lucide-svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -45,7 +53,7 @@
   const groups = $derived<NavGroup[]>([
     {
       label: m.admin_section_overview(),
-      items: [navItem("/admin", IconLibrary, m.organisation())]
+      items: [navItem("/admin", IconLibrary, m.overview())]
     },
     {
       label: m.admin_section_governance(),
@@ -64,7 +72,8 @@
           : []),
         navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
-        navItem("/admin/integrations", Cloud, m.integrations())
+        navItem("/admin/integrations", Cloud, m.integrations()),
+        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
       ]
     },
     {

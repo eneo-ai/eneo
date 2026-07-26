@@ -146,7 +146,7 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.query) {
     Object.entries(params.query).forEach(([param, value]) => {
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         url.searchParams.append(param, value);
       }
     });

@@ -4,8 +4,10 @@ Tests the PUT/GET/DELETE endpoints for managing tenant-specific crawler settings
 Requires super_admin_token for authentication (system admin only).
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
+
 from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 

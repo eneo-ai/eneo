@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { askChatQuestion, uniqueName } from "./helpers";
 
 // Central flow #4: the core product loop. A logged-in user sends a message in the
 // personal chat and gets the assistant's streamed answer. The seeded model points
@@ -8,12 +9,8 @@ import { expect, test } from "@playwright/test";
 test("a streamed answer is saved and can be reopened from history", async ({ page }) => {
   await page.goto("/spaces/personal/chat");
 
-  const question = "e2e persistence ping";
-  const input = page.locator('[contenteditable="true"]').first();
-  await input.click();
-  await input.pressSequentially(question);
-
-  await page.locator('button[name="ask"]').click();
+  const question = uniqueName("e2e persistence ping");
+  await askChatQuestion(page, question);
 
   await expect(page.getByText(question, { exact: true })).toBeVisible();
   await expect(page.getByText("E2E mock completion: pong")).toBeVisible({ timeout: 20_000 });

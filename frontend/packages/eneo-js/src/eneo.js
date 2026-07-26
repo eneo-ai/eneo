@@ -36,6 +36,8 @@ import { initModelProviders } from "./endpoints/model-providers.js";
 import { initTenantModels } from "./endpoints/tenant-models.js";
 import { initApiKeys } from "./endpoints/api-keys.js";
 import { initHelpAssistants } from "./endpoints/helpAssistants.js";
+import { initSkills } from "./endpoints/skills.js";
+import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -86,6 +88,8 @@ export function createEneo(args) {
     tenantModels: initTenantModels(client),
     apiKeys: initApiKeys(client),
     helpAssistants: initHelpAssistants(client),
+    skills: initSkills(client),
+    objectContentPolicy: initObjectContentPolicy(client),
     client
   };
 }

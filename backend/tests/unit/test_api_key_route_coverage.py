@@ -130,6 +130,7 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
@@ -157,6 +158,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
+    "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
 }
 
 
@@ -478,6 +480,17 @@ class TestHighRiskExactRouteGuards:
     from broad prefix exemptions on privileged routes.
     """
 
+    def test_organization_skill_adoption_rejects_api_keys(self):
+        route = _find_route_by_method_and_paths(
+            "GET",
+            "/skills/organization/{skill_id}/adoption/",
+            "/skills/organization/{skill_id}/adoption",
+        )
+        assert _route_has_dep_name(route, "require_session_auth"), (
+            "GET /skills/organization/{skill_id}/adoption/ must remain "
+            "session-only; OrganizationSkillService performs the tenant-admin check"
+        )
+
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
             "GET", "/integrations/", "/integrations"
@@ -796,6 +809,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/skills/organization/": "Requires session authentication; OrganizationSkillService enforces tenant-admin authorization for every mutation",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission
@@ -1001,7 +1015,8 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "repo.delete_by_owner_for_lifecycle("
+        "id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
         "The file delete scope guard "
         "blocks service keys because files are user-owned.",
         (
@@ -1009,6 +1024,11 @@ class TestScopeCheckPathParamSafety:
             "/files/{id}/signed-url/",
         ): "file_service.get_file_infos() performs the access check against user context "
         "before a signed URL is minted.",
+        (
+            "POST",
+            "/files/{id}/original/signed-url/",
+        ): "file_service.ensure_original_available() performs the owner and exact-original "
+        "checks before a signed URL is minted.",
         (
             "POST",
             "/info-blobs/{id}/",
@@ -1123,6 +1143,7 @@ class TestReadOverrideSnapshot:
             "run_service",
         ],
         "FILES_READ_OVERRIDES": [
+            "generate_original_signed_url",
             "generate_signed_url",
         ],
         "KNOWLEDGE_READ_OVERRIDES": [

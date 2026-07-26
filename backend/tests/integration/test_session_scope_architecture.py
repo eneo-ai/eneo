@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from eneo.main.container.container import Container
 
-
 # =============================================================================
 # UNIT TESTS: Container.session_scope() method
 # =============================================================================
@@ -48,7 +47,7 @@ class TestContainerSessionScope:
 
     async def test_session_scope_yields_session(self, test_settings):
         """session_scope should yield a valid AsyncSession."""
-        from eneo.database.database import sessionmanager, AsyncSession
+        from eneo.database.database import AsyncSession, sessionmanager
 
         # Initialize sessionmanager with test database
         if not sessionmanager._engine:
@@ -142,8 +141,9 @@ class TestContainerSessionScope:
 
         original_session = sessionmanager.session
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         from contextlib import asynccontextmanager
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         TestSessionLocal = async_sessionmaker(
             bind=tiny_engine,

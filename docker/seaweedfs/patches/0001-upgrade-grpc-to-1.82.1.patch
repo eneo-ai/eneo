@@ -1,0 +1,84 @@
+Subject: [PATCH] build: upgrade gRPC to 1.82.1
+
+SeaweedFS 4.40 pins gRPC 1.81.1, which is affected by
+GHSA-hrxh-6v49-42gf. Keep this downstream patch until an upstream
+SeaweedFS release includes gRPC 1.82.1 or newer.
+
+diff --git a/go.mod b/go.mod
+--- a/go.mod
++++ b/go.mod
+@@ -102,7 +102,7 @@ require (
+ 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
+ 	google.golang.org/api v0.287.0
+ 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
+-	google.golang.org/grpc v1.81.1
++	google.golang.org/grpc v1.82.1
+ 	google.golang.org/protobuf v1.36.11
+ 	gopkg.in/inf.v0 v0.9.1 // indirect
+ 	modernc.org/b v1.0.0 // indirect
+@@ -300,7 +300,7 @@ require (
+ 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
+ 	github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2 // indirect
+ 	github.com/Files-com/files-sdk-go/v3 v3.3.82 // indirect
+-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
++	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 // indirect
+ 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
+ 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0 // indirect
+ 	github.com/IBM/go-sdk-core/v5 v5.21.2 // indirect
+@@ -482,7 +482,7 @@ require (
+ 	go.etcd.io/bbolt v1.4.3 // indirect
+ 	go.etcd.io/etcd/api/v3 v3.6.12 // indirect
+ 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+-	go.opentelemetry.io/contrib/detectors/gcp v1.42.0 // indirect
++	go.opentelemetry.io/contrib/detectors/gcp v1.43.0 // indirect
+ 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
+ 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.67.0 // indirect
+ 	go.opentelemetry.io/otel v1.43.0 // indirect
+@@ -494,7 +494,7 @@ require (
+ 	go.uber.org/zap v1.27.1 // indirect
+ 	golang.org/x/term v0.45.0
+ 	golang.org/x/time v0.15.0
+-	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
++	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
+ 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d // indirect
+ 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+ 	gopkg.in/validator.v2 v2.0.1 // indirect
+diff --git a/go.sum b/go.sum
+--- a/go.sum
++++ b/go.sum
+@@ -595,6 +595,8 @@
+ github.com/Files-com/files-sdk-go/v3 v3.3.82/go.mod h1:IPk80dOmc7VFC0DJ85xMTPmre+8xoXX6kGHAkf5jRRw=
+ github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 h1:DHa2U07rk8syqvCge0QIGMCE1WxGj9njT44GH7zNJLQ=
+ github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0/go.mod h1:P4WPRUkOhJC13W//jWpyfJNDAIpvRbAUIYLX/4jtlE0=
++github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 h1:rIkQfkCOVKc1OiRCNcSDD8ml5RJlZbH/Xsq7lbpynwc=
++github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0/go.mod h1:RD2SsorTmYhF6HkTmDw7KmPYQk8OBYwTkuasChwv7R4=
+ github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 h1:UnDZ/zFfG1JhH/DqxIZYU/1CUAlTUScoXD/LcM2Ykk8=
+ github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0/go.mod h1:IA1C1U7jO/ENqm/vhi7V9YYpBsp+IMyqNrEN94N7tVc=
+ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0.55.0 h1:7t/qx5Ost0s0wbA/VDrByOooURhp+ikYwv20i9Y07TQ=
+@@ -2090,6 +2092,8 @@
+ go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
+ go.opentelemetry.io/contrib/detectors/gcp v1.42.0 h1:kpt2PEJuOuqYkPcktfJqWWDjTEd/FNgrxcniL7kQrXQ=
+ go.opentelemetry.io/contrib/detectors/gcp v1.42.0/go.mod h1:W9zQ439utxymRrXsUOzZbFX4JhLxXU4+ZnCt8GG7yA8=
++go.opentelemetry.io/contrib/detectors/gcp v1.43.0 h1:62yY3dT7/ShwOxzA0RsKRgshBmfElKI4d/Myu2OxDFU=
++go.opentelemetry.io/contrib/detectors/gcp v1.43.0/go.mod h1:RyaZMFY7yi1kAs45S6mbFGz8O8rqB0dTY14uzvG4LCs=
+ go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 h1:yI1/OhfEPy7J9eoa6Sj051C7n5dvpj0QX8g4sRchg04=
+ go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0/go.mod h1:NoUCKYWK+3ecatC4HjkRktREheMeEtrXoQxrqYFeHSc=
+ go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.63.0 h1:2pn7OzMewmYRiNtv1doZnLo3gONcnMHlFnmOR8Vgt+8=
+@@ -2811,6 +2815,8 @@
+ google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7/go.mod h1:L43LFes82YgSonw6iTXTxXUX1OlULt4AQtkik4ULL/I=
+ google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 h1:VPWxll4HlMw1Vs/qXtN7BvhZqsS9cdAittCNvVENElA=
+ google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9/go.mod h1:7QBABkRtR8z+TEnmXTqIqwJLlzrZKVfAUm7tY3yGv0M=
++google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 h1:yQugLulqltosq0B/f8l4w9VryjV+N/5gcW0jQ3N8Qec=
++google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478/go.mod h1:C6ADNqOxbgdUUeRTU+LCHDPB9ttAMCTff6auwCVa4uc=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d h1:mpAgMyM9vQHxycBlDq50y1VHpfSfVwzXvrQKtYbXuUY=
+ google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=
+ google.golang.org/grpc v1.19.0/go.mod h1:mqu4LbDTu4XGKhr4mRzUsmM4RtVoemTSY81AxZiDr8c=
+@@ -2855,6 +2861,8 @@
+ google.golang.org/grpc v1.55.0/go.mod h1:iYEXKGkEBhg1PjZQvoYEVPTDkHo1/bjTnfwTeGONTY8=
+ google.golang.org/grpc v1.81.1 h1:VnnIIZ88UzOOKLukQi+ImGz8O1Wdp8nAGGnvOfEIWQQ=
+ google.golang.org/grpc v1.81.1/go.mod h1:xGH9GfzOyMTGIOXBJmXt+BX/V0kcdQbdcuwQ/zNw42I=
++google.golang.org/grpc v1.82.1 h1:NnAxzGRA0677vCa4BUkOAnO5+FfQqVl9iUXeD0IqcGE=
++google.golang.org/grpc v1.82.1/go.mod h1:yzTZ1TB1Z3SG+LIYaI+WiE8D5+PZ3ArnrSp8zF3+/ZA=
+ google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0/go.mod h1:6Kw0yEErY5E/yWrBtf03jp27GLLJujG4z/JK95pnjjw=
+ google.golang.org/grpc/examples v0.0.0-20250407062114-b368379ef8f6 h1:ExN12ndbJ608cboPYflpTny6mXSzPrDLh0iTaVrRrds=
+ google.golang.org/grpc/examples v0.0.0-20250407062114-b368379ef8f6/go.mod h1:6ytKWczdvnpnO+m+JiG9NjEDzR1FJfsnmJdG7B8QVZ8=

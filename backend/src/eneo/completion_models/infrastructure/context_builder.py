@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
     Message,
     MessageToolCall,
+    function_definition_to_tool,
 )
 from eneo.completion_models.infrastructure.message_payload import (
     build_turn_messages,
@@ -153,8 +154,8 @@ def build_file_references_string(
 
     Lets the model pass a URL to whichever MCP tool accepts a URL input so the
     tool can fetch the original file. Only files present in
-    ``file_reference_urls`` (those with original bytes in external storage) get
-    an entry; the rest keep relying on the inlined text from
+    ``file_reference_urls`` (those with a durably stored original) get an
+    entry; the rest keep relying on the inlined text from
     ``build_files_string``.
     """
     entries = [
@@ -652,15 +653,7 @@ class ContextBuilder:
         functions.extend(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
-            {
-                "type": "function",
-                "function": {
-                    "name": func_def.name,
-                    "description": func_def.description,
-                    "parameters": func_def.schema,
-                },
-            }
-            for func_def in functions
+            function_definition_to_tool(func_def) for func_def in functions
         ]
         if extra_tool_dicts:
             tool_dicts.extend(extra_tool_dicts)

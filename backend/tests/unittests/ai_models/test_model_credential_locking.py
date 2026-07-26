@@ -10,7 +10,6 @@ Runtime credential validation still occurs when models are actually used.
 from datetime import datetime
 from uuid import uuid4
 
-
 from eneo.completion_models.domain.completion_model import CompletionModel
 
 

@@ -25,7 +25,6 @@ import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
-
 # =============================================================================
 # HELPER: Mock Session Manager
 # =============================================================================
@@ -738,8 +737,8 @@ class TestSuccessfulUrlsTracking:
         """
         INVARIANT: When embedding_model is None, all pages fail with NO_EMBEDDING_MODEL reason.
         """
-        from eneo.worker.crawl_tasks import persist_batch
         from eneo.worker.crawl_context import FailureReason
+        from eneo.worker.crawl_tasks import persist_batch
 
         page_buffer = [
             {"url": "https://example.com/page1", "content": "Content 1"},

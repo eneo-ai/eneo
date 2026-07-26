@@ -1,4 +1,6 @@
 name: Request Eneo AI review
+# Contract: eneo-ai-review-trigger/v3.1
+# Canonical source: eneo-ai-bot/eneo-security-review-infra/examples/github/ai-review-request.yml
 
 on:
   issue_comment:
@@ -6,6 +8,8 @@ on:
 
 permissions:
   issues: write
+  # GitHub's Actions integration requires this when reacting to a pull-request
+  # conversation comment, even though the REST path is under issue comments.
   pull-requests: write
 
 concurrency:
@@ -14,26 +18,25 @@ concurrency:
 
 jobs:
   request-review:
-    # Coarse gate: a PR comment that starts with the trigger token. The Python step
-    # below is the precise, security-relevant gate and separates review requests
-    # from deterministic feedback commands. Keep this role list in sync with the
-    # precise association check below.
+    # Coarse gate: a PR comment that starts with the lowercase trigger token.
+    # The Python step below owns the exact command grammar and authorization.
+    # Keep this role list in sync with the precise association check below.
     if: >-
       github.event.issue.pull_request &&
       (startsWith(github.event.comment.body, '@review') || startsWith(github.event.comment.body, '/review')) &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      HERMES_REVIEW_URL: ${{ secrets.HERMES_REVIEW_URL }}
-      HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
-      HERMES_REVIEW_FEEDBACK_URL: ${{ secrets.HERMES_REVIEW_FEEDBACK_URL }}
-      HERMES_REVIEW_FEEDBACK_SECRET: ${{ secrets.HERMES_REVIEW_FEEDBACK_SECRET }}
-      ALLOWED_USERS: ${{ vars.AI_REVIEW_ALLOWED_USERS }}
+    timeout-minutes: 5
 
     steps:
       - name: Authorize requester and send signed review request
         id: dispatch
+        env:
+          HERMES_REVIEW_URL: ${{ secrets.HERMES_REVIEW_URL }}
+          HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
+          HERMES_REVIEW_FEEDBACK_URL: ${{ secrets.HERMES_REVIEW_FEEDBACK_URL }}
+          HERMES_REVIEW_FEEDBACK_SECRET: ${{ secrets.HERMES_REVIEW_FEEDBACK_SECRET }}
+          ALLOWED_USERS: ${{ vars.AI_REVIEW_ALLOWED_USERS }}
         shell: python
         run: |
           import hashlib
@@ -42,6 +45,7 @@ jobs:
           import os
           import re
           import urllib.error
+          import urllib.parse
           import urllib.request
 
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
@@ -49,20 +53,25 @@ jobs:
 
 
           def ignore(reason):
-              # Clean no-op: the workflow ran but this was not a valid maintainer request.
-              # Exit 0 so ignored comments are NOT counted as failed runs (keeps metrics honest).
+              # A clean no-op keeps ignored comments out of workflow-failure metrics.
               print(f"ignored: {reason}")
               raise SystemExit(0)
 
 
           def parse_review_command(body):
-              match = re.match(r"^[@/]review(?:\s+(?P<rest>\S.*))?$", body, flags=re.IGNORECASE | re.DOTALL)
+              match = re.match(r"^[@/]review(?:\s+(?P<rest>\S.*))?$", body, flags=re.DOTALL)
               if not match:
                   return None
               return "feedback" if match.group("rest") else "review"
 
 
-          trigger = event["comment"]["body"].strip()
+          class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+                  return None
+
+
+          # Commands must begin at the first character; trailing whitespace is harmless.
+          trigger = event["comment"]["body"].rstrip()
           if event["comment"]["user"].get("type") == "Bot":
               ignore("bot comments cannot invoke the reviewer")
 
@@ -83,7 +92,7 @@ jobs:
 
           mode = parse_review_command(trigger)
           if mode is None:
-              ignore(f"comment is not an Eneo review command ({trigger!r})")
+              ignore("comment does not match the exact Eneo review command grammar")
 
           if mode == "review":
               webhook_url = os.environ.get("HERMES_REVIEW_URL", "").strip()
@@ -92,11 +101,19 @@ jobs:
           else:
               webhook_url = os.environ.get("HERMES_REVIEW_FEEDBACK_URL", "").strip()
               webhook_secret = os.environ.get("HERMES_REVIEW_FEEDBACK_SECRET", "").strip()
-              # Namespace feedback deliveries defensively because review and feedback
-              # requests both originate from GitHub issue comments.
+              # Review and feedback requests both originate from issue comments.
               delivery_id = f"{event['comment']['id']}:feedback"
           if not webhook_url or not webhook_secret:
               raise SystemExit(f"{mode} webhook secrets are not configured")
+
+          parsed_url = urllib.parse.urlparse(webhook_url)
+          if (
+              parsed_url.scheme != "https"
+              or not parsed_url.netloc
+              or parsed_url.username is not None
+              or parsed_url.password is not None
+          ):
+              raise SystemExit(f"{mode} webhook URL must be an HTTPS URL without credentials")
 
           payload = {
               "repository": {"full_name": event["repository"]["full_name"]},
@@ -114,34 +131,44 @@ jobs:
               method="POST",
               headers={
                   "Content-Type": "application/json",
-                  "User-Agent": "Eneo-AI-Review-Trigger/3.0",
+                  "User-Agent": "Eneo-AI-Review-Trigger/3.1",
                   "X-GitHub-Event": "issue_comment",
-                  # Keep this stable across workflow retries so Hermes' one-hour
-                  # idempotency cache cannot start a duplicate agent run.
+                  # Stable across retries so Hermes cannot start a duplicate run.
                   "X-GitHub-Delivery": delivery_id,
                   "X-Hub-Signature-256": signature,
               },
           )
-          timeout = 900 if mode == "review" else 60
 
           try:
-              with urllib.request.urlopen(request, timeout=timeout) as response:
-                  text = response.read(4096).decode("utf-8", errors="replace")
-                  print(f"Eneo {mode} webhook accepted the request: HTTP {response.status} {text}")
+              opener = urllib.request.build_opener(NoRedirectHandler())
+              with opener.open(request, timeout=60) as response:
+                  response.read(4096)
+                  print(f"Eneo {mode} webhook accepted the request: HTTP {response.status}")
           except urllib.error.HTTPError as error:
-              detail = error.read(4096).decode("utf-8", errors="replace")
-              raise SystemExit(f"Eneo {mode} webhook rejected the request: HTTP {error.code} {detail}")
-          except urllib.error.URLError as error:
-              raise SystemExit(f"Eneo {mode} webhook could not be reached: {error.reason}")
+              raise SystemExit(
+                  f"Eneo {mode} webhook rejected the request: HTTP {error.code}"
+              ) from None
+          except urllib.error.URLError:
+              raise SystemExit(f"Eneo {mode} webhook could not be reached") from None
+          except TimeoutError:
+              raise SystemExit(f"Eneo {mode} webhook could not be reached") from None
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("dispatched=true\n")
+              output.write(f"mode={mode}\n")
 
       - name: Acknowledge receipt with an eyes reaction
-        if: steps.dispatch.outputs.dispatched == 'true'
-        continue-on-error: true
+        if: >-
+          steps.dispatch.outputs.dispatched == 'true' &&
+          steps.dispatch.outputs.mode == 'review'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           COMMENT_ID: ${{ github.event.comment.id }}
-        run: gh api --method POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes
+        shell: bash
+        run: |
+          if ! gh api --silent --method POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content=eyes >/dev/null 2>&1; then
+            echo "::warning::Review request was accepted, but GitHub refused the eyes reaction. Check the workflow token's Issues and Pull requests write permissions."
+          fi

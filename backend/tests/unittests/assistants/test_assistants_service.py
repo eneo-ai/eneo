@@ -23,6 +23,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.skills.domain.skill import (
+    AssistantSkillBindingReplacement,
+    SkillBindingIntent,
+    SkillBindingReference,
+)
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -66,6 +71,8 @@ def setup_fixture():
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
+    mock_space.id = TEST_UUID
+    mock_space.mcp_servers = []
     mock_space.get_assistant.return_value = mock_assistant
     space_repo.get_space_by_assistant.return_value = mock_space
 
@@ -98,6 +105,7 @@ def setup_fixture():
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
+        skill_service=AsyncMock(),
     )
 
     # Attachment fit validation needs a real model + token counts; it is
@@ -105,6 +113,12 @@ def setup_fixture():
     # orchestration tests (update flow, model selection, permissions) aren't
     # coupled to the token-counting subsystem.
     service._validate_attachments_fit = AsyncMock()
+    service.skill_service.replace_assistant_bindings.return_value = (
+        AssistantSkillBindingReplacement(
+            bindings=(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
+        )
+    )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
 
@@ -266,6 +280,34 @@ async def test_update_runs_fit_check_for_prompt_only_change(setup: Setup):
     )
 
     setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
+
+
+async def test_update_runs_full_candidate_fit_for_model_change(setup: Setup):
+    model_id = uuid4()
+    model = MagicMock(id=model_id)
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    space.get_completion_model.return_value = model
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=model_id,
+    )
+
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
 
 
 async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
@@ -275,6 +317,111 @@ async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
     await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
 
     setup.service._validate_attachments_fit.assert_not_awaited()
+    setup.service.skill_service.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_update_runs_full_candidate_fit_for_mcp_tool_change(setup: Setup):
+    projected_servers = [MagicMock()]
+    setup.service.space_repo.project_assistant_mcp_servers.return_value = (
+        projected_servers
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        mcp_tools=[],
+    )
+
+    setup.service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        mcp_servers=[],
+        tool_settings=[],
+    )
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    fit_kwargs = setup.service._validate_attachments_fit.await_args.kwargs
+    assert fit_kwargs["validate_all_on_demand_candidates"] is True
+    assert fit_kwargs["mcp_servers_override"] == projected_servers
+
+
+async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    setup.service.space_repo.update.return_value = space
+    intents = [
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
+    ]
+    events: list[str] = []
+
+    assistant.update.side_effect = lambda **_: events.append("parent_update")
+
+    async def replace_bindings(**_):
+        events.append("binding_replace")
+        return AssistantSkillBindingReplacement(
+            bindings=(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
+        )
+
+    async def validate_fit(*_, **__):
+        events.append("fit")
+
+    async def persist_parent(*_, **__):
+        events.append("persist")
+        return space
+
+    setup.service.skill_service.replace_assistant_bindings.side_effect = (
+        replace_bindings
+    )
+    setup.service._validate_attachments_fit.side_effect = validate_fit
+    setup.service.space_repo.update.side_effect = persist_parent
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        skill_binding_intents=intents,
+    )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        intents=intents,
+    )
+    assert events == ["parent_update", "binding_replace", "fit", "persist"]
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
+
+
+async def test_update_assistant_binding_fit_failure_skips_parent_persist(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.space_id = TEST_UUID
+    setup.service._validate_attachments_fit.side_effect = BadRequestException(
+        "Composed context is too large"
+    )
+
+    with pytest.raises(BadRequestException, match="too large"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID,
+            skill_binding_intents=[],
+        )
+
+    setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        intents=[],
+    )
+    setup.service.space_repo.update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -339,6 +486,7 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
+        {"skill_binding_intents": []},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(

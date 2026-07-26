@@ -19,7 +19,7 @@ from eneo.transcription_models.infrastructure.adapters.litellm_transcription imp
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
-    from eneo.files.file_repo import FileRepository
+    from eneo.files.file_service import FileService
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.transcription_models.domain.transcription_model import (
@@ -32,14 +32,14 @@ logger = get_logger(__name__)
 class Transcriber:
     def __init__(
         self,
-        file_repo: "FileRepository",
+        file_service: "FileService",
         tenant: Optional["TenantInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
         super().__init__()
-        self.file_repo = file_repo
+        self.file_service = file_service
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
@@ -64,12 +64,7 @@ class Transcriber:
                 filepath=temp_file_path, transcription_model=transcription_model
             )
 
-            # Store the transcription in the file object
-            file.transcription = result
-
-            # If we have a repository, update the file in the database
-            if self.file_repo:
-                await self.file_repo.update(file)
+            result = await self.file_service.save_transcription(file.id, result)
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):

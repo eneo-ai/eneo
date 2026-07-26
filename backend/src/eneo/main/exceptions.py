@@ -63,6 +63,13 @@ class ErrorCodes(int, Enum):
     SYSTEM_USER_PROTECTED = 9040
     # AI provider deterministically rejected the request (4xx upstream)
     PROVIDER_REJECTED_REQUEST = 9041
+    # Deployment configuration errors
+    ENCRYPTION_NOT_CONFIGURED = 9042
+    SKILL_REVISION_CONFLICT = 9043
+    FILE_IN_USE = 9044
+    FILE_ORIGINAL_NOT_FOUND = 9045
+    DEPLOYMENT_POLICY_CONFLICT = 9046
+    OBJECT_STORE_NOT_SELECTABLE = 9047
 
 
 class NotFoundException(Exception):
@@ -204,8 +211,7 @@ class FileNotSupportedException(Exception):
 
 class FileTooLargeException(Exception):
     DEFAULT_DOCS_HINT = (
-        "See backend/README.md (Environment variables) and backend/.env.template "
-        "to update upload limits."
+        "Ask a platform administrator to review the object-content deployment policy."
     )
 
     def __init__(
@@ -214,12 +220,12 @@ class FileTooLargeException(Exception):
         *,
         file_size: int | None = None,
         max_size: int | None = None,
-        setting_name: str | None = None,
+        limit_name: str | None = None,
         docs_hint: str | None = None,
     ):
         self.file_size = file_size
         self.max_size = max_size
-        self.setting_name = setting_name
+        self.limit_name = limit_name
         self.docs_hint = docs_hint or self.DEFAULT_DOCS_HINT
 
         if message is None:
@@ -257,11 +263,8 @@ class FileTooLargeException(Exception):
         else:
             message = "File size limit exceeded."
 
-        if self.setting_name:
-            message += (
-                f" Adjust {self.setting_name} in your backend environment "
-                "if you need a higher limit."
-            )
+        if self.limit_name:
+            message += f" The active limit is {self.limit_name}."
 
         if self.docs_hint:
             message += f" {self.docs_hint}"
@@ -279,6 +282,9 @@ class FileTooLargeException(Exception):
         if self.max_size is not None:
             details["max_size_bytes"] = self.max_size
             details["max_size_human"] = self._format_bytes(self.max_size)
+
+        if self.limit_name is not None:
+            details["limit_name"] = self.limit_name
 
         return details
 
@@ -324,6 +330,10 @@ class NameCollisionException(Exception):
     pass
 
 
+class SkillRevisionConflictException(Exception):
+    pass
+
+
 class UserNotCreatedInEneoError(Exception):
     pass
 
@@ -361,6 +371,10 @@ class TenantSuspendedException(Exception):
 
 
 class APIKeyNotConfiguredException(Exception):
+    pass
+
+
+class EncryptionNotConfiguredException(Exception):
     pass
 
 
@@ -460,6 +474,11 @@ EXCEPTION_MAP = {
         ErrorCodes.CHUNK_EMBEDDING_MISMATCH,
     ),
     NameCollisionException: (409, None, ErrorCodes.NAME_COLLISION),
+    SkillRevisionConflictException: (
+        409,
+        None,
+        ErrorCodes.SKILL_REVISION_CONFLICT,
+    ),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),
@@ -477,6 +496,11 @@ EXCEPTION_MAP = {
     ),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
+    EncryptionNotConfiguredException: (
+        503,
+        None,
+        ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
+    ),
     # File extraction errors - use None to pass through the exception's own message
     ExtractionError: (400, None, ErrorCodes.FILE_EXTRACTION_ERROR),
     EncryptedFileError: (400, None, ErrorCodes.FILE_ENCRYPTED),
