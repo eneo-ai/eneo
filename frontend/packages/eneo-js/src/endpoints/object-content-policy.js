@@ -16,6 +16,18 @@ export function initObjectContentPolicy(client) {
     },
 
     /**
+     * Get bounded deployment-wide object-content inventory facts.
+     * Session-backed platform administrators only.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').ObjectContentInventory>}
+     */
+    getInventory: async () => {
+      return await client.fetch("/api/v1/admin/object-content-inventory", {
+        method: "get"
+      });
+    },
+
+    /**
      * Replace the deployment-wide object content storage policy.
      * Session-backed platform administrators only.
      * @param {import('../types/resources').DeploymentPolicyUpdate} policy

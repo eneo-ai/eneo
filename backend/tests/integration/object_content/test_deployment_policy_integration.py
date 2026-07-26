@@ -138,9 +138,8 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
 
     assert len(projection.capabilities) == 2
     assert len(projection.limits) == 5
-    assert len(projection.inventory) <= 12
     payload = projection.model_dump(mode="json")
-    assert set(payload) == {"policy", "limits", "capabilities", "inventory"}
+    assert set(payload) == {"policy", "limits", "capabilities"}
     assert set(payload["policy"]) == {
         "revision",
         "new_write_storage_target",
@@ -168,9 +167,50 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
         set(capability) == {"target", "configured", "selectable", "readiness_code"}
         for capability in payload["capabilities"]
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_global_inventory_requires_platform_admin_authority(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+) -> None:
+    await _seed_policy()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    policy = await client.get(
+        "/api/v1/admin/object-content-policy",
+        headers=headers,
+    )
+    tenant_inventory = await client.get(
+        "/api/v1/admin/object-content-inventory",
+        headers=headers,
+    )
+
+    assert policy.status_code == 200, policy.text
+    assert "inventory" not in policy.json()
+    assert tenant_inventory.status_code == 403, tenant_inventory.text
+
+    async with db_container() as container:
+        stored_user = await container.session().get(Users, admin_user.id)
+        assert stored_user is not None
+        stored_user.is_platform_admin = True
+
+    platform_inventory = await client.get(
+        "/api/v1/admin/object-content-inventory",
+        headers=headers,
+    )
+
+    assert platform_inventory.status_code == 200, platform_inventory.text
+    inventory = platform_inventory.json()["inventory"]
+    assert len(inventory) <= 12
     assert all(
         set(fact) == {"target", "state", "count", "bytes", "oldest_created_at"}
-        for fact in payload["inventory"]
+        for fact in inventory
     )
 
 

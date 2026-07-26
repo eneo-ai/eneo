@@ -32,10 +32,14 @@ state, audit, and reconciliation facts. The chosen byte backend owns only the
 payload. Selection is explicit when content is created and never changes
 silently after a failure.
 
-| Owner | Responsibility |
-| --- | --- |
-| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage** |
-| Operator | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+| Owner          | Responsibility                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform admin | Set the deployment-wide new-write target and business upload limits in **Admin > Storage**                                            |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+
+Tenant admins can review policy, effective limits, and capability status.
+Deployment-wide content inventory spans tenants, so only platform admins can
+view it.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
@@ -133,10 +137,7 @@ adapter; save it as `eneo-object-content-policy.json`:
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket",
-        "s3:ListBucketMultipartUploads"
-      ],
+      "Action": ["s3:ListBucket", "s3:ListBucketMultipartUploads"],
       "Resource": ["arn:aws:s3:::eneo-object-content"]
     },
     {
@@ -278,6 +279,10 @@ use the same rule with the portable multipart envelope derived from configured
 transport settings. File and Icon reject envelope + 1 before capture or disk
 spooling.
 
+Business limits apply to the user's original upload. Generated text, model
+input, and page variants may be larger and are bounded by the selected
+backend's operator ceiling instead of a second business limit.
+
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
 enabled. These are deployment controls, not tenant policy.
@@ -294,14 +299,14 @@ logs.
 
 Object content has these explicit runtime outcomes:
 
-| Deployment state | Process | Readiness / operations |
-| --- | --- | --- |
-| Remote settings absent; no active object-store rows | Starts inline-capable | Healthy `object_store_not_configured`; local work continues |
-| Remote settings absent; active object-store rows exist | Starts fail-closed | `configuration_required`; remote content is not stranded silently |
-| Any blank, partial, or invalid remote settings | Startup fails | Clear configuration validation error |
-| Complete settings; PostgreSQL and endpoint available | Starts inline + object-store capable | Healthy `ready` |
-| Complete settings; endpoint temporarily unavailable | Stays live | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
-| Reachable bucket not paired with this PostgreSQL database | Startup fails | `configuration_required`; reconciliation does not mutate rows or objects |
+| Deployment state                                          | Process                              | Readiness / operations                                                                                       |
+| --------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Remote settings absent; no active object-store rows       | Starts inline-capable                | Healthy `object_store_not_configured`; local work continues                                                  |
+| Remote settings absent; active object-store rows exist    | Starts fail-closed                   | `configuration_required`; remote content is not stranded silently                                            |
+| Any blank, partial, or invalid remote settings            | Startup fails                        | Clear configuration validation error                                                                         |
+| Complete settings; PostgreSQL and endpoint available      | Starts inline + object-store capable | Healthy `ready`                                                                                              |
+| Complete settings; endpoint temporarily unavailable       | Stays live                           | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
+| Reachable bucket not paired with this PostgreSQL database | Startup fails                        | `configuration_required`; reconciliation does not mutate rows or objects                                     |
 
 Selecting **Object store** in **Admin > Storage** fails clearly while the
 endpoint is unavailable or incompatible; the previous committed policy remains

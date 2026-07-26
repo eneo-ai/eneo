@@ -606,3 +606,127 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
             real_object_store.store,
             await _remote_object_keys(object_content_database),
         )
+
+
+@pytest.mark.asyncio
+async def test_generated_file_family_content_uses_operator_not_source_business_limit(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    original = b"%PDF-1"
+    extracted = b"expanded text"
+    page = b"\x89PNG page data"
+    source_business_maximum = len(original)
+
+    def prepared(name: str) -> PreparedFileUpload:
+        return PreparedFileUpload(
+            name=f"{name}.pdf",
+            file_type=FileType.TEXT,
+            display_media_type="application/pdf",
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes_source(original),
+                    declared_media_type="application/pdf",
+                    verified_media_type="application/pdf",
+                ),
+                PendingFileContent(
+                    variant=FileContentVariant.EXTRACTED_TEXT,
+                    chunks=_bytes_source(extracted),
+                    declared_media_type="text/plain",
+                    verified_media_type="text/plain",
+                ),
+            ),
+            derivatives=(
+                PreparedFileUpload(
+                    name=f"{name}-page.png",
+                    file_type=FileType.IMAGE,
+                    display_media_type="image/png",
+                    contents=(
+                        PendingFileContent(
+                            variant=FileContentVariant.DERIVED_PAGE,
+                            chunks=_bytes_source(page),
+                            declared_media_type="image/png",
+                            verified_media_type="image/png",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    inline_content = ObjectContentService(
+        real_object_store.settings,
+        object_content_database,
+    )
+    remote_content = _ControlledObjectContentService(
+        database=object_content_database,
+        real_object_store=real_object_store,
+    )
+
+    try:
+        for name, target, content_service in (
+            ("inline-generated", StorageKind.POSTGRES_INLINE, inline_content),
+            ("remote-generated", StorageKind.OBJECT_STORE, remote_content),
+        ):
+            operator_maximum = (
+                real_object_store.settings.inline_maximum_bytes
+                if target is StorageKind.POSTGRES_INLINE
+                else real_object_store.settings.maximum_multipart_bytes
+            )
+            snapshot = UploadAdmissionSnapshot(
+                policy_revision=42,
+                session_storage_target=target,
+                session_operator_ceiling_bytes=operator_maximum,
+                session_file_maximum_bytes=source_business_maximum,
+                session_image_maximum_bytes=source_business_maximum,
+                session_audio_maximum_bytes=source_business_maximum,
+                knowledge_file_maximum_bytes=source_business_maximum,
+                knowledge_audio_maximum_bytes=source_business_maximum,
+            )
+            async with object_content_database.session() as session:
+                user = await _user(session)
+                await _service(
+                    session=session,
+                    user=user,
+                    protocol=_PreparedFileProtocol(prepared(name)),
+                    object_content=content_service,
+                    snapshot=snapshot,
+                ).save_file(
+                    UploadFile(
+                        file=BytesIO(original),
+                        filename=f"{name}.pdf",
+                        headers={"content-type": "application/pdf"},
+                    )
+                )
+
+        async with object_content_database.session() as session, session.begin():
+            controls = (
+                await session.execute(
+                    sa.select(
+                        ObjectContents.size_bytes,
+                        ObjectContents.state,
+                        ObjectContents.storage_kind,
+                    )
+                    .join(
+                        FileContentReferences,
+                        FileContentReferences.content_id == ObjectContents.id,
+                    )
+                    .order_by(ObjectContents.storage_kind, ObjectContents.size_bytes)
+                )
+            ).all()
+
+        assert sorted(
+            size_bytes for size_bytes, _state, _storage_kind in controls
+        ) == sorted([len(original), len(extracted), len(page)] * 2)
+        assert {state for _size_bytes, state, _storage_kind in controls} == {
+            ContentState.AVAILABLE.value
+        }
+        assert {storage_kind for _size_bytes, _state, storage_kind in controls} == {
+            StorageKind.POSTGRES_INLINE.value,
+            StorageKind.OBJECT_STORE.value,
+        }
+    finally:
+        await _delete_remote_objects(
+            real_object_store.store,
+            await _remote_object_keys(object_content_database),
+        )

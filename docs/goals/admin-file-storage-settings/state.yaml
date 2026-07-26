@@ -806,7 +806,46 @@ tasks:
         stop_conditions:
           - "Stop before implementation if row-less object orphans are not bounded by the current prefix inventory, or if safe adoption requires remote I/O inside the product transaction."
           - "Do not commit until red tests fail for the intended behavior, focused/broad gates are green, the exact changed-path inventory and staged hash are frozen, and same-session Claude iteration 40 returns GREEN_LIGHT yes with MIN_SCORE >= 8."
-      next_gate: "Freeze the board-inclusive final hash, run the same-session exact-state verification, then commit with normal hooks only if green >= 8."
+      review_6:
+        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
+        head: "07a26dfc187813b6b69d19ad98206c4e9b421928"
+        coverage: "complete: 106 of 106 changed paths"
+        confirmed_resolved:
+          - "F11"
+          - "F12"
+        findings:
+          - "F13 genuine/P2: the tenant-admin policy projection includes deployment-global count, bytes, state, and oldest-content inventory facts."
+          - "F14 genuine/P2: generated File variants are captured against user-source business limits instead of only the selected backend's operator ceiling."
+        owner_direction: "This bounded cycle is [no-peer-review]. Claude iteration 44 was aborted and its output is unused; conserve peer-review capacity and use source verification, behavior-first tests, type/format/schema/frontend/docs checks, fresh repository review, and exact-head CI."
+        frozen_plan:
+          - "F13: keep tenant-admin read-only policy, limits, and capabilities on GET /object-content-policy; move global inventory to typed GET /object-content-inventory guarded by existing session, identity, and platform-admin dependencies. Do not add tenant filtering, per-tenant policy, or an authorization framework."
+          - "F13 UI: request and render inventory only for user.is_platform_admin; preserve one page-local state owner, generated API types, bounded inventory, and existing loading/error behavior."
+          - "F14: source business maximum applies only to ORIGINAL content. EXTRACTED_TEXT, MODEL_INPUT, DERIVED_PAGE, and other generated variants pass business_maximum_bytes=None so ObjectContentService owns operator-only target ceilings."
+          - "F14 canonical seam: PostgreSQL inline already maps None to its operator ceiling; object_store must map None to ObjectContentSettings.maximum_multipart_bytes instead of rejecting it."
+          - "Prove ordinary tenant admin cannot read inventory, platform admin can, generated payload above business policy and below operator ceiling succeeds for inline and real object store, and operator ceiling + 1 remains fail-closed."
+        prior_head_ci: "CI run 30199848475 completed fully green before Review 6 fixes; a fresh exact-head run remains mandatory."
+        implementation_result:
+          - "F13: DeploymentPolicyPublic now contains policy, effective limits, and sanitized capabilities only. A separate typed GET /object-content-inventory owns the bounded deployment-wide inventory and requires session auth, a user identity, and the existing platform-admin authority."
+          - "F13 UI: the storage page requests and renders inventory only for user.is_platform_admin; an ordinary tenant admin keeps read-only policy/limit/capability access without receiving global inventory facts. Generated OpenAPI and Eneo JS contracts own the split."
+          - "F14: FileService applies the business maximum only to ORIGINAL content. ObjectContentService maps business_maximum_bytes=None to the selected target's existing operator ceiling, including ObjectContentSettings.maximum_multipart_bytes for object storage."
+          - "PostgreSQL-inline remains the complete default. Object storage remains optional and adds no provider, fallback, migration, dual-write, or per-tenant path."
+        red_evidence:
+          - "Backend focused tests => 4 expected failures before implementation: inventory still embedded, route absent, and object-store operator-only capture rejected."
+          - "Eneo JS endpoint test => 2 expected failures before getInventory and the split route existed."
+          - "Real PostgreSQL/SeaweedFS tests => 2 expected failures before implementation: tenant admin received inventory and generated File content was rejected by the source business limit."
+        green_evidence:
+          - "Focused backend policy/capture tests => 29 passed."
+          - "Focused real PostgreSQL/SeaweedFS authority and generated-family parity tests => 2 passed; both complete affected integration files => 13 passed."
+          - "Complete object-content integration directory => 118 passed in 281.50 seconds. Whole backend non-integration => 3973 passed, 1254 deselected in 30.11 seconds."
+          - "Strict whole-backend Pyright => 0 errors, 0 warnings, 0 informations; changed Python Ruff/format => passed."
+          - "OpenAPI-to-schema drift regeneration => exact match. Eneo JS => 15 tests passed and lint passed; Svelte check => 0 errors/0 warnings; whole frontend lint => passed with only the pre-existing docs img warning."
+          - "docs.eneo.ai production build => 32 pages generated and 28 indexed; concise docs-site and deployment guidance explain inventory authority and generated-variant operator ceilings."
+        environment_gate:
+          - "The focused Chromium component test could not launch in this managed macOS sandbox: MachPort bootstrap permission denied before collection. The component behavior test is present, Svelte check is green, and orchestrator/CI must run it in the normal browser-capable profile before publication."
+        complexity_and_deletion:
+          - "F13 reuses the existing bounded inventory repository and platform-admin dependency; the policy projection loses duplicate inventory ownership instead of adding tenant filtering or an auth framework."
+          - "F14 is O(1) admission at the canonical capture owner and reuses existing target ceilings. No second read, provider branch, setting, extractor abstraction, or compatibility path was added."
+      next_gate: "Orchestrator verifies the exact unstaged freeze and runs the focused Chromium component test in a browser-capable profile before any commit; fresh review and exact-head CI remain mandatory."
 
   - id: T007
     type: pm

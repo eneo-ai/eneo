@@ -251,14 +251,14 @@ class ObjectContentService:
             spool_memory_bytes = self._core_settings.inline_io_chunk_bytes
             multipart_part_bytes = self._core_settings.inline_io_chunk_bytes
         else:
-            if business_maximum_bytes is None:
-                raise ValueError(
-                    "business_maximum_bytes is required for object-store capture"
-                )
             settings, _store = self._require_object_store()
-            maximum_size_bytes = min(
-                business_maximum_bytes,
-                settings.maximum_multipart_bytes,
+            maximum_size_bytes = (
+                settings.maximum_multipart_bytes
+                if business_maximum_bytes is None
+                else min(
+                    business_maximum_bytes,
+                    settings.maximum_multipart_bytes,
+                )
             )
             spool_memory_bytes = settings.spool_memory_bytes
             multipart_part_bytes = settings.multipart_part_bytes

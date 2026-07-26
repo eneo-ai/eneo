@@ -216,7 +216,6 @@ def test_policy_put_boundary_accepts_json_safe_maximum_and_rejects_next_value(
         },
         "limits": [],
         "capabilities": [],
-        "inventory": [],
     }
     monkeypatch.setattr(
         deployment_policy_router,
@@ -318,6 +317,25 @@ def test_policy_mutation_composes_existing_session_and_identity_fences() -> None
     assert route.responses[409]["model"].__name__ == "GeneralError"
 
 
+def test_inventory_read_composes_existing_platform_authority_fences() -> None:
+    endpoint = getattr(
+        deployment_policy_router,
+        "get_object_content_inventory",
+        None,
+    )
+    assert endpoint is not None
+    route = next(
+        route
+        for route in router.routes
+        if isinstance(route, APIRoute) and route.endpoint is endpoint
+    )
+    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+    assert require_session_auth in dependency_calls
+    assert require_user_identity in dependency_calls
+    assert require_platform_admin in dependency_calls
+    assert route.responses[403]["model"].__name__ == "GeneralError"
+
+
 def test_policy_get_uses_a_non_transactional_request_session() -> None:
     route = next(
         route
@@ -374,15 +392,6 @@ async def test_concurrent_policy_projections_close_transactions_before_readiness
             await asyncio.sleep(0)
             return policy
 
-    class InventoryRepository:
-        def __init__(self, session: Session) -> None:
-            self._session = session
-
-        async def inventory_facts(self) -> tuple[object, ...]:
-            assert self._session.in_transaction()
-            await asyncio.sleep(0)
-            return ()
-
     class Runtime:
         inline_maximum_bytes = 100
         object_store_maximum_bytes = None
@@ -417,11 +426,6 @@ async def test_concurrent_policy_projections_close_transactions_before_readiness
         deployment_policy_router,
         "DeploymentPolicyRepository",
         PolicyRepository,
-    )
-    monkeypatch.setattr(
-        deployment_policy_router,
-        "ObjectContentReconciliationRepository",
-        InventoryRepository,
     )
     monkeypatch.setattr(
         deployment_policy_router,
@@ -522,6 +526,7 @@ def test_policy_router_is_registered_on_the_admin_surface() -> None:
     methods = set(app.openapi()["paths"]["/admin/object-content-policy"])
 
     assert methods == {"get", "put"}
+    assert set(app.openapi()["paths"]["/admin/object-content-inventory"]) == {"get"}
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { EneoError, type DeploymentPolicy, type DeploymentPolicyUpdate } from "@eneo/eneo-js";
+  import {
+    EneoError,
+    type DeploymentPolicy,
+    type DeploymentPolicyUpdate,
+    type ObjectContentInventory
+  } from "@eneo/eneo-js";
   import { AlertCircle, CheckCircle2, Database, HardDrive, Info, Loader2 } from "lucide-svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -17,7 +22,7 @@
   type StorageTarget = DeploymentPolicy["policy"]["new_write_storage_target"];
   type ReadinessCode = DeploymentPolicy["capabilities"][number]["readiness_code"];
   type UploadUseCase = DeploymentPolicy["limits"][number]["use_case"];
-  type ContentState = DeploymentPolicy["inventory"][number]["state"];
+  type ContentState = ObjectContentInventory["inventory"][number]["state"];
 
   const DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE = 9046;
   const OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE = 9047;
@@ -26,6 +31,7 @@
   const { user } = getAppContext();
 
   let deploymentPolicy = $state<DeploymentPolicy | null>(null);
+  let contentInventory = $state<ObjectContentInventory | null>(null);
   let loading = $state(true);
   let reloading = $state(false);
   let loadError = $state(false);
@@ -82,14 +88,23 @@
     if (initialLoad) loading = true;
     else reloading = true;
     loadError = false;
+    contentInventory = null;
 
     try {
-      applyPolicy(await eneo.objectContentPolicy.get());
+      const [nextPolicy, nextInventory] = await Promise.all([
+        eneo.objectContentPolicy.get(),
+        user.is_platform_admin === true
+          ? eneo.objectContentPolicy.getInventory()
+          : Promise.resolve(null)
+      ]);
+      applyPolicy(nextPolicy);
+      contentInventory = nextInventory;
       stale = false;
       targetUnavailable = false;
       saveOutcomeUnknown = false;
       saveSuccess = false;
-    } catch {
+    } catch (error: unknown) {
+      if (hasStatus(error, 403)) authorityRevoked = true;
       loadError = true;
     } finally {
       loading = false;
@@ -133,8 +148,13 @@
       applyPolicy(await eneo.objectContentPolicy.replace(replacement));
       saveSuccess = true;
     } catch (error: unknown) {
-      if (hasStatus(error, 403)) authorityRevoked = true;
-      else if (error instanceof EneoError && error.code === DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE) {
+      if (hasStatus(error, 403)) {
+        authorityRevoked = true;
+        contentInventory = null;
+      } else if (
+        error instanceof EneoError &&
+        error.code === DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE
+      ) {
         stale = true;
       } else if (
         error instanceof EneoError &&
@@ -576,49 +596,51 @@
             </div>
           </section>
 
-          <section class="space-y-4 pb-8">
-            <div class="max-w-3xl space-y-1">
-              <h2 class="text-lg font-semibold">{m.storage_inventory_title()}</h2>
-              <p class="text-secondary text-sm leading-6">
-                {m.storage_inventory_description()}
-              </p>
-            </div>
-            {#if deploymentPolicy.inventory.length === 0}
-              <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
-                {m.storage_inventory_empty()}
-              </p>
-            {:else}
-              <div class="border-default overflow-hidden rounded-lg border">
-                <Table.Root class="min-w-[640px]">
-                  <Table.Caption class="sr-only">
-                    {m.storage_inventory_caption()}
-                  </Table.Caption>
-                  <Table.Header>
-                    <Table.Row>
-                      <Table.Head>{m.storage_inventory_target()}</Table.Head>
-                      <Table.Head>{m.storage_inventory_state()}</Table.Head>
-                      <Table.Head>{m.storage_inventory_count()}</Table.Head>
-                      <Table.Head>{m.storage_inventory_bytes()}</Table.Head>
-                      <Table.Head>{m.storage_inventory_oldest()}</Table.Head>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {#each deploymentPolicy.inventory as item (`${item.target}-${item.state}`)}
-                      <Table.Row>
-                        <Table.Cell class="font-medium"
-                          >{storageTargetLabel(item.target)}</Table.Cell
-                        >
-                        <Table.Cell>{contentStateLabel(item.state)}</Table.Cell>
-                        <Table.Cell>{item.count}</Table.Cell>
-                        <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
-                        <Table.Cell>{inventoryDate(item.oldest_created_at)}</Table.Cell>
-                      </Table.Row>
-                    {/each}
-                  </Table.Body>
-                </Table.Root>
+          {#if contentInventory}
+            <section class="space-y-4 pb-8">
+              <div class="max-w-3xl space-y-1">
+                <h2 class="text-lg font-semibold">{m.storage_inventory_title()}</h2>
+                <p class="text-secondary text-sm leading-6">
+                  {m.storage_inventory_description()}
+                </p>
               </div>
-            {/if}
-          </section>
+              {#if contentInventory.inventory.length === 0}
+                <p class="border-default text-muted rounded-lg border px-4 py-3 text-sm">
+                  {m.storage_inventory_empty()}
+                </p>
+              {:else}
+                <div class="border-default overflow-hidden rounded-lg border">
+                  <Table.Root class="min-w-[640px]">
+                    <Table.Caption class="sr-only">
+                      {m.storage_inventory_caption()}
+                    </Table.Caption>
+                    <Table.Header>
+                      <Table.Row>
+                        <Table.Head>{m.storage_inventory_target()}</Table.Head>
+                        <Table.Head>{m.storage_inventory_state()}</Table.Head>
+                        <Table.Head>{m.storage_inventory_count()}</Table.Head>
+                        <Table.Head>{m.storage_inventory_bytes()}</Table.Head>
+                        <Table.Head>{m.storage_inventory_oldest()}</Table.Head>
+                      </Table.Row>
+                    </Table.Header>
+                    <Table.Body>
+                      {#each contentInventory.inventory as item (`${item.target}-${item.state}`)}
+                        <Table.Row>
+                          <Table.Cell class="font-medium"
+                            >{storageTargetLabel(item.target)}</Table.Cell
+                          >
+                          <Table.Cell>{contentStateLabel(item.state)}</Table.Cell>
+                          <Table.Cell>{item.count}</Table.Cell>
+                          <Table.Cell>{formatBytes(item.bytes)}</Table.Cell>
+                          <Table.Cell>{inventoryDate(item.oldest_created_at)}</Table.Cell>
+                        </Table.Row>
+                      {/each}
+                    </Table.Body>
+                  </Table.Root>
+                </div>
+              {/if}
+            </section>
+          {/if}
         {/if}
       </div>
     </Settings.Page>

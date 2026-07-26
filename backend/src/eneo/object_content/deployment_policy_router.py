@@ -70,6 +70,9 @@ class DeploymentPolicyPublic(BaseModel):
     policy: DeploymentPolicyPublicValues
     limits: tuple[UploadLimitProjection, ...]
     capabilities: tuple[CapabilityPublic, ...]
+
+
+class ObjectContentInventoryPublic(BaseModel):
     inventory: tuple[InventoryPublic, ...]
 
 
@@ -81,9 +84,6 @@ async def _read_projection(
 
     async with session.begin():
         policy = await DeploymentPolicyRepository(session).get()
-        inventory_facts = await ObjectContentReconciliationRepository(
-            session
-        ).inventory_facts()
 
     capabilities = tuple(
         CapabilityPublic(
@@ -93,16 +93,6 @@ async def _read_projection(
             readiness_code=fact.readiness_code,
         )
         for fact in await object_content_runtime.storage_capabilities()
-    )
-    inventory = tuple(
-        InventoryPublic(
-            target=fact.storage_kind,
-            state=fact.state,
-            count=fact.count,
-            bytes=fact.size_bytes,
-            oldest_created_at=fact.oldest_created_at,
-        )
-        for fact in inventory_facts
     )
     return DeploymentPolicyPublic(
         policy=DeploymentPolicyPublicValues(
@@ -124,7 +114,29 @@ async def _read_projection(
             ),
         ),
         capabilities=capabilities,
-        inventory=inventory,
+    )
+
+
+async def _read_inventory(session: AsyncSession) -> ObjectContentInventoryPublic:
+    if session.in_transaction():
+        raise RuntimeError("Inventory projection requires a non-transactional session")
+
+    async with session.begin():
+        inventory_facts = await ObjectContentReconciliationRepository(
+            session
+        ).inventory_facts()
+
+    return ObjectContentInventoryPublic(
+        inventory=tuple(
+            InventoryPublic(
+                target=fact.storage_kind,
+                state=fact.state,
+                count=fact.count,
+                bytes=fact.size_bytes,
+                oldest_created_at=fact.oldest_created_at,
+            )
+            for fact in inventory_facts
+        )
     )
 
 
@@ -133,7 +145,7 @@ async def _read_projection(
     response_model=DeploymentPolicyPublic,
     description=(
         "Get the deployment-wide new-write storage target, upload limits, "
-        "and sanitized capability and inventory facts."
+        "and sanitized capability facts."
     ),
     responses=responses.get_responses([403]),
 )
@@ -147,6 +159,29 @@ async def get_deployment_policy(
     # while this endpoint awaits object-store readiness.
     validate_permission(container.user(), Permission.ADMIN)
     return await _read_projection(cast(AsyncSession, container.session()))
+
+
+@router.get(
+    "/object-content-inventory",
+    response_model=ObjectContentInventoryPublic,
+    description=(
+        "Get bounded deployment-wide object-content inventory facts. "
+        "Platform administrators only."
+    ),
+    dependencies=[
+        Depends(require_session_auth),
+        Depends(require_user_identity),
+        Depends(require_platform_admin),
+    ],
+    responses=responses.get_responses([403]),
+)
+async def get_object_content_inventory(
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_transaction=False)),
+    ],
+) -> ObjectContentInventoryPublic:
+    return await _read_inventory(cast(AsyncSession, container.session()))
 
 
 @router.put(

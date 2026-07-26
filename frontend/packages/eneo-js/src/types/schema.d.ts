@@ -5868,7 +5868,7 @@ export interface paths {
     };
     /**
      * Get Deployment Policy
-     * @description Get the deployment-wide new-write storage target, upload limits, and sanitized capability and inventory facts.
+     * @description Get the deployment-wide new-write storage target, upload limits, and sanitized capability facts.
      */
     get: operations["get_deployment_policy_api_v1_admin_object_content_policy_get"];
     /**
@@ -5876,6 +5876,26 @@ export interface paths {
      * @description Replace the deployment-wide new-write storage target and upload limits using the expected revision. The target affects eligible new writes only and never moves existing content.
      */
     put: operations["replace_deployment_policy_api_v1_admin_object_content_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/object-content-inventory": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Object Content Inventory
+     * @description Get bounded deployment-wide object-content inventory facts. Platform administrators only.
+     */
+    get: operations["get_object_content_inventory_api_v1_admin_object_content_inventory_get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -11142,8 +11162,6 @@ export interface components {
       limits: components["schemas"]["UploadLimitProjection"][];
       /** Capabilities */
       capabilities: components["schemas"]["CapabilityPublic"][];
-      /** Inventory */
-      inventory: components["schemas"]["InventoryPublic"][];
     };
     /** DeploymentPolicyPublicValues */
     DeploymentPolicyPublicValues: {
@@ -13774,6 +13792,11 @@ export interface components {
       reason: string | null;
       /** Backend */
       backend: string;
+    };
+    /** ObjectContentInventoryPublic */
+    ObjectContentInventoryPublic: {
+      /** Inventory */
+      inventory: components["schemas"]["InventoryPublic"][];
     };
     /**
      * ObjectContentReadinessCode
@@ -39680,6 +39703,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_object_content_inventory_api_v1_admin_object_content_inventory_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObjectContentInventoryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

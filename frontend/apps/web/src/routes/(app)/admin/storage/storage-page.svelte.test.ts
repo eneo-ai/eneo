@@ -4,6 +4,7 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const getPolicy = vi.hoisted(() => vi.fn());
+const getInventory = vi.hoisted(() => vi.fn());
 const replacePolicy = vi.hoisted(() => vi.fn());
 const testUser = vi.hoisted(() => ({ isPlatformAdmin: false }));
 
@@ -19,6 +20,7 @@ vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     objectContentPolicy: {
       get: getPolicy,
+      getInventory,
       replace: replacePolicy
     }
   })
@@ -112,6 +114,12 @@ function policy(overrides: Record<string, unknown> = {}) {
         readiness_code: "object_store_not_configured"
       }
     ],
+    ...overrides
+  };
+}
+
+function inventory() {
+  return {
     inventory: [
       {
         target: "postgres_inline",
@@ -120,8 +128,7 @@ function policy(overrides: Record<string, unknown> = {}) {
         bytes: 4096,
         oldest_created_at: "2026-07-20T10:00:00Z"
       }
-    ],
-    ...overrides
+    ]
   };
 }
 
@@ -129,6 +136,8 @@ describe("admin storage settings page", () => {
   beforeEach(() => {
     testUser.isPlatformAdmin = false;
     getPolicy.mockReset();
+    getInventory.mockReset();
+    getInventory.mockResolvedValue(inventory());
     replacePolicy.mockReset();
   });
 
@@ -146,8 +155,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("heading", { name: "storage_settings_title" }))
       .toBeVisible();
-    await expect.element(page.getByText("storage_inventory_title")).toBeVisible();
-    await expect.element(page.getByText("4 KB")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
   });
 
   test("shows a failed initial read and retries through the same policy owner", async () => {
@@ -177,6 +185,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByRole("button", { name: "storage_settings_save" }))
       .not.toBeInTheDocument();
+    expect(getInventory).not.toHaveBeenCalled();
   });
 
   test("lets a platform administrator replace all policy values and reports pending and success", async () => {
@@ -286,6 +295,7 @@ describe("admin storage settings page", () => {
     await page.getByRole("button", { name: "storage_settings_save" }).click();
 
     await expect.element(page.getByText("storage_settings_read_only_title")).toBeVisible();
+    await expect.element(page.getByText("storage_inventory_title")).not.toBeInTheDocument();
     await expect.element(page.getByLabelText("storage_limit_session_file")).toBeDisabled();
     await expect
       .element(page.getByRole("button", { name: "storage_settings_save" }))
@@ -397,6 +407,7 @@ describe("admin storage settings page", () => {
   });
 
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
+    testUser.isPlatformAdmin = true;
     getPolicy.mockResolvedValue(policy());
 
     render(StoragePage);
@@ -420,5 +431,6 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByText("storage_content_state_available")).toBeVisible();
     await expect.element(page.getByText("4 KB")).toBeVisible();
     await expect.element(page.getByText("Jul 20, 2026")).toBeVisible();
+    expect(getInventory).toHaveBeenCalledTimes(1);
   });
 });

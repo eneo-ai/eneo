@@ -206,13 +206,18 @@ class FileService:
     ) -> _CapturedPreparedFile:
         contents: list[_CapturedPendingContent] = []
         for pending in prepared.contents:
+            source_business_maximum_bytes = (
+                business_maximum_bytes
+                if pending.variant is FileContentVariant.ORIGINAL
+                else None
+            )
             captured = await stack.enter_async_context(
                 self._object_content.capture_for_target(
                     pending.chunks,
                     storage_kind=storage_kind,
                     declared_media_type=pending.declared_media_type,
                     verified_media_type=pending.verified_media_type,
-                    business_maximum_bytes=business_maximum_bytes,
+                    business_maximum_bytes=source_business_maximum_bytes,
                 )
             )
             contents.append(

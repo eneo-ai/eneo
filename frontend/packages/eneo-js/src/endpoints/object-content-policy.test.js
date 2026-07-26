@@ -8,6 +8,7 @@ test("createEneo exposes the object content policy resource", () => {
   const eneo = createEneo({ baseUrl: "https://example.test" });
 
   assert.equal(typeof eneo.objectContentPolicy.get, "function");
+  assert.equal(typeof eneo.objectContentPolicy.getInventory, "function");
   assert.equal(typeof eneo.objectContentPolicy.replace, "function");
 });
 
@@ -16,7 +17,7 @@ test("object content policy uses the deployment-wide GET and replacement PUT con
   const objectContentPolicy = initObjectContentPolicy({
     fetch: async (endpoint, request) => {
       calls.push({ endpoint, request });
-      return { policy: { revision: 4 }, limits: [], capabilities: [], inventory: [] };
+      return { policy: { revision: 4 }, limits: [], capabilities: [] };
     }
   });
   const replacement = {
@@ -29,11 +30,16 @@ test("object content policy uses the deployment-wide GET and replacement PUT con
   };
 
   await objectContentPolicy.get();
+  await objectContentPolicy.getInventory();
   await objectContentPolicy.replace(replacement);
 
   assert.deepEqual(calls, [
     {
       endpoint: "/api/v1/admin/object-content-policy",
+      request: { method: "get" }
+    },
+    {
+      endpoint: "/api/v1/admin/object-content-inventory",
       request: { method: "get" }
     },
     {

@@ -159,6 +159,10 @@ mean “more services.”
 | Platform admin | Set the one deployment-wide new-write target and business upload limits in **Admin > Storage**                                        |
 | Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
 
+Tenant admins can review policy, effective limits, and capability status.
+Deployment-wide content inventory spans tenants, so only platform admins can
+view it.
+
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
 upload limit. For PostgreSQL-inline session uploads, Eneo uses the smaller of
@@ -167,6 +171,11 @@ limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from deployment
 transport settings. File and Icon reject envelope + 1 before capture or disk
 spooling.
+
+Business limits apply to the user's original upload. Generated text, model
+input, and page variants can be larger; Eneo bounds those internal variants by
+the selected backend's operator ceiling instead of rejecting an otherwise valid
+upload against a second business limit.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same

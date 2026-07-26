@@ -113,19 +113,30 @@ async def test_object_store_target_rejects_portable_multipart_maximum_plus_one()
 
 
 @pytest.mark.asyncio
-async def test_object_store_target_requires_business_maximum() -> None:
-    service = _service()
-    with pytest.raises(
-        ValueError,
-        match="business_maximum_bytes is required for object-store capture",
-    ):
+async def test_object_store_generated_content_uses_operator_ceiling_without_business_limit() -> (
+    None
+):
+    service = _service(multipart_part_bytes=1)
+    portable_maximum = 10_000
+
+    async with service.capture_for_target(
+        _source(b"x" * portable_maximum),
+        storage_kind=StorageKind.OBJECT_STORE,
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+    ) as captured:
+        assert captured.size_bytes == portable_maximum
+
+    with pytest.raises(ContentTooLargeError) as error:
         async with service.capture_for_target(
-            _source(b"payload"),
+            _source(b"x" * (portable_maximum + 1)),
             storage_kind=StorageKind.OBJECT_STORE,
-            declared_media_type="application/octet-stream",
-            verified_media_type="application/octet-stream",
+            declared_media_type="text/plain",
+            verified_media_type="text/plain",
         ):
-            pytest.fail("object-store capture must have a business maximum")
+            pytest.fail("operator maximum + 1 must not be captured")
+
+    assert error.value.maximum_size_bytes == portable_maximum
 
 
 @pytest.mark.asyncio
