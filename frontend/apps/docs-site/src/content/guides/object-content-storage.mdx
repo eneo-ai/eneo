@@ -366,6 +366,12 @@ File/Icon columns once before dropping them. Measure this on a restored
 production-size database and plan a maintenance window proportional to total
 File/Icon bytes.
 
+The later range-verification revision uses the same maintenance window. It
+backfills at most 10,000 unexpected pre-production object descriptors in one
+transaction and stops before changing schema or data when that bound is
+exceeded. Earlier released versions have no supported File/Icon producer for
+these rows; contact Eneo before upgrading a deployment that trips this guard.
+
 ### Failure rule
 
 | Situation                                             | Eneo behavior                                                            |

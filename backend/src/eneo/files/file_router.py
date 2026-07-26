@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -35,12 +36,14 @@ from eneo.main.exceptions import (
     ErrorCodes,
     UnauthorizedException,
 )
+from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError, PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 _file_upload_container_dependency = get_container(
     with_user=True,
@@ -84,19 +87,30 @@ async def upload_file(
 
     audit_service = container.audit_service()
     session = cast(AsyncSession, container.session())
-    async with session.begin():
-        await audit_service.log_async(
-            tenant_id=current_user.tenant_id,
-            user=current_user,
-            action=ActionType.FILE_UPLOADED,
-            entity_type=EntityType.FILE,
-            entity_id=file.id,
-            description=f"Uploaded file '{file.name}' ({file.size} bytes)",
-            metadata=AuditMetadata.standard(
-                actor=current_user,
-                target=file,
-                extra=extra,
-            ),
+    try:
+        async with session.begin():
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                user=current_user,
+                action=ActionType.FILE_UPLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=file,
+                    extra=extra,
+                ),
+            )
+    except SQLAlchemyError as exc:
+        # FileService has already committed the File family. A transient audit
+        # lookup failure must not report that successful upload as failed.
+        logger.warning(
+            "File upload committed but audit logging was unavailable",
+            extra={
+                "file_id": str(file.id),
+                "error_type": type(exc).__name__,
+            },
         )
 
     return file

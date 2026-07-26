@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.files import file_router
@@ -60,7 +61,14 @@ def test_upload_route_reuses_one_non_transactional_authenticated_container() -> 
     }
 
 
-def test_upload_request_resolves_shared_container_once_before_file_work() -> None:
+@pytest.mark.parametrize(
+    "audit_error",
+    [None, SQLAlchemyError("audit lookup unavailable")],
+    ids=["audit-available", "audit-unavailable-after-commit"],
+)
+def test_upload_request_resolves_shared_container_once_before_file_work(
+    audit_error: SQLAlchemyError | None,
+) -> None:
     now = datetime.now(UTC)
     saved = FileInfo(
         id=uuid4(),
@@ -100,6 +108,7 @@ def test_upload_request_resolves_shared_container_once_before_file_work() -> Non
 
     file_service.save_file.side_effect = save_file
     audit_service = AsyncMock()
+    audit_service.log_async.side_effect = audit_error
     container = MagicMock()
     container.file_service.return_value = file_service
     container.audit_service.return_value = audit_service

@@ -522,6 +522,13 @@ copied payloads with the legacy File/Icon columns once and contracts the old
 schema. Measure this pass on a restored production-size database and reserve a
 maintenance window proportional to total File/Icon bytes.
 
+The later range-verification revision uses the same maintenance window. It
+backfills at most 10,000 unexpected pre-production object descriptors in one
+transaction and aborts before changing schema or data when that bound is
+exceeded. Released Eneo versions before this revision have no supported
+File/Icon producer for these rows; contact Eneo before upgrading a deployment
+that trips this guard.
+
 Policy rollback does not move bytes. To stop new remote placement while keeping
 the current version, select
 `postgres_inline` in **Admin > Storage**. Existing remote content still needs

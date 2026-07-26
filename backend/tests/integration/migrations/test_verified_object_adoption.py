@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
@@ -241,3 +242,47 @@ def test_verified_adoption_and_chunk_manifest_round_trip_has_one_head() -> None:
             content_id=empty_id,
             payload=b"",
         )
+
+        command.downgrade(config, _VERIFIED_ADOPTION_REVISION)
+        assert _current_revision(database_url) == _VERIFIED_ADOPTION_REVISION
+        connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    ALTER TABLE object_store_objects
+                    RENAME TO object_store_objects_seed;
+                    CREATE VIEW object_store_objects AS
+                    SELECT descriptor.*
+                    FROM object_store_objects_seed AS descriptor
+                    CROSS JOIN generate_series(1, 5001)
+                    """
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with pytest.raises(
+            DBAPIError,
+            match="object verification backfill found 10002 descriptors",
+        ):
+            command.upgrade(config, "head")
+
+        assert _current_revision(database_url) == _VERIFIED_ADOPTION_REVISION
+        connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT count(*)
+                    FROM information_schema.columns
+                    WHERE table_name = 'object_store_objects'
+                      AND column_name IN (
+                          'verification_chunk_size_bytes',
+                          'verification_chunk_sha256'
+                      )
+                    """
+                )
+                assert cursor.fetchone() == (0,)
+        finally:
+            connection.close()

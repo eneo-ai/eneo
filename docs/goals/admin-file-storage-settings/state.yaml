@@ -539,24 +539,24 @@ tasks:
     assignee: PM
     status: active
     reasoning_hint: high
-    objective: "Post top-level /review, wait for complete repository review and CI on the exact head, fix verified findings, and repeat until current and green."
+    objective: "Close final Review 14 findings F20/F21, publish one final head, and require exact-head CI before merge."
     constraints:
       - "Never merge while anything required is pending, stale, unexpectedly skipped, failing, or unverified."
-      - "Re-run /review after every pushed fix."
-      - "Use one consolidated same-session Claude gate for the final source diff; do not create per-finding review artifacts."
+      - "Owner explicitly ended peer/repository review after F20/F21; do not create more review artifacts or post another /review."
+      - "Use focused behavior tests and exact-head CI for the final bounded fix."
     expected_output:
       - "Exact-head review result"
       - "Required CI/check result"
       - "Resolved or rejected findings with evidence"
     receipt:
       result: in_progress
-      summary: "Reviews 2-13 produced verified F1-F19. F1-F18 are fixed at canonical owners; F19's bounded verified object-store Range read is implemented and locally green. One consolidated final gate, push, complete /review, and exact-head CI remain before merge."
+      summary: "Reviews 2-14 produced verified F1-F21. F1-F21 are fixed at canonical owners. Review 14's final bounded migration and post-commit audit fixes are locally green; one commit, push, and exact-head CI remain before merge."
       canonical_history: "GitHub review comments own finding detail. This board retains only current invariants, disposition ranges, decisive validation, and publication gates."
       current_exact_head:
-        sha: "87e79581a7dfe6f2d2313bc97440772863307a5f"
+        sha: "f45662609034fac9f012f625792f9964ef0929b5 (last pushed head before final F20/F21 fix)"
         branch: "feature/admin-file-storage-settings"
         pr: "https://github.com/eneo-ai/eneo/pull/601"
-        worktree: "Uncommitted F19 source, migration, tests, and concise documentation are under final validation."
+        worktree: "Uncommitted F20/F21 migration, route, tests, and concise operations guidance are under final validation."
         ci:
           - "Exact pushed head 87e7958 was fully green before the F19 review finding."
           - "The next pushed head requires a complete new CI run; old success is not transferable."
@@ -577,6 +577,8 @@ tasks:
         - "F13-F16 fixed and verified in Reviews 6-8."
         - "F17-F18 fixed and verified in Reviews 11-12."
         - "F19 implemented: ranged object reads no longer full-GET or full-spool the object."
+        - "F20 fixed: the verification migration has an enforced pre-DDL inventory bound and no longer claims transaction-local loops release locks or WAL."
+        - "F21 fixed: database failures in the separate post-commit audit phase no longer turn a committed File upload into a false 500."
       canonical_reviews:
         - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
         - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
@@ -585,6 +587,7 @@ tasks:
         - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
         - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
         - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5084085653"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5084688950"
       peer_review:
         session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
         model: "Claude Opus 5 1M, high effort, read-only"
@@ -594,7 +597,7 @@ tasks:
         - "3985 backend non-integration tests passed; 1256 deselected."
         - "PostgreSQL 13 migration roundtrips passed for legacy descriptors, empty content, split compatibility, and one Alembic head."
         - "Whole-backend Pyright 0/0/0, changed-file Ruff/format, diff check, and docs-site build passed."
-      next_gate: "Run one consolidated final peer/diff gate, commit and push one head, post one /review, then require complete finding-free review and all CI green before T007 merge."
+      next_gate: "Commit and push the bounded F20/F21 fix, then require all exact-head CI green before T007 merge; no further review per owner direction."
 
   - id: T016
     type: worker
@@ -687,4 +690,5 @@ checks:
       - "Ruff/format, Pyright 0/0, route metadata, exact generated-schema drift, and docs-site build => passed."
       - "Claude iteration 51 raised P3 follow-ups; iteration 52 verified them applied => GREEN_LIGHT yes, MIN_SCORE 9 (.codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T154110Z.md)."
       - "Goal Maker checker and diff checks must pass on the final staged hash."
-      - "Fresh exact-head CI and complete finding-free /review remain required before merge."
+      - "Focused F20/F21 RED/GREEN, PostgreSQL 13 migration rollback proof, Pyright, Ruff/format, docs build, and diff checks must pass before push."
+      - "Fresh exact-head CI remains required before merge; owner explicitly ended further review cycles."

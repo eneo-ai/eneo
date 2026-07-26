@@ -18,9 +18,30 @@ depends_on: str | Sequence[str] | None = None
 _TABLE = "object_store_objects"
 _CHUNK_SIZE = "verification_chunk_size_bytes"
 _CHUNK_SHA256 = "verification_chunk_sha256"
+_MAX_LEGACY_DESCRIPTORS = 10_000
 
 
 def upgrade() -> None:
+    # This revision ships before object-store File/Icon producers are available
+    # in a released Eneo version. Fail before any DDL or data rewrite if an
+    # unexpected pre-production inventory is too large for one maintenance
+    # transaction; an in-transaction loop would not release locks or WAL.
+    op.execute(f"""
+        DO $$
+        DECLARE
+            descriptor_count bigint;
+        BEGIN
+            SELECT count(*) INTO descriptor_count FROM {_TABLE};
+            IF descriptor_count > {_MAX_LEGACY_DESCRIPTORS} THEN
+                RAISE EXCEPTION
+                    'object verification backfill found % descriptors; '
+                    'maximum supported in the maintenance migration is '
+                    '{_MAX_LEGACY_DESCRIPTORS}',
+                    descriptor_count;
+            END IF;
+        END;
+        $$
+    """)
     op.add_column(
         _TABLE,
         sa.Column(_CHUNK_SIZE, sa.BigInteger(), nullable=True),
@@ -34,36 +55,17 @@ def upgrade() -> None:
     )
 
     # Existing descriptors keep today's whole-object verification semantics.
-    # Batching bounds row locks and WAL pressure if an operator already has a
-    # large pre-production object-content inventory.
+    # Backend and worker remain stopped while this bounded update runs.
     op.execute(f"""
-        DO $$
-        DECLARE
-            updated_rows integer;
-        BEGIN
-            LOOP
-                WITH batch AS (
-                    SELECT descriptor.ctid, content.size_bytes, content.sha256
-                    FROM {_TABLE} AS descriptor
-                    JOIN object_contents AS content
-                      ON content.id = descriptor.content_id
-                    WHERE descriptor.{_CHUNK_SIZE} IS NULL
-                       OR descriptor.{_CHUNK_SHA256} IS NULL
-                    ORDER BY descriptor.content_id
-                    LIMIT 1000
-                    FOR UPDATE OF descriptor SKIP LOCKED
-                )
-                UPDATE {_TABLE} AS descriptor
-                SET {_CHUNK_SIZE} = GREATEST(batch.size_bytes, 1),
-                    {_CHUNK_SHA256} = batch.sha256
-                FROM batch
-                WHERE descriptor.ctid = batch.ctid;
-
-                GET DIAGNOSTICS updated_rows = ROW_COUNT;
-                EXIT WHEN updated_rows = 0;
-            END LOOP;
-        END;
-        $$
+        UPDATE {_TABLE} AS descriptor
+        SET {_CHUNK_SIZE} = GREATEST(content.size_bytes, 1),
+            {_CHUNK_SHA256} = content.sha256
+        FROM object_contents AS content
+        WHERE content.id = descriptor.content_id
+          AND (
+              descriptor.{_CHUNK_SIZE} IS NULL
+              OR descriptor.{_CHUNK_SHA256} IS NULL
+          )
     """)
     # The descriptor update fires the existing deferred ownership audit. Run
     # it before ALTER TABLE so PostgreSQL has no pending trigger events.
