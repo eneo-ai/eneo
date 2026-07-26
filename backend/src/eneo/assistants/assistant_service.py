@@ -593,11 +593,16 @@ class AssistantService:
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
+        validation_plan = (
+            skill_plan.for_on_demand_save_validation()
+            if validate_all_on_demand_candidates
+            else skill_plan
+        )
         candidate_ids = set(on_demand_skill_ids_requiring_validation)
         if validate_all_on_demand_candidates:
             candidate_ids.update(
                 binding.binding.skill_id
-                for binding in skill_plan.available
+                for binding in validation_plan.available
                 if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
             )
         candidate_skill_ids = frozenset(candidate_ids)
@@ -609,9 +614,9 @@ class AssistantService:
                 )
             return
 
-        runtime = skill_plan.to_activation_runtime(
+        runtime = validation_plan.to_activation_runtime(
             selected_model_route=model.get_model_route(),
-            max_input_tokens=attachment_token_ceiling(model.max_input_tokens),
+            max_input_tokens=model.max_input_tokens,
             supports_tool_calling=model.supports_tool_calling,
         )
         snapshot = runtime.snapshot()
@@ -685,6 +690,7 @@ class AssistantService:
             candidate_skill_ids,
             messages=provider_input.messages,
             provider_tools=provider_input.tools,
+            provider_input_token_limit=attachment_token_ceiling(model.max_input_tokens),
         )
         rejected_provider_assessment = next(
             (

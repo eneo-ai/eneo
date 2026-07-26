@@ -356,13 +356,16 @@ class SkillActivationRuntime:
         *,
         messages: list[dict[str, Any]],
         provider_tools: list[dict[str, Any]],
+        provider_input_token_limit: int | None = None,
     ) -> tuple[SkillActivationCandidateAssessment, ...]:
         """Stage each candidate against the provider-visible request payload.
 
         Save-time preflight uses the same transcript mutation and token
         measurement as a real activation round. Each probe runs on a fork so
         neither the frozen turn state nor the caller's messages are changed.
-        Each selected on-demand candidate is measured exactly once.
+        Each selected on-demand candidate is measured exactly once. Save-time
+        callers may reserve question space with a lower provider-input limit;
+        the runtime's model window still owns Skill-share measurement.
         """
         if self._effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
             return ()
@@ -386,6 +389,7 @@ class SkillActivationRuntime:
                     "list[dict[str, object]]",
                     provider_tools,
                 ),
+                provider_input_token_limit=provider_input_token_limit,
             )
             snapshot = staged.snapshot()
             rejection_reason = next(
@@ -753,8 +757,15 @@ class SkillActivationRuntime:
         messages: list[dict[str, object]],
         provider_tools: list[dict[str, object]] | None = None,
         assistant_content: str | None = None,
+        provider_input_token_limit: int | None = None,
     ) -> SkillToolCallApplication:
         """Close internal calls and return external calls safe to dispatch."""
+
+        provider_limit = (
+            self._max_input_tokens
+            if provider_input_token_limit is None
+            else provider_input_token_limit
+        )
 
         internal = tuple(
             call for call in calls if call.name == SKILL_ACTIVATION_TOOL_NAME
@@ -884,7 +895,7 @@ class SkillActivationRuntime:
                     }
                 )
                 continue
-            if provider_measurement.tokens > self._max_input_tokens:
+            if provider_measurement.tokens > provider_limit:
                 overflow_key = newly_accepted[-1]
                 for index, candidate_key in enumerate(newly_accepted[:-1]):
                     probe_rejections = {
@@ -919,7 +930,7 @@ class SkillActivationRuntime:
                         )
                         overflow_key = None
                         break
-                    if probe_measurement.tokens > self._max_input_tokens:
+                    if probe_measurement.tokens > provider_limit:
                         overflow_key = candidate_key
                         break
 

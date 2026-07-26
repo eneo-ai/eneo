@@ -408,6 +408,114 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
 
 
 @pytest.mark.asyncio
+async def test_save_skill_share_uses_raw_model_window(monkeypatch):
+    _patch_reserve(monkeypatch, 1_000)
+    measured_windows: list[int] = []
+
+    def measure_skill_share(**kwargs):
+        max_input_tokens = kwargs["max_input_tokens"]
+        measured_windows.append(max_input_tokens)
+        candidate_is_active = (
+            "Instructions for Candidate" in kwargs["composed_instructions"]
+        )
+        return SimpleNamespace(
+            tokens=800 if candidate_is_active else 100,
+            limit=max_input_tokens // 10,
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        measure_skill_share,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            tokens=7_000,
+            source=TokenCountSource.LITELLM,
+        ),
+    )
+    candidate = _resolved_skill(
+        name="Candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 8_000
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(candidate,), blocked=())
+    )
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    await service._validate_attachments_fit(
+        assistant,
+        space=space,
+        on_demand_skill_ids_requiring_validation=frozenset({candidate.skill_id}),
+    )
+
+    assert measured_windows
+    assert set(measured_windows) == {8_000}
+
+
+@pytest.mark.asyncio
+async def test_full_save_stages_blocked_on_demand_candidate(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_kwargs: SimpleNamespace(
+            tokens=10,
+            limit=100,
+            source=TokenCountSource.LITELLM,
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            tokens=91,
+            source=TokenCountSource.LITELLM,
+        ),
+    )
+    blocked_candidate = _resolved_skill(
+        name="Blocked candidate",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 100
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(), blocked=(blocked_candidate,))
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    with pytest.raises(BadRequestException, match="Blocked candidate"):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            validate_all_on_demand_candidates=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_fit_skipped_when_no_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(

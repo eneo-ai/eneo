@@ -337,6 +337,62 @@ def test_turn_plan_freezes_bindings_and_starts_with_required_skills():
     assert "Confirmed unsafe instructions" not in evidence.model_dump_json()
 
 
+def test_turn_plan_stages_blocked_on_demand_bindings_for_save_validation():
+    blocked_always = replace(
+        _binding(position=0, name="Blocked required"),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    blocked_on_demand = replace(
+        _binding(position=1, name="Blocked optional"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    available_always = replace(
+        _binding(position=2, name="Available required"),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    available_on_demand = replace(
+        _binding(position=3, name="Available optional"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=15,
+        max_activations_per_turn=5,
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base instructions",
+        resolution=SkillRuntimeResolution(
+            eligible=(available_always, available_on_demand),
+            blocked=(blocked_always, blocked_on_demand),
+        ),
+        policy=policy,
+    )
+
+    validation_plan = plan.for_on_demand_save_validation()
+
+    assert [binding.binding for binding in validation_plan.available] == [
+        blocked_on_demand,
+        available_always,
+        available_on_demand,
+    ]
+    assert [binding.activation_key for binding in validation_plan.available] == [
+        "skill-1",
+        "skill-2",
+        "skill-3",
+    ]
+    assert validation_plan.initially_active_keys == ("skill-2",)
+    assert [binding.binding for binding in validation_plan.blocked] == [blocked_always]
+    assert [binding.binding for binding in plan.available] == [
+        available_always,
+        available_on_demand,
+    ]
+    assert [binding.binding for binding in plan.blocked] == [
+        blocked_always,
+        blocked_on_demand,
+    ]
+
+
 def test_zero_skill_turn_plan_preserves_base_and_records_empty_evidence():
     plan = SkillTurnPlan.create(
         base_instructions="  Base instructions\n",

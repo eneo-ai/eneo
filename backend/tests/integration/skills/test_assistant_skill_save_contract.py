@@ -4,6 +4,10 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+    ProviderToolCall,
+)
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
@@ -17,7 +21,7 @@ from eneo.database.tables.mcp_server_table import (
 )
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.skill_table import AssistantSkillBindings
-from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.users_table import users_roles_table
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
@@ -25,6 +29,7 @@ from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillBindingReference,
     SkillRuntimePolicy,
+    SkillTurnEffectiveMode,
 )
 from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
@@ -89,6 +94,16 @@ async def _persisted_mcp_server_ids(db_container, *, assistant_id):
         )
 
 
+async def _organization_space(session, *, tenant_id):
+    return await session.scalar(
+        sa.select(Spaces).where(
+            Spaces.tenant_id == tenant_id,
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
+    )
+
+
 async def _create_on_demand_save_contract(
     container,
     *,
@@ -103,6 +118,7 @@ async def _create_on_demand_save_contract(
     skill_name,
     skill_description,
     skill_instructions,
+    organization_skill=False,
 ):
     session = container.session()
     model = await completion_model_factory(
@@ -135,8 +151,15 @@ async def _create_on_demand_save_contract(
             max_activations_per_turn=10,
         ),
     )
+    skill_space = space
+    if organization_skill:
+        skill_space = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert skill_space is not None
     skill = await repo.create(
-        space_id=space.id,
+        space_id=skill_space.id,
         slug=f"{skill_slug}-{uuid4().hex[:8]}",
         display_name=skill_name,
         description=skill_description,
@@ -144,6 +167,12 @@ async def _create_on_demand_save_contract(
         content_digest=uuid4().hex * 2,
         created_by_user_id=admin_user.id,
     )
+    if organization_skill:
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=skill.current_revision.id,
+        )
     await container.skill_service().replace_assistant_bindings(
         space_id=space.id,
         assistant_id=assistant.id,
@@ -508,6 +537,183 @@ async def test_retained_on_demand_candidate_rejection_rolls_back_new_always_bind
     else:
         assert persisted_name == original_name
         assert persisted_bindings == original_bindings
+
+
+@pytest.mark.parametrize(
+    ("activated_tokens", "expected_status"),
+    [(7_000, 200), (7_001, 400)],
+    ids=("fits-after-unblock", "blocked-candidate-overflows"),
+)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_blocked_on_demand_candidate_is_staged_before_binding_save(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    activated_tokens,
+    expected_status,
+):
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.get_settings",
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=1_000),
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_tokens",
+        lambda *_args, **_kwargs: 100,
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens",
+        lambda **_kwargs: 0,
+    )
+
+    def measure_provider_payload(messages, _tools, _model_route):
+        activated = any(message.get("role") == "tool" for message in messages)
+        return TokenCount(
+            tokens=activated_tokens if activated else 100,
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        measure_provider_payload,
+    )
+
+    async with db_container() as container:
+        (
+            session,
+            target_space,
+            assistant,
+            candidate,
+        ) = await _create_on_demand_save_contract(
+            container,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            model_name="gpt-4o",
+            space_name="Blocked candidate save contract",
+            assistant_name="Original blocked-candidate Assistant",
+            skill_slug="blocked-candidate",
+            skill_name="Blocked candidate Skill",
+            skill_description="Use for blocked-candidate questions",
+            skill_instructions=("This exact reviewed body must remain activatable."),
+            organization_skill=True,
+        )
+        repo = container.skill_repo()
+        always = await repo.create(
+            space_id=target_space.id,
+            slug=f"blocked-always-{uuid4().hex[:8]}",
+            display_name="New always Skill",
+            description="Required context added while the candidate is blocked",
+            instructions="This body expands the required prompt.",
+            content_digest="4" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        blocked = await repo.block_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=candidate.id,
+            blocked_by_user_id=admin_user.id,
+            reason="Confirmed unsafe instructions",
+        )
+        assert blocked is not None
+        assistant_id = assistant.id
+        candidate_id = candidate.id
+        candidate_revision_id = candidate.current_revision.id
+        always_id = always.id
+        always_revision_id = always.current_revision.id
+        block_id = blocked.block.id
+        model_route = "openai/gpt-4o"
+
+    original_name, original_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "name": "Staged blocked-candidate Assistant",
+            "skill_bindings": [
+                {
+                    "skill_id": str(candidate_id),
+                    "skill_revision_id": str(candidate_revision_id),
+                    "activation_mode": "on_demand",
+                },
+                {
+                    "skill_id": str(always_id),
+                    "skill_revision_id": str(always_revision_id),
+                    "activation_mode": "always",
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == expected_status, response.text
+    persisted_name, persisted_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    if expected_status == 400:
+        assert 'on-demand Skill "Blocked candidate Skill"' in response.json()["message"]
+        assert persisted_name == original_name
+        assert persisted_bindings == original_bindings
+        return
+
+    assert persisted_name == "Staged blocked-candidate Assistant"
+    assert [binding.skill_id for binding in persisted_bindings] == [
+        candidate_id,
+        always_id,
+    ]
+    async with db_container() as container:
+        repo = container.skill_repo()
+        released = await repo.unblock_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=candidate_id,
+            expected_block_id=block_id,
+            unblocked_by_user_id=admin_user.id,
+            reason="The reviewed instructions are safe again",
+        )
+        assert released is not None
+        skill_service = container.skill_service()
+        resolution = await skill_service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant_id
+        )
+        plan = await skill_service.create_turn_plan(
+            base_instructions="",
+            resolution=resolution,
+        )
+        runtime = plan.to_activation_runtime(
+            selected_model_route=model_route,
+            max_input_tokens=8_000,
+            supports_tool_calling=True,
+        )
+        candidate_key = next(
+            binding.activation_key
+            for binding in plan.available
+            if binding.binding.skill_id == candidate_id
+        )
+        messages: list[dict[str, object]] = [
+            {"role": "system", "content": runtime.prompt},
+            {"role": "user", "content": "Use the restored Skill"},
+        ]
+        runtime.apply_provider_tool_calls(
+            calls=(
+                ProviderToolCall(
+                    call_id="activate-restored",
+                    name=SKILL_ACTIVATION_TOOL_NAME,
+                    arguments=f'{{"skill_key":"{candidate_key}"}}',
+                ),
+            ),
+            messages=messages,
+        )
+
+    assert runtime.snapshot().effective_mode is SkillTurnEffectiveMode.SELECTIVE
+    assert runtime.snapshot().accepted == (candidate_key,)
 
 
 @pytest.mark.parametrize(

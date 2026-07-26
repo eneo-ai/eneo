@@ -515,6 +515,63 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
     assert messages == messages_before
 
 
+@pytest.mark.parametrize(
+    ("provider_tokens", "expected_rejection"),
+    [
+        (900, None),
+        (
+            901,
+            SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED,
+        ),
+    ],
+    ids=("reserved-limit", "reserved-overflow"),
+)
+def test_provider_candidate_assessment_uses_explicit_payload_limit(
+    provider_tokens,
+    expected_rejection,
+):
+    candidate = _skill(
+        key="skill-1",
+        name="Payroll",
+        description="Payroll questions",
+        position=1,
+        instructions="Payroll body",
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=1_000,
+        supports_tool_calling=True,
+    )
+
+    with patch(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        return_value=TokenCount(
+            tokens=provider_tokens,
+            source=TokenCountSource.LITELLM,
+        ),
+    ):
+        assessments = runtime.assess_provider_payload_candidates(
+            frozenset({candidate.binding.skill_id}),
+            messages=[
+                {"role": "system", "content": "Base"},
+                {"role": "user", "content": "Reserved question space"},
+            ],
+            provider_tools=[],
+            provider_input_token_limit=900,
+        )
+
+    assert len(assessments) == 1
+    assert assessments[0].rejection_reason is expected_rejection
+    assert assessments[0].measurement.limit == 1_000
+
+
 def test_model_limit_rejects_oversized_earlier_skill_and_keeps_later_fit():
     runtime = SkillActivationRuntime.create(
         base_instructions="Base",
