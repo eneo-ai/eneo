@@ -16,8 +16,10 @@ from eneo.roles.permissions import Permission
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     SKILL_RUNTIME_POLICY_DEFAULTS,
+    AssistantSkillBindingReplacement,
     ResolvedSkillBinding,
     SkillActivationMode,
+    SkillBindingIntent,
     SkillBindingReference,
     SkillBindingSource,
     SkillCatalogEntry,
@@ -60,6 +62,17 @@ def _binding_reference(binding: ResolvedSkillBinding) -> SkillBindingReference:
     return SkillBindingReference(
         skill_id=binding.skill_id,
         skill_revision_id=binding.skill_revision_id,
+    )
+
+
+def _binding_intent(
+    binding: ResolvedSkillBinding,
+    *,
+    activation_mode: SkillActivationMode | None = None,
+) -> SkillBindingIntent:
+    return SkillBindingIntent(
+        reference=_binding_reference(binding),
+        activation_mode=activation_mode,
     )
 
 
@@ -603,16 +616,20 @@ async def test_same_space_skill_can_be_reused_by_multiple_parents():
     first = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=uuid4(),
-        references=[_binding_reference(binding)],
+        intents=[_binding_intent(binding)],
     )
     second = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=uuid4(),
-        references=[_binding_reference(binding)],
+        intents=[_binding_intent(binding)],
     )
 
-    assert first == [binding]
-    assert second == [binding]
+    assert first == AssistantSkillBindingReplacement(
+        bindings=(binding,), changed_to_on_demand_skill_ids=frozenset()
+    )
+    assert second == AssistantSkillBindingReplacement(
+        bindings=(binding,), changed_to_on_demand_skill_ids=frozenset()
+    )
     assert repo.replace_assistant_bindings.await_count == 2
 
 
@@ -643,11 +660,20 @@ async def test_resource_binding_resolves_local_and_published_catalogue_skills(
     repo.resolve_published_references_for_binding_update.return_value = [published]
     service = _service(space=space, repo=repo)
 
-    result = await getattr(service, replace_method)(
-        space_id=space.id,
-        **{parent_id_name: getattr(space, parent_attribute).id},
-        references=[_binding_reference(local), _binding_reference(published)],
-    )
+    references = [_binding_reference(local), _binding_reference(published)]
+    if replace_method == "replace_assistant_bindings":
+        replacement = await service.replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=getattr(space, parent_attribute).id,
+            intents=[SkillBindingIntent(reference=value) for value in references],
+        )
+        result = list(replacement.bindings)
+    else:
+        result = await getattr(service, replace_method)(
+            space_id=space.id,
+            **{parent_id_name: getattr(space, parent_attribute).id},
+            references=references,
+        )
 
     assert result == [local, replace(published, position=1)]
     repo.resolve_local_references_for_binding_update.assert_awaited_once_with(
@@ -680,7 +706,7 @@ async def test_blocked_organization_skill_cannot_receive_new_binding(owner: str)
             await service.replace_assistant_bindings(
                 space_id=space.id,
                 assistant_id=space.assistant.id,
-                references=[_binding_reference(blocked)],
+                intents=[_binding_intent(blocked)],
             )
         elif owner == "app":
             await service.replace_app_bindings(
@@ -723,7 +749,7 @@ async def test_blocked_organization_skill_cannot_change_revision(owner: str):
             await service.replace_assistant_bindings(
                 space_id=space.id,
                 assistant_id=space.assistant.id,
-                references=[_binding_reference(changed)],
+                intents=[_binding_intent(changed)],
             )
         elif owner == "app":
             await service.replace_app_bindings(
@@ -763,7 +789,10 @@ async def test_blocked_retained_bindings_can_be_reordered(owner: str):
         result = await service.replace_assistant_bindings(
             space_id=space.id,
             assistant_id=space.assistant.id,
-            references=reversed_references,
+            intents=[
+                SkillBindingIntent(reference=reference)
+                for reference in reversed_references
+            ],
         )
     elif owner == "app":
         result = await service.replace_app_bindings(
@@ -778,8 +807,12 @@ async def test_blocked_retained_bindings_can_be_reordered(owner: str):
             references=reversed_references,
         )
 
-    assert [binding.skill_id for binding in result] == [second.skill_id, first.skill_id]
-    assert [binding.position for binding in result] == [0, 1]
+    bindings = result.bindings if owner == "assistant" else result
+    assert [binding.skill_id for binding in bindings] == [
+        second.skill_id,
+        first.skill_id,
+    ]
+    assert [binding.position for binding in bindings] == [0, 1]
     repo.list_active_execution_blocks.assert_not_awaited()
 
 
@@ -839,11 +872,18 @@ async def test_organization_space_resource_rejects_unpublished_skill_revision(
     service = _service(space=space, repo=repo)
 
     with pytest.raises(NotFoundException, match="unavailable"):
-        await getattr(service, replace_method)(
-            space_id=space.id,
-            **{parent_id_name: getattr(space, parent_attribute).id},
-            references=[_binding_reference(draft)],
-        )
+        if replace_method == "replace_assistant_bindings":
+            await service.replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=getattr(space, parent_attribute).id,
+                intents=[_binding_intent(draft)],
+            )
+        else:
+            await getattr(service, replace_method)(
+                space_id=space.id,
+                **{parent_id_name: getattr(space, parent_attribute).id},
+                references=[_binding_reference(draft)],
+            )
 
     repo.resolve_local_references_for_binding_update.assert_not_awaited()
 
@@ -859,10 +899,11 @@ async def test_existing_unpublished_catalogue_binding_can_remain_on_resource():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[_binding_reference(existing)],
+        intents=[_binding_intent(existing)],
     )
 
-    assert result == [existing]
+    assert result.bindings == (existing,)
+    assert result.changed_to_on_demand_skill_ids == frozenset()
     repo.resolve_bound_references_for_binding_update.assert_awaited_once_with(
         tenant_id=space.tenant_id,
         parent_space_id=space.id,
@@ -882,7 +923,7 @@ async def test_assistant_binding_update_rejects_a_concurrent_space_move():
         await service.replace_assistant_bindings(
             space_id=space.id,
             assistant_id=space.assistant.id,
-            references=[],
+            intents=[],
         )
 
     repo.list_assistant_bindings.assert_not_awaited()
@@ -924,7 +965,7 @@ async def test_inactive_skill_cannot_receive_a_new_binding():
         await service.replace_assistant_bindings(
             space_id=space.id,
             assistant_id=space.assistant.id,
-            references=[_binding_reference(inactive)],
+            intents=[_binding_intent(inactive)],
         )
 
 
@@ -939,10 +980,11 @@ async def test_existing_inactive_exact_revision_binding_can_be_reordered():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[_binding_reference(inactive)],
+        intents=[_binding_intent(inactive)],
     )
 
-    assert result == [inactive]
+    assert result.bindings == (inactive,)
+    assert result.changed_to_on_demand_skill_ids == frozenset()
     repo.replace_assistant_bindings.assert_awaited_once()
 
 
@@ -1111,11 +1153,18 @@ async def test_parent_reader_cannot_replace_skill_bindings(
     service = _service(space=space, actor=actor, repo=repo)
 
     with pytest.raises(UnauthorizedException, match="permission to edit"):
-        await getattr(service, replace_method)(
-            space_id=space.id,
-            **{parent_id_name: parent.id},
-            references=[],
-        )
+        if replace_method == "replace_assistant_bindings":
+            await service.replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=parent.id,
+                intents=[],
+            )
+        else:
+            await getattr(service, replace_method)(
+                space_id=space.id,
+                **{parent_id_name: parent.id},
+                references=[],
+            )
 
     repo.replace_assistant_bindings.assert_not_awaited()
     repo.replace_app_bindings.assert_not_awaited()
@@ -1138,11 +1187,18 @@ async def test_api_key_cannot_replace_parent_skill_bindings(
     service = _service(space=space, repo=repo, active_api_key=MagicMock())
 
     with pytest.raises(UnauthorizedException, match="session token"):
-        await getattr(service, replace_method)(
-            space_id=space.id,
-            **{parent_id_name: parent_id},
-            references=[],
-        )
+        if replace_method == "replace_assistant_bindings":
+            await service.replace_assistant_bindings(
+                space_id=space.id,
+                assistant_id=parent_id,
+                intents=[],
+            )
+        else:
+            await getattr(service, replace_method)(
+                space_id=space.id,
+                **{parent_id_name: parent_id},
+                references=[],
+            )
 
     repo.list_assistant_bindings.assert_not_awaited()
     repo.list_app_bindings.assert_not_awaited()
@@ -1348,10 +1404,11 @@ async def test_retained_assistant_binding_keeps_activation_mode_on_resave():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[_binding_reference(existing)],
+        intents=[_binding_intent(existing)],
     )
 
-    assert result[0].activation_mode is SkillActivationMode.ON_DEMAND
+    assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
+    assert result.changed_to_on_demand_skill_ids == frozenset()
     persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
     assert [binding.activation_mode for binding in persisted] == [
         SkillActivationMode.ON_DEMAND
@@ -1395,12 +1452,77 @@ async def test_new_binding_defaults_to_always_activation_mode():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[_binding_reference(added)],
+        intents=[_binding_intent(added)],
     )
 
-    assert [binding.activation_mode for binding in result] == [
+    assert [binding.activation_mode for binding in result.bindings] == [
         SkillActivationMode.ALWAYS
     ]
+    assert result.changed_to_on_demand_skill_ids == frozenset()
+
+
+async def test_explicit_assistant_mode_only_change_is_persisted_and_reported():
+    space = _space()
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ALWAYS)
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [existing]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                existing,
+                activation_mode=SkillActivationMode.ON_DEMAND,
+            )
+        ],
+    )
+
+    assert result.changed_to_on_demand_skill_ids == frozenset({existing.skill_id})
+    assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
+    persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
+    assert persisted[0].activation_mode is SkillActivationMode.ON_DEMAND
+
+
+async def test_assistant_reorder_preserves_omitted_mode_and_applies_explicit_mode():
+    space = _space()
+    first = replace(
+        _binding(position=0),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    second = replace(
+        _binding(position=1),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [first, second]
+    repo.resolve_bound_references_for_binding_update.return_value = [second, first]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                second,
+                activation_mode=SkillActivationMode.ON_DEMAND,
+            ),
+            _binding_intent(first),
+        ],
+    )
+
+    assert [binding.skill_id for binding in result.bindings] == [
+        second.skill_id,
+        first.skill_id,
+    ]
+    assert [binding.position for binding in result.bindings] == [0, 1]
+    assert [binding.activation_mode for binding in result.bindings] == [
+        SkillActivationMode.ON_DEMAND,
+        SkillActivationMode.ON_DEMAND,
+    ]
+    assert result.changed_to_on_demand_skill_ids == frozenset({second.skill_id})
 
 
 async def test_assistant_revision_upgrade_keeps_activation_mode():
@@ -1418,16 +1540,91 @@ async def test_assistant_revision_upgrade_keeps_activation_mode():
     result = await service.replace_assistant_bindings(
         space_id=space.id,
         assistant_id=space.assistant.id,
-        references=[_binding_reference(upgraded)],
+        intents=[_binding_intent(upgraded)],
     )
 
-    assert [binding.activation_mode for binding in result] == [
+    assert [binding.activation_mode for binding in result.bindings] == [
         SkillActivationMode.ON_DEMAND
     ]
+    assert result.changed_to_on_demand_skill_ids == frozenset()
     persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
     assert [binding.activation_mode for binding in persisted] == [
         SkillActivationMode.ON_DEMAND
     ]
+
+
+async def test_assistant_revision_upgrade_applies_explicit_mode_change():
+    space = _space()
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    upgraded = replace(
+        _binding(skill_id=existing.skill_id),
+        activation_mode=SkillActivationMode.ALWAYS,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_local_references_for_binding_update.return_value = [upgraded]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                upgraded,
+                activation_mode=SkillActivationMode.ALWAYS,
+            )
+        ],
+    )
+
+    assert result.bindings[0].skill_revision_id == upgraded.skill_revision_id
+    assert result.bindings[0].activation_mode is SkillActivationMode.ALWAYS
+    assert result.changed_to_on_demand_skill_ids == frozenset()
+
+
+async def test_echoing_existing_on_demand_mode_is_not_reported_as_a_change():
+    space = _space()
+    existing = replace(_binding(), activation_mode=SkillActivationMode.ON_DEMAND)
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [existing]
+    repo.resolve_bound_references_for_binding_update.return_value = [existing]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                existing,
+                activation_mode=SkillActivationMode.ON_DEMAND,
+            )
+        ],
+    )
+
+    assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
+    assert result.changed_to_on_demand_skill_ids == frozenset()
+
+
+async def test_new_on_demand_binding_is_reported_as_a_change():
+    space = _space()
+    added = _binding()
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = []
+    repo.resolve_local_references_for_binding_update.return_value = [added]
+    service = _service(space=space, repo=repo)
+
+    result = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                added,
+                activation_mode=SkillActivationMode.ON_DEMAND,
+            )
+        ],
+    )
+
+    assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
+    assert result.changed_to_on_demand_skill_ids == frozenset({added.skill_id})
 
 
 async def test_governance_revision_upgrade_keeps_activation_mode():

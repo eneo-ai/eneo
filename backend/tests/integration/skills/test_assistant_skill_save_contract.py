@@ -1,0 +1,227 @@
+from uuid import uuid4
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.skill_table import AssistantSkillBindings
+from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.users_table import users_roles_table
+from eneo.roles.permissions import Permission
+from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
+
+
+@pytest.fixture
+async def admin_token(db_container, patch_auth_service_jwt, admin_user):
+    async with db_container() as container:
+        return container.auth_service().create_access_token_for_user(admin_user)
+
+
+async def _persisted_assistant_state(db_container, *, assistant_id):
+    async with db_container() as container:
+        session = container.session()
+        name = await session.scalar(
+            sa.select(Assistants.name).where(Assistants.id == assistant_id)
+        )
+        bindings = (
+            (
+                await session.execute(
+                    sa.select(
+                        AssistantSkillBindings.skill_id,
+                        AssistantSkillBindings.skill_revision_id,
+                        AssistantSkillBindings.position,
+                        AssistantSkillBindings.activation_mode,
+                        AssistantSkillBindings.tenant_id,
+                        AssistantSkillBindings.space_id,
+                        AssistantSkillBindings.skill_space_id,
+                    )
+                    .where(AssistantSkillBindings.assistant_id == assistant_id)
+                    .order_by(AssistantSkillBindings.position)
+                )
+            )
+            .tuples()
+            .all()
+        )
+    return name, tuple(bindings)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_assistant_mode_rejection_rolls_back_parent_and_bindings(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            f"assistant-save-contract-{uuid4().hex[:8]}",
+        )
+        space = await space_factory(
+            session,
+            "Assistant Skill save contract",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Original Assistant name",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = container.skill_repo()
+        first_skill = await repo.create(
+            space_id=space.id,
+            slug=f"first-{uuid4().hex[:8]}",
+            display_name="First Skill",
+            description="First on-demand candidate",
+            instructions="Use the first Skill when it is relevant.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        second_skill = await repo.create(
+            space_id=space.id,
+            slug=f"second-{uuid4().hex[:8]}",
+            display_name="Second Skill",
+            description="Second on-demand candidate",
+            instructions="Use the second Skill when it is relevant.",
+            content_digest="b" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        references = [
+            SkillBindingReference(
+                skill_id=first_skill.id,
+                skill_revision_id=first_skill.current_revision.id,
+            ),
+            SkillBindingReference(
+                skill_id=second_skill.id,
+                skill_revision_id=second_skill.current_revision.id,
+            ),
+        ]
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[SkillBindingIntent(reference=value) for value in references],
+        )
+        assistant_id = assistant.id
+        first_skill_id = first_skill.id
+        first_revision_id = first_skill.current_revision.id
+        second_skill_id = second_skill.id
+        second_revision_id = second_skill.current_revision.id
+
+    original_name, original_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert original_name == "Original Assistant name"
+    assert len(original_bindings) == 2
+
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "name": "Rejected Assistant name",
+            "skill_bindings": [
+                {
+                    "skill_id": str(second_skill_id),
+                    "skill_revision_id": str(second_revision_id),
+                },
+                {
+                    "skill_id": str(first_skill_id),
+                    "skill_revision_id": str(first_revision_id),
+                    "activation_mode": "on_demand",
+                },
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+
+    persisted_name, persisted_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert persisted_name == original_name
+    assert persisted_bindings == original_bindings
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_assistant_skill_configuration_requires_skill_read_access(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        user = await user_factory(session, tenant_id=admin_user.tenant_id)
+        assistant_reader_role = Roles(
+            name=f"Assistant reader {uuid4().hex[:8]}",
+            permissions=[Permission.ASSISTANTS.value],
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(assistant_reader_role)
+        await session.flush()
+        await session.execute(
+            users_roles_table.insert().values(
+                user_id=user.id,
+                role_id=assistant_reader_role.id,
+            )
+        )
+        model = await completion_model_factory(
+            session,
+            f"assistant-skill-read-{uuid4().hex[:8]}",
+        )
+        space = await space_factory(
+            session,
+            "Assistant Skill read contract",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=user.id,
+                role="viewer",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Readable Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        token = container.auth_service().create_access_token_for_user(user)
+        space_id = space.id
+        assistant_id = assistant.id
+
+    headers = {"Authorization": f"Bearer {token}"}
+    assistant_response = await client.get(
+        f"/api/v1/assistants/{assistant_id}/",
+        headers=headers,
+    )
+    assert assistant_response.status_code == 200, assistant_response.text
+
+    configuration_response = await client.get(
+        f"/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+        headers=headers,
+    )
+
+    assert configuration_response.status_code == 403, configuration_response.text

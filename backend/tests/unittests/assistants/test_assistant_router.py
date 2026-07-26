@@ -11,6 +11,7 @@ pattern to prevent regressions from commit 58b73e9e.
 """
 
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,10 +38,12 @@ from eneo.main.exceptions import UnauthorizedException
 from eneo.sessions.session import SessionFeedback, SessionInDB
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
+    SkillActivationMode,
+    SkillBindingIntent,
     SkillBindingReference,
     SkillBindingSource,
 )
-from eneo.skills.presentation.skill_models import SkillBindingReferenceInput
+from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 
 
 def _request(*, api_key=None) -> Request:
@@ -490,7 +493,7 @@ def _skill_binding(*, position: int) -> ResolvedSkillBinding:
     )
 
 
-async def test_update_assistant_folds_ordered_body_free_skills_into_single_parent_audit(
+async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
     monkeypatch,
 ):
     assistant_id = uuid.uuid4()
@@ -513,12 +516,19 @@ async def test_update_assistant_folds_ordered_body_free_skills_into_single_paren
         space_id=space_id,
         type=None,
     )
-    before = [_skill_binding(position=0)]
-    after = [_skill_binding(position=0), _skill_binding(position=1)]
+    before_binding = _skill_binding(position=0)
+    before = [before_binding]
+    after = [
+        replace(
+            before_binding,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        )
+    ]
     references = [
-        SkillBindingReferenceInput(
+        AssistantSkillBindingInput(
             skill_id=binding.skill_id,
             skill_revision_id=binding.skill_revision_id,
+            activation_mode=SkillActivationMode.ON_DEMAND,
         )
         for binding in after
     ]
@@ -560,10 +570,13 @@ async def test_update_assistant_folds_ordered_body_free_skills_into_single_paren
 
     assert result is response
     service.update_assistant.assert_awaited_once()
-    assert service.update_assistant.await_args.kwargs["skill_references"] == [
-        SkillBindingReference(
-            skill_id=reference.skill_id,
-            skill_revision_id=reference.skill_revision_id,
+    assert service.update_assistant.await_args.kwargs["skill_binding_intents"] == [
+        SkillBindingIntent(
+            reference=SkillBindingReference(
+                skill_id=reference.skill_id,
+                skill_revision_id=reference.skill_revision_id,
+            ),
+            activation_mode=SkillActivationMode.ON_DEMAND,
         )
         for reference in references
     ]
@@ -571,6 +584,7 @@ async def test_update_assistant_folds_ordered_body_free_skills_into_single_paren
     audit_call = audit_service.log_async.await_args.kwargs
     assert audit_call["action"] == ActionType.ASSISTANT_UPDATED
     skills_change = audit_call["metadata"]["changes"]["skills"]
-    assert [entry["position"] for entry in skills_change["new"]] == [0, 1]
+    assert skills_change["old"][0]["activation_mode"] == "always"
+    assert skills_change["new"][0]["activation_mode"] == "on_demand"
     assert "instructions" not in str(skills_change)
     assert "description" not in str(skills_change)

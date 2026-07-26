@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -8,8 +9,18 @@ from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
-from eneo.main.exceptions import BadRequestException
-from eneo.skills.domain.skill import SkillRuntimeResolution
+from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.skills.domain.skill import (
+    ResolvedSkillBinding,
+    SkillActivationMode,
+    SkillBindingProjection,
+    SkillBindingSource,
+    SkillRuntimePolicy,
+    SkillRuntimeResolution,
+    SkillTurnEffectiveMode,
+    SkillTurnPlan,
+)
+from eneo.tokens.token_utils import TokenCountSource
 
 
 def _settings(**overrides):
@@ -38,6 +49,22 @@ def _image_attachment():
 
 
 def _service(file_service=None):
+    skill_service = AsyncMock()
+    skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(), blocked=())
+    )
+    skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
     service = AssistantService(
         repo=AsyncMock(),
         space_repo=AsyncMock(),
@@ -58,7 +85,7 @@ def _service(file_service=None):
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=AsyncMock(),
         help_assistant_assignment_history_repo=AsyncMock(),
-        skill_service=AsyncMock(),
+        skill_service=skill_service,
     )
     return service
 
@@ -82,7 +109,11 @@ def _domain_assistant():
 
 def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=False):
     model = SimpleNamespace(
-        max_input_tokens=max_input_tokens, name="gpt-4o", vision=vision
+        max_input_tokens=max_input_tokens,
+        name="gpt-4o",
+        vision=vision,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/gpt-4o",
     )
     prompt = SimpleNamespace(text=prompt_text) if prompt_text is not None else None
     return SimpleNamespace(
@@ -92,6 +123,50 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
         attachments=[_text_attachment() for _ in range(n_attachments)],
         prompt=prompt,
         get_prompt_text=lambda: prompt_text or "",
+    )
+
+
+def _resolved_skill(
+    *,
+    name: str,
+    position: int,
+    activation_mode: SkillActivationMode,
+) -> ResolvedSkillBinding:
+    return ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=uuid4(),
+        slug=name.lower(),
+        revision_number=1,
+        current_revision_number=1,
+        display_name=name,
+        description=f"Use {name} when relevant",
+        instructions=f"Instructions for {name}",
+        content_digest="a" * 64,
+        position=position,
+        source=SkillBindingSource.SPACE,
+        activation_mode=activation_mode,
+    )
+
+
+def _assistant_with_runtime_model(*, prompt_text: str = "Base instructions"):
+    model = SimpleNamespace(
+        id=uuid4(),
+        max_input_tokens=16_000,
+        name="gpt-4o",
+        vision=False,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/gpt-4o",
+    )
+    return SimpleNamespace(
+        id=uuid4(),
+        space_id=uuid4(),
+        is_default=False,
+        completion_model=model,
+        attachments=[],
+        prompt=SimpleNamespace(text=prompt_text),
+        get_prompt_text=lambda: prompt_text,
     )
 
 
@@ -313,6 +388,471 @@ async def test_fit_passes_prompt_only_within_ceiling(monkeypatch):
     await _service()._validate_attachments_fit(assistant, space=MagicMock())
 
 
+@pytest.mark.parametrize(
+    ("bindings", "selective_activation_enabled"),
+    [
+        ((), True),
+        (
+            (
+                _resolved_skill(
+                    name="Always",
+                    position=0,
+                    activation_mode=SkillActivationMode.ALWAYS,
+                ),
+            ),
+            True,
+        ),
+        (
+            (
+                _resolved_skill(
+                    name="Always",
+                    position=0,
+                    activation_mode=SkillActivationMode.ALWAYS,
+                ),
+                _resolved_skill(
+                    name="On demand",
+                    position=1,
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                ),
+            ),
+            True,
+        ),
+        (
+            (
+                _resolved_skill(
+                    name="Always",
+                    position=0,
+                    activation_mode=SkillActivationMode.ALWAYS,
+                ),
+                _resolved_skill(
+                    name="On demand",
+                    position=1,
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                ),
+            ),
+            False,
+        ),
+    ],
+    ids=("none", "all-always", "mixed-selective", "mixed-disabled"),
+)
+async def test_save_fit_uses_the_exact_initial_turn_runtime_prompt(
+    bindings: tuple[ResolvedSkillBinding, ...],
+    selective_activation_enabled: bool,
+    monkeypatch,
+):
+    """Save must validate the exact prompt ask() creates, not eagerly compose
+    every attached Skill through a parallel calculation."""
+
+    measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=selective_activation_enabled,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
+    resolution = SkillRuntimeResolution(eligible=bindings, blocked=())
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        resolution
+    )
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=policy,
+        )
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    expected_plan = SkillTurnPlan.create(
+        base_instructions=assistant.get_prompt_text(),
+        resolution=resolution,
+        policy=policy,
+    )
+    expected_runtime = expected_plan.to_activation_runtime(
+        selected_model_route=assistant.completion_model.get_model_route(),
+        max_input_tokens=assistant.completion_model.max_input_tokens,
+        supports_tool_calling=assistant.completion_model.supports_tool_calling,
+    )
+
+    await service._validate_attachments_fit(assistant, space=space)
+
+    assert (
+        service._assert_persistent_baseline_fits.await_args.kwargs["prompt_text"]
+        == expected_runtime.prompt
+    )
+    service.skill_service.create_turn_plan.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
+    monkeypatch,
+):
+    bindings = (
+        _resolved_skill(
+            name="Always",
+            position=0,
+            activation_mode=SkillActivationMode.ALWAYS,
+        ),
+        _resolved_skill(
+            name="On demand",
+            position=1,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        ),
+    )
+    measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
+    resolution = SkillRuntimeResolution(eligible=bindings, blocked=())
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.is_personal.return_value = False
+    service = _service()
+    service.space_repo.get_space_by_assistant.return_value = space
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        resolution
+    )
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=policy,
+        )
+    )
+
+    expected_runtime = SkillTurnPlan.create(
+        base_instructions=assistant.get_prompt_text(),
+        resolution=resolution,
+        policy=policy,
+    ).to_activation_runtime(
+        selected_model_route=assistant.completion_model.get_model_route(),
+        max_input_tokens=assistant.completion_model.max_input_tokens,
+        supports_tool_calling=assistant.completion_model.supports_tool_calling,
+    )
+
+    prompt, attachments = await service.get_preflight_baseline(assistant.id)
+
+    assert prompt == expected_runtime.prompt
+    assert attachments == assistant.attachments
+
+
+@pytest.mark.parametrize(
+    (
+        "selective_activation_enabled",
+        "supports_tool_calling",
+        "measurement",
+        "message",
+    ),
+    [
+        (
+            False,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "disabled by the organisation runtime policy",
+        ),
+        (
+            True,
+            False,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "does not support on-demand Skills",
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=1_001,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "exceeds the configured context allowance",
+        ),
+        (
+            True,
+            True,
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.FALLBACK_ESTIMATE,
+            ),
+            "cannot measure the Skill catalogue exactly",
+        ),
+    ],
+    ids=("disabled", "no-tool-support", "catalogue-too-large", "estimated"),
+)
+async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
+    selective_activation_enabled,
+    supports_tool_calling,
+    measurement,
+    message,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    binding = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    resolution = SkillRuntimeResolution(eligible=(binding,), blocked=())
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.supports_tool_calling = supports_tool_calling
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        resolution
+    )
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=selective_activation_enabled,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    with pytest.raises(BadRequestException, match=message):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
+        )
+
+    service._assert_persistent_baseline_fits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_existing_on_demand_binding_remains_saveable_during_policy_drift(
+    monkeypatch,
+):
+    measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    binding = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    resolution = SkillRuntimeResolution(eligible=(binding,), blocked=())
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        resolution
+    )
+    service.skill_service.create_turn_plan.side_effect = (
+        lambda *, base_instructions, resolution: SkillTurnPlan.create(
+            base_instructions=base_instructions,
+            resolution=resolution,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=False,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=3,
+            ),
+        )
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    await service._validate_attachments_fit(
+        assistant,
+        space=space,
+        explicit_on_demand_skill_ids=frozenset(),
+    )
+
+    service._assert_persistent_baseline_fits.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_explicit_on_demand_change_requires_an_effective_model():
+    binding = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model = None
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(binding,), blocked=())
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Choose a completion model before enabling on-demand Skills",
+    ):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_on_demand_change_rejects_an_execution_blocked_skill():
+    binding = _resolved_skill(
+        name="Blocked",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(), blocked=(binding,))
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Blocked organisation Skills cannot receive new or changed bindings",
+    ):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
+    monkeypatch,
+):
+    measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    binding = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    projection = SkillBindingProjection(binding=binding, execution_blocked=False)
+    resolution = SkillRuntimeResolution(eligible=(binding,), blocked=())
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service = _service()
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.skill_service.list_assistant_binding_projections.return_value = [projection]
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        resolution
+    )
+
+    configuration = await service.get_skill_configuration(
+        space_id=assistant.space_id,
+        assistant_id=assistant.id,
+    )
+
+    assert configuration.bindings == (projection,)
+    assert configuration.runtime is not None
+    assert configuration.runtime.effective_model_id == assistant.completion_model.id
+    assert (
+        configuration.runtime.snapshot.effective_mode
+        is SkillTurnEffectiveMode.SELECTIVE
+    )
+    assert configuration.runtime.snapshot.measurement is measurement
+
+
+@pytest.mark.asyncio
+async def test_personal_default_skill_configuration_has_no_direct_runtime():
+    assistant = _assistant_with_runtime_model()
+    assistant.is_default = True
+    space = MagicMock()
+    space.is_personal.return_value = True
+    space.get_assistant.return_value = assistant
+    service = _service()
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.skill_service.list_assistant_binding_projections.return_value = []
+    service._resolve_effective_config = AsyncMock()
+
+    configuration = await service.get_skill_configuration(
+        space_id=assistant.space_id,
+        assistant_id=assistant.id,
+    )
+
+    assert configuration.bindings == ()
+    assert configuration.runtime is None
+    service._resolve_effective_config.assert_not_awaited()
+    service.skill_service.create_turn_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_skill_configuration_authorizes_skill_read_before_runtime_resolution():
+    service = _service()
+    service.skill_service.list_assistant_binding_projections.side_effect = (
+        UnauthorizedException("No Skill access")
+    )
+
+    with pytest.raises(UnauthorizedException, match="No Skill access"):
+        await service.get_skill_configuration(
+            space_id=uuid4(),
+            assistant_id=uuid4(),
+        )
+
+    service.space_repo.get_space_by_assistant.assert_not_awaited()
+
+
 # --- context fit: governance validates the model + prompt ask() will send ---
 
 
@@ -325,7 +865,13 @@ async def test_fit_uses_governance_effective_model(monkeypatch):
     monkeypatch.setattr(
         "eneo.files.attachment_budget.count_attachment_tokens", lambda **k: 15
     )
-    small_model = SimpleNamespace(max_input_tokens=20, name="small", vision=False)
+    small_model = SimpleNamespace(
+        max_input_tokens=20,
+        name="small",
+        vision=False,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/small",
+    )
     monkeypatch.setattr(
         "eneo.assistants.assistant_service.select_effective_completion_model",
         lambda **k: small_model,
@@ -387,18 +933,24 @@ async def test_governance_preflight_uses_each_assistants_effective_model():
         max_input_tokens=100,
         name="allowed-current",
         vision=False,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/allowed-current",
     )
     policy_default = SimpleNamespace(
         id=MagicMock(),
         max_input_tokens=200,
         name="policy-default",
         vision=False,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/policy-default",
     )
     stale_model = SimpleNamespace(
         id=MagicMock(),
         max_input_tokens=300,
         name="stale",
         vision=False,
+        supports_tool_calling=True,
+        get_model_route=lambda: "openai/stale",
     )
     assistants = [
         SimpleNamespace(

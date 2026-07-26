@@ -17,6 +17,7 @@ from eneo.database.tables.users_table import users_roles_table
 from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
+    SkillBindingIntent,
     SkillBindingReference,
     SkillExecutionBlockConflictError,
     SkillExecutionBlockedException,
@@ -466,7 +467,10 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
         await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=existing_assistant.id,
-            references=[blocked_reference, companion_reference],
+            intents=[
+                SkillBindingIntent(reference=blocked_reference),
+                SkillBindingIntent(reference=companion_reference),
+            ],
         )
         revision_two_change = await repo.create_revision(
             skill_id=blocked_skill.id,
@@ -494,9 +498,12 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
         retained = await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=existing_assistant.id,
-            references=[companion_reference, blocked_reference],
+            intents=[
+                SkillBindingIntent(reference=companion_reference),
+                SkillBindingIntent(reference=blocked_reference),
+            ],
         )
-        assert [binding.skill_id for binding in retained] == [
+        assert [binding.skill_id for binding in retained.bindings] == [
             companion_skill.id,
             blocked_skill.id,
         ]
@@ -505,10 +512,12 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
             await service.replace_assistant_bindings(
                 space_id=target_space.id,
                 assistant_id=new_assistant.id,
-                references=[
-                    SkillBindingReference(
-                        skill_id=blocked_skill.id,
-                        skill_revision_id=revision_two.id,
+                intents=[
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=blocked_skill.id,
+                            skill_revision_id=revision_two.id,
+                        )
                     )
                 ],
             )
@@ -516,11 +525,13 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
             await service.replace_assistant_bindings(
                 space_id=target_space.id,
                 assistant_id=existing_assistant.id,
-                references=[
-                    companion_reference,
-                    SkillBindingReference(
-                        skill_id=blocked_skill.id,
-                        skill_revision_id=revision_two.id,
+                intents=[
+                    SkillBindingIntent(reference=companion_reference),
+                    SkillBindingIntent(
+                        reference=SkillBindingReference(
+                            skill_id=blocked_skill.id,
+                            skill_revision_id=revision_two.id,
+                        )
                     ),
                 ],
             )
@@ -539,15 +550,17 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
         updated = await service.replace_assistant_bindings(
             space_id=target_space.id,
             assistant_id=existing_assistant.id,
-            references=[
-                companion_reference,
-                SkillBindingReference(
-                    skill_id=blocked_skill.id,
-                    skill_revision_id=revision_two.id,
+            intents=[
+                SkillBindingIntent(reference=companion_reference),
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=blocked_skill.id,
+                        skill_revision_id=revision_two.id,
+                    )
                 ),
             ],
         )
-        assert updated[1].skill_revision_id == revision_two.id
+        assert updated.bindings[1].skill_revision_id == revision_two.id
 
 
 async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(

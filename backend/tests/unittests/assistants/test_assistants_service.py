@@ -22,7 +22,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
-from eneo.skills.domain.skill import SkillBindingReference
+from eneo.skills.domain.skill import (
+    AssistantSkillBindingReplacement,
+    SkillBindingIntent,
+    SkillBindingReference,
+)
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -104,6 +108,12 @@ def setup_fixture():
     # orchestration tests (update flow, model selection, permissions) aren't
     # coupled to the token-counting subsystem.
     service._validate_attachments_fit = AsyncMock()
+    service.skill_service.replace_assistant_bindings.return_value = (
+        AssistantSkillBindingReplacement(
+            bindings=(),
+            changed_to_on_demand_skill_ids=frozenset(),
+        )
+    )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
 
@@ -283,9 +293,13 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
     assistant.space_id = TEST_UUID
     space = setup.service.space_repo.get_space_by_assistant.return_value
     setup.service.space_repo.update.return_value = space
-    references = [
-        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
-        SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4()),
+    intents = [
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
+        SkillBindingIntent(
+            reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
+        ),
     ]
     events: list[str] = []
 
@@ -293,6 +307,10 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
 
     async def replace_bindings(**_):
         events.append("binding_replace")
+        return AssistantSkillBindingReplacement(
+            bindings=(),
+            changed_to_on_demand_skill_ids=frozenset(),
+        )
 
     async def validate_fit(*_, **__):
         events.append("fit")
@@ -309,13 +327,13 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
 
     await setup.service.update_assistant(
         assistant_id=TEST_UUID,
-        skill_references=references,
+        skill_binding_intents=intents,
     )
 
     setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
         space_id=TEST_UUID,
         assistant_id=TEST_UUID,
-        references=references,
+        intents=intents,
     )
     assert events == ["parent_update", "binding_replace", "fit", "persist"]
 
@@ -332,13 +350,13 @@ async def test_update_assistant_binding_fit_failure_skips_parent_persist(
     with pytest.raises(BadRequestException, match="too large"):
         await setup.service.update_assistant(
             assistant_id=TEST_UUID,
-            skill_references=[],
+            skill_binding_intents=[],
         )
 
     setup.service.skill_service.replace_assistant_bindings.assert_awaited_once_with(
         space_id=TEST_UUID,
         assistant_id=TEST_UUID,
-        references=[],
+        intents=[],
     )
     setup.service.space_repo.update.assert_not_awaited()
 
@@ -403,7 +421,7 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
-        {"skill_references": []},
+        {"skill_binding_intents": []},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(
