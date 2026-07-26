@@ -200,13 +200,22 @@
       .filter((token) => token.length > 0)
       .slice(0, 4)
   );
+  // Illustrative field names only: no form fields exist yet in this state. The
+  // label goes through the same runtime-key derivation a real field's label
+  // would, so a translation with spaces, diacritics or a reserved word shows the
+  // token that field would actually get rather than one that never resolves.
+  const exampleField = (id: "primary" | "secondary", label: string) => ({
+    id,
+    label,
+    token: getFlowFormFieldVariableToken(getSuggestedFlowFormFieldRuntimeKey(label))
+  });
   const emptyStateExamples = $derived(
     $userMode === "power_user"
       ? [
-          { label: "ärendenummer", token: "{{flow_input.ärendenummer}}" },
-          { label: "verksamhet", token: "{{flow_input.verksamhet}}" }
+          exampleField("primary", m.flow_form_schema_example_field_primary()),
+          exampleField("secondary", m.flow_form_schema_example_field_secondary())
         ]
-      : [{ label: "ärendenummer", token: "{{flow_input.ärendenummer}}" }]
+      : [exampleField("primary", m.flow_form_schema_example_field_primary())]
   );
   const previewVariableTokens = $derived(namedVariableTokens.slice(0, 2));
 
@@ -400,7 +409,7 @@
         {#if previewVariableTokens.length > 0 || emptyStateExamples.length > 0}
           <div class="text-muted mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
             <span class="text-secondary font-medium">{m.flow_form_schema_example_label()}</span>
-            {#each emptyStateExamples as example, exampleIndex (example.token)}
+            {#each emptyStateExamples as example, exampleIndex (example.id)}
               <span class="bg-hover-dimmer rounded-md px-2 py-0.5 font-medium">
                 {example.label}
               </span>

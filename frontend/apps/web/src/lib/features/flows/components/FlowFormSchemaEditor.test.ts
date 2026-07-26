@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 import type { FlowEditor } from "../FlowEditor";
-import type { FlowFormField } from "../flowFormSchema";
+import {
+  getFlowFormFieldVariableToken,
+  getSuggestedFlowFormFieldRuntimeKey,
+  type FlowFormField
+} from "../flowFormSchema";
 import FlowFormSchemaEditorHarness from "./test-harnesses/FlowFormSchemaEditorHarness.svelte";
 
 function makeFlow(fields: FlowFormField[]): Flow {
@@ -121,6 +125,21 @@ afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
   localStorage.clear();
+});
+
+describe("FlowFormSchemaEditor examples", () => {
+  it("renders the token a real field derives from the translated example label", async () => {
+    renderHarness([]);
+    await flushEffects();
+
+    const label = m.flow_form_schema_example_field_primary();
+    const token = getFlowFormFieldVariableToken(getSuggestedFlowFormFieldRuntimeKey(label));
+
+    expect(label).toContain(" ");
+    expect(token).not.toContain(" ");
+    expect(screen.getByText(label)).not.toBeNull();
+    expect(screen.getByText(token)).not.toBeNull();
+  });
 });
 
 describe("FlowFormSchemaEditor conflicts", () => {

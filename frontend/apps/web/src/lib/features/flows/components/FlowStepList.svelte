@@ -115,18 +115,18 @@
             class="bg-secondary/15 border-default/60 mt-3 w-full rounded-xl border px-4 py-4 text-left"
           >
             <p class="text-primary text-sm font-semibold tracking-[-0.005em]">
-              {m.flow_template_fill_empty_state_title()}
+              {m.flow_starter_drafting_title()}
             </p>
             <p class="text-secondary mt-1 text-xs leading-relaxed">
-              {m.flow_template_fill_empty_state_body()}
+              {m.flow_starter_drafting_body()}
             </p>
             <div class="mt-3">
               <Button
                 variant="outline"
                 size="sm"
-                onclick={() => flowEditor.createTemplateFillStarter()}
+                onclick={() => flowEditor.createDraftingChainStarter()}
               >
-                {m.flow_template_fill_empty_state_action()}
+                {m.flow_starter_drafting_action()}
               </Button>
             </div>
           </div>

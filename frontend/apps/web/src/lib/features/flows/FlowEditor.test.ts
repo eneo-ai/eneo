@@ -1,10 +1,24 @@
 import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
 
+import { toast } from "$lib/components/toast";
+import { m } from "$lib/paraglide/messages";
 import { createFlowEditor, getUnifiedFlowSaveStatus } from "./FlowEditor";
+
+vi.mock("$lib/components/toast", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn()
+  }
+}));
+
+beforeEach(() => {
+  vi.mocked(toast.error).mockClear();
+});
 
 function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial<Flow> = {}): Flow {
   return {
@@ -483,6 +497,28 @@ describe("FlowEditor step mutation commands", () => {
       expect(inserted.step_order).toBe(2);
       expect(inserted.input_source).toBe("previous_step");
       expect(inserted.input_type).toBe("json");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("reports an inserted-step creation failure without invalidating the flow", async () => {
+    const existingStep = makeStep(1);
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [existingStep] }),
+      eneo: makeEneo({
+        assistantCreate: vi.fn(async () => {
+          throw new Error("assistant creation failed");
+        }),
+        flowUpdate: echoUpdate()
+      })
+    });
+    try {
+      await editor.insertStepAfter(1);
+
+      expect(get(editor.state.update).steps).toEqual([existingStep]);
+      expect(get(editor.state.validationErrors).size).toBe(0);
+      expect(toast.error).toHaveBeenCalledWith(m.flow_step_creation_failed());
     } finally {
       editor.destroy();
     }
@@ -1137,3 +1173,115 @@ function readEditorState(editor: ReturnType<typeof createFlowEditor>): {
     hasUnsavedChanges: get(editor.state.currentChanges).hasUnsavedChanges
   };
 }
+
+describe("FlowEditor drafting chain starter", () => {
+  const echoFlowUpdate = () =>
+    vi.fn(async (args: unknown) => {
+      const { flow, update } = args as { flow: Flow; update: Partial<Flow> };
+      return { ...flow, ...update, steps: update.steps ?? flow.steps };
+    });
+
+  /** Fails assistant creation on the nth call; succeeds on every other. */
+  const assistantCreateFailingOn = (failingCall: number) => {
+    let call = 0;
+    return vi.fn(async () => {
+      call += 1;
+      if (call === failingCall) throw new Error("assistant creation failed");
+      return { id: `assistant-${call}` };
+    });
+  };
+
+  const makeStarterEditor = (
+    assistantCreate: ReturnType<typeof vi.fn>,
+    assistantUpdate: ReturnType<typeof vi.fn> = vi.fn(async (_request: unknown) => undefined)
+  ) =>
+    createFlowEditor({
+      flow: makeFlow(null, { steps: [] }),
+      eneo: makeEneo({ assistantCreate, assistantUpdate, flowUpdate: echoFlowUpdate() })
+    });
+
+  it("creates the three-step chain and binds the summary to both earlier steps", async () => {
+    const assistantUpdate = vi.fn(async (_request: unknown) => undefined);
+    const editor = makeStarterEditor(assistantCreateFailingOn(0), assistantUpdate);
+    try {
+      await editor.createDraftingChainStarter();
+      await editor.flushAssistantSaves();
+      const steps = get(editor.state.update).steps ?? [];
+
+      expect(steps).toHaveLength(3);
+      expect(steps[2]).toMatchObject({ step_order: 3, input_source: "all_previous_steps" });
+      const question = (steps[2].input_bindings as Record<string, string>).question;
+      expect(question).toContain("{{step_1.output.text}}");
+      expect(question).toContain("{{step_2.output.text}}");
+      expect(get(editor.state.validationErrors).size).toBe(0);
+      expect(
+        assistantUpdate.mock.calls.map(
+          ([request]) => (request as { update: { prompt: { text: string } } }).update.prompt.text
+        )
+      ).toEqual([
+        m.flow_starter_drafting_extract_prompt(),
+        m.flow_starter_drafting_assess_prompt(),
+        m.flow_starter_drafting_summary_prompt()
+      ]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it.each([1, 2])(
+    "stops without binding when creation %i fails, leaving no self-reference",
+    async (failingCall) => {
+      // A rolled-back step would otherwise put the summary at an earlier
+      // position, where its own binding references itself.
+      const editor = makeStarterEditor(assistantCreateFailingOn(failingCall));
+      try {
+        await editor.createDraftingChainStarter();
+        const steps = get(editor.state.update).steps ?? [];
+
+        expect(steps.length).toBeLessThan(3);
+        for (const step of steps) {
+          const question = (step.input_bindings as Record<string, string> | null)?.question;
+          expect(question ?? "").not.toContain(`{{step_${step.step_order}.output.text}}`);
+          expect(step.input_source).not.toBe("all_previous_steps");
+        }
+        expect(get(editor.state.validationErrors).size).toBe(0);
+        expect(toast.error).toHaveBeenCalledWith(m.flow_step_creation_failed());
+      } finally {
+        editor.destroy();
+      }
+    }
+  );
+
+  it("leaves the earlier steps unbound when the summary itself fails", async () => {
+    const editor = makeStarterEditor(assistantCreateFailingOn(3));
+    try {
+      await editor.createDraftingChainStarter();
+      const steps = get(editor.state.update).steps ?? [];
+
+      expect(steps).toHaveLength(2);
+      for (const step of steps) {
+        expect(step.input_source).not.toBe("all_previous_steps");
+      }
+      expect(get(editor.state.validationErrors).size).toBe(0);
+      expect(toast.error).toHaveBeenCalledWith(m.flow_step_creation_failed());
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("recovers from a failed starter attempt without leaving stale validation", async () => {
+    const editor = makeStarterEditor(assistantCreateFailingOn(1));
+    try {
+      await editor.createDraftingChainStarter();
+      expect(toast.error).toHaveBeenCalledWith(m.flow_step_creation_failed());
+
+      const createdStepId = await editor.addStep();
+
+      expect(createdStepId).not.toBeNull();
+      expect(get(editor.state.update).steps).toHaveLength(1);
+      expect(get(editor.state.validationErrors).size).toBe(0);
+    } finally {
+      editor.destroy();
+    }
+  });
+});

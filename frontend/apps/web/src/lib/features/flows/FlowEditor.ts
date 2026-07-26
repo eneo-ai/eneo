@@ -6,6 +6,7 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
+import { toast } from "$lib/components/toast";
 import { EneoError, type Flow, type FlowStep, type Eneo, type PromptSparse } from "@eneo/eneo-js";
 import { derived, get, readonly, writable } from "svelte/store";
 import { uid } from "uid";
@@ -20,6 +21,7 @@ import {
 } from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues } from "./flowStepTypes";
+import { m } from "$lib/paraglide/messages";
 import {
   getFlowWizardMetadata,
   getUnifiedFlowSaveStatus,
@@ -506,8 +508,12 @@ function createFlowEditor(data: FlowEditorInitData) {
    * with a `seed` it applies a template's output shape plus a starter
    * instruction on the hidden assistant. The input side is always derived from
    * position, so a seeded step stays valid wherever it is added.
+   *
+   * Returns the created step's temporary id, or null when assistant creation
+   * failed and the step was rolled back. Callers that chain steps must not
+   * assume the last step in the list is the one they just asked for.
    */
-  async function addStep(seed?: FlowStepCreationSeed): Promise<void> {
+  async function addStep(seed?: FlowStepCreationSeed): Promise<string | null> {
     const $update = get(editor.state.update);
     const currentSteps = $update.steps ?? [];
     const stepCount = currentSteps.length;
@@ -562,7 +568,10 @@ function createFlowEditor(data: FlowEditorInitData) {
         steps: (u.steps ?? []).filter((s: FlowStep) => s.id !== tempId)
       }));
       activeStepId.set(null);
+      toast.error(m.flow_step_creation_failed());
+      return null;
     }
+    return tempId;
   }
 
   /** Insert step after a given step order */
@@ -625,66 +634,68 @@ function createFlowEditor(data: FlowEditorInitData) {
         return { ...u, steps: filtered };
       });
       activeStepId.set(null);
+      toast.error(m.flow_step_creation_failed());
     }
   }
 
-  async function createTemplateFillStarter(): Promise<void> {
-    // Step 1: Extract key facts from input
-    await addStep();
-    let steps = [...(get(editor.state.update).steps ?? [])];
-    const factStep = steps[steps.length - 1];
-    if (factStep) {
-      factStep.user_description = "Extrahera fakta";
-      if (factStep.assistant_id) {
-        await updateAssistantImmediately(factStep.assistant_id, {
-          name: factStep.user_description,
-          prompt: {
-            text: "Extrahera de viktigaste faktauppgifterna ur texten. Ta med namn, datum, siffror och konkreta omständigheter. Svara som en tydlig punktlista."
-          }
-        });
-      }
-    }
-    editor.state.update.update((resource) => ({ ...resource, steps }));
+  /**
+   * Seed a three-step drafting chain: extract the facts, weigh them, then
+   * write the summary.
+   *
+   * Built from `addStep`, which already owns assistant creation, positional
+   * input derivation and save state, so this adds no second creation path. It
+   * stays a plain sequence rather than a starter schema until a second starter
+   * shows what would actually vary.
+   */
+  async function createDraftingChainStarter(): Promise<void> {
+    const textStep = { output_type: "text", output_mode: "pass_through" } as const;
 
-    // Step 2: Assess implications based on facts
-    await addStep();
-    steps = [...(get(editor.state.update).steps ?? [])];
-    const assessStep = steps[steps.length - 1];
-    if (assessStep) {
-      assessStep.user_description = "Bedöm konsekvenser";
-      if (assessStep.assistant_id) {
-        await updateAssistantImmediately(assessStep.assistant_id, {
-          name: assessStep.user_description,
-          prompt: {
-            text: "Bedöm vad faktauppgifterna innebär. Beskriv konsekvenser, osäkerheter och rekommenderade nästa steg."
-          }
-        });
-      }
-    }
-    editor.state.update.update((resource) => ({ ...resource, steps }));
+    // Every creation is checked. A failed step is rolled back by addStep, so an
+    // unchecked failure would leave the summary sitting at an earlier position
+    // where its own binding — {{step_2.output.text}} — would reference itself
+    // and make the draft unpublishable. Earlier steps are left in place; they
+    // are valid on their own.
+    const extractStepId = await addStep({
+      ...textStep,
+      name: m.flow_starter_drafting_extract_name(),
+      prompt: m.flow_starter_drafting_extract_prompt()
+    });
+    if (!extractStepId) return;
 
-    // Step 3: Write decision brief combining both previous outputs
-    await addStep();
-    steps = [...(get(editor.state.update).steps ?? [])];
-    const briefStep = steps[steps.length - 1];
-    if (briefStep) {
-      briefStep.user_description = "Skriv beslutsunderlag";
-      briefStep.input_source = "all_previous_steps";
-      briefStep.input_type = "text";
-      briefStep.output_type = "text";
-      briefStep.input_bindings = {
-        question: "Nyckelfakta:\n{{step_1.output.text}}\n\nBedömning:\n{{step_2.output.text}}"
-      };
-      if (briefStep.assistant_id) {
-        await updateAssistantImmediately(briefStep.assistant_id, {
-          name: briefStep.user_description,
-          prompt: {
-            text: "Skriv ett kort beslutsunderlag. Kombinera fakta och bedömning nedan. Använd rubrikerna: Nyckelfakta, Bedömning, Nästa steg. Håll det under 250 ord."
+    const assessStepId = await addStep({
+      ...textStep,
+      name: m.flow_starter_drafting_assess_name(),
+      prompt: m.flow_starter_drafting_assess_prompt()
+    });
+    if (!assessStepId) return;
+
+    const summaryStepId = await addStep({
+      ...textStep,
+      name: m.flow_starter_drafting_summary_name(),
+      prompt: m.flow_starter_drafting_summary_prompt()
+    });
+
+    // The summary reads both earlier steps. Seeds deliberately set only the
+    // output side — the input side is derived from position — so this one
+    // cross-step binding is applied here, matched by the id addStep returned
+    // rather than by tail position.
+    if (!summaryStepId) return;
+    const steps = (get(editor.state.update).steps ?? []).map((step) =>
+      step.id === summaryStepId
+        ? {
+            ...step,
+            input_source: "all_previous_steps" as const,
+            input_type: "text" as const,
+            input_bindings: {
+              // The step tokens stay in code: they are a runtime contract, not prose,
+              // and a translated token would silently stop resolving.
+              question:
+                `${m.flow_starter_drafting_facts_label()}:\n{{step_1.output.text}}\n\n` +
+                `${m.flow_starter_drafting_assessment_label()}:\n{{step_2.output.text}}`
+            }
           }
-        });
-      }
-      activeStepId.set(briefStep.id ?? null);
-    }
+        : step
+    );
     editor.state.update.update((resource) => ({ ...resource, steps }));
     scheduleAutoSave();
   }
@@ -857,7 +868,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     setResource: editor.setResource,
     addStep,
     insertStepAfter,
-    createTemplateFillStarter,
+    createDraftingChainStarter,
     assistantRevision,
     loadAssistant,
     saveAssistant,
