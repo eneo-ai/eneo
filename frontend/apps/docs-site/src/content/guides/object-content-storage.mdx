@@ -2,11 +2,17 @@
 
 import { Callout, Steps, Tabs } from "nextra/components";
 
-<Callout type="info">
-  **Short answer:** Eneo works without S3-compatible storage. New File and Icon
-  content uses bounded PostgreSQL storage by default. Add a private compatible
-  endpoint only when your capacity or availability needs justify operating it.
-</Callout>
+## TL;DR
+
+- PostgreSQL inline is the complete ready-to-use default. Compatible object
+  storage is optional.
+- Operators configure storage infrastructure and safety bounds. Platform admins
+  choose one deployment-wide target for eligible new File and Icon writes in
+  **Admin > Storage** without restarting backend or worker.
+- A policy change affects new writes only. Existing content never moves
+  implicitly.
+- Each payload has one byte authority. Eneo does not fall back, dual-write, or
+  maintain vendor-specific product modes.
 
 ## Start here
 
@@ -50,15 +56,17 @@ Object storage and RAG solve different problems:
 
 ### What is adopted now?
 
-| Product content                                              | Current behavior                                                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| New File and Icon bytes                                      | Use the shared lifecycle and PostgreSQL-inline byte backend                                             |
-| Existing File and Icon bytes                                 | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
-| InfoBlob knowledge generations and Flow artifacts            | Remain separate follow-up work                                                                          |
-| Admin-selected placement and inline ↔ object-store migration | Remain a separate, verified migration workflow                                                          |
+| Product content                                   | Current behavior                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Eligible new File and Icon bytes                  | Use the deployment-wide target selected in **Admin > Storage**                                          |
+| Existing File and Icon bytes                      | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
+| InfoBlob knowledge generations and Flow artifacts | Remain separate follow-up work                                                                          |
+| Changing the selected target                      | Affects eligible new writes without a restart; existing content stays where it is                       |
+| Moving existing content                           | Requires a separate explicit, verified migration                                                        |
 
 Enabling an endpoint makes the optional byte plane available; it does not move
-existing content or change producer placement by itself.
+existing content or change producer placement by itself. A platform admin must
+select it after Eneo reports it compatible and ready.
 
 ## Download or recover a File
 
@@ -144,6 +152,40 @@ Start inline unless measured volume, backup duration, database growth, or
 availability requirements say otherwise. “Enterprise” does not automatically
 mean “more services.”
 
+### Admin and operator responsibilities
+
+| Owner          | Responsibility                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform admin | Set the one deployment-wide new-write target and business upload limits in **Admin > Storage**                                        |
+| Operator       | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, certificates, capacity, backups, and process safety tuning |
+
+Tenant admins can review policy, effective limits, and capability status.
+Deployment-wide content inventory spans tenants, so only platform admins can
+view it.
+
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
+safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
+upload limit. For PostgreSQL-inline session uploads, Eneo uses the smaller of
+the admin policy and this ceiling. **Admin > Storage** shows the configured
+limit, effective limit, and constraining source. Object-store session uploads
+use the same rule with the portable multipart envelope derived from deployment
+transport settings. FastAPI/Starlette multipart parsing happens before route
+admission and may use temporary disk. Eneo rejects an oversized File or Icon
+before its own capture/spool or any storage mutation. Operators must use
+ingress/request-body limits and configure and monitor temporary-disk capacity
+to protect that earlier parsing boundary.
+
+Business limits apply to the user's original upload. Generated text, model
+input, and page variants can be larger; Eneo bounds those internal variants by
+the selected backend's operator ceiling instead of rejecting an otherwise valid
+upload against a second business limit.
+
+Persisted business limits accept whole-byte values from 1 through
+9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
+integer exactly. This representation bound is not a business default or a
+capacity recommendation; the applicable operator ceiling can still make the
+effective limit lower.
+
 ## Set up your choice
 
 <Tabs items={["PostgreSQL only", "Bundled SeaweedFS", "External / MinIO"]}>
@@ -162,10 +204,13 @@ the control records and bounded payload bytes, so the normal PostgreSQL backup
 is the complete content backup.
 
 Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
-deployment ceiling. It is an operational safety bound, not a hidden product
-upload policy. It must be at least the largest configured File, image, or audio
-upload limit. Eneo rejects a conflicting configuration at startup instead of
-accepting an upload that PostgreSQL-inline storage cannot persist.
+deployment ceiling. Admin policy may exceed this value, but inline session
+writes use the lower effective limit and report the ceiling as the constraining
+source.
+
+In **Admin > Storage**, keep the new-write target set to **PostgreSQL inline**
+and set the four business limits. The update applies to backend and worker
+operations without restarting either process.
 
   </Tabs.Tab>
   <Tabs.Tab>
@@ -222,6 +267,11 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
+After readiness reports `ready`, a platform admin can select **Object store**
+in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+or incompatible. No backend or worker restart is required for the policy
+change.
+
 </Steps>
 
 Use an external service instead when your availability target requires storage
@@ -274,12 +324,22 @@ curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
 
+After readiness reports `ready`, a platform admin can select **Object store**
+in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+or incompatible. No backend or worker restart is required for the policy
+change.
+
 Before production, test the exact service version and configuration: single and
 multipart write, `HEAD`, full and single-range read, deletion, pagination, TLS,
 and paired restore. Use one dedicated private active-content bucket with
 versioning and Object Lock disabled. Eneo currently deletes one opaque key and
 does not claim to purge retained historical object versions; snapshots and
 paired backups own recovery.
+
+Range reads reuse the verification chunks calculated during the original
+upload. Eneo stores each object's chunk size, so changing multipart tuning later
+does not invalidate older files. Full reads verify the canonical digest for the
+entire object; a range verifies only the chunks that cover that response.
 
   </Tabs.Tab>
 </Tabs>
@@ -306,18 +366,57 @@ File/Icon columns once before dropping them. Measure this on a restored
 production-size database and plan a maintenance window proportional to total
 File/Icon bytes.
 
+The later range-verification revision uses the same maintenance window. It
+backfills at most 10,000 unexpected pre-production object descriptors in one
+transaction and stops before changing schema or data when that bound is
+exceeded. Earlier released versions have no supported File/Icon producer for
+these rows; contact Eneo before upgrading a deployment that trips this guard.
+
 ### Failure rule
 
-| Situation                                      | Eneo behavior                                                             |
-| ---------------------------------------------- | ------------------------------------------------------------------------- |
-| No endpoint configured and no remote rows      | Healthy inline operation                                                  |
-| Endpoint temporarily unavailable               | Inline work continues; remote operations return a typed temporary failure |
-| Remote rows exist but configuration is missing | Fails closed with `configuration_required`                                |
-| Bucket does not match this PostgreSQL database | Fails closed; Eneo does not adopt or mutate it                            |
+| Situation                                             | Eneo behavior                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| No endpoint configured and no remote rows             | Healthy inline operation                                                 |
+| Object-store selection is unavailable or incompatible | Admin update fails clearly; the previous committed policy remains active |
+| Admin save loses its response                         | Outcome is unknown; keep the draft and reload the persisted policy       |
+| Endpoint fails after object store was selected        | New remote-target writes fail; Eneo does not fall back or dual-write     |
+| Existing remote content during an outage              | Remote operations return a typed temporary failure                       |
+| Remote rows exist but configuration is missing        | Fails closed with `configuration_required`                               |
+| Bucket does not match this PostgreSQL database        | Fails closed; Eneo does not adopt or mutate it                           |
 
 Monitor PostgreSQL growth, endpoint capacity and latency, failed/pending
 content, delete backlog, reconciliation lag, temporary spool space, and stale
 multipart uploads. Keep endpoint APIs and consoles private.
+
+### Upgrade, restore, and rollback
+
+The policy migration creates revision 1 with **PostgreSQL inline** selected. It
+reads the four former upload-limit environment values once as migration seeds.
+A present integer from 1 through 9,007,199,254,740,991 is preserved exactly; an
+absent value uses the fresh-install default (10 MiB for session File, session
+image, and knowledge File; 200 MiB for transcription audio). Blank,
+non-integer, zero, negative, or larger values stop the migration with a named
+remediation error. After the migration, environment changes and restarts never
+overwrite the stored policy. During an upgrade, keep the old release's values
+available until `db-init` succeeds, then remove them from active backend and
+worker configuration. Fresh installations do not need them.
+
+If you restore a database from before this migration, stop writers and run
+`docker compose run --rm db-init` before starting backend and worker. `db-init`
+runs Alembic `upgrade head`. The runtime does not create or repair the missing
+policy table.
+
+Policy rollback does not move bytes. To stop placing new content remotely,
+select **PostgreSQL inline** in **Admin > Storage**. The change affects eligible
+new writes only. Existing remote content still needs the configured endpoint,
+credentials, certificates, and paired backup. Eneo does not migrate it back
+implicitly.
+
+Before rolling back to a release that predates the stored policy, export the
+four current business limits and restore them as that old release's four legacy
+environment settings; old code cannot read the singleton policy. Full
+application/schema rollback also requires the previous image and matching
+database/object backup pair.
 
 ## FAQ
 

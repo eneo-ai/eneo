@@ -63,8 +63,11 @@ Inline bytes have a documented deployment ceiling and are verified against the
 control row before a full or single-range response. Object-store uploads compute
 the same canonical digest while streaming. S3 ETags, CRCs, and multipart
 composite checksums help with transport, but never replace it. Object-store
-reads verify and spool the full object before serving full or range bytes;
-memory use stays bounded and larger objects spill to temporary disk.
+full reads verify and spool the whole object. Range reads fetch and verify only
+the persisted upload chunks that cover the requested bytes before responding.
+This keeps seeks bounded to the requested interval plus at most two chunk
+edges. A range proves its covering chunks; a full read still checks the
+canonical full-object digest and can detect corruption elsewhere.
 
 Deletion starts with irreversible PostgreSQL intent. Holds and retention block
 hard deletion. A tombstone becomes purgeable only after its database-owned
@@ -110,10 +113,13 @@ product reference disappears; they are not duplicated as File-identity rules.
 ## Crash recovery and reconciliation
 
 Inline creation has no database/object-store crash gap: payload and intent share
-one transaction. Network and process failures can interrupt object-store work
-after its intent commits. Bounded leases, idempotent retries, multipart abort
-records, and a queue-neutral reconciler close that gap. The current worker
-schedules the reconciler with ARQ, but lifecycle code does not depend on ARQ.
+one transaction. For eligible new File and Icon object-store writes, Eneo
+uploads and HEAD verifies captured bytes under a bounded PostgreSQL reservation
+before one short transaction publishes product metadata, already-available
+content rows, and concrete references. A pre-publication crash therefore leaves
+no invisible product row; repeated inventory and the existing grace period own
+the row-less remote residue. The current worker schedules that queue-neutral
+reconciler with ARQ, but lifecycle code does not depend on ARQ.
 
 Local lifecycle, retention, reference audit, and inline deletion reconciliation
 continue even when no endpoint is configured or a configured endpoint is

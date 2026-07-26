@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.orm import aliased
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.files_table import Files
@@ -17,7 +18,7 @@ from eneo.files.file_models import (
     FileType,
 )
 from eneo.main.exceptions import NotFoundException
-from eneo.object_content.content import ContentAccessClass
+from eneo.object_content.content import ContentAccessClass, ContentState
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +133,41 @@ class FileRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    @staticmethod
+    def _visible_family(file: type[Files] = Files):
+        root_id = sa.case(
+            (file.parent_file_id.is_(None), file.id),
+            else_=file.parent_file_id,
+        )
+        family_member = aliased(Files)
+        family_reference = aliased(FileContentReferences)
+        family_ids = (
+            sa.select(family_member.id)
+            .where(
+                sa.or_(
+                    family_member.id == root_id,
+                    family_member.parent_file_id == root_id,
+                )
+            )
+            .correlate(file)
+        )
+        root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
+        referenced_content_state = (
+            sa.select(ObjectContents.state)
+            .where(ObjectContents.id == family_reference.content_id)
+            .correlate(family_reference)
+            .scalar_subquery()
+        )
+        unavailable_content = (
+            sa.exists()
+            .where(
+                family_reference.file_id.in_(family_ids),
+                referenced_content_state != ContentState.AVAILABLE.value,
+            )
+            .correlate(file)
+        )
+        return sa.and_(root_has_content.correlate(file), ~unavailable_content)
+
     async def add_metadata(self, file: FileMetadataCreate) -> FileMetadata:
         row = Files(**file.model_dump())
         self.session.add(row)
@@ -171,7 +207,11 @@ class FileRepository:
             return []
         rows = await self.session.scalars(
             sa.select(Files)
-            .where(Files.id.in_(ids), Files.user_id == user_id)
+            .where(
+                Files.id.in_(ids),
+                Files.user_id == user_id,
+                self._visible_family(),
+            )
             .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
@@ -180,7 +220,9 @@ class FileRepository:
         if not ids:
             return []
         rows = await self.session.scalars(
-            sa.select(Files).where(Files.id.in_(ids)).order_by(Files.created_at)
+            sa.select(Files)
+            .where(Files.id.in_(ids), self._visible_family())
+            .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
 
@@ -196,26 +238,31 @@ class FileRepository:
             .where(
                 Files.parent_file_id.in_(parent_ids),
                 Files.user_id == user_id,
+                self._visible_family(),
             )
             .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
 
     async def get_by_id(self, file_id: UUID) -> FileMetadata:
-        row = await self.session.get(Files, file_id)
+        row = await self.session.scalar(
+            sa.select(Files).where(Files.id == file_id, self._visible_family())
+        )
         if row is None:
             raise NotFoundException()
         return FileMetadata.model_validate(row)
 
     async def get_by_id_for_update(self, file_id: UUID) -> FileMetadata:
         row = await self.session.scalar(
-            sa.select(Files).where(Files.id == file_id).with_for_update()
+            sa.select(Files)
+            .where(Files.id == file_id, self._visible_family())
+            .with_for_update()
         )
         if row is None:
             raise NotFoundException()
         return FileMetadata.model_validate(row)
 
-    async def get_by_id_and_owner(
+    async def get_by_id_and_owner_for_lifecycle(
         self,
         *,
         file_id: UUID,
@@ -237,10 +284,15 @@ class FileRepository:
             .where(
                 Files.user_id == user_id,
                 Files.parent_file_id.is_(None),
+                self._visible_family(),
             )
             .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
+
+    async def get_by_id_for_lifecycle(self, file_id: UUID) -> FileMetadata | None:
+        row = await self.session.get(Files, file_id)
+        return None if row is None else FileMetadata.model_validate(row)
 
     async def get_content_references(
         self,
@@ -302,7 +354,7 @@ class FileRepository:
             by_file[reference.file_id].append(reference)
         return [project_file_info(file, by_file[file.id]) for file in metadata]
 
-    async def delete_by_owner(
+    async def delete_by_owner_for_lifecycle(
         self,
         id: UUID,
         user_id: UUID,

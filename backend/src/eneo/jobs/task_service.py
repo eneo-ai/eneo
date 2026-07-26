@@ -11,8 +11,11 @@ from eneo.files.text import TextMimeTypes
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_models import TaskParams, Transcription, UploadInfoBlob
-from eneo.main.config import get_settings
 from eneo.main.exceptions import FileNotSupportedException, FileTooLargeException
+from eneo.object_content.deployment_policy import (
+    UploadAdmissionSnapshot,
+    UploadLimitUseCase,
+)
 from eneo.users.user import UserInDB
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_run import CrawlType
@@ -25,12 +28,14 @@ class TaskService:
         file_size_service: FileSizeService,
         job_service: JobService,
         quota_service: QuotaService,
+        upload_admission: UploadAdmissionSnapshot | None = None,
     ) -> None:
         super().__init__()
         self.user = user
         self.file_size_service = file_size_service
         self.job_service = job_service
         self.quota_service = quota_service
+        self.upload_admission = upload_admission
 
     @staticmethod
     def get_task_type(mimetype: str):
@@ -41,15 +46,20 @@ class TaskService:
         else:
             raise FileNotSupportedException(f"{mimetype} not supported.")
 
-    @staticmethod
-    def get_max_size(task: Task):
+    def get_max_size(self, task: Task) -> tuple[int, str | None]:
+        if self.upload_admission is None:
+            raise RuntimeError("Upload admission snapshot is required")
+
         match task:
             case Task.UPLOAD_FILE:
-                return get_settings().upload_max_file_size, "UPLOAD_MAX_FILE_SIZE"
+                return (
+                    self.upload_admission.knowledge_file_maximum_bytes,
+                    UploadLimitUseCase.KNOWLEDGE_FILE.value,
+                )
             case Task.TRANSCRIPTION:
                 return (
-                    get_settings().transcription_max_file_size,
-                    "TRANSCRIPTION_MAX_FILE_SIZE",
+                    self.upload_admission.knowledge_audio_maximum_bytes,
+                    UploadLimitUseCase.KNOWLEDGE_AUDIO.value,
                 )
             case _:
                 return 0, None
@@ -57,14 +67,14 @@ class TaskService:
     async def validate_file_size(
         self, file: SpooledTemporaryFile[bytes], task: Task
     ) -> None:
-        max_size, setting_name = self.get_max_size(task)
+        max_size, limit_name = self.get_max_size(task)
         file_size = await asyncio.to_thread(self.file_size_service.get_file_size, file)
 
         if file_size > max_size:
             raise FileTooLargeException(
                 file_size=file_size,
                 max_size=max_size,
-                setting_name=setting_name,
+                limit_name=limit_name,
             )
 
     async def ensure_quota(self, file: SpooledTemporaryFile[bytes], task: Task) -> None:

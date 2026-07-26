@@ -21,7 +21,6 @@ from eneo.object_content.configuration import (
     ObjectContentSettings,
 )
 from eneo.object_content.content import (
-    ObjectContentConfigurationError,
     ObjectContentUnavailableError,
 )
 from eneo.object_content.runtime import (
@@ -159,23 +158,27 @@ def test_runtime_fails_closed_before_start() -> None:
         runtime.service
 
 
-def test_runtime_rejects_inline_capacity_below_file_producer_limit() -> None:
+def test_runtime_inline_capacity_has_no_process_owned_business_limit() -> None:
     runtime = ObjectContentRuntime()
 
-    with pytest.raises(
-        ObjectContentConfigurationError,
-        match="OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
-    ):
-        runtime.start(
-            core_settings=ObjectContentCoreSettings(
-                _env_file=None,
-                inline_maximum_bytes=10,
-                inline_io_chunk_bytes=10,
-            ),
-            required_inline_bytes=11,
-        )
+    runtime.start(
+        core_settings=ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=10,
+            inline_io_chunk_bytes=10,
+        ),
+    )
 
-    assert runtime.state is ObjectContentRuntimeState.NOT_STARTED
+    assert runtime.state is ObjectContentRuntimeState.ENABLED
+
+
+def test_runtime_exposes_the_configured_portable_object_store_ceiling() -> None:
+    settings = _settings()
+    runtime = ObjectContentRuntime()
+
+    runtime.start(settings=settings, store=cast(S3ObjectStore, _ReadinessStore()))
+
+    assert runtime.object_store_maximum_bytes == settings.maximum_multipart_bytes
 
 
 @pytest.mark.asyncio
@@ -190,6 +193,7 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     runtime.start()
     await runtime.validate_configuration()
     readiness = await runtime.readiness()
+    capabilities = await runtime.storage_capabilities()
     reconciliation = await runtime.reconcile_once()
 
     assert runtime.state is ObjectContentRuntimeState.ENABLED
@@ -197,6 +201,16 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     assert runtime.object_store_configured is False
     assert readiness.ready is True
     assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    assert runtime.inline_maximum_bytes == 200 * 1024**2
+    assert runtime.object_store_maximum_bytes is None
+    assert capabilities[0].configured is True
+    assert capabilities[0].selectable is True
+    assert capabilities[1].configured is False
+    assert capabilities[1].selectable is False
+    assert (
+        capabilities[1].readiness_code
+        is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
+    )
     assert reconciliation.content_processed == 0
     assert reconciliation.object_cycle_completed is False
     assert runtime.service.object_store_configured is False

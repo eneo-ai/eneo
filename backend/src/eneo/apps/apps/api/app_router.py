@@ -37,6 +37,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 WITH_USER_CONTAINER = get_container(with_user=True)
 USER_CONTAINER = Depends(WITH_USER_CONTAINER)
+USER_UPLOAD_ADMISSION_CONTAINER = Depends(
+    get_container(with_user=True, with_upload_admission=True)
+)
 
 
 class AttachmentChange(TypedDict):
@@ -51,7 +54,7 @@ class AttachmentChange(TypedDict):
 )
 async def get_app(
     id: UUID,
-    container: Container = USER_CONTAINER,
+    container: Container = USER_UPLOAD_ADMISSION_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -71,7 +74,7 @@ async def update_app(
     id: UUID,
     update_service_req: AppUpdateRequest,
     request: Request,
-    container: Container = USER_CONTAINER,
+    container: Container = USER_UPLOAD_ADMISSION_CONTAINER,
 ):
     if (
         update_service_req.skill_bindings is not None
@@ -536,7 +539,7 @@ async def get_prompts(
 async def publish_app(
     id: UUID,
     published: bool,
-    container: Container = USER_CONTAINER,
+    container: Container = USER_UPLOAD_ADMISSION_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()

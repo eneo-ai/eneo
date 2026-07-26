@@ -92,6 +92,8 @@ async def _available_content(
         descriptor.content_id = content.id
         descriptor.storage_kind = StorageKind.OBJECT_STORE.value
         descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{token}"
+        descriptor.verification_chunk_size_bytes = 1
+        descriptor.verification_chunk_sha256 = digest
         session.add(descriptor)
         session.add(
             FileContentReferences(
@@ -146,6 +148,8 @@ async def _pending_content(
         descriptor.content_id = content.id
         descriptor.storage_kind = StorageKind.OBJECT_STORE.value
         descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{token}"
+        descriptor.verification_chunk_size_bytes = len(payload)
+        descriptor.verification_chunk_sha256 = digest
         session.add(descriptor)
         session.add(
             FileContentReferences(
@@ -169,6 +173,7 @@ async def _pending_content(
         declared_media_type="text/plain",
         verified_media_type="text/plain",
         part_sha256=(digest,),
+        part_size_bytes=len(payload),
     )
 
 

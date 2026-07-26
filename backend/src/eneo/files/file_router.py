@@ -1,14 +1,14 @@
 import base64
 import time
 import unicodedata
-from typing import Annotated
+from typing import Annotated, cast
 from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 
-# Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -19,6 +19,7 @@ from eneo.authentication.signed_urls import (
     verify_file_original_download_token,
     verify_signed_token,
 )
+from eneo.database.database import AsyncSession
 from eneo.files.file_models import (
     ContentDisposition,
     FileContentRangeError,
@@ -35,32 +36,47 @@ from eneo.main.exceptions import (
     ErrorCodes,
     UnauthorizedException,
 )
+from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError, PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+_file_upload_container_dependency = get_container(
+    with_user=True,
+    with_transaction=False,
+    with_upload_admission=True,
+)
+_FileUploadContainer = Annotated[
+    Container,
+    Depends(_file_upload_container_dependency),
+]
+
+
+async def _require_upload_user_for_creation(
+    container: _FileUploadContainer,
+) -> None:
+    await require_user_for_creation(container.user())
 
 
 @router.post(
     "/",
     response_model=FilePublic,
-    responses=responses.get_responses([400, 403, 413, 415]),
+    responses=responses.get_responses([400, 403, 413, 415, 503]),
     description="Upload a file; rejects unsupported media types and oversized files.",
+    dependencies=[Depends(_require_upload_user_for_creation)],
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
+    container: _FileUploadContainer,
 ):
     service = container.file_service()
     current_user = container.user()
-
-    # Upload file
     file = await service.save_file(upload_file)
 
-    # Build extra context with file details
     extra = {
         "size_bytes": file.size,
         "mimetype": getattr(file, "mimetype", None),
@@ -69,21 +85,33 @@ async def upload_file(
         else None,
     }
 
-    # Audit logging
     audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=current_user.tenant_id,
-        user=current_user,
-        action=ActionType.FILE_UPLOADED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=f"Uploaded file '{file.name}' ({file.size} bytes)",
-        metadata=AuditMetadata.standard(
-            actor=current_user,
-            target=file,
-            extra=extra,
-        ),
-    )
+    session = cast(AsyncSession, container.session())
+    try:
+        async with session.begin():
+            await audit_service.log_async(
+                tenant_id=current_user.tenant_id,
+                user=current_user,
+                action=ActionType.FILE_UPLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+                metadata=AuditMetadata.standard(
+                    actor=current_user,
+                    target=file,
+                    extra=extra,
+                ),
+            )
+    except SQLAlchemyError as exc:
+        # FileService has already committed the File family. A transient audit
+        # lookup failure must not report that successful upload as failed.
+        logger.warning(
+            "File upload committed but audit logging was unavailable",
+            extra={
+                "file_id": str(file.id),
+                "error_type": type(exc).__name__,
+            },
+        )
 
     return file
 
@@ -387,12 +415,16 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         403: {"description": "Unauthorized - Not authorized to view this file"},
         404: {"description": "File content not found or file does not exist"},
         416: {"description": "Range not satisfiable"},
+        **responses.get_responses([503]),
     },
 )
 async def download_file_signed(
     id: UUID,
     token: Annotated[str, Query(description="The signed token for file access")],
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_transaction=False)),
+    ],
     range: Annotated[str | None, Header()] = None,
 ):
     content_disposition = _validate_download_claims(

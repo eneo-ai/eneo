@@ -543,7 +543,10 @@ async def create_group_chat(
 async def create_app(
     id: UUID,
     create_service_req: CreateSpaceAppRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, with_upload_admission=True)),
+    ],
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()

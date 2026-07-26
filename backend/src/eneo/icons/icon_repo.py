@@ -10,7 +10,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
-from eneo.object_content.content import ContentAccessClass
+from eneo.object_content.content import ContentAccessClass, ContentState
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +48,25 @@ class IconRepository:
         await self.session.flush()
 
     async def get(self, icon_id: UUID) -> IconMetadata | None:
+        row = await self.session.scalar(
+            sa.select(Icons)
+            .join(
+                IconContentReferences,
+                IconContentReferences.icon_id == Icons.id,
+            )
+            .join(
+                ObjectContents,
+                ObjectContents.id == IconContentReferences.content_id,
+            )
+            .where(
+                Icons.id == icon_id,
+                IconContentReferences.variant == "primary",
+                ObjectContents.state == ContentState.AVAILABLE.value,
+            )
+        )
+        return None if row is None else IconMetadata.model_validate(row)
+
+    async def get_for_lifecycle(self, icon_id: UUID) -> IconMetadata | None:
         row = await self.session.get(Icons, icon_id)
         return None if row is None else IconMetadata.model_validate(row)
 

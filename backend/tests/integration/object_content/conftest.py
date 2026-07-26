@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
@@ -204,7 +204,7 @@ async def object_content_database(
 
 
 @pytest.fixture(scope="session")
-async def real_object_store(
+async def _real_object_store_process(
     unused_tcp_port_factory: Callable[[], int],
 ) -> AsyncGenerator[RealObjectStore, None]:
     bucket = "eneo-object-content-test"
@@ -287,7 +287,28 @@ async def real_object_store(
                 await store.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
+async def real_object_store(
+    _real_object_store_process: RealObjectStore,
+) -> AsyncGenerator[RealObjectStore, None]:
+    # Namespaces accumulate only inside this disposable session container;
+    # session teardown destroys them with the shared SeaweedFS process.
+    settings = _real_object_store_process.settings.model_copy(
+        update={"deployment_id": uuid4()}
+    )
+    store = S3ObjectStore(settings)
+    await store.check_ready()
+    try:
+        yield RealObjectStore(
+            settings=settings,
+            store=store,
+            container=_real_object_store_process.container,
+        )
+    finally:
+        await store.close()
+
+
+@pytest.fixture
 async def real_unpaired_object_store(
     real_object_store: RealObjectStore,
 ) -> AsyncGenerator[RealObjectStore, None]:

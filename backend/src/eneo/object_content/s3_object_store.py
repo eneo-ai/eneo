@@ -25,7 +25,12 @@ from botocore.response import StreamingBody
 from botocore.session import get_session
 
 from eneo.object_content.configuration import ObjectContentSettings
-from eneo.object_content.content import ByteRange, CapturedContent, ContentRead
+from eneo.object_content.content import (
+    ByteRange,
+    CapturedContent,
+    ContentRead,
+    verification_chunk_window,
+)
 from eneo.object_content.lease import OperationCheckpoint
 
 if TYPE_CHECKING:
@@ -636,14 +641,36 @@ class S3ObjectStore:
         expected_size_bytes: int,
         expected_media_type: str,
         byte_range: ByteRange | None = None,
+        verification_chunk_size_bytes: int | None = None,
+        verification_chunk_count: int | None = None,
+        verification_chunk_sha256: Sequence[bytes] = (),
     ) -> AsyncGenerator[ContentRead, None]:
-        """Verify canonical bytes before exposing a full or ranged response."""
+        """Verify canonical full bytes or every chunk covering a byte range."""
         if len(expected_sha256) != _SHA256_BYTES:
             raise ObjectStoreIntegrityError("Canonical SHA-256 has an invalid length")
         if byte_range is not None and byte_range.total != expected_size_bytes:
             raise ObjectStoreIntegrityError(
                 "Requested byte range does not match the canonical object size"
             )
+        if byte_range is not None:
+            if (
+                verification_chunk_size_bytes is None
+                or verification_chunk_count is None
+            ):
+                raise ObjectStoreIntegrityError(
+                    "Ranged read verification metadata is missing"
+                )
+            async with self._open_verified_range(
+                key,
+                expected_size_bytes=expected_size_bytes,
+                expected_media_type=expected_media_type,
+                byte_range=byte_range,
+                verification_chunk_size_bytes=verification_chunk_size_bytes,
+                verification_chunk_count=verification_chunk_count,
+                verification_chunk_sha256=verification_chunk_sha256,
+            ) as opened:
+                yield opened
+            return
 
         spool = SpooledTemporaryFile(
             max_size=self._settings.spool_memory_bytes,
@@ -669,20 +696,152 @@ class S3ObjectStore:
                     "Object bytes do not match the canonical SHA-256"
                 )
 
-            start = 0 if byte_range is None else byte_range.start
-            content_length = (
-                expected_size_bytes if byte_range is None else byte_range.content_length
-            )
-            await asyncio.to_thread(spool.seek, start)
-            chunks = self._stream_file(spool, expected_length=content_length)
+            await asyncio.to_thread(spool.seek, 0)
+            chunks = self._stream_file(spool, expected_length=expected_size_bytes)
             try:
                 yield ContentRead(
                     chunks=chunks,
-                    content_length=content_length,
+                    content_length=expected_size_bytes,
                     media_type=expected_media_type,
-                    content_range=(
-                        None if byte_range is None else byte_range.response_header
-                    ),
+                    content_range=None,
+                )
+            finally:
+                await chunks.aclose()
+        finally:
+            await asyncio.to_thread(spool.close)
+
+    @asynccontextmanager
+    async def _open_verified_range(
+        self,
+        key: str,
+        *,
+        expected_size_bytes: int,
+        expected_media_type: str,
+        byte_range: ByteRange,
+        verification_chunk_size_bytes: int,
+        verification_chunk_count: int,
+        verification_chunk_sha256: Sequence[bytes],
+    ) -> AsyncGenerator[ContentRead, None]:
+        try:
+            window = verification_chunk_window(
+                byte_range,
+                chunk_size_bytes=verification_chunk_size_bytes,
+                chunk_count=verification_chunk_count,
+            )
+        except ValueError as error:
+            raise ObjectStoreIntegrityError(
+                "Ranged read verification metadata is inconsistent"
+            ) from error
+        if len(verification_chunk_sha256) != window.chunk_count or any(
+            len(digest) != _SHA256_BYTES for digest in verification_chunk_sha256
+        ):
+            raise ObjectStoreIntegrityError(
+                "Ranged read verification chunk inventory is invalid"
+            )
+
+        self._require_owned_key(key)
+        try:
+            result = await asyncio.to_thread(
+                self._client.get_object,
+                Bucket=self._settings.bucket,
+                Key=key,
+                Range=window.aligned_range.request_header,
+            )
+        except ClientError as error:
+            if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
+                raise ObjectStoreNotFoundError(
+                    "Object content does not exist"
+                ) from error
+            raise ObjectStoreUnavailableError("Object range read failed") from error
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError("Object range read failed") from error
+
+        aligned_length = window.aligned_range.content_length
+        body = result["Body"]
+        if result.get("ContentLength") != aligned_length:
+            body.close()
+            raise ObjectStoreIntegrityError(
+                "Object range length does not match verification window"
+            )
+        if result.get("ContentRange") != window.aligned_range.response_header:
+            body.close()
+            raise ObjectStoreIntegrityError(
+                "Object range response does not match verification window"
+            )
+        if result.get("ContentType") != expected_media_type:
+            body.close()
+            raise ObjectStoreIntegrityError(
+                "Object range media type does not match intent"
+            )
+
+        spool = SpooledTemporaryFile(
+            max_size=self._settings.spool_memory_bytes,
+            mode="w+b",
+        )
+        try:
+            remote_chunks = self._stream_body(body, expected_length=aligned_length)
+            verification_index = 0
+            chunk_hasher = sha256()
+            chunk_remaining = min(
+                verification_chunk_size_bytes,
+                expected_size_bytes
+                - window.first_chunk_index * verification_chunk_size_bytes,
+            )
+            try:
+                async for remote_chunk in remote_chunks:
+                    written = await asyncio.to_thread(spool.write, remote_chunk)
+                    if written != len(remote_chunk):
+                        raise ObjectStoreIntegrityError(
+                            "Verified object spool accepted a partial write"
+                        )
+
+                    remaining = memoryview(remote_chunk)
+                    while remaining:
+                        piece = remaining[:chunk_remaining]
+                        chunk_hasher.update(piece)
+                        chunk_remaining -= len(piece)
+                        remaining = remaining[len(piece) :]
+                        if chunk_remaining != 0:
+                            continue
+                        if (
+                            chunk_hasher.digest()
+                            != verification_chunk_sha256[verification_index]
+                        ):
+                            raise ObjectStoreIntegrityError(
+                                "Object verification chunk does not match intent"
+                            )
+                        verification_index += 1
+                        if verification_index < window.chunk_count:
+                            chunk_hasher = sha256()
+                            absolute_chunk_index = (
+                                window.first_chunk_index + verification_index
+                            )
+                            chunk_remaining = min(
+                                verification_chunk_size_bytes,
+                                expected_size_bytes
+                                - absolute_chunk_index * verification_chunk_size_bytes,
+                            )
+                if verification_index != window.chunk_count:
+                    raise ObjectStoreIntegrityError(
+                        "Object range ended before every verification chunk"
+                    )
+            finally:
+                await remote_chunks.aclose()
+
+            await asyncio.to_thread(
+                spool.seek,
+                byte_range.start - window.aligned_range.start,
+            )
+            chunks = self._stream_file(
+                spool,
+                expected_length=byte_range.content_length,
+            )
+            try:
+                yield ContentRead(
+                    chunks=chunks,
+                    content_length=byte_range.content_length,
+                    media_type=expected_media_type,
+                    content_range=byte_range.response_header,
                 )
             finally:
                 await chunks.aclose()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from io import BytesIO
+from unittest.mock import AsyncMock
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -9,12 +11,21 @@ import sqlalchemy as sa
 from PIL import Image
 from sqlalchemy import select
 
+from eneo.audit.application import audit_service as audit_service_module
+from eneo.database.database import sessionmanager
+from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
+from eneo.database.tables.object_content_policy_table import (
+    ObjectContentDeploymentPolicy,
+)
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
 )
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
+from eneo.object_content.content import StorageKind
+from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.runtime import object_content_runtime
 
 
 def _opaque_png(*, width: int, height: int) -> bytes:
@@ -24,6 +35,90 @@ def _opaque_png(*, width: int, height: int) -> bytes:
         format="PNG",
     )
     return buffer.getvalue()
+
+
+class _ReadyObjectStoreContentService(ObjectContentService):
+    async def ensure_target_ready(self, storage_kind: StorageKind) -> None:
+        assert storage_kind is StorageKind.OBJECT_STORE
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "storage_target",
+    [StorageKind.POSTGRES_INLINE, StorageKind.OBJECT_STORE],
+)
+async def test_file_upload_respects_audit_kill_switch_after_storage_commit(
+    client,
+    db_container,
+    admin_user_api_key,
+    real_object_store,
+    monkeypatch,
+    caplog,
+    storage_target: StorageKind,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        policy = await session.get(ObjectContentDeploymentPolicy, 1)
+        assert policy is not None
+        policy.new_write_storage_target = storage_target.value
+
+    if storage_target is StorageKind.OBJECT_STORE:
+        monkeypatch.setattr(
+            object_content_runtime,
+            "_service",
+            _ReadyObjectStoreContentService(
+                real_object_store.settings,
+                sessionmanager,
+                object_store_settings=real_object_store.settings,
+                object_store=real_object_store.store,
+            ),
+        )
+
+    enqueue = AsyncMock(return_value=None)
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", enqueue)
+    caplog.set_level(logging.WARNING, logger=audit_service_module.__name__)
+
+    headers = {"X-API-Key": admin_user_api_key.key}
+    for audit_enabled in (False, True):
+        async with db_container() as container:
+            session = container.session()
+            audit_flag = await session.scalar(
+                select(GlobalFeatureFlag).where(
+                    GlobalFeatureFlag.name == "audit_logging_enabled"
+                )
+            )
+            assert audit_flag is not None
+            audit_flag.enabled = audit_enabled
+
+        enqueue.reset_mock()
+        caplog.clear()
+        upload = await client.post(
+            "/api/v1/files/",
+            files={
+                "upload_file": (
+                    f"audit-{storage_target.value}-{audit_enabled}.txt",
+                    b"audited payload",
+                    "text/plain",
+                )
+            },
+            headers=headers,
+        )
+
+        assert upload.status_code == 200, upload.text
+        file_upload_enqueues = [
+            call
+            for call in enqueue.await_args_list
+            if call.args[2]["action"] == "file_uploaded"
+        ]
+        assert len(file_upload_enqueues) == int(audit_enabled)
+        assert "Failed to check audit_logging_enabled flag" not in caplog.text
+
+        deletion = await client.delete(
+            f"/api/v1/files/{upload.json()['id']}/",
+            headers=headers,
+        )
+        assert deletion.status_code == 204, deletion.text
 
 
 @pytest.mark.integration
