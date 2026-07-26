@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -270,6 +271,132 @@ async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_bindin
     )
 
     assert response.status_code == 400, response.text
+    persisted_name, persisted_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert persisted_name == original_name
+    assert persisted_bindings == original_bindings
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.get_settings",
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=0),
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_tokens",
+        lambda text, *_args, **_kwargs: (
+            6_500 if "candidate-persistent-overflow" in text else 100
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: (2_000 if text_files else 0),
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            "gpt-4o",
+            max_input_tokens=8_000,
+        )
+        model.supports_tool_calling = True
+        space = await space_factory(
+            session,
+            "Assistant candidate attachment contract",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Original attachment-fit Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        repo = container.skill_repo()
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+        skill = await repo.create(
+            space_id=space.id,
+            slug=f"candidate-attachment-{uuid4().hex[:8]}",
+            display_name="Candidate attachment Skill",
+            description="Use for candidate attachment questions",
+            instructions="candidate-persistent-overflow",
+            content_digest="e" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assistant_id = assistant.id
+        skill_id = skill.id
+        revision_id = skill.current_revision.id
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    upload = await client.post(
+        "/api/v1/files/",
+        files={
+            "upload_file": (
+                "persistent.txt",
+                b"persistent attachment",
+                "text/plain",
+            )
+        },
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    attachment_id = upload.json()["id"]
+    attach_response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"attachments": [{"id": attachment_id}]},
+        headers=headers,
+    )
+    assert attach_response.status_code == 200, attach_response.text
+
+    original_name, original_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "name": "Rejected attachment-fit Assistant",
+            "skill_bindings": [
+                {
+                    "skill_id": str(skill_id),
+                    "skill_revision_id": str(revision_id),
+                    "activation_mode": "on_demand",
+                }
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400, response.text
+    assert 'on-demand Skill "Candidate attachment Skill"' in response.json()["message"]
     persisted_name, persisted_bindings = await _persisted_assistant_state(
         db_container,
         assistant_id=assistant_id,

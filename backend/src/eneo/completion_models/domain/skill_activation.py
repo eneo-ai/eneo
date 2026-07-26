@@ -92,7 +92,9 @@ class SkillActivationCandidateAssessment:
     """Non-mutating fit result for one on-demand candidate."""
 
     skill_id: UUID
+    display_name: str
     activation_key: str
+    prompt: str
     rejection_reason: SkillActivationRejectionReason | None
     measurement: SkillContextMeasurement
 
@@ -345,14 +347,13 @@ class SkillActivationRuntime:
         for skill in self._skills:
             if skill.initially_active or skill.binding.skill_id not in skill_ids:
                 continue
-            _, assessment = self._assess_candidate(skill)
-            assessments.append(assessment)
+            assessments.append(self._assess_candidate(skill))
         return tuple(assessments)
 
     def _assess_candidate(
         self,
         skill: FrozenSkillInstruction,
-    ) -> tuple[str, SkillActivationCandidateAssessment]:
+    ) -> SkillActivationCandidateAssessment:
         prompt, measurement = self._measure(self._active_skills(skill.activation_key))
         rejection_reason: SkillActivationRejectionReason | None = None
         if measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
@@ -361,14 +362,13 @@ class SkillActivationRuntime:
             )
         elif measurement.tokens > measurement.limit:
             rejection_reason = SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED
-        return (
-            prompt,
-            SkillActivationCandidateAssessment(
-                skill_id=skill.binding.skill_id,
-                activation_key=skill.activation_key,
-                rejection_reason=rejection_reason,
-                measurement=measurement,
-            ),
+        return SkillActivationCandidateAssessment(
+            skill_id=skill.binding.skill_id,
+            display_name=skill.display_name,
+            activation_key=skill.activation_key,
+            prompt=prompt,
+            rejection_reason=rejection_reason,
+            measurement=measurement,
         )
 
     @staticmethod
@@ -528,7 +528,7 @@ class SkillActivationRuntime:
                 )
                 continue
 
-            candidate_prompt, assessment = self._assess_candidate(candidate)
+            assessment = self._assess_candidate(candidate)
             if assessment.rejection_reason is not None:
                 self._reject(
                     activation_key=key,
@@ -544,7 +544,7 @@ class SkillActivationRuntime:
 
             self._active_keys.add(key)
             self._accepted.append(key)
-            self.prompt = candidate_prompt
+            self.prompt = assessment.prompt
             self._measurement = assessment.measurement
             accepted_any = True
             decisions.append(

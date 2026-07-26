@@ -330,6 +330,7 @@ def test_fresh_candidate_assessment_matches_accepted_first_activation():
     decisions = _apply_activation_requests(runtime, ("activate", "skill-1"))
 
     assert decisions == [{"activated": True}]
+    assert runtime.prompt == assessment.prompt
     assert runtime.snapshot().measurement == assessment.measurement
 
 

@@ -288,6 +288,81 @@ async def test_fit_passes_at_exact_ceiling(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
+    monkeypatch,
+):
+    _patch_reserve(monkeypatch, 10)
+    attachment_count_calls = 0
+
+    def fake_count_tokens(text, *args, **kwargs):
+        if "Instructions for Candidate two" in text:
+            return 60
+        if "Instructions for Candidate one" in text:
+            return 30
+        return 5
+
+    def fake_count_attachment_tokens(**kwargs):
+        nonlocal attachment_count_calls
+        attachment_count_calls += 1
+        return 40
+
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_tokens",
+        fake_count_tokens,
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens",
+        fake_count_attachment_tokens,
+    )
+    measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: measurement,
+    )
+    bindings = (
+        _resolved_skill(
+            name="Candidate one",
+            position=0,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        ),
+        _resolved_skill(
+            name="Candidate two",
+            position=1,
+            activation_mode=SkillActivationMode.ON_DEMAND,
+        ),
+    )
+    assistant = _assistant_with_runtime_model()
+    assistant.completion_model.max_input_tokens = 100
+    assistant.completion_model.vision = True
+    assistant.attachments = [_text_attachment()]
+    space = MagicMock()
+    space.is_personal.return_value = False
+    file_service = AsyncMock()
+    file_service.with_derived_images.return_value = assistant.attachments
+    service = _service(file_service)
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=bindings, blocked=())
+    )
+
+    with pytest.raises(BadRequestException, match="Candidate two"):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            on_demand_skill_ids_requiring_validation=frozenset(
+                binding.skill_id for binding in bindings
+            ),
+        )
+
+    file_service.with_derived_images.assert_awaited_once_with(assistant.attachments)
+    assert attachment_count_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_fit_skipped_when_no_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(

@@ -571,8 +571,11 @@ class AssistantService:
         Attachments are sent whole (never truncated), so a set that doesn't fit
         can't run — a clear rejection beats silently sending part of a document.
         The prompt counts toward the ceiling on its own, so a prompt that alone
-        overflows is rejected even with no attachments. Skipped only when no
-        model is resolved."""
+        overflows is rejected even with no attachments. Changed on-demand
+        candidates are each checked from the always-active baseline; combinations
+        remain a turn-time decision. Existing candidates are not revalidated for
+        unrelated attachment or policy drift. Skipped only when no model is
+        resolved."""
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
@@ -634,6 +637,13 @@ class AssistantService:
             assistant=assistant,
             model=model,
             prompt_text=runtime.prompt,
+            alternative_prompts=tuple(
+                (
+                    f'on-demand Skill "{assessment.display_name}"',
+                    assessment.prompt,
+                )
+                for assessment in assessments
+            ),
         )
 
     @staticmethod
@@ -659,6 +669,7 @@ class AssistantService:
         assistant: Assistant,
         model: "CompletionModel",
         prompt_text: str,
+        alternative_prompts: Sequence[tuple[str, str]] = (),
     ) -> None:
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
@@ -669,6 +680,7 @@ class AssistantService:
             model_name=model.name,
             prompt_text=prompt_text,
             files=completion_prompt_files,
+            alternative_prompts=alternative_prompts,
         )
 
     async def assert_personal_default_governance_context_fit(self) -> None:
