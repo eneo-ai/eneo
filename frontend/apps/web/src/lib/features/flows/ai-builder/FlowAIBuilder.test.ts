@@ -88,6 +88,93 @@ function recoveryHarness(
   return { fetch, stream };
 }
 
+function resumeFailureHarness(options: { multipleDrafts?: boolean } = {}): {
+  transport: AIBuilderClientTransport;
+  fetch: ReturnType<typeof vi.fn>;
+} {
+  const draft = {
+    session_id: "draft-resume-failure",
+    space_id: "space-1",
+    status: "chatting" as const,
+    target_kind: "create" as const,
+    flow_id: null,
+    latest_plan_id: null,
+    draft_title: "Recovered draft",
+    created_at: "2026-07-12T10:00:00Z",
+    updated_at: "2026-07-12T10:05:00Z"
+  };
+  const resumedSession = {
+    ...draft,
+    conversation: [
+      {
+        message_id: "assistant-resumed",
+        role: "assistant" as const,
+        content: "The saved draft is available again.",
+        timestamp: "2026-07-12T10:05:00Z"
+      }
+    ],
+    latest_turn: null
+  };
+  const freshSession = {
+    ...draft,
+    session_id: "fresh-after-resume-failure",
+    conversation: [],
+    latest_turn: null
+  };
+  const otherDraft = {
+    ...draft,
+    session_id: "draft-other",
+    draft_title: "Other recoverable draft",
+    updated_at: "2026-07-12T09:05:00Z"
+  };
+  let draftResumeCount = 0;
+  const fetch = vi.fn(
+    async (
+      path: string,
+      init?: {
+        method?: string;
+        params?: { path?: { session_id?: string } };
+      }
+    ) => {
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: options.multipleDrafts ? [draft, otherDraft] : [draft] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return freshSession;
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
+        if (init?.params?.path?.session_id === draft.session_id) {
+          draftResumeCount += 1;
+          if (draftResumeCount === 1) {
+            throw {
+              status: 503,
+              response: {
+                schema_version: 2,
+                code: "resume_unavailable",
+                category: "upstream",
+                message: "The saved draft could not be loaded.",
+                phase: "client",
+                request_id: "request-resume"
+              }
+            };
+          }
+          return resumedSession;
+        }
+        return freshSession;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }
+  );
+  return {
+    transport: {
+      fetch: fetch as unknown as AIBuilderClientTransport["fetch"],
+      stream: vi.fn()
+    },
+    fetch
+  };
+}
+
 // jsdom in the server project does not always provide rAF or the Web
 // Animations API; the composer's focus() and the resume banner's fade
 // transition go through them.
@@ -974,6 +1061,102 @@ describe("FlowAIBuilder", () => {
       method: "get",
       params: { path: { session_id: "draft-1" } }
     });
+  });
+
+  it("settles a rejected auto-resume once and keeps both recovery actions available", async () => {
+    const { transport, fetch } = resumeFailureHarness();
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (value) => (service = value)
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("The saved draft could not be loaded.");
+    expect(await screen.findByRole("button", { name: m.retry() })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: m.ai_builder_resumed_start_fresh() })
+    ).toBeTruthy();
+
+    await service?.loadDraftSessions();
+    await waitFor(() => {
+      expect(
+        fetch.mock.calls.filter(
+          ([path, init]) =>
+            path === "/api/v1/flows/ai-builder/sessions/{session_id}" &&
+            init?.params?.path?.session_id === "draft-resume-failure"
+        )
+      ).toHaveLength(1);
+    });
+  });
+
+  it("keeps every draft choice and recovery action after a selected draft fails to resume", async () => {
+    const { transport } = resumeFailureHarness({ multipleDrafts: true });
+    render(FlowAIBuilderHarness, { transport });
+
+    const resumeButtons = await screen.findAllByRole("button", {
+      name: m.ai_builder_resume_draft()
+    });
+    expect(resumeButtons).toHaveLength(2);
+    await fireEvent.click(resumeButtons[0]!);
+
+    expect(await screen.findByText("The saved draft could not be loaded.")).toBeTruthy();
+    expect(screen.getByText("Other recoverable draft")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: m.ai_builder_resume_draft() })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: m.retry() })).toBeTruthy();
+    expect(screen.getByRole("button", { name: m.ai_builder_resumed_start_fresh() })).toBeTruthy();
+  });
+
+  it("retries the same failed draft and preserves the successful resume behavior", async () => {
+    const { transport, fetch } = resumeFailureHarness();
+    render(FlowAIBuilderHarness, { transport });
+
+    await fireEvent.click(await screen.findByRole("button", { name: m.retry() }));
+
+    expect(await screen.findByText("The saved draft is available again.")).toBeTruthy();
+    expect(await screen.findByText(m.ai_builder_resumed_from())).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryAllByText("The saved draft could not be loaded.")).toHaveLength(0);
+    });
+    expect(
+      fetch.mock.calls.filter(
+        ([path, init]) =>
+          path === "/api/v1/flows/ai-builder/sessions/{session_id}" &&
+          init?.params?.path?.session_id === "draft-resume-failure"
+      )
+    ).toHaveLength(2);
+  });
+
+  it("starts a fresh session after a failed draft resume", async () => {
+    const { transport, fetch } = resumeFailureHarness();
+    let service: FlowAIBuilderService | undefined;
+    render(FlowAIBuilderHarness, {
+      transport,
+      onservice: (value) => (service = value)
+    });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.ai_builder_resumed_start_fresh() })
+    );
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/v1/flows/ai-builder/sessions",
+        expect.objectContaining({
+          method: "post",
+          requestBody: {
+            "application/json": expect.objectContaining({
+              force_new: true,
+              target_kind: "create"
+            })
+          }
+        })
+      );
+    });
+    await waitFor(() => {
+      expect(service?.session?.session_id).toBe("fresh-after-resume-failure");
+    });
+    expect(((await screen.findByRole("textbox")) as HTMLTextAreaElement).disabled).toBe(false);
   });
 
   it("prefers a seeded prompt over draft recovery and prefills the composer", async () => {

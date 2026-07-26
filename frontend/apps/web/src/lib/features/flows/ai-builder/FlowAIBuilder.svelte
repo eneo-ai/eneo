@@ -26,6 +26,9 @@
 
   let chatRef = $state<FlowAIBuilderChat | undefined>();
   let wasAutoResumed = $state(false);
+  // The attempted ID prevents repeat auto-resume; the failed ID owns the selected recovery target.
+  let autoResumeAttemptedDraftId = $state<string | null>(null);
+  let failedResumeDraftId = $state<string | null>(null);
   // One-shot seed: only the value present at mount matters, by design.
   // svelte-ignore state_referenced_locally
   let pendingPrefill = $state(initialPrompt);
@@ -102,6 +105,24 @@
     targetKind === "create" && !service.hasSession && service.recoverableCreateDrafts.length >= 2
   );
 
+  const failedResumeDraft = $derived(
+    failedResumeDraftId === null
+      ? null
+      : (service.recoverableCreateDrafts.find(
+          (draft) => draft.session_id === failedResumeDraftId
+        ) ?? null)
+  );
+
+  async function resumeDraft(sessionId: string) {
+    await service.resumeSession(sessionId);
+    if (service.session?.session_id === sessionId) {
+      failedResumeDraftId = null;
+      wasAutoResumed = true;
+    } else if (!service.hasSession && service.error !== null) {
+      failedResumeDraftId = sessionId;
+    }
+  }
+
   // Single draft: auto-resume
   $effect(() => {
     if (
@@ -111,9 +132,9 @@
       service.recoverableCreateDrafts.length === 1
     ) {
       const draft = service.recoverableCreateDrafts[0];
-      if (draft) {
-        wasAutoResumed = true;
-        void service.resumeSession(draft.session_id);
+      if (draft && autoResumeAttemptedDraftId !== draft.session_id) {
+        autoResumeAttemptedDraftId = draft.session_id;
+        void resumeDraft(draft.session_id);
       }
     }
   });
@@ -147,11 +168,73 @@
     service.startFreshSession("create");
   }
 
+  function handleRetryFailedResume() {
+    if (failedResumeDraft) {
+      void resumeDraft(failedResumeDraft.session_id);
+    }
+  }
+
+  async function handleStartFreshFromFailedResume() {
+    wasAutoResumed = false;
+    try {
+      await service.startFreshSession("create");
+      failedResumeDraftId = null;
+    } catch {
+      // createSession retains its typed error while failedResumeDraftId keeps recovery visible.
+    }
+  }
+
   function handleStartOver() {
     chatRef?.resetComposerContext();
     void service.startFreshSession("edit");
   }
 </script>
+
+{#snippet failedResumeAlert()}
+  {#if failedResumeDraft && service.error}
+    <div
+      class="w-full shrink-0 px-4 pt-3 max-sm:px-3 max-sm:pt-2"
+      transition:fade={{ duration: 180 }}
+    >
+      <Alert.Root
+        variant="destructive"
+        class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          class="mt-0.5 size-4 shrink-0"
+          aria-hidden="true"
+        >
+          <path
+            fill-rule="evenodd"
+            d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 0-2 0v4a1 1 0 1 0 2 0V6Zm-1 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+            clip-rule="evenodd"
+          />
+        </svg>
+        <div class="min-w-0">
+          <Alert.Description class="text-[0.8125rem] leading-relaxed">
+            {service.error.message}
+          </Alert.Description>
+          <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button size="sm" class="w-full sm:w-auto" onclick={handleRetryFailedResume}>
+              {m.retry()}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              class="w-full sm:w-auto"
+              onclick={handleStartFreshFromFailedResume}
+            >
+              {m.ai_builder_resumed_start_fresh()}
+            </Button>
+          </div>
+        </div>
+      </Alert.Root>
+    </div>
+  {/if}
+{/snippet}
 
 {#if service.isInitializing}
   <div class="flex flex-1 flex-col gap-8 p-6" aria-hidden="true">
@@ -163,12 +246,15 @@
     </div>
   </div>
 {:else if showDraftPage}
-  <FlowAIBuilderDraftRecovery
-    drafts={service.recoverableCreateDrafts}
-    onresume={(sessionId) => service.resumeSession(sessionId)}
-    onstartfresh={() => service.startFreshSession("create")}
-    ondiscard={(sessionId) => service.discardSession(sessionId)}
-  />
+  <div class="flex min-h-0 flex-1 flex-col">
+    {@render failedResumeAlert()}
+    <FlowAIBuilderDraftRecovery
+      drafts={service.recoverableCreateDrafts}
+      onresume={resumeDraft}
+      onstartfresh={() => service.startFreshSession("create")}
+      ondiscard={(sessionId) => service.discardSession(sessionId)}
+    />
+  </div>
 {:else}
   <!--
     Layout contract (docs/flows/plan-review-handoff.md §1). All thresholds are
@@ -188,6 +274,8 @@
     <div
       class="builder-page-scroll flex min-h-0 w-full flex-1 flex-col overflow-y-auto break-words hyphens-auto @[1040px]/builder:overflow-hidden"
     >
+      {@render failedResumeAlert()}
+
       <!-- Auto-resume banner: inline Alert, flex row, no absolute positioning -->
       {#if wasAutoResumed && service.hasSession && service.messages.length > 0}
         <div
@@ -325,7 +413,7 @@
           <FlowAIBuilderChat
             bind:this={chatRef}
             {targetKind}
-            suppressStreamError={planPaneOwnsError}
+            suppressStreamError={planPaneOwnsError || failedResumeDraft !== null}
           />
         </div>
 

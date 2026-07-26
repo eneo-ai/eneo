@@ -371,7 +371,10 @@ export class FlowAIBuilderDriver {
     if (this.#state.pendingOperation) return;
     ++this.#initGeneration;
     this.abort();
+    const draftSessions = this.#state.draftSessions;
     this.#resetFlowState();
+    this.#state.draftSessions = draftSessions;
+    this.#state.isInitializing = true;
     const sessionGeneration = this.#sessionGeneration;
     const pendingResumeOwner = { sessionId, sessionGeneration };
     this.#pendingResumeOwner = pendingResumeOwner;
@@ -386,10 +389,19 @@ export class FlowAIBuilderDriver {
       })) as AIBuilderSession;
     } catch (error) {
       if (sessionGeneration !== this.#sessionGeneration) return;
-      throw error;
+      this.#state.error = parseAIBuilderError({
+        transport: "apply",
+        payload: error,
+        fallbackMessage: "Failed to resume the saved draft."
+      });
+      return;
     } finally {
       if (this.#pendingResumeOwner === pendingResumeOwner) {
         this.#pendingResumeOwner = null;
+      }
+      if (sessionGeneration === this.#sessionGeneration) {
+        this.#state.isInitializing = false;
+        this.#notify();
       }
     }
     if (sessionGeneration !== this.#sessionGeneration) return;

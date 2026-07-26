@@ -1118,16 +1118,35 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toBeNull();
   });
 
-  it("keeps a current resume failure explicit to its caller", async () => {
-    const fetchError = new Error("current session unavailable");
+  it("keeps a rejected resume as typed state without losing the recoverable draft", async () => {
+    const draft = makeDraft({
+      session_id: "session-current",
+      target_kind: "create",
+      flow_id: null
+    });
+    const fetchError = {
+      status: 503,
+      response: {
+        schema_version: 2,
+        code: "resume_unavailable",
+        category: "upstream",
+        message: "The saved draft could not be loaded.",
+        phase: "client",
+        request_id: "request-resume"
+      }
+    };
     const { driver } = makeDriver({
       fetchImpl: vi.fn().mockRejectedValueOnce(fetchError)
     });
+    driver.seedState({ draftSessions: [draft] });
 
-    await expect(driver.resumeSession("session-current")).rejects.toBe(fetchError);
+    await expect(driver.resumeSession("session-current")).resolves.toBeUndefined();
 
     expect(driver.state.session).toBeNull();
-    expect(driver.state.error).toBeNull();
+    expect(driver.state.draftSessions).toEqual([draft]);
+    expect(driver.state.error?.code).toBe("resume_unavailable");
+    expect(driver.state.error?.message).toBe("The saved draft could not be loaded.");
+    expect(driver.state.error?.request_id).toBe("request-resume");
   });
 
   it("does not let a delayed create replace a subsequently resumed session", async () => {
