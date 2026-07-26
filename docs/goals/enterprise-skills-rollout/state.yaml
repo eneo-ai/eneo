@@ -1046,12 +1046,13 @@ tasks:
     status: active
     reasoning_hint: high
     objective: "Implement Task #553 slice 5A: Assistant binding-mode save contracts, admin runtime-policy UI, honest activation controls, and the shared fit/activatability owner."
-    tracking_issue: "https://github.com/eneo-ai/eneo/issues/553"
+    tracking_issue: "https://github.com/eneo-ai/eneo/issues/602"
     inputs:
       - "Completed T015 receipt"
       - "docs/enterprise-skills-roadmap.md slice 5 contract"
       - "Current typed Skill runtime policy and generated per-model projections"
       - "Current Assistant parent-save owner and shared SkillBindingsEditor"
+      - ".codex/artifacts/claude-peer-loop-t016-assistant-selective-activation-implementation-ready-gate-20260726T105040Z.md"
     allowed_files:
       - "backend/src/eneo/assistants/"
       - "backend/src/eneo/completion_models/"
@@ -1070,7 +1071,7 @@ tasks:
       - "Expose mode writes only after T015 runtime semantics are merged."
       - "Distinguish an omitted mode from an explicit mode change; preserve retained modes."
       - "Apps expose no mode and remain eager."
-      - "One concrete typed fit/activatability function must own ordinary save, API/UI projection, future rollout preview/apply, and tests."
+      - "SkillTurnPlan.to_activation_runtime() remains the single selective-fit owner for save, read projection, ask, and tests; do not add a second evaluator."
       - "Reuse stored admin policy; platform model-window and safety ceilings remain fixed invariants while tenant values remain admin-configurable."
       - "Use existing admin and binding-editor surfaces with installed shadcn-svelte components; no new dashboard or form store."
     verify:
