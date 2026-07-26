@@ -46,7 +46,7 @@ continuity:
   completed_write_tasks_in_thread: 2
   handoff_note: notes/handoff.md
   last_handoff_at: null
-  last_verified_revision: "31aad9731ddc0e7d6b38dc7c66f499d2cf50be5e"
+  last_verified_revision: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
 
 active_task: T006
 
@@ -618,277 +618,112 @@ tasks:
       - "Resolved or rejected findings with evidence"
     receipt:
       result: in_progress
-      summary: "Review 2 on a85c8bf confirmed F1-F5 and added F6. All six findings were reproduced or source-verified, fixed at their canonical owners, and covered by behavior tests. Claude iteration 27 found one additional same-root policy PUT transaction defect; its authenticated ASGI reproduction and two-transaction fix are included. Iteration 28 returned green/MIN_SCORE 8 for the intended commit delta."
-      evidence:
-        - "Review 2: https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
-        - ".codex/artifacts/claude-peer-loop-569-pr-1-review-2-fixes-20260725T213300Z.md => iteration 27, reproduced policy PUT post-commit read defect"
-        - ".codex/artifacts/claude-peer-loop-569-pr-1-review-2-fixes-20260725T213923Z.md => iteration 28, GREEN_LIGHT yes, MIN_SCORE 8"
-      resolved_findings:
-        - "F1: icon create returns metadata and GET streams bounded chunks with deterministic close; parity is integration-tested above the spool threshold."
-        - "F2: file/icon compensation is bounded to 30 seconds and preserves original plus cleanup/timeout failures."
-        - "F3: persisted limits are constrained to JavaScript's exact-integer maximum across API, ORM, migration, docs, and generated schema."
-        - "F4: the admin page distinguishes stale revision 9046, unavailable target 9047, and unknown 409 responses."
-        - "F5: icon POST declares and runtime-tests the normal typed 503 contract."
-        - "F6: file upload evaluates the audit kill switch in an explicit short post-commit transaction for both targets."
-        - "P0: policy PUT reads its response projection in a separate post-CAS transaction so readiness I/O does not hold the write transaction."
-      validation:
-        - "whole backend non-integration => 3960 passed"
-        - "relevant PostgreSQL/object-content integrations => 33 passed"
-        - "migration isolation => 5 passed; alembic heads => one head"
-        - "whole-backend pyright => 0 errors, 0 warnings"
-        - "full web unit suite => 59 files, 334 passed; focused admin page => 10 passed"
-        - "Svelte check => 0 errors, 0 warnings; frontend lint and docs-site build => passed"
-        - "generated client => 15 passed; Ruff/format and bounded secret scan => passed"
-      review_3:
-        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
-        head: "5b5af9eb3db28a9e61a2b2f25305cfb1f2b35a61"
-        coverage: "complete: 98 of 98 changed paths"
-        confirmed_resolved:
-          - "F1"
-          - "F2"
-          - "F3"
-          - "F4"
-          - "F5"
-          - "F6"
-        dispositions:
-          - "F8 genuine/in-scope: public Icon GET used an ambient request transaction across remote verification. The route now uses a non-transactional container and IconService owns only the metadata/reference read transaction."
-          - "F9 genuine/in-scope: generic mutation failure has an unknown commit outcome. The UI keeps the draft, blocks re-save, and requires a persisted-policy reload without claiming the old target won."
-          - "F7 genuine/out-of-scope: crash leftovers are the explicitly documented PR1 residual risk; goal.md and the frozen publication plan prohibit the proposed automatic aggregate cleanup/reaper."
-          - "Claude iteration 31 sibling check verified genuine: legacy signed File download also held its request transaction across object-content open. It now shares the non-ambient route and short metadata-transaction contract already used by original download and Icon."
-        red:
-          - "F8 service metadata reads ran without an owned transaction and the route dependency resolved get_session_with_transaction."
-          - "F9 generic replacement failure had no outcome-unknown/reload-required presentation."
-        focused_green:
-          - "Icon unit/router => 13 passed."
-          - "Storage page browser suite => 10 passed."
-          - "Real PostgreSQL/object-store Icon lifecycle/adoption => 14 passed after direct callers adopted the non-ambient read contract."
-          - "File signed-download unit red/green => 3 passed; real File lifecycle/adoption => 15 passed."
-        commit_validation:
-          - "Whole backend non-integration => 3963 passed; coverage-enabled run also exited 0."
-          - "Combined PostgreSQL/object-content policy, public route, File, and Icon integrations => 33 passed."
-          - "Whole-backend Pyright => 0 errors, 0 warnings, 0 informations."
-          - "Changed Python Ruff and format checks => passed."
-          - "Full web unit/browser suite => 59 files, 334 tests passed; Svelte check and lint passed."
-          - "docs.eneo.ai build => 32 routes and 28 indexed pages; only the pre-existing img warning remained."
-          - "Goal board checker, diff checks, and bounded secret scan => passed."
-      review_4:
-        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080942430"
-        head: "78021f258b1055ee627e02e977975205ad2d8224"
-        coverage: "complete: 98 of 98 changed paths"
-        findings:
-          - "F10 genuine/in-scope: deployment-policy GET and post-CAS PUT projection can await object-store readiness while a request-owned database transaction remains open, creating a cold-read pool-exhaustion cycle."
-          - "F11 source-supported and under architecture review: File/Icon metadata and concrete references can commit before remote bytes are verified; a process death can leave a permanently invisible failed product aggregate. Compare publication-before-upload cleanup with upload-before-product-publication using the existing object-content orphan reconciler; do not add a generic reaper or marker by default."
-          - "F7/F8/F9 must be explicitly re-audited on the Review 4 head because the reviewer did not recheck them."
-        ci_failures:
-          - "Backend tests job 89729880175: 3 failures after 1160 passed, 83 skipped, 1 xfailed; Icon parity reported storage/DB mismatch and two reconciliation tests observed extra orphan deletions. Root cause must be proven without weakening expected behavior."
-          - "Schema drift job 89729880159 never reached checkout or schema commands because Docker Hub timed out pulling redis:7-alpine three times; verify on the next exact head without changing product behavior to mask external infrastructure."
-          - "Final CI failed only because Backend tests failed."
-        direction_gate:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T081229Z.md"
-          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
-          result: "Claude iteration 34 changes_required, GREEN_LIGHT no, MIN_SCORE 6; accepted as the pre-implementation direction gate."
-          decision: "Fix F10 at the existing policy projection owner; retain the F11 safety fences and record the available_at discriminator for the later lifecycle slice; fix the CI contamination only at the real-store fixture owner."
-        iteration_35:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T083711Z.md"
-          staged_sha256: "7925737fd0345da906897b2b92ad4caf702fa80402162078e99618ff6becf10f"
-          result: "GREEN_LIGHT yes, MIN_SCORE 8, no blockers."
-          follow_up: "Accepted the proportionality improvement: simplify the synthetic concurrency test and document the deliberate permission and fixture lifetimes. There is no deployment-policy-specific real-pool integration test, and the receipt makes no such claim."
-        dispositions:
-          - "F10 fixed in the intended delta: GET reuses one authenticated non-transactional container, _read_projection owns one short policy+inventory transaction, readiness runs only after that transaction closes, and PUT calls the same projection owner after its CAS transaction."
-          - "F11 remains a genuine residual crash window but upload-before-product-publication is incompatible with three intentional safety fences: pending content must gain its first concrete owner in the creation transaction, commit-time pending ownership is enforced, and upload claims require reference_count >= 1. No fence, marker, product reaper, or PR2 move was added."
-          - "F7/F11 later-slice discriminator is source-supported: never-available object content retains available_at IS NULL while content that was published and later failed retains a non-null available_at. This is design evidence, not PR1 automatic cleanup."
-          - "F8 remains fixed: Icon and signed File routes use non-transactional request containers; their services own short metadata/reference transactions and release them before opening or streaming remote bytes."
-          - "F9 remains fixed: an unclassified policy PUT failure keeps the draft, disables another save, and requires an explicit persisted-policy reload without claiming which revision committed."
-          - "Backend CI failures were test isolation, not lifecycle behavior: the function-scoped database reset deleted its store binding while the session-scoped real store retained the fixed deployment marker and objects. Each real-store test now gets a unique deployment namespace over the same process; exact orphan counts remain unchanged."
-        focused_validation:
-          - "Review 4 F10 RED => transactional GET dependency, projection without owned transaction, and PUT projection inside the post-CAS transaction all failed before the fix."
-          - "Review 4 F10 GREEN => 3 focused transaction/concurrency tests passed; complete deployment-policy unit file => 21 passed."
-          - "Exact three Backend CI failures => 3 passed unchanged."
-          - "Complete real object-content integration directory => 112 passed in 270.84 seconds."
-          - "Whole backend non-integration suite => 3966 passed in 23.82 seconds."
-          - "Real bounded policy projection integration => passed."
-          - "Changed Python Ruff and format checks => passed."
-          - "Canonical uv run pyright => 0 errors, 0 warnings, 0 informations."
+      summary: "All verified Review 2-7 findings (F1-F16) are fixed at canonical owners. Full CI on source head f3a8fed is green and Review 8-10 report no findings, but repository review remains incomplete because this historical board file exceeds the reviewer's per-file context limit. This PM-only compaction preserves decisions, stop conditions, links, and decisive proof while removing duplicated transcript-like detail; its new exact head still requires fresh CI and review."
+      canonical_history: "The linked GitHub review comments are the detailed finding authority. This receipt is the compact board truth and does not duplicate their full prose."
+      current_exact_head:
+        sha: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+        branch: "feature/admin-file-storage-settings"
+        pr: "https://github.com/eneo-ai/eneo/pull/601"
+        worktree: "clean and index-empty before this board-only compaction"
+        ci:
+          - "CI run 30203966247 => success, including backend integration, frontend component tests, and E2E."
+          - "Dependency Review 30203966242 => success."
+          - "Dead code 30203966246 => success."
+          - "Deploy Docs 30203966253 => success."
+      architecture_result:
+        - "PostgreSQL remains the complete default; compatible object storage is optional and affects only eligible new writes selected by the deployment policy."
+        - "Persisted admin policy owns business limits and placement; deployment configuration owns secrets, endpoint details, readiness, and immutable operator safety ceilings."
+        - "Original File content uses the applicable business limit. Generated variants use only the selected backend's operator ceiling."
+        - "Object-store File/Icon families upload and HEAD-verify once before one short atomic AVAILABLE product/reference publication transaction."
+        - "Existing bounded prefix inventory and orphan reconciliation own remote residue. No product reaper, marker, staging table, fallback, dual write, provider branch, per-tenant policy, or PR2 move was added."
+        - "Global inventory requires existing platform-admin authority; tenant admins retain the sanitized read-only policy, limits, and capability projection."
+        - "Affected long-running routes share one non-transactional authenticated container per request; short database work owns explicit transactions."
+      finding_dispositions:
+        - "F1 fixed: Icon creation/read paths are bounded and streaming."
+        - "F2 fixed: File/Icon compensation is finite and preserves original plus cleanup failures."
+        - "F3 fixed: persisted limits remain within the PostgreSQL/JavaScript exact-integer contract."
+        - "F4 fixed: stale revision, unavailable target, and unknown 409 outcomes are distinct."
+        - "F5 fixed: Icon upload publishes and tests its typed 503 contract."
+        - "F6 fixed: file upload evaluates the audit kill switch in a short post-commit transaction."
+        - "F7 withdrawn as duplicate of F11; no automatic cleanup scope was introduced."
+        - "F8 fixed: public Icon and signed File reads do not hold ambient request transactions over remote I/O."
+        - "F9 fixed: unknown policy mutation outcome blocks resave and requires persisted-policy reload."
+        - "F10 fixed: readiness runs after the policy/inventory transaction closes."
+        - "F11 fixed: pre-verified object-store bytes publish AVAILABLE only with exactly one first concrete owner/reference in the same deferred-fence transaction; crash-left remote residue converges through existing inventory."
+        - "F12 fixed: projection and pre-spool admission use the portable object-store operator ceiling."
+        - "F13 fixed: deployment-global inventory moved behind existing platform-admin authority."
+        - "F14 fixed: generated File variants use operator-only admission rather than source business limits."
+        - "F15 fixed: affected endpoints and declarative guards reuse one authenticated container identity, removing duplicate session ownership."
+        - "F16 fixed: policy loads independently; inventory 403 preserves policy and becomes read-only, while other inventory errors have an inventory-only retry."
+      review_history:
+        - review: 2
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
+          head: "a85c8bfd697e07623969d4e5b49b47bae948f5a0"
+          result: "F1-F6 fixed; same-root policy PUT post-commit projection defect also fixed."
+          decisive_proof: "3960 backend non-integration; 33 real PostgreSQL/object-content; 5 migration; Pyright 0/0; web 334; Claude iteration 28 green/MIN_SCORE 8."
+        - review: 3
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
+          head: "5b5af9eb3db28a9e61a2b2f25305cfb1f2b35a61"
+          coverage: "complete 98/98"
+          result: "F1-F6 confirmed; F8/F9 and signed File sibling fixed; F7 deferred pending bounded architecture decision."
+          decisive_proof: "3963 backend non-integration; 33 real integrations; web 334; Pyright 0/0; docs build green."
+        - review: 4
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080942430"
+          head: "78021f258b1055ee627e02e977975205ad2d8224"
+          coverage: "complete 98/98"
+          result: "F10 fixed; CI contamination isolated to real-store fixture; F8/F9 re-audited; F11 promoted to owner-level redesign."
+          decisive_proof: "112 object-content integrations; 3966 backend non-integration; Pyright 0/0; Claude iteration 36 green/MIN_SCORE 9."
+        - review: 5
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5082850757"
+          head: "94796176ef71e4432f9fd10504894bc7f9d4e7ec"
+          coverage: "incomplete 87/99"
+          result: "F11/F12 fixed through bounded upload-before-publication adoption, portable pre-spool ceiling, generalized deferred fences, and existing orphan inventory."
+          decisive_proof: "115 object-content integrations; 3971 backend non-integration; migration roundtrip and one head; Pyright 0/0; Claude iteration 41 green/MIN_SCORE 8."
+        - review: 6
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
+          head: "07a26dfc187813b6b69d19ad98206c4e9b421928"
+          coverage: "complete 106/106"
+          result: "F11/F12 confirmed; F13/F14 fixed with split inventory authority and generated-variant operator ceilings."
+          decisive_proof: "118 object-content integrations; 3973 backend non-integration; Pyright 0/0; generated schema, Eneo JS, Svelte, lint, and docs build green. Owner explicitly waived peer review for this bounded cycle."
+        - review: 7
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
+          head: "83e5ab1b5de5dfd17cf5bcdebc6ae02845ab6b48"
+          coverage: "complete"
+          result: "F13/F14 confirmed; F15/F16 fixed through shared request authentication and independent inventory recovery."
+          decisive_proof: "119 object-content integrations; 3979 backend non-integration; Pyright 0/0; generated schema, Eneo JS, Svelte, lint, and message checks green; Claude iterations 46/47 green/MIN_SCORE 8."
+        - review: 8
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083744737"
+          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+          coverage: "incomplete 106/107; only state.yaml truncated"
+          result: "No findings; F15/F16 confirmed resolved."
+        - review: 9
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083826748"
+          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+          coverage: "incomplete 91/107"
+          result: "No findings."
+        - review: 10
+          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083907108"
+          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+          coverage: "incomplete 106/107; only state.yaml truncated"
+          result: "No findings."
+      peer_review:
+        session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
+        model: "Claude Opus 5 1M, high effort, read-only"
+        final_source_gates:
+          - ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T131824Z.md => iteration 46 commit gate, GREEN_LIGHT yes, MIN_SCORE 8."
+          - ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T132224Z.md => iteration 47 push gate, GREEN_LIGHT yes, MIN_SCORE 8."
+      board_compaction:
+        reason: "state.yaml was 75,042 bytes and repeatedly exceeded repository review's per-file context budget."
         commit_gate:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T084406Z.md"
-          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
-          result: "Claude iteration 36 VERDICT green, GREEN_LIGHT yes, MIN_SCORE 9; no P0/P1/P2 or blocker."
-          disposition: "The simplified six-request test now asserts only owned-transaction ordering across concurrent async suspension; the production guard owns the hard invariant and no real-pool integration test is claimed. The GET permission rationale and bounded disposable namespace tradeoff are documented. Reviewer found further deletion would be churn."
-      review_5:
-        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5082850757"
-        head: "94796176ef71e4432f9fd10504894bc7f9d4e7ec"
-        coverage: "incomplete: 87 of 99 changed paths; the next repository review must cover every path"
-        findings:
-          - "F11 genuine/P1: object-store File/Icon metadata and references publish before remote upload verification, so process death can leave a permanently invisible product aggregate."
-          - "F12 genuine/P2: object-store projections expose no applicable ceiling even though the portable multipart envelope is authoritative, allowing capture/spooling beyond a size the backend can accept."
-        direction_gate:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T091642Z.md"
-          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
-          result: "Claude iteration 39 changes_required, GREEN_LIGHT no, MIN_SCORE 7; owner chose the structurally reliable upload-before-publication direction rather than accepting residual risk."
-        iteration_40:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T105539Z.md"
-          staged_sha256: "d70a51defba47757a2b3f645db87e0ae2ea43553e2dbf5dcaf2307f1f204f378"
-          result: "changes_required, GREEN_LIGHT no, MIN_SCORE 7. The sole blocker was missing visible owner authorization, not a code defect; F12 and the publication structure/reuse were verified clean."
-          owner_authority: "The owner explicitly directed this task to fix verified PR #601 review findings through finding-free review, green CI, and merge. That authority includes changing the initial object-store invariant so pre-verified bytes may be created AVAILABLE only in the same short transaction as exactly one concrete first product owner/reference."
-          invariant_scope: "This authorization does not permit PR #569 PR 2 moves, automatic product cleanup, a new reaper/marker/staging table, knowledge/InfoBlob/Flow work, fallback, dual write, provider-specific product behavior, or per-tenant policy."
-        iteration_41:
-          artifact: ".codex/artifacts/claude-peer-loop-pr-601-admin-storage-review-20260726T110712Z.md"
-          staged_sha256: "675657f43081cd24f8b5f0cf37a08355c4c6b5464c062e387d6b05518da589ce"
-          result: "GREEN_LIGHT yes, MIN_SCORE 8; owner authority, invariant scope, degraded projection ownership, PENDING deletion trigger, and real File-family database rollback evidence were accepted."
-          accepted_comment: "Document that the AVAILABLE/current-transaction predicate assumes the owner-check trigger remains DEFERRABLE INITIALLY DEFERRED through commit; no SQL or behavior changes."
-        frozen_owners:
-          - "ObjectContentRuntime and deployment_policy projection own the applicable inline or portable object-store operator ceiling; downstream admission consumes the existing effective values."
-          - "ObjectContentService and ObjectContentRepository own opaque remote upload verification and adoption of already-available bytes."
-          - "FileService and IconService own atomic product metadata/reference publication after every object-store payload is verified."
-          - "Existing bounded prefix inventory/orphan reconciliation owns remote residue left before product publication; no product reaper, marker, cleanup policy, provider branch, or new authorization/multi-tenant layer is permitted."
-        red_first_plan:
-          - "F12 policy projection: object_store configured maximum above maximum_multipart_bytes must report effective=envelope, operator ceiling, and constraining_source=operator_ceiling; maximum remains admin-constrained at or below the envelope."
-          - "F12 File/Icon admission: envelope+1 must fail before capture/spooling or any object-store mutation; envelope succeeds subject to media behavior. PostgreSQL-inline projection and admission remain unchanged."
-          - "F11 real PostgreSQL/SeaweedFS: Icon and multi-content File remote failure/process boundary before the publication transaction leave no metadata/reference/control rows; verified remote residue is discoverable and deleted only by the existing bounded orphan inventory after grace."
-          - "F11 success: all File-family/Icon bytes are uploaded and HEAD-verified once, then AVAILABLE control+descriptor rows, product metadata, and concrete references become visible in one short transaction with no remote I/O."
-          - "F11 race: adoption serializes against an active orphan-delete candidate for the same object key before publishing, so reconciliation cannot delete bytes being adopted."
-          - "Migration: change only the initial-state/first-reference fences required for object-store AVAILABLE creation, prove upgrade/downgrade/re-upgrade and one head on disposable PostgreSQL."
-        expected_paths:
-          - "backend/src/eneo/object_content/runtime.py"
-          - "backend/src/eneo/object_content/deployment_policy.py"
-          - "backend/src/eneo/object_content/deployment_policy_router.py"
-          - "backend/src/eneo/object_content/content_service.py"
-          - "backend/src/eneo/object_content/content_repository.py"
-          - "backend/src/eneo/files/file_service.py"
-          - "backend/src/eneo/icons/icon_service.py"
-          - "backend/alembic/versions/202607261000_allow_verified_object_adoption.py"
-          - "focused backend unit/integration/migration tests under backend/tests"
-          - "docs/deployment/OBJECT_CONTENT.md and the existing docs.eneo.ai storage page only where the effective-ceiling/publication behavior changes"
-        deletion_and_non_goals:
-          - "Delete the object-store post-commit prepare/claim/upload compensation path from File/Icon when the verified publication path makes it dead; retain the inline path unchanged."
-          - "Explicit owner-approved invariant change: pre-verified object-store bytes may be inserted AVAILABLE only with exactly one first concrete owner/reference in the same transaction; this does not authorize verified moves or any automatic cleanup scope."
-          - "Do not add automatic product cleanup, a generic reconciliation callback, unpublished-byte database markers, client idempotency, PR2 moves, knowledge/InfoBlob work, fallback, dual write, vendor logic, or per-tenant policy."
-        red_evidence:
-          - "F12 RED: two object-store policy projections rejected the new portable-ceiling input and two runtime checks lacked object_store_maximum_bytes."
-          - "F12 owner-boundary RED: ObjectContentService captured portable multipart maximum + 1 when called directly with a larger business value; the focused test failed before the canonical capture clamp."
-          - "F11 RED on real PostgreSQL/SeaweedFS: paused Icon creation exposed product metadata before verification; failed Icon creation retained its product row; all three injected failure points in a multi-content File family retained object-content/product state. Exact result: 5 failed in 25.51 seconds."
-          - "F11 transaction-entry RED: an object-store File call with an ambient repository transaction reached readiness before rejection; the focused test failed until the existing guard moved ahead of readiness, protocol preparation, and capture."
-          - "F11 inventory RED: a reserved but unlisted object gained one completed observation when an empty concurrent inventory cycle finished; the reservation must not impersonate remote evidence."
-        implementation_progress:
-          - "F12: runtime exposes ObjectContentSettings.maximum_multipart_bytes; policy projection and immutable admission snapshots use min(admin policy, applicable inline or object-store ceiling) with truthful source; ObjectContentService independently clamps object-store capture to the same portable envelope, and FileProtocol/Icon reject envelope + 1 before spooling/capture."
-          - "F11: one bounded publication lease owner reserves a sorted File family in existing orphan-candidate rows; each captured payload uploads and HEAD-verifies once outside the product transaction; one short transaction consumes the reservations and creates AVAILABLE controls/descriptors, File/Icon metadata, and concrete references atomically."
-          - "File rejects an invalid ambient object-store transaction before readiness or any protocol/capture work; Icon already owned the equivalent early guard."
-          - "Publication reservations use one fresh batch sentinel rather than reading/stamping the active inventory cycle; this deletes one query and ensures only an actual remote listing advances observations while the existing lease remains the race fence."
-          - "The old File/Icon post-commit compensation path and its tests are deleted. Existing pending-content reconciliation remains for persisted legacy/foundation rows; no new product reaper, staging table, marker, provider branch, or fence weakening was added."
-          - "The serialized Alembic revision changes only initial AVAILABLE object-store creation/first-reference fences; ownerless or multiple first references remain rejected."
-          - "The retained PENDING seam now names its live owner and deletion trigger: persisted pending rows and explicit store_and_verify recovery remain until a database audit proves zero such rows and every live producer/cutover uses verified publication."
-        focused_green:
-          - "F12 projection/runtime/admission and F11 owner/race/fence checks => 11 passed in 26.74 seconds."
-          - "Canonical object-store capture accepts the portable envelope and rejects envelope + 1; the full target-capture file => 5 passed."
-          - "Ambient File transaction rejects before readiness/protocol/capture, while a normal unready target still fails without fallback or mutation => 2 passed."
-          - "Icon pre-publication, cancellation, and failure boundaries => 3 passed in 25.87 seconds; complete File/Icon lifecycle packet previously reached 8 additional passes."
-          - "Active publication reservation versus orphan-delete => passed; an expired crash-left publication lease converges through the existing grace/two-inventory deletion path => 1 passed in 19.47 seconds; the generic row-less object/multipart test remains unchanged."
-          - "Reservation-not-observation, active cleanup race, and expired crash convergence packet => 3 passed in 33.38 seconds."
-          - "Degraded object-store projection deliberately keeps configured policy values with no invented operator ceiling; capability readiness/selectability remains the separate failure owner."
-          - "Real PostgreSQL/SeaweedFS File-family commit failure after all three verified uploads rolls back File/reference/control/descriptor rows while leaving three bounded remote orphans for existing inventory."
-          - "Public File route audit behavior for inline and object-store => 2 passed after the canonical integration cleanup fixture restored the migration-seeded reconciliation singleton."
-        broad_validation_progress:
-          - "Whole-backend strict Pyright => 0 errors, 0 warnings, 0 informations."
-          - "Complete exact-state object-content integration directory, including crash-left lease convergence and reservation-not-observation => 115 passed in 262.99 seconds."
-          - "Whole backend non-integration => 3971 passed, 1250 deselected in 30.88 seconds."
-          - "Disposable PostgreSQL migration upgrade/downgrade/re-upgrade => 1 passed; Alembic reports exactly one 202607261000 head."
-          - "Changed Python Ruff and format checks => passed; docs.eneo.ai production build => 32 pages, 28 indexed pages, with only the pre-existing img warning."
-          - "The earlier fixture failure was isolated to full-table test cleanup omitting the migration-seeded reconciliation singleton; canonical cleanup restores id=1 and product code has no fallback."
-        docs_progress:
-          - "Updated focused deployment/install/troubleshooting docs and docs.eneo.ai storage/deployment/architecture pages for object-store effective ceilings, pre-spool rejection, upload-before-publication, and bounded row-less orphan recovery."
-        iteration_40_follow_up_validation:
-          - "Degraded object-store limit projection => 1 passed in 2.44 seconds."
-          - "Real PostgreSQL/SeaweedFS File-family rollback after three verified uploads => 1 passed in 16.99 seconds, including durable orphan-candidate ownership of all three remote residues."
-          - "Focused Ruff/format => passed; Goal board checker => ok with no warnings/errors. No types changed, so the already-green exact-state whole-backend Pyright evidence remains applicable."
-        complexity_evidence:
-          - "F12 admission is O(1). File/Icon publication is O(k + total bytes) for bounded family size k: one capture and one upload plus HEAD verification per payload, sorted batched reservation queries, no per-object task fan-out, no second full-byte read, and no remote I/O in the publication transaction."
-          - "The complexity scanner's two object-content leads were independently rejected as unrelated existing patterns: one page loop performs total-byte reads and one membership check uses a constant-size set. No performance refactor is warranted in this slice."
-        stop_conditions:
-          - "Stop before implementation if row-less object orphans are not bounded by the current prefix inventory, or if safe adoption requires remote I/O inside the product transaction."
-          - "Do not commit until red tests fail for the intended behavior, focused/broad gates are green, the exact changed-path inventory and staged hash are frozen, and same-session Claude iteration 40 returns GREEN_LIGHT yes with MIN_SCORE >= 8."
-      review_6:
-        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
-        head: "07a26dfc187813b6b69d19ad98206c4e9b421928"
-        coverage: "complete: 106 of 106 changed paths"
-        confirmed_resolved:
-          - "F11"
-          - "F12"
-        findings:
-          - "F13 genuine/P2: the tenant-admin policy projection includes deployment-global count, bytes, state, and oldest-content inventory facts."
-          - "F14 genuine/P2: generated File variants are captured against user-source business limits instead of only the selected backend's operator ceiling."
-        owner_direction: "This bounded cycle is [no-peer-review]. Claude iteration 44 was aborted and its output is unused; conserve peer-review capacity and use source verification, behavior-first tests, type/format/schema/frontend/docs checks, fresh repository review, and exact-head CI."
-        frozen_plan:
-          - "F13: keep tenant-admin read-only policy, limits, and capabilities on GET /object-content-policy; move global inventory to typed GET /object-content-inventory guarded by existing session, identity, and platform-admin dependencies. Do not add tenant filtering, per-tenant policy, or an authorization framework."
-          - "F13 UI: request and render inventory only for user.is_platform_admin; preserve one page-local state owner, generated API types, bounded inventory, and existing loading/error behavior."
-          - "F14: source business maximum applies only to ORIGINAL content. EXTRACTED_TEXT, MODEL_INPUT, DERIVED_PAGE, and other generated variants pass business_maximum_bytes=None so ObjectContentService owns operator-only target ceilings."
-          - "F14 canonical seam: PostgreSQL inline already maps None to its operator ceiling; object_store must map None to ObjectContentSettings.maximum_multipart_bytes instead of rejecting it."
-          - "Prove ordinary tenant admin cannot read inventory, platform admin can, generated payload above business policy and below operator ceiling succeeds for inline and real object store, and operator ceiling + 1 remains fail-closed."
-        prior_head_ci: "CI run 30199848475 completed fully green before Review 6 fixes; a fresh exact-head run remains mandatory."
-        implementation_result:
-          - "F13: DeploymentPolicyPublic now contains policy, effective limits, and sanitized capabilities only. A separate typed GET /object-content-inventory owns the bounded deployment-wide inventory and requires session auth, a user identity, and the existing platform-admin authority."
-          - "F13 UI: the storage page requests and renders inventory only for user.is_platform_admin; an ordinary tenant admin keeps read-only policy/limit/capability access without receiving global inventory facts. Generated OpenAPI and Eneo JS contracts own the split."
-          - "F14: FileService applies the business maximum only to ORIGINAL content. ObjectContentService maps business_maximum_bytes=None to the selected target's existing operator ceiling, including ObjectContentSettings.maximum_multipart_bytes for object storage."
-          - "PostgreSQL-inline remains the complete default. Object storage remains optional and adds no provider, fallback, migration, dual-write, or per-tenant path."
-        red_evidence:
-          - "Backend focused tests => 4 expected failures before implementation: inventory still embedded, route absent, and object-store operator-only capture rejected."
-          - "Eneo JS endpoint test => 2 expected failures before getInventory and the split route existed."
-          - "Real PostgreSQL/SeaweedFS tests => 2 expected failures before implementation: tenant admin received inventory and generated File content was rejected by the source business limit."
-        green_evidence:
-          - "Focused backend policy/capture tests => 29 passed."
-          - "Focused real PostgreSQL/SeaweedFS authority and generated-family parity tests => 2 passed; both complete affected integration files => 13 passed."
-          - "Complete object-content integration directory => 118 passed in 281.50 seconds. Whole backend non-integration => 3973 passed, 1254 deselected in 30.11 seconds."
-          - "Strict whole-backend Pyright => 0 errors, 0 warnings, 0 informations; changed Python Ruff/format => passed."
-          - "OpenAPI-to-schema drift regeneration => exact match. Eneo JS => 15 tests passed and lint passed; Svelte check => 0 errors/0 warnings; whole frontend lint => passed with only the pre-existing docs img warning."
-          - "docs.eneo.ai production build => 32 pages generated and 28 indexed; concise docs-site and deployment guidance explain inventory authority and generated-variant operator ceilings."
-        environment_gate:
-          - "The focused Chromium component test could not launch in this managed macOS sandbox: MachPort bootstrap permission denied before collection. The component behavior test is present, Svelte check is green, and orchestrator/CI must run it in the normal browser-capable profile before publication."
-        complexity_and_deletion:
-          - "F13 reuses the existing bounded inventory repository and platform-admin dependency; the policy projection loses duplicate inventory ownership instead of adding tenant filtering or an auth framework."
-          - "F14 is O(1) admission at the canonical capture owner and reuses existing target ceilings. No second read, provider branch, setting, extractor abstraction, or compatibility path was added."
-      review_7:
-        source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
-        head: "83e5ab1b5de5dfd17cf5bcdebc6ae02845ab6b48"
-        confirmed_resolved:
-          - "F13"
-          - "F14"
-        findings:
-          - "F15 genuine/High: POST /files, policy PUT, and inventory GET authenticate through a non-transactional route container and again through transactional auth dependencies; pool-sized concurrent long requests can occupy every auth connection while waiting for another connection."
-          - "F16 genuine: a stale frontend platform-admin flag combines policy and inventory in Promise.all, so inventory 403 discards the successful policy and every retry repeats the forbidden inventory request."
-        direction_gate:
-          artifact: ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T124433Z.md"
-          session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
-          result: "Claude iteration 45 changes_required, GREEN_LIGHT no, MIN_SCORE 7; its correction to preserve declarative guards with one shared callable identity was independently verified and accepted."
-        frozen_plan:
-          - "F15: define one module-level non-transactional authenticated container callable for File upload and one for policy mutation/inventory. Reuse the exact callable identity in endpoint Annotated aliases and thin local guard dependencies so FastAPI resolves one authenticated container per request."
-          - "Thin guards call the existing require_user_for_creation, require_session_auth, require_user_identity, and require_platform_admin functions against container.user()/Request. Do not copy their rules, move guards into bodies, add pure-validator duplication, or build a generic auth framework."
-          - "Remove the policy PUT's separate get_current_active_user actor dependency and use the already-authenticated route container user. Exact source scope is POST /files, policy PUT, and inventory GET; policy GET remains unchanged."
-          - "F15 proof: structural dependency graphs retain explicit fences, contain get_session but no get_session_with_transaction, and real FastAPI request instrumentation observes one shared container resolution with no active transaction while file save/readiness suspends. Preserve existing 403 and activation/admission behavior."
-          - "F16: apply policy independently. Request inventory only while the app-context flag is true and authority has not been revoked. Inventory 403 retains policy, clears inventory, marks authority revoked, renders read-only, and is never retried."
-          - "F16 non-403: retain policy and show a scoped retryable inventory error. Retry only inventory; do not convert it to a page-level load failure or silently hide it."
-        non_goals:
-          - "No repo-wide auth refactor, generic permission module, fake pool abstraction, per-tenant policy, PR2 lifecycle work, fallback, provider branch, or docs expansion without a changed public/operator contract."
-        red_evidence:
-          - "Focused backend route tests => 5 expected failures and 42 passes before implementation: each affected graph still exposed get_session_with_transaction, the shared container callables did not exist, and one-container request invariants were not satisfied."
-          - "The focused Chromium component suite could not collect in the managed macOS profile because Chromium's MachPort rendezvous bootstrap was denied; this environment limitation existed before the frontend implementation and is not behavior evidence."
-        implementation:
-          - "F15: File upload and privileged policy routes now define one non-transactional authenticated container callable each. The endpoint and thin declarative guards share that exact FastAPI dependency identity and reuse the canonical creation/session/identity/platform-admin checks."
-          - "Policy PUT now takes its audit actor from the already-authenticated shared container. No permission rule was copied and policy GET remains on its already-safe single-container path."
-          - "F16: the page loads policy independently, owns inventory state separately, converts inventory 403 into an immediate read-only authority-revoked state, and scopes retryable non-403 inventory failures to inventory alone."
-        green_evidence:
-          - "Focused File/policy route behavior => 47 passed; container authentication/admission transaction behavior => 3 passed. Instrumented FastAPI requests resolve the shared container once and observe no active request transaction while file work or readiness is suspended."
-          - "Focused real authorization contracts => 4 passed: user-owned API keys cannot read global inventory or mutate policy, platform authority remains required, committed PUT projection remains correct, and service keys cannot upload user-owned files."
-          - "Complete object-content PostgreSQL/SeaweedFS integrations => 119 passed in 301.24 seconds. Whole backend non-integration => 3979 passed, 1256 deselected in 33.02 seconds."
-          - "Strict whole-backend Pyright => 0 errors, 0 warnings, 0 informations; changed Python Ruff/format => passed."
-          - "OpenAPI-to-generated-schema drift => exact match. Eneo JS => 15 tests passed and lint passed; Svelte check => 0 errors/0 warnings; web lint and message parity/duplicate checks => passed."
-        frontend_behavior:
-          - "Component proofs cover stale platform-admin=true plus inventory 403 retaining policy/read-only state with no inventory retry, and inventory 500 retaining policy with a scoped successful inventory-only retry."
-          - "The focused component suite remains blocked before collection only by the managed Chromium MachPort permission. Orchestrator/CI must execute it in the normal browser-capable profile before publication."
-        complexity_and_deletion:
-          - "F15 removes duplicate authentication/transaction ownership from three routes and reuses existing guards; request work remains O(1) in dependency/session count with no fake pool model or new auth layer."
-          - "F16 uses one page-local inventory state owner and one retry path. It removes Promise.all coupling without a second policy fetch, hidden retry loop, new store, or API contract."
-        docs_disposition:
-          - "No docs-site or deployment-doc change is required in Review 7: public storage policy, PostgreSQL-default/object-store-optional setup, inventory authority, and operator contracts are unchanged; this cycle corrects internal transaction lifetime and frontend error recovery only."
-      next_gate: "Orchestrator verifies the exact unstaged freeze and runs the focused Chromium component test in a browser-capable profile before any commit; fresh review and exact-head CI remain mandatory."
+          artifact: ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T144547Z.md"
+          staged_sha256: "457b59c94ebdfbda7f74e7187492017d81211110098f52f8bd47c64a9aed2e5b"
+          result: "Claude iteration 48 GREEN_LIGHT yes, MIN_SCORE 9; no P0/P1/P2 or blocker. Its sole wording suggestion is reflected in the source-head versus next-head CI distinction."
+        invariants:
+          - "Preserve task identities, statuses, active task, stop conditions, owner decisions, finding dispositions, canonical review links, decisive validation, and current publication gate."
+          - "Remove only duplicated transcript-like detail already owned by canonical review comments and immutable evidence artifacts."
+          - "Touch no product source, tests, migrations, generated contracts, frontend, docs-site, deployment docs, issue, epic, or PR behavior."
+        target: "Goal Maker checker green and state.yaml <= 50 KiB before the board-only commit."
+      next_gate: "Validate and peer-review this board-only compaction, commit and push it normally, then require fresh exact-head CI success and one complete finding-free repository review before activating T007 merge."
 
   - id: T007
     type: pm
@@ -926,14 +761,13 @@ tasks:
     receipt: null
 
 checks:
-  dirty_fingerprint: "review-2-fixes-intended-for-commit"
+  dirty_fingerprint: "board-only-review-context-compaction"
   last_verification:
-    result: passed
+    result: passed_with_publication_gate
     task: T006
     commands:
-      - "same-session Claude iteration 28 => GREEN_LIGHT yes, MIN_SCORE 8"
-      - "cd backend && uv run pytest -v -n 2 -m 'not integration' --cov=src/eneo --cov-report=term:skip-covered tests/"
-      - "cd backend && uv run pytest -q -m integration tests/integration/object_content/test_icon_storage_lifecycle.py tests/integration/object_content/test_file_storage_lifecycle.py tests/integration/object_content/test_file_icon_adoption.py tests/integration/object_content/test_deployment_policy_integration.py tests/integration/object_content/test_file_public_routes.py"
-      - "cd backend && uv run pyright"
-      - "cd frontend/apps/web && bun run test:unit && bun run check"
-      - "cd frontend && bun run lint && bun run --cwd apps/docs-site build"
+      - "exact source head f3a8fed092316f47f5e2344089b9fa358a1f78e4 => fully green CI run 30203966247"
+      - "Dependency Review 30203966242, Dead code 30203966246, and Deploy Docs 30203966253 => success"
+      - "Review 8-10 => no findings but incomplete because state.yaml exceeded per-file context"
+      - "Goal Maker checker and diff checks must pass after board-only compaction"
+      - "fresh exact-head CI and complete finding-free /review remain required before merge"
