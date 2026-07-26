@@ -187,6 +187,11 @@ class FileContentLoader:
                 user_id=file.user_id,
                 tenant_id=file.tenant_id,
                 parent_file_id=file.parent_file_id,
+                original_available=self._first_reference(
+                    by_file[file.id],
+                    FileContentVariant.ORIGINAL,
+                )
+                is not None,
             )
         return hydrated
 

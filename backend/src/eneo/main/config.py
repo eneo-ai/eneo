@@ -420,6 +420,19 @@ class Settings(BaseSettings):
     jwt_token_prefix: str
     url_signing_key: str
 
+    # Signed file references (original-download URLs surfaced to the LLM so it
+    # can hand them to URL-accepting MCP tools).
+    # Expiry of the minted URL; clamped to the original-download token maximum
+    # (1 hour) at mint time.
+    file_reference_url_expiry_seconds: int = 3600
+    # Base URL used to build the signed download links handed to MCP tools.
+    # Defaults to public_origin, but a remote tool (server-to-server) often needs
+    # a different, internally-reachable host than the browser-facing origin (e.g.
+    # http://host.docker.internal:8123 in dev, or an internal service URL in prod).
+    # Unlike public_origin this is NOT restricted to https/localhost. Must point
+    # at the Eneo backend's /api/v1 and be reachable from the tool's network.
+    file_reference_base_url: Optional[str] = None
+
     # Dev
     testing: bool = False
     dev: bool = False

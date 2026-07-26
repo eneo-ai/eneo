@@ -289,6 +289,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_file_original_download_link_created,
     description: m.audit_action_file_original_download_link_created_description
   },
+  file_signed_url_minted: {
+    name: m.audit_action_file_signed_url_minted,
+    description: m.audit_action_file_signed_url_minted_description
+  },
   website_created: {
     name: m.audit_action_website_created,
     description: m.audit_action_website_created_description

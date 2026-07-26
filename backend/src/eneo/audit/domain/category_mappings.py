@@ -98,10 +98,11 @@ CATEGORY_MAPPINGS = {
     ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_ENABLED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DISABLED.value: "security_events",
-    # File Operations (3 actions)
+    # File Operations (4 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
     # Integration Events (12 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",

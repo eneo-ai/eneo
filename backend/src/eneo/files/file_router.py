@@ -241,11 +241,13 @@ async def generate_signed_url(
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
 
-    # Generate the signed token
+    # Generate the signed token. tenant_id is bound into the signature so the
+    # download handler refuses cross-tenant replay even if the URL leaks.
     token = generate_signed_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=container.user().tenant_id,
     )
 
     # Build the full URL
@@ -282,6 +284,7 @@ async def generate_original_signed_url(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=current_user.tenant_id,
     )
     await container.audit_service().log_async(
         tenant_id=current_user.tenant_id,
@@ -311,12 +314,21 @@ def _validate_download_claims(
     *,
     file_id: UUID,
     payload: dict[str, object] | None,
-) -> ContentDisposition:
+) -> tuple[ContentDisposition, UUID | None]:
+    """Validate token claims; returns the disposition and the tenant claim.
+
+    The tenant claim (present on newly minted tokens) is enforced against the
+    file's tenant by the download service, refusing cross-tenant replay if a
+    URL leaks. Tokens minted before the claim existed carry None and skip the
+    check until they expire.
+    """
     if not payload:
         raise AuthenticationException("Invalid or expired token")
     if str(file_id) != payload["file_id"]:
         raise UnauthorizedException("Token not valid for this file")
-    return ContentDisposition(str(payload["content_disposition"]))
+    tenant_claim = payload.get("tenant_id")
+    expected_tenant_id = UUID(str(tenant_claim)) if tenant_claim is not None else None
+    return ContentDisposition(str(payload["content_disposition"])), expected_tenant_id
 
 
 def _content_disposition_header(
@@ -427,14 +439,18 @@ async def download_file_signed(
     ],
     range: Annotated[str | None, Header()] = None,
 ):
-    content_disposition = _validate_download_claims(
+    content_disposition, expected_tenant_id = _validate_download_claims(
         file_id=id,
         payload=verify_signed_token(token),
     )
 
     service = container.file_service(user=None)
     try:
-        download = await service.get_download_no_auth(id, range_header=range)
+        download = await service.get_download_no_auth(
+            id,
+            range_header=range,
+            expected_tenant_id=expected_tenant_id,
+        )
     except FileContentRangeError as exc:
         return Response(
             status_code=416,
@@ -467,7 +483,7 @@ async def download_original_file_signed(
     ],
     range: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse | Response:
-    content_disposition = _validate_download_claims(
+    content_disposition, expected_tenant_id = _validate_download_claims(
         file_id=id,
         payload=verify_file_original_download_token(token),
     )
@@ -476,6 +492,7 @@ async def download_original_file_signed(
         download = await service.get_original_download_no_auth(
             id,
             range_header=range,
+            expected_tenant_id=expected_tenant_id,
         )
     except FileContentRangeError as exc:
         return _range_not_satisfiable_response(exc)

@@ -438,6 +438,7 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     service.get_original_download_no_auth.assert_awaited_once_with(
         file_id,
         range_header="bytes=999-",
+        expected_tenant_id=None,
     )
 
 
@@ -696,3 +697,29 @@ def test_original_download_openapi_declares_json_error_contracts():
         content = operation["responses"][status]["content"]
         schema = content["application/json"]["schema"]
         assert schema["$ref"] == "#/components/schemas/GeneralError"
+
+
+def test_download_claims_return_tenant_claim_when_present():
+    file_id, tenant_id = uuid4(), uuid4()
+    disposition, expected_tenant = file_router._validate_download_claims(
+        file_id=file_id,
+        payload={
+            "file_id": str(file_id),
+            "content_disposition": "inline",
+            "tenant_id": str(tenant_id),
+        },
+    )
+
+    assert disposition is ContentDisposition.INLINE
+    assert expected_tenant == tenant_id
+
+
+def test_download_claims_tolerate_absent_tenant_claim():
+    file_id = uuid4()
+    disposition, expected_tenant = file_router._validate_download_claims(
+        file_id=file_id,
+        payload={"file_id": str(file_id), "content_disposition": "attachment"},
+    )
+
+    assert disposition is ContentDisposition.ATTACHMENT
+    assert expected_tenant is None

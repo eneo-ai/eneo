@@ -44,6 +44,11 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    # Read-only: whether signed file-reference URLs can be minted (a reference
+    # base URL or public origin is configured). Gates UI that only makes sense
+    # with them (e.g. the assistant inline-file-text toggle). Computed from
+    # deployment config, never persisted.
+    file_references_enabled: bool = False
 
 
 class GetModelsResponse(BaseModel):

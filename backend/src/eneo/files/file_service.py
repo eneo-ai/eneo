@@ -631,12 +631,14 @@ class FileService:
         file_id: UUID,
         *,
         range_header: str | None = None,
+        expected_tenant_id: UUID | None = None,
     ) -> FileDownload:
         session = self.repo.session
         if session.in_transaction():
             raise RuntimeError("File downloads require a non-ambient transaction")
         async with session.begin():
             metadata = await self.repo.get_by_id(file_id=file_id)
+            self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
             reference = self._primary_reference(metadata, references)
         return await self._open_download(
@@ -657,12 +659,14 @@ class FileService:
         file_id: UUID,
         *,
         range_header: str | None = None,
+        expected_tenant_id: UUID | None = None,
     ) -> FileDownload:
         session = self.repo.session
         if session.in_transaction():
             raise RuntimeError("File downloads require a non-ambient transaction")
         async with session.begin():
             metadata = await self.repo.get_by_id(file_id=file_id)
+            self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
             reference = self._original_reference(references)
         return await self._open_download(
@@ -670,6 +674,15 @@ class FileService:
             reference,
             range_header=range_header,
         )
+
+    @staticmethod
+    def _require_token_tenant(
+        metadata: FileMetadata,
+        expected_tenant_id: UUID | None,
+    ) -> None:
+        """Refuse a signed download whose token was minted for another tenant."""
+        if expected_tenant_id is not None and metadata.tenant_id != expected_tenant_id:
+            raise UnauthorizedException("Token not valid for this file")
 
     async def _open_download(
         self,

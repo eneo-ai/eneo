@@ -84,6 +84,7 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
         id=uuid4(),
         user_id=uuid4(),
         assistant=SimpleNamespace(id=uuid4()),
+        questions=[],
     )
 
     approval_manager = AsyncMock()

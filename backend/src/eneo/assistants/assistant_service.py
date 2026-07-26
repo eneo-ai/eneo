@@ -28,6 +28,7 @@ from eneo.files.attachment_budget import (
     attachment_token_ceiling,
 )
 from eneo.files.file_models import File, FileType
+from eneo.files.file_reference import url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
@@ -814,14 +815,21 @@ class AssistantService:
         downstream."""
         if not files and not validate_persistent_baseline:
             return
+        # URL-only uploads are sent as a signed URL — no inlined text, no
+        # derived images — so they cost ~nothing. Count only the files whose
+        # content is actually inlined; otherwise a large stored CSV would be
+        # rejected here even though URL-only mode exists precisely to let it
+        # through.
+        url_only = url_only_file_ids(files, assistant.inline_file_text)
+        countable = [f for f in files if f.id not in url_only]
         persistent_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
         message_files = (
-            await self.file_service.with_derived_images(files)
+            await self.file_service.with_derived_images(countable)
             if model.vision
-            else files
+            else countable
         )
         assert_prompt_and_files_fit_context(
             max_input_tokens=model.max_input_tokens,
@@ -879,6 +887,7 @@ class AssistantService:
         attachment_ids: list[UUID] | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
+        inline_file_text: Optional[bool] = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
@@ -935,6 +944,7 @@ class AssistantService:
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
+                inline_file_text,
                 skill_binding_intents,
             )
         ) or any(
@@ -1142,6 +1152,7 @@ class AssistantService:
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
+            inline_file_text=inline_file_text,
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
@@ -2006,25 +2017,48 @@ class AssistantService:
             completion_model=completion_model,
         )
 
-        await self._attach_history_derivatives(session=session)
+        await self._attach_history_derivatives(
+            session=session, inline_file_text=assistant.inline_file_text
+        )
+
+        # A URL-only document reaches the model as a signed URL: its extracted
+        # text is skipped by the context builder, so its rendered page images
+        # must be skipped here too — otherwise the images alone defeat the
+        # toggle's purpose of keeping large documents out of the context
+        # window. Assistant attachments are exempt: they are always inlined
+        # and get no URL references.
+        completion_message_files = await self.file_service.with_derived_images(files)
+        url_only = url_only_file_ids(files, assistant.inline_file_text)
+        if url_only:
+            completion_message_files = [
+                f for f in completion_message_files if f.parent_file_id not in url_only
+            ]
 
         return AssistantCompletionFileInputs(
-            completion_message_files=await self.file_service.with_derived_images(files),
+            completion_message_files=completion_message_files,
             completion_prompt_files=completion_prompt_files,
         )
 
-    async def _attach_history_derivatives(self, session: "SessionInDB") -> None:
+    async def _attach_history_derivatives(
+        self, session: "SessionInDB", inline_file_text: bool = True
+    ) -> None:
         """Re-attach derived images to history messages for replay.
 
         Derived images are not persisted on questions, so each ask rebuilds
         them in memory from the parent files referenced by the history.
+        URL-only parents are skipped: history replay surfaces them as signed
+        URLs (their text is skipped too), so their rendered images must not
+        ride along either.
         """
-        parent_ids = {
-            file.id
+        parents = [
+            file
             for question in session.questions
             for file in question.files
             if file.file_type == FileType.TEXT
-        }
+        ]
+        parent_ids = {file.id for file in parents} - url_only_file_ids(
+            parents, inline_file_text
+        )
         if not parent_ids:
             return
 

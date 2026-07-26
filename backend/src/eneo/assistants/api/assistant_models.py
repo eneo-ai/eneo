@@ -229,6 +229,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    inline_file_text: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether to inline attached file text into the prompt. When False, a file "
+            "whose original is available via signed URL is surfaced as that URL only "
+            "(e.g. to avoid large files blowing the context window)."
+        ),
+    )
     data_retention_days: Optional[int] = None
     metadata_json: Union[dict[str, object], None, NotProvided] = Field(
         default=NOT_PROVIDED,
@@ -356,6 +364,12 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    inline_file_text: bool = Field(
+        description=(
+            "Whether attached file text is inlined into the prompt (True) or the file "
+            "is surfaced to the model as a signed URL only (False)."
+        ),
+    )
     data_retention_days: Optional[int] = Field(
         default=None,
         description="Number of days to retain data for this assistant",
@@ -386,6 +400,7 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
 class DefaultAssistant(AssistantPublic):
     completion_model: Optional[CompletionModelSparse] = None
     insight_enabled: bool = False
+    inline_file_text: bool = True
 
 
 SessionInDB.model_rebuild()

@@ -65,6 +65,7 @@ class ActionType(str, Enum):
     FILE_UPLOADED = "file_uploaded"
     FILE_DELETED = "file_deleted"
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
+    FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
     WEBSITE_CREATED = "website_created"
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"

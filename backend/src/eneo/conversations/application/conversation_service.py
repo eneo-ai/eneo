@@ -13,6 +13,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
+from eneo.files.file_reference import url_only_file_ids
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.sessions.session import SessionUpdate
@@ -196,7 +197,7 @@ class ConversationService:
         up-front. Model name and context window are echoed so the caller can
         compute percentage fill without a round-trip.
         """
-        model, selector_tokens = await self._resolve_preflight_model(
+        model, selector_tokens, inline_file_text = await self._resolve_preflight_model(
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
@@ -218,6 +219,7 @@ class ConversationService:
                 files=files,
                 model=model,
                 model_name=model_name,
+                inline_file_text=inline_file_text,
             )
 
         assistant_attachment_tokens = 0
@@ -235,6 +237,9 @@ class ConversationService:
             if assistant_prompt is not None:
                 prompt_text = assistant_prompt
             prompt_tokens = count_tokens(prompt_text or "", model_name)
+            # Assistant attachments are exempt from URL-only mode: the send
+            # path always inlines their text (they get no URL references), so
+            # count them fully regardless of inline_file_text.
             assistant_attachment_tokens, _ = await self._count_preflight_files(
                 files=attachments,
                 model=model,
@@ -257,12 +262,20 @@ class ConversationService:
         files: "list[File]",
         model: "CompletionModel",
         model_name: str,
+        inline_file_text: bool = True,
     ) -> tuple[int, int]:
         # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
         # has no extractable text of its own but still yields derived vision
         # images, so key derived-image lookup on every document — not only the
         # ones with inlinable text.
         document_files = [f for f in files if f.file_type == FileType.TEXT]
+
+        # A URL-only document is sent as its signed URL (a tiny block), not its
+        # extracted text or derived images — so it must not be counted here at
+        # all and reads as excluded. Same predicate as the send path.
+        url_only = url_only_file_ids(document_files, inline_file_text)
+        if url_only:
+            document_files = [f for f in document_files if f.id not in url_only]
         image_files = (
             [f for f in files if f.file_type == FileType.IMAGE] if model.vision else []
         )
@@ -318,7 +331,7 @@ class ConversationService:
         assistant_id: Optional["UUID"],
         group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
-    ) -> "tuple[CompletionModel, int]":
+    ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
         Mirrors ask_conversation routing rules so the preflight count uses the
@@ -326,9 +339,14 @@ class ConversationService:
         selected by an LLM at send time, so preflight uses the smallest context
         window among the candidate assistants as a conservative projection.
 
+        Also returns the resolved assistant's ``inline_file_text`` so preflight
+        can drop URL-only file text from the count. Group chat picks an assistant
+        at send time, so it conservatively reports True (keep counting).
+
         Raises BadRequestException for the same configurations that would fail
         on actual send (no assistants in group chat, no completion model set).
         """
+        inline_file_text = True
         if session_id:
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
@@ -346,11 +364,17 @@ class ConversationService:
                     session.assistant.id
                 )
                 selector_tokens = 0
+                assistant, _ = await self.assistant_service.get_assistant(
+                    session.assistant.id
+                )
+                inline_file_text = assistant.inline_file_text
         elif assistant_id:
             model = await self.assistant_service.get_effective_completion_model(
                 assistant_id
             )
             selector_tokens = 0
+            assistant, _ = await self.assistant_service.get_assistant(assistant_id)
+            inline_file_text = assistant.inline_file_text
         elif group_chat_id:
             model, selector_tokens = await self._group_chat_preflight_model(
                 group_chat_id,
@@ -366,7 +390,7 @@ class ConversationService:
             raise BadRequestException(
                 "No completion model configured for this conversation."
             )
-        return model, selector_tokens
+        return model, selector_tokens, inline_file_text
 
     async def _group_chat_preflight_model(
         self,

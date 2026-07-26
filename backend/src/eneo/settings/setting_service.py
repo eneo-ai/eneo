@@ -8,6 +8,7 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.completion_models.domain.skill_context import skill_context_token_allowance
+from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings as get_app_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -396,6 +397,7 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            file_references_enabled=bool(file_reference_base_url(app_settings)),
         )
 
     async def get_settings(self) -> SettingsPublic:
