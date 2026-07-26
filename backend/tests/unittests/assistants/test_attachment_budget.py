@@ -7,6 +7,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
@@ -65,6 +66,36 @@ def _service(file_service=None):
             ),
         )
     )
+    completion_service = AsyncMock()
+
+    async def prepare_activation_preflight(**kwargs):
+        runtime = kwargs["skill_runtime"]
+        built_in_tools = (
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": runtime.tool_definition.name,
+                        "description": runtime.tool_definition.description,
+                        "parameters": runtime.tool_definition.schema,
+                    },
+                }
+            ]
+            if runtime.tool_definition is not None
+            else []
+        )
+        return ProviderInput(
+            messages=[
+                {"role": "system", "content": kwargs["prompt"]},
+                {"role": "user", "content": ""},
+            ],
+            tools=built_in_tools,
+            built_in_tools=built_in_tools,
+        )
+
+    completion_service.prepare_skill_activation_preflight.side_effect = (
+        prepare_activation_preflight
+    )
     service = AssistantService(
         repo=AsyncMock(),
         space_repo=AsyncMock(),
@@ -80,7 +111,7 @@ def _service(file_service=None):
         session_service=AsyncMock(),
         actor_manager=MagicMock(),
         integration_knowledge_repo=AsyncMock(),
-        completion_service=AsyncMock(),
+        completion_service=completion_service,
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
         org_space_assistant_role_repo=AsyncMock(),
@@ -165,8 +196,10 @@ def _assistant_with_runtime_model(*, prompt_text: str = "Base instructions"):
         is_default=False,
         completion_model=model,
         attachments=[],
+        mcp_servers=[],
         prompt=SimpleNamespace(text=prompt_text),
         get_prompt_text=lambda: prompt_text,
+        has_knowledge=lambda: False,
     )
 
 
@@ -322,6 +355,18 @@ async def test_changed_on_demand_candidates_share_the_attachment_ceiling(
     monkeypatch.setattr(
         "eneo.completion_models.domain.skill_activation.measure_skill_context",
         lambda **_: measurement,
+    )
+
+    def measure_provider_input(messages, _tools, _model_name):
+        system_prompt = str(messages[0]["content"])
+        return SimpleNamespace(
+            tokens=(101 if "Instructions for Candidate two" in system_prompt else 80),
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        measure_provider_input,
     )
     bindings = (
         _resolved_skill(
@@ -747,7 +792,7 @@ async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
                 limit=1_000,
                 source=TokenCountSource.LITELLM,
             ),
-            "An on-demand Skill exceeds the configured context allowance",
+            'on-demand Skill "On demand" exceeds the configured context allowance',
         ),
         (
             SimpleNamespace(
@@ -755,7 +800,7 @@ async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
                 limit=1_000,
                 source=TokenCountSource.FALLBACK_ESTIMATE,
             ),
-            "The selected completion model cannot measure an on-demand Skill exactly",
+            'on-demand Skill "On demand" cannot be measured exactly by the selected completion model',
         ),
     ],
     ids=("context-limit", "measurement-unavailable"),

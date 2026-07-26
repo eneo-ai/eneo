@@ -91,10 +91,11 @@ Before attaching that Skill:
 4. Test an allowed request, a denied request, an approval-required call, an
    unavailable server, and a request outside the Skill's scope.
 
-An Assistant cannot currently use knowledge and MCP at the same time. Tool
-availability can also change after a Skill is saved. Eneo therefore does not
-treat Skill text as a dependency declaration or perform a save-time MCP health
-check: the existing MCP runtime remains the source of truth and fails closed.
+An Assistant cannot currently use knowledge and MCP at the same time. Eneo
+includes the stored, enabled MCP tool schemas when it validates whether a saved
+on-demand Skill can fit. Live discovery, user permissions, approvals, and tool
+availability can still change later, so runtime remains the source of truth and
+fails closed.
 
 ## Create and attach a Skill
 
@@ -292,10 +293,10 @@ and audit guarantees.
 
 The tenant settings API owns the seeded total Skill-context share; its admin
 form arrives in the next UI slice. The selected model window and fixed platform
-safety bounds still apply. Eneo rejects an Assistant configuration when a
-changed on-demand binding cannot fit its configured share, instead of saving a
-Skill that can never load. Models without tool calling keep only **always**
-Skills and report that limitation in runtime evidence.
+safety bounds still apply. Eneo rejects an Assistant configuration when any
+affected on-demand Skill cannot fit after a binding, prompt, model, attachment,
+or MCP-tool change. Models without tool calling keep only **always** Skills and
+report that limitation in runtime evidence.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.

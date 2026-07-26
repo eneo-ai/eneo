@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 from uuid import UUID
 
@@ -826,6 +827,7 @@ class SpaceRepository:
         space_id: UUID,
         assistant_id: UUID,
         mcp_servers: list["MCPServer"],
+        assistant_tool_overrides: dict[UUID, bool] | None = None,
     ) -> list["MCPServer"]:
         """Load tools for assistant's MCP servers and apply space + assistant-level overrides.
 
@@ -884,20 +886,18 @@ class SpaceRepository:
             for override in space_overrides_db
         }
 
-        # Load assistant-level tool overrides
-        assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
-            AssistantMCPServerTools.assistant_id == assistant_id
-        )
-        assistant_overrides_result = await self.session.execute(
-            assistant_overrides_query
-        )
-        assistant_overrides_db = assistant_overrides_result.scalars().all()
-
-        # Create map: tool_id -> is_enabled (assistant level)
-        assistant_tool_overrides = {
-            override.mcp_server_tool_id: override.is_enabled
-            for override in assistant_overrides_db
-        }
+        if assistant_tool_overrides is None:
+            assistant_overrides_query = sa.select(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.assistant_id == assistant_id
+            )
+            assistant_overrides_result = await self.session.execute(
+                assistant_overrides_query
+            )
+            assistant_overrides_db = assistant_overrides_result.scalars().all()
+            assistant_tool_overrides = {
+                override.mcp_server_tool_id: override.is_enabled
+                for override in assistant_overrides_db
+            }
 
         # Group tools by server
         from collections import defaultdict
@@ -954,6 +954,28 @@ class SpaceRepository:
             server.tools = tools_by_server.get(server.id, [])
 
         return mcp_servers
+
+    async def project_assistant_mcp_servers(
+        self,
+        *,
+        space_id: UUID,
+        assistant_id: UUID,
+        mcp_servers: list["MCPServer"],
+        tool_settings: list[tuple[UUID, bool]] | None = None,
+    ) -> list["MCPServer"]:
+        """Project staged assistant tool settings through the canonical policy.
+
+        Copies the read-model entities because tool projection is intentionally
+        mutable and save-time validation must not alter the loaded Space.
+        """
+        return await self._load_assistant_mcp_server_tools_with_overrides(
+            space_id=space_id,
+            assistant_id=assistant_id,
+            mcp_servers=deepcopy(mcp_servers),
+            assistant_tool_overrides=(
+                dict(tool_settings) if tool_settings is not None else None
+            ),
+        )
 
     async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
         stmt = (

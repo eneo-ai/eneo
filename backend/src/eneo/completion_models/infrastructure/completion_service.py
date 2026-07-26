@@ -13,6 +13,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -150,6 +151,57 @@ class CompletionService:
             credential_resolver=credential_resolver,
             provider_type=provider.provider_type,
         )
+
+    async def prepare_skill_activation_preflight(
+        self,
+        *,
+        model: CompletionModel,
+        prompt: str,
+        prompt_files: list[File],
+        mcp_servers: list["MCPServer"],
+        skill_runtime: SkillActivationRuntime,
+    ) -> ProviderInput:
+        """Build a deterministic upper bound for save-time activation checks.
+
+        The persisted, permission-filtered MCP catalogue is used without live
+        discovery or a network connection. Runtime still performs the final
+        per-user check after live tool narrowing.
+        """
+        adapter = await self._get_adapter(model)
+        enabled_servers = [server for server in mcp_servers if server.is_enabled]
+        mcp_proxy: MCPProxySession | None = None
+        if enabled_servers and model.supports_tool_calling:
+            mcp_proxy = self._mcp_proxy_factory.create(
+                enabled_servers,
+                identity_headers=build_identity_headers(self.user, self.tenant),
+                mcp_server_tool_repo=self.mcp_server_tool_repo,
+            )
+
+        try:
+            context = self.context_builder.build_context(
+                input_str="",
+                max_tokens=adapter.get_token_limit_of_model(),
+                model_name=adapter.get_model_route(),
+                prompt=prompt,
+                prompt_files=prompt_files,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime.tool_definition is not None
+                    else None
+                ),
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm() if mcp_proxy is not None else None
+                ),
+                vision=model.vision,
+            )
+            return adapter.prepare_provider_input(
+                context,
+                mcp_proxy=mcp_proxy,
+                skill_runtime=skill_runtime,
+            )
+        finally:
+            if mcp_proxy is not None:
+                await mcp_proxy.close()
 
     @staticmethod
     def is_valid_arguments(arguments: str):

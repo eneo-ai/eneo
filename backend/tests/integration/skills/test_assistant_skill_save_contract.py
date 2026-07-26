@@ -1,10 +1,20 @@
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+    Assistants,
+    AssistantsFiles,
+)
+from eneo.database.tables.mcp_server_table import (
+    MCPServers,
+    MCPServerTools,
+    SpacesMCPServers,
+)
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.skill_table import AssistantSkillBindings
 from eneo.database.tables.spaces_table import SpacesUsers
@@ -16,6 +26,7 @@ from eneo.skills.domain.skill import (
     SkillBindingReference,
     SkillRuntimePolicy,
 )
+from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 
 @pytest.fixture
@@ -50,6 +61,19 @@ async def _persisted_assistant_state(db_container, *, assistant_id):
             .all()
         )
     return name, tuple(bindings)
+
+
+async def _persisted_attachment_ids(db_container, *, assistant_id):
+    async with db_container() as container:
+        return tuple(
+            (
+                await container.session().scalars(
+                    sa.select(AssistantsFiles.file_id)
+                    .where(AssistantsFiles.assistant_id == assistant_id)
+                    .order_by(AssistantsFiles.file_id)
+                )
+            ).all()
+        )
 
 
 @pytest.mark.integration
@@ -279,6 +303,11 @@ async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_bindin
     assert persisted_bindings == original_bindings
 
 
+@pytest.mark.parametrize(
+    ("activated_tokens", "expected_status"),
+    [(8_000, 200), (8_001, 400)],
+    ids=("fits", "overflow"),
+)
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back(
@@ -290,6 +319,8 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
     space_factory,
     assistant_factory,
     monkeypatch,
+    activated_tokens,
+    expected_status,
 ):
     monkeypatch.setattr(
         "eneo.files.attachment_budget.get_settings",
@@ -304,6 +335,20 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
     monkeypatch.setattr(
         "eneo.files.attachment_budget.count_attachment_tokens",
         lambda *, text_files, image_files, model_name: (2_000 if text_files else 0),
+    )
+
+    def measure_provider_payload(messages, _tools, _model_route):
+        activated = any(message.get("role") == "tool" for message in messages)
+        if activated:
+            assert "persistent attachment" in str(messages)
+        return TokenCount(
+            tokens=activated_tokens if activated else 100,
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        measure_provider_payload,
     )
 
     async with db_container() as container:
@@ -352,8 +397,19 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
             created_by_user_id=admin_user.id,
         )
         assistant_id = assistant.id
-        skill_id = skill.id
-        revision_id = skill.current_revision.id
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=skill.current_revision.id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
 
     headers = {"Authorization": f"Bearer {admin_token}"}
     upload = await client.post(
@@ -369,12 +425,202 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
     )
     assert upload.status_code == 200, upload.text
     attachment_id = upload.json()["id"]
-    attach_response = await client.post(
+    original_name, original_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert (
+        await _persisted_attachment_ids(
+            db_container,
+            assistant_id=assistant_id,
+        )
+        == ()
+    )
+    response = await client.post(
         f"/api/v1/assistants/{assistant_id}/",
-        json={"attachments": [{"id": attachment_id}]},
+        json={
+            "name": "Rejected attachment-fit Assistant",
+            "attachments": [{"id": attachment_id}],
+        },
         headers=headers,
     )
-    assert attach_response.status_code == 200, attach_response.text
+
+    assert response.status_code == expected_status, response.text
+    if expected_status == 400:
+        assert (
+            'on-demand Skill "Candidate attachment Skill"' in response.json()["message"]
+        )
+    persisted_name, persisted_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert persisted_name == (
+        "Rejected attachment-fit Assistant" if expected_status == 200 else original_name
+    )
+    assert persisted_bindings == original_bindings
+    assert await _persisted_attachment_ids(
+        db_container,
+        assistant_id=assistant_id,
+    ) == ((UUID(attachment_id),) if expected_status == 200 else ())
+
+
+@pytest.mark.parametrize(
+    ("activated_tokens", "expected_status"),
+    [(8_000, 200), (8_001, 400)],
+    ids=("fits", "overflow"),
+)
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_mcp_schema_activation_preflight_is_atomic(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    activated_tokens,
+    expected_status,
+):
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.get_settings",
+        lambda: SimpleNamespace(attachment_context_reserve_tokens=0),
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_tokens",
+        lambda *_args, **_kwargs: 100,
+    )
+    monkeypatch.setattr(
+        "eneo.files.attachment_budget.count_attachment_tokens",
+        lambda **_kwargs: 0,
+    )
+    measured_tool_names: list[set[str]] = []
+
+    def measure_provider_payload(messages, tools, _model_route):
+        measured_tool_names.append(
+            {
+                tool["function"]["name"]
+                for tool in tools
+                if isinstance(tool.get("function"), dict)
+            }
+        )
+        activated = any(message.get("role") == "tool" for message in messages)
+        return TokenCount(
+            tokens=activated_tokens if activated else 100,
+            source=TokenCountSource.LITELLM,
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        measure_provider_payload,
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            "gpt-4o",
+            max_input_tokens=8_000,
+        )
+        model.supports_tool_calling = True
+        space = await space_factory(
+            session,
+            "Assistant activation tool contract",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Original activation-tool Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        mcp_server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Save contract MCP",
+            description="Approved warehouse contract",
+            http_url="http://localhost:9000/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        session.add(mcp_server)
+        await session.flush()
+        mcp_tool = MCPServerTools(
+            mcp_server_id=mcp_server.id,
+            name="warehouse_query",
+            title="Warehouse query",
+            description="Query the approved warehouse",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "SQL query"}},
+                "required": ["query"],
+            },
+            is_enabled_by_default=True,
+            requires_approval=False,
+            removed_from_remote=False,
+        )
+        session.add(mcp_tool)
+        await session.flush()
+        session.add_all(
+            [
+                SpacesMCPServers(
+                    space_id=space.id,
+                    mcp_server_id=mcp_server.id,
+                ),
+                AssistantMCPServers(
+                    assistant_id=assistant.id,
+                    mcp_server_id=mcp_server.id,
+                ),
+                AssistantMCPServerTools(
+                    assistant_id=assistant.id,
+                    mcp_server_tool_id=mcp_tool.id,
+                    is_enabled=True,
+                ),
+            ]
+        )
+        repo = container.skill_repo()
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=100,
+                max_activations_per_turn=10,
+            ),
+        )
+        skill = await repo.create(
+            space_id=space.id,
+            slug=f"activation-tool-{uuid4().hex[:8]}",
+            display_name="Activation tool Skill",
+            description="Use for activation-tool questions",
+            instructions="This candidate body fits.",
+            content_digest="f" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assistant_id = assistant.id
+        mcp_server_id = mcp_server.id
+        mcp_tool_id = mcp_tool.id
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=skill.current_revision.id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
 
     original_name, original_bindings = await _persisted_assistant_state(
         db_container,
@@ -383,25 +629,30 @@ async def test_on_demand_candidate_and_persistent_attachment_overflow_rolls_back
     response = await client.post(
         f"/api/v1/assistants/{assistant_id}/",
         json={
-            "name": "Rejected attachment-fit Assistant",
-            "skill_bindings": [
+            "name": "Staged MCP Assistant",
+            "mcp_servers": [{"id": str(mcp_server_id)}],
+            "mcp_tools": [
                 {
-                    "skill_id": str(skill_id),
-                    "skill_revision_id": str(revision_id),
-                    "activation_mode": "on_demand",
+                    "tool_id": str(mcp_tool_id),
+                    "is_enabled": True,
                 }
             ],
         },
-        headers=headers,
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    assert response.status_code == 400, response.text
-    assert 'on-demand Skill "Candidate attachment Skill"' in response.json()["message"]
+    assert response.status_code == expected_status, response.text
+    assert any(
+        "save_contract_mcp__warehouse_query" in tool_names
+        for tool_names in measured_tool_names
+    )
     persisted_name, persisted_bindings = await _persisted_assistant_state(
         db_container,
         assistant_id=assistant_id,
     )
-    assert persisted_name == original_name
+    assert persisted_name == (
+        "Staged MCP Assistant" if expected_status == 200 else original_name
+    )
     assert persisted_bindings == original_bindings
 
 

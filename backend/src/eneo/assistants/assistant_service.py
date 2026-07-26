@@ -66,6 +66,7 @@ from eneo.skills.domain.skill import (
     AssistantSkillRuntimeProjection,
     SkillActivationEvidenceV1,
     SkillActivationFallbackReason,
+    SkillActivationMode,
     SkillActivationRejectionReason,
     SkillBindingIntent,
     SkillComposition,
@@ -108,10 +109,13 @@ _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
     str,
 ] = {
     SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED: (
-        "An on-demand Skill exceeds the configured context allowance"
+        "exceeds the configured context allowance"
     ),
     SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
-        "The selected completion model cannot measure an on-demand Skill exactly"
+        "cannot be measured exactly by the selected completion model"
+    ),
+    SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED: (
+        "does not fit the selected completion model context"
     ),
 }
 
@@ -556,6 +560,8 @@ class AssistantService:
         *,
         space: "Space",
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
+        validate_all_on_demand_candidates: bool = False,
+        mcp_servers_override: list["MCPServer"] | None = None,
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -570,12 +576,10 @@ class AssistantService:
 
         Attachments are sent whole (never truncated), so a set that doesn't fit
         can't run — a clear rejection beats silently sending part of a document.
-        The prompt counts toward the ceiling on its own, so a prompt that alone
-        overflows is rejected even with no attachments. Changed on-demand
-        candidates are each checked from the always-active baseline; combinations
-        remain a turn-time decision. Existing candidates are not revalidated for
-        unrelated attachment or policy drift. Skipped only when no model is
-        resolved."""
+        On-demand candidates are staged one at a time against the provider-visible
+        baseline, including the activation transcript and configured MCP schemas.
+        Combinations and live per-user MCP narrowing remain turn-time decisions.
+        Skipped only when no model is resolved."""
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
@@ -586,9 +590,17 @@ class AssistantService:
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
+        candidate_ids = set(on_demand_skill_ids_requiring_validation)
+        if validate_all_on_demand_candidates:
+            candidate_ids.update(
+                binding.binding.skill_id
+                for binding in skill_plan.available
+                if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
+            )
+        candidate_skill_ids = frozenset(candidate_ids)
         model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
-            if on_demand_skill_ids_requiring_validation:
+            if candidate_skill_ids:
                 raise BadRequestException(
                     "Choose a completion model before enabling on-demand Skills"
                 )
@@ -601,7 +613,7 @@ class AssistantService:
         )
         snapshot = runtime.snapshot()
         if (
-            on_demand_skill_ids_requiring_validation
+            candidate_skill_ids
             and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
         ):
             message = (
@@ -614,37 +626,82 @@ class AssistantService:
             )
             raise BadRequestException(message)
 
-        assessments = runtime.assess_on_demand_candidates(
-            on_demand_skill_ids_requiring_validation
-        )
-        rejection = next(
+        assessments = runtime.assess_on_demand_candidates(candidate_skill_ids)
+        rejected_assessment = next(
             (
-                assessment.rejection_reason
+                assessment
                 for assessment in assessments
                 if assessment.rejection_reason is not None
             ),
             None,
         )
-        if rejection is not None:
+        if rejected_assessment is not None:
+            rejection_reason = rejected_assessment.rejection_reason
+            assert rejection_reason is not None
             raise BadRequestException(
-                _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
-                    rejection,
+                f'on-demand Skill "{rejected_assessment.display_name}" '
+                + _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                    rejection_reason,
                     _ON_DEMAND_REJECTION_DEFAULT,
                 )
             )
 
+        completion_prompt_files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments,
+            completion_model=model,
+        )
         await self._assert_persistent_baseline_fits(
             assistant=assistant,
             model=model,
             prompt_text=runtime.prompt,
-            alternative_prompts=tuple(
-                (
-                    f'on-demand Skill "{assessment.display_name}"',
-                    assessment.prompt,
-                )
-                for assessment in assessments
-            ),
+            completion_prompt_files=completion_prompt_files,
         )
+
+        if not candidate_skill_ids:
+            return
+
+        if effective_config is not None and effective_config.mcp_enforced:
+            effective_mcp_servers = effective_config.available_mcp_servers
+        elif mcp_servers_override is not None:
+            effective_mcp_servers = mcp_servers_override
+        else:
+            effective_mcp_servers = assistant.mcp_servers
+        if assistant.has_knowledge():
+            effective_mcp_servers = []
+
+        provider_input = (
+            await self.completion_service.prepare_skill_activation_preflight(
+                model=cast("AICompletionModel", model),
+                prompt=runtime.prompt,
+                prompt_files=completion_prompt_files,
+                mcp_servers=effective_mcp_servers,
+                skill_runtime=runtime,
+            )
+        )
+        provider_assessments = runtime.assess_provider_payload_candidates(
+            candidate_skill_ids,
+            messages=provider_input.messages,
+            provider_tools=provider_input.tools,
+        )
+        rejected_provider_assessment = next(
+            (
+                assessment
+                for assessment in provider_assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejected_provider_assessment is not None:
+            rejection_reason = rejected_provider_assessment.rejection_reason
+            assert rejection_reason is not None
+            message = _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                rejection_reason,
+                _ON_DEMAND_REJECTION_DEFAULT,
+            )
+            raise BadRequestException(
+                f'on-demand Skill "{rejected_provider_assessment.display_name}" '
+                f"{message}"
+            )
 
     @staticmethod
     def _context_model(
@@ -669,18 +726,18 @@ class AssistantService:
         assistant: Assistant,
         model: "CompletionModel",
         prompt_text: str,
-        alternative_prompts: Sequence[tuple[str, str]] = (),
+        completion_prompt_files: list[File] | None = None,
     ) -> None:
-        completion_prompt_files = await self._completion_prompt_files_for_model(
-            persistent_attachments=assistant.attachments,
-            completion_model=model,
-        )
+        if completion_prompt_files is None:
+            completion_prompt_files = await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+            )
         assert_prompt_and_files_fit_context(
             max_input_tokens=model.max_input_tokens,
-            model_name=model.name,
+            model_name=model.get_model_route(),
             prompt_text=prompt_text,
             files=completion_prompt_files,
-            alternative_prompts=alternative_prompts,
         )
 
     async def assert_personal_default_governance_context_fit(self) -> None:
@@ -1036,6 +1093,30 @@ class AssistantService:
             effective_config=mcp_effective_config,
         )
 
+        mcp_servers_for_validation: list["MCPServer"] | None = None
+        if mcp_server_ids is not None or mcp_tools is not None:
+            assert space.id is not None
+            selected_ids = (
+                set(mcp_server_ids)
+                if mcp_server_ids is not None
+                else {server.id for server in assistant.mcp_servers}
+            )
+            source_servers = (
+                space.mcp_servers
+                if mcp_server_ids is not None
+                else assistant.mcp_servers
+            )
+            mcp_servers_for_validation = (
+                await self.space_repo.project_assistant_mcp_servers(
+                    space_id=space.id,
+                    assistant_id=assistant_id,
+                    mcp_servers=[
+                        server for server in source_servers if server.id in selected_ids
+                    ],
+                    tool_settings=mcp_tools,
+                )
+            )
+
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
         setattr(assistant, "_mcp_tool_settings", mcp_tools)
@@ -1105,6 +1186,8 @@ class AssistantService:
             or completion_model is not None
             or prompt_obj is not None
             or skill_binding_intents is not None
+            or mcp_server_ids is not None
+            or mcp_tools is not None
         ):
             await self._validate_attachments_fit(
                 assistant,
@@ -1112,6 +1195,14 @@ class AssistantService:
                 on_demand_skill_ids_requiring_validation=(
                     on_demand_skill_ids_requiring_validation
                 ),
+                validate_all_on_demand_candidates=(
+                    attachments is not None
+                    or completion_model is not None
+                    or prompt_obj is not None
+                    or mcp_server_ids is not None
+                    or mcp_tools is not None
+                ),
+                mcp_servers_override=mcp_servers_for_validation,
             )
 
         refreshed_space = await self.space_repo.update(space)

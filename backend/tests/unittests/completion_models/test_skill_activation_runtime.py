@@ -433,6 +433,76 @@ def test_activation_rejects_when_complete_follow_up_exceeds_model_input_limit():
     assert "Payroll body" not in str(messages[0]["content"])
 
 
+@pytest.mark.parametrize(
+    ("provider_tokens", "expected_rejection"),
+    [
+        (1_000, None),
+        (
+            1_001,
+            SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED,
+        ),
+    ],
+    ids=("exact-limit", "overflow"),
+)
+def test_provider_candidate_assessment_is_exact_and_non_mutating(
+    provider_tokens,
+    expected_rejection,
+):
+    candidate = _skill(
+        key="skill-1",
+        name="Payroll",
+        description="Payroll questions",
+        position=1,
+        instructions="Payroll body",
+        initially_active=False,
+    )
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(candidate,),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=1,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=1_000,
+        supports_tool_calling=True,
+    )
+    messages = [
+        {"role": "system", "content": "Base"},
+        {"role": "user", "content": "Question"},
+    ]
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "large_mcp_schema",
+                "parameters": {"description": "x" * 2_000},
+            },
+        }
+    ]
+    snapshot_before = runtime.snapshot()
+    messages_before = [message.copy() for message in messages]
+
+    with patch(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        return_value=TokenCount(
+            tokens=provider_tokens,
+            source=TokenCountSource.LITELLM,
+        ),
+    ) as measure:
+        assessments = runtime.assess_provider_payload_candidates(
+            frozenset({candidate.binding.skill_id}),
+            messages=messages,
+            provider_tools=provider_tools,
+        )
+
+    assert len(assessments) == 1
+    assert assessments[0].rejection_reason is expected_rejection
+    assert measure.call_args.args[1] == provider_tools
+    assert runtime.snapshot() == snapshot_before
+    assert messages == messages_before
+
+
 def test_model_limit_rejects_oversized_earlier_skill_and_keeps_later_fit():
     runtime = SkillActivationRuntime.create(
         base_instructions="Base",

@@ -69,6 +69,8 @@ def setup_fixture():
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
+    mock_space.id = TEST_UUID
+    mock_space.mcp_servers = []
     mock_space.get_assistant.return_value = mock_assistant
     space_repo.get_space_by_assistant.return_value = mock_space
 
@@ -274,6 +276,34 @@ async def test_update_runs_fit_check_for_prompt_only_change(setup: Setup):
     )
 
     setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
+
+
+async def test_update_runs_full_candidate_fit_for_model_change(setup: Setup):
+    model_id = uuid4()
+    model = MagicMock(id=model_id)
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    space.get_completion_model.return_value = model
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=model_id,
+    )
+
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is True
+    )
 
 
 async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
@@ -284,6 +314,29 @@ async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
 
     setup.service._validate_attachments_fit.assert_not_awaited()
     setup.service.skill_service.replace_assistant_bindings.assert_not_awaited()
+
+
+async def test_update_runs_full_candidate_fit_for_mcp_tool_change(setup: Setup):
+    projected_servers = [MagicMock()]
+    setup.service.space_repo.project_assistant_mcp_servers.return_value = (
+        projected_servers
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        mcp_tools=[],
+    )
+
+    setup.service.space_repo.project_assistant_mcp_servers.assert_awaited_once_with(
+        space_id=TEST_UUID,
+        assistant_id=TEST_UUID,
+        mcp_servers=[],
+        tool_settings=[],
+    )
+    setup.service._validate_attachments_fit.assert_awaited_once()
+    fit_kwargs = setup.service._validate_attachments_fit.await_args.kwargs
+    assert fit_kwargs["validate_all_on_demand_candidates"] is True
+    assert fit_kwargs["mcp_servers_override"] == projected_servers
 
 
 async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
@@ -336,6 +389,12 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         intents=intents,
     )
     assert events == ["parent_update", "binding_replace", "fit", "persist"]
+    assert (
+        setup.service._validate_attachments_fit.await_args.kwargs[
+            "validate_all_on_demand_candidates"
+        ]
+        is False
+    )
 
 
 async def test_update_assistant_binding_fit_failure_skips_parent_persist(

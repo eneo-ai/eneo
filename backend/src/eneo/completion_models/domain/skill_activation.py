@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter_ns
 from typing import Any, cast
 from uuid import UUID
@@ -349,6 +349,57 @@ class SkillActivationRuntime:
                 continue
             assessments.append(self._assess_candidate(skill))
         return tuple(assessments)
+
+    def assess_provider_payload_candidates(
+        self,
+        skill_ids: frozenset[UUID],
+        *,
+        messages: list[dict[str, Any]],
+        provider_tools: list[dict[str, Any]],
+    ) -> tuple[SkillActivationCandidateAssessment, ...]:
+        """Stage each candidate against the provider-visible request payload.
+
+        Save-time preflight uses the same transcript mutation and token
+        measurement as a real activation round. Each probe runs on a fork so
+        neither the frozen turn state nor the caller's messages are changed.
+        """
+        assessments = self.assess_on_demand_candidates(skill_ids)
+        provider_assessments: list[SkillActivationCandidateAssessment] = []
+        for assessment in assessments:
+            staged = self._fork()
+            staged_messages = [message.copy() for message in messages]
+            staged.apply_provider_tool_calls(
+                calls=(
+                    ProviderToolCall(
+                        call_id=f"preflight-{assessment.activation_key}",
+                        name=SKILL_ACTIVATION_TOOL_NAME,
+                        arguments=json.dumps({"skill_key": assessment.activation_key}),
+                    ),
+                ),
+                messages=cast("list[dict[str, object]]", staged_messages),
+                provider_tools=cast(
+                    "list[dict[str, object]]",
+                    provider_tools,
+                ),
+            )
+            snapshot = staged.snapshot()
+            rejection_reason = next(
+                (
+                    rejection.reason
+                    for rejection in snapshot.rejected
+                    if rejection.activation_key == assessment.activation_key
+                ),
+                None,
+            )
+            provider_assessments.append(
+                replace(
+                    assessment,
+                    prompt=staged.prompt,
+                    rejection_reason=rejection_reason,
+                    measurement=snapshot.measurement,
+                )
+            )
+        return tuple(provider_assessments)
 
     def _assess_candidate(
         self,

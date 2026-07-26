@@ -40,6 +40,7 @@ from eneo.completion_models.domain.skill_activation import (
 )
 from eneo.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
+    ProviderInput,
 )
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
@@ -747,6 +748,28 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         return messages
 
+    @override
+    def prepare_provider_input(
+        self,
+        context: "Context",
+        *,
+        mcp_proxy: "MCPProxySession | None" = None,
+        skill_runtime: SkillActivationRuntime | None = None,
+    ) -> ProviderInput:
+        """Build the canonical payload shared by preflight and provider calls."""
+        messages = self._create_messages_from_context(context)
+        eneo_tools = self._build_tools_from_context(context)
+        tools = self._merge_mcp_tools(
+            eneo_tools,
+            mcp_proxy,
+            skill_runtime,
+        )
+        return ProviderInput(
+            messages=messages,
+            tools=tools,
+            built_in_tools=eneo_tools,
+        )
+
     def _prepare_kwargs(
         self,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
@@ -840,18 +863,14 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
-        # Convert messages to OpenAI format (with vision support)
-        messages = self._create_messages_from_context(context)
-
-        # Build combined tools (Eneo built-in + MCP)
-        eneo_tools = self._build_tools_from_context(context)
-        all_tools = self._merge_mcp_tools(
-            eneo_tools,
-            mcp_proxy,
-            skill_runtime,
+        provider_input = self.prepare_provider_input(
+            context,
+            mcp_proxy=mcp_proxy,
+            skill_runtime=skill_runtime,
         )
-        if all_tools:
-            litellm_kwargs["tools"] = all_tools
+        messages = provider_input.messages
+        if provider_input.tools:
+            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1100,18 +1119,14 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
-        # Convert messages to OpenAI format (with vision support)
-        messages = self._create_messages_from_context(context)
-
-        # Build combined tools (Eneo built-in + MCP)
-        eneo_tools = self._build_tools_from_context(context)
-        all_tools = self._merge_mcp_tools(
-            eneo_tools,
-            mcp_proxy,
-            skill_runtime,
+        provider_input = self.prepare_provider_input(
+            context,
+            mcp_proxy=mcp_proxy,
+            skill_runtime=skill_runtime,
         )
-        if all_tools:
-            litellm_kwargs["tools"] = all_tools
+        messages = provider_input.messages
+        if provider_input.tools:
+            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1146,8 +1161,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 kwargs=litellm_kwargs,
                 mcp_proxy=mcp_proxy,
                 skill_runtime=skill_runtime,
-                has_tools=bool(all_tools),
-                eneo_tools=eneo_tools,
+                has_tools=bool(provider_input.tools),
+                eneo_tools=provider_input.built_in_tools,
             )
 
         except Exception as exc:
