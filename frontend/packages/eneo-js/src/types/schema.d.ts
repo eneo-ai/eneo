@@ -8869,22 +8869,6 @@ export interface components {
       | "router"
       | "self_correction";
     /**
-     * AIBuilderInputSource
-     * @enum {string}
-     */
-    AIBuilderInputSource: "flow_input" | "previous_step" | "all_previous_steps";
-    /**
-     * AIBuilderInputType
-     * @enum {string}
-     */
-    AIBuilderInputType: "text" | "json" | "audio" | "document" | "file" | "any";
-    /**
-     * AIBuilderOutputMode
-     * @enum {string}
-     */
-    AIBuilderOutputMode:
-      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
-    /**
      * AIBuilderPlanEditContext
      * @description Structured intent for revising an already proposed AI Builder plan.
      *
@@ -14015,6 +13999,22 @@ export interface components {
       /** Icon Id */
       icon_id?: string | null;
     };
+    /**
+     * FlowAuthoringInputSource
+     * @enum {string}
+     */
+    FlowAuthoringInputSource: "flow_input" | "previous_step" | "all_previous_steps";
+    /**
+     * FlowAuthoringInputType
+     * @enum {string}
+     */
+    FlowAuthoringInputType: "text" | "json" | "audio" | "document" | "file" | "any";
+    /**
+     * FlowAuthoringOutputMode
+     * @enum {string}
+     */
+    FlowAuthoringOutputMode:
+      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
     /** FlowBuilderEditApproval */
     FlowBuilderEditApproval: {
       /** Base Flow Revision */
@@ -25996,11 +25996,11 @@ export interface components {
        */
       name: string;
       assistant_spec: components["schemas"]["AssistantSpec"];
-      input_source: components["schemas"]["AIBuilderInputSource"];
+      input_source: components["schemas"]["FlowAuthoringInputSource"];
       /** @default text */
-      input_type?: components["schemas"]["AIBuilderInputType"];
+      input_type?: components["schemas"]["FlowAuthoringInputType"];
       /** @default pass_through */
-      output_mode?: components["schemas"]["AIBuilderOutputMode"];
+      output_mode?: components["schemas"]["FlowAuthoringOutputMode"];
       /** @default text */
       output_type?: components["schemas"]["FlowOutputType"];
       /** Input Bindings */

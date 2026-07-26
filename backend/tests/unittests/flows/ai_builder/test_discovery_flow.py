@@ -81,7 +81,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
-from eneo.flows.enums import AIBuilderInputType
+from eneo.flows.enums import FlowAuthoringInputType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,7 +97,7 @@ def test_mapped_file_limit_question_displays_current_policy_ceiling() -> None:
     planning_state.architecture_commit = ArchitectureCommit(
         tuples_chain=[
             StepTriple(
-                input_type=AIBuilderInputType.DOCUMENT,
+                input_type=FlowAuthoringInputType.DOCUMENT,
                 output_type="json",
                 output_mode="pass_through",
             )

@@ -820,7 +820,7 @@ KNOWN_GAPS: tuple[KnownCapabilityGap, ...] = (
         runtime_input_sources=frozenset(),
         runtime_output_modes=frozenset({FlowOutputMode.HTTP_POST}),
         why_not_authorable=(
-            "AIBuilderOutputMode omits http_post, so a FlowDraftSpecCore step "
+            "FlowAuthoringOutputMode omits http_post, so a FlowDraftSpecCore step "
             "cannot be authored with an outbound HTTP POST call."
         ),
         product_decision=(
@@ -833,7 +833,7 @@ KNOWN_GAPS: tuple[KnownCapabilityGap, ...] = (
         runtime_input_sources=frozenset({FlowInputSource.HTTP_GET}),
         runtime_output_modes=frozenset(),
         why_not_authorable=(
-            "AIBuilderInputSource omits http_get, so a FlowDraftSpecCore step "
+            "FlowAuthoringInputSource omits http_get, so a FlowDraftSpecCore step "
             "cannot be authored that fetches input over HTTP GET."
         ),
         product_decision=(

@@ -11,9 +11,9 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     document_delivery_mode_values,
 )
 from eneo.flows.enums import (
-    AIBuilderInputSource,
-    AIBuilderInputType,
-    AIBuilderOutputMode,
+    FlowAuthoringInputSource,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
@@ -34,14 +34,41 @@ def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> Non
     }
 
     assert builder_input_source_values() == [
-        item.value for item in AIBuilderInputSource
+        item.value for item in FlowAuthoringInputSource
     ]
     assert builder_input_type_values() == [
-        item.value for item in AIBuilderInputType if item.value in exposed_input_types
+        item.value
+        for item in FlowAuthoringInputType
+        if item.value in exposed_input_types
     ]
     assert set(builder_input_type_values()) == exposed_input_types
     assert builder_output_type_values() == [item.value for item in FlowOutputType]
-    assert builder_output_mode_values() == [item.value for item in AIBuilderOutputMode]
+    assert builder_output_mode_values() == [
+        item.value for item in FlowAuthoringOutputMode
+    ]
+
+
+def test_flow_authoring_enum_values_preserve_the_persisted_wire_contract() -> None:
+    assert [item.value for item in FlowAuthoringInputSource] == [
+        "flow_input",
+        "previous_step",
+        "all_previous_steps",
+    ]
+    assert [item.value for item in FlowAuthoringInputType] == [
+        "text",
+        "json",
+        "audio",
+        "document",
+        "file",
+        "any",
+    ]
+    assert [item.value for item in FlowAuthoringOutputMode] == [
+        "pass_through",
+        "compose_text",
+        "transcribe_only",
+        "template_fill",
+        "render_verbatim",
+    ]
 
 
 def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> None:
@@ -65,7 +92,7 @@ def test_builder_exposed_flow_input_types_bridge_to_authoring_input_type() -> No
     ]
 
     assert [InputType(input_type.value) for input_type in exposed_flow_input_types] == [
-        AIBuilderInputType(value) for value in builder_input_type_values()
+        FlowAuthoringInputType(value) for value in builder_input_type_values()
     ]
 
 

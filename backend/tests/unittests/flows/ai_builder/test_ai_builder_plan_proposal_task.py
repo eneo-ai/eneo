@@ -204,6 +204,8 @@ def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
     assert "final text step immediately before the renderer" in prompt
     assert "Do not add a separate final conversion" in prompt
     assert "the backend adds the fixed renderer" in prompt
+    assert "- document -> json (pass_through)" in prompt
+    assert "- text -> pdf (render_verbatim)" in prompt
 
 
 def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:

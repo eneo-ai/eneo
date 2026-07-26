@@ -14,13 +14,13 @@ from eneo.flows.domain.flow import (
     parse_flow_step_retrieval_policy,
 )
 from eneo.flows.enums import (
-    AIBuilderInputSource as InputSource,
+    FlowAuthoringInputSource as InputSource,
 )
 from eneo.flows.enums import (
-    AIBuilderInputType as InputType,
+    FlowAuthoringInputType as InputType,
 )
 from eneo.flows.enums import (
-    AIBuilderOutputMode as OutputMode,
+    FlowAuthoringOutputMode as OutputMode,
 )
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.enums import (

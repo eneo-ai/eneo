@@ -1431,7 +1431,7 @@ def test_validate_form_schema_rejects_runtime_payload_field_names(field_name, co
 
 
 def test_validate_form_schema_rejects_step_alias_field_name_with_context():
-    with pytest.raises(BadRequestException, match="Names like step_1") as exc_info:
+    with pytest.raises(BadRequestException) as exc_info:
         validate_form_schema(
             {
                 "form_schema": {
@@ -1440,6 +1440,10 @@ def test_validate_form_schema_rejects_step_alias_field_name_with_context():
             }
         )
 
+    assert str(exc_info.value) == (
+        "Form field 1 is named 'step_2'. Names like step_1 are reserved for "
+        "Flow step aliases. Use a descriptive field name instead."
+    )
     assert exc_info.value.code == "flow_form_field_name_step_alias"
     assert exc_info.value.context == {"field_index": 0, "field_name": "step_2"}
 

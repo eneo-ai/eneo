@@ -28,7 +28,7 @@ class RerunDependencyKind(str, Enum):
     RUNTIME_ALIAS_PREVIOUS_STEP = "runtime_alias.previous_step"
 
 
-class AIBuilderInputSource(str, Enum):
+class FlowAuthoringInputSource(str, Enum):
     FLOW_INPUT = FlowInputSource.FLOW_INPUT.value
     PREVIOUS_STEP = FlowInputSource.PREVIOUS_STEP.value
     ALL_PREVIOUS_STEPS = FlowInputSource.ALL_PREVIOUS_STEPS.value
@@ -44,7 +44,7 @@ class FlowInputType(str, Enum):
     ANY = "any"
 
 
-class AIBuilderInputType(str, Enum):
+class FlowAuthoringInputType(str, Enum):
     TEXT = FlowInputType.TEXT.value
     JSON = FlowInputType.JSON.value
     AUDIO = FlowInputType.AUDIO.value
@@ -73,7 +73,7 @@ def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
     return mode == FlowOutputMode.HTTP_POST
 
 
-class AIBuilderOutputMode(str, Enum):
+class FlowAuthoringOutputMode(str, Enum):
     PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
     COMPOSE_TEXT = FlowOutputMode.COMPOSE_TEXT.value
     TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value

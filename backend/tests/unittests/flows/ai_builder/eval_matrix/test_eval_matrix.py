@@ -22,8 +22,8 @@ import pytest
 
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.enums import (
-    AIBuilderInputSource,
-    AIBuilderOutputMode,
+    FlowAuthoringInputSource,
+    FlowAuthoringOutputMode,
     FlowOutputType,
 )
 from eneo.flows.flow_authoring_spec import (
@@ -115,8 +115,8 @@ def test_http_gap_is_not_silently_authorable() -> None:
     # The ratchet: HTTP rows are gaps only because the authoring enums cannot
     # express them. If HTTP authoring is ever added, this fails and forces the
     # gap rows to be promoted to buildable with real goldens.
-    builder_sources = {source.value for source in AIBuilderInputSource}
-    builder_modes = {mode.value for mode in AIBuilderOutputMode}
+    builder_sources = {source.value for source in FlowAuthoringInputSource}
+    builder_modes = {mode.value for mode in FlowAuthoringOutputMode}
     assert "http_get" not in builder_sources
     assert "http_post" not in builder_sources
     assert "http_post" not in builder_modes
@@ -129,8 +129,8 @@ def test_known_gaps_runtime_support_is_real_but_not_authorable(
     # The gap must claim some runtime capability (typed Flow enum members) and
     # every claimed member must be absent from the AI Builder authoring enums.
     assert gap.runtime_input_sources or gap.runtime_output_modes
-    builder_sources = {source.value for source in AIBuilderInputSource}
-    builder_modes = {mode.value for mode in AIBuilderOutputMode}
+    builder_sources = {source.value for source in FlowAuthoringInputSource}
+    builder_modes = {mode.value for mode in FlowAuthoringOutputMode}
     for source in gap.runtime_input_sources:
         assert source.value not in builder_sources
     for mode in gap.runtime_output_modes:
@@ -214,8 +214,8 @@ def test_docx_fill_and_create_are_distinct_shapes() -> None:
         step.output_mode for c in creates for step in c.spec.steps if _is_docx(step)
     }
     # Fill always uses TEMPLATE_FILL; create always generates via PASS_THROUGH.
-    assert fill_modes == {AIBuilderOutputMode.TEMPLATE_FILL}
-    assert create_modes == {AIBuilderOutputMode.PASS_THROUGH}
+    assert fill_modes == {FlowAuthoringOutputMode.TEMPLATE_FILL}
+    assert create_modes == {FlowAuthoringOutputMode.PASS_THROUGH}
     fill_hashes = {c.spec.spec_hash() for c in fills}
     create_hashes = {c.spec.spec_hash() for c in creates}
     assert fill_hashes.isdisjoint(create_hashes)

@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
+from eneo.flows.enums import FlowAuthoringOutputMode, FlowOutputMode
 
 
 def _slot(
@@ -205,6 +206,23 @@ def test_returns_none_when_no_primary_pattern_can_be_chosen(
             )
         )
         is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("flow_mode", "expected_authoring_mode"),
+    [
+        (FlowOutputMode.COMPOSE_TEXT, FlowAuthoringOutputMode.COMPOSE_TEXT),
+        (FlowOutputMode.HTTP_POST, None),
+    ],
+)
+def test_step_output_mode_mapping_preserves_the_authoring_boundary(
+    flow_mode: FlowOutputMode,
+    expected_authoring_mode: FlowAuthoringOutputMode | None,
+) -> None:
+    assert (
+        ai_builder_architecture_derivation._step_output_mode_value(flow_mode)
+        is expected_authoring_mode
     )
 
 

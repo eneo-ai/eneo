@@ -43,7 +43,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
-from eneo.flows.enums import AIBuilderInputType
+from eneo.flows.enums import (
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
+    FlowOutputType,
+)
 from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.json_types import JsonObject
 
@@ -103,18 +107,6 @@ ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX = ":json_schema_attachment"
 TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX = "content:template_placeholder:"
 TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX = ":template_placeholder_source"
 
-StepOutputType = Literal["text", "json", "pdf", "docx"]
-# Mirrors AIBuilderOutputMode, the authoring vocabulary. Server-injected modes
-# are excluded: http_post is applied by the server, never authored, and no
-# writer could produce it here — a hand-edited value used to degrade silently
-# to pass-through. test_planning_state holds this list and the enum together.
-StepOutputMode = Literal[
-    "pass_through",
-    "compose_text",
-    "transcribe_only",
-    "template_fill",
-    "render_verbatim",
-]
 AggregationIntent = Literal["linear", "aggregate", "compare"]
 
 
@@ -192,9 +184,9 @@ class ResolvedSlot(_PlanningModel):
 
 
 class StepTriple(_PlanningModel):
-    input_type: AIBuilderInputType
-    output_type: StepOutputType
-    output_mode: StepOutputMode
+    input_type: FlowAuthoringInputType
+    output_type: FlowOutputType
+    output_mode: FlowAuthoringOutputMode
 
 
 class ArchitectureCommitDraft(_PlanningModel):

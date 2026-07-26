@@ -13,6 +13,7 @@ from eneo.flows.flow_metadata import (
     parse_flow_metadata,
     serialize_flow_form_schema,
     serialize_flow_metadata,
+    validate_form_field_runtime_name,
 )
 from eneo.main.exceptions import BadRequestException
 
@@ -90,6 +91,11 @@ def _ai_builder_origin() -> dict[str, object]:
             _metadata([{"name": "case_id", "type": "text", "options": ["a"]}]),
             "metadata_json.form_schema.fields[0].options is only valid for select or multiselect.",
         ),
+        (
+            _metadata([{"name": "step_1", "type": "text"}]),
+            "Form field 1 is named 'step_1'. Names like step_1 are reserved for "
+            "Flow step aliases. Use a descriptive field name instead.",
+        ),
     ],
 )
 def test_parse_flow_form_schema_preserves_write_error_messages(
@@ -155,6 +161,20 @@ def test_parse_flow_form_schema_preserves_write_error_codes_and_context(
 
     assert exc_info.value.code == expected_code
     assert exc_info.value.context == expected_context
+
+
+def test_validate_form_field_runtime_name_rejects_step_alias_with_neutral_error() -> (
+    None
+):
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_form_field_runtime_name(1, "Step_2")
+
+    assert str(exc_info.value) == (
+        "Form field 2 is named 'Step_2'. Names like step_1 are reserved for "
+        "Flow step aliases. Use a descriptive field name instead."
+    )
+    assert exc_info.value.code == "flow_form_field_name_step_alias"
+    assert exc_info.value.context == {"field_index": 1, "field_name": "Step_2"}
 
 
 def test_parse_flow_form_schema_normalizes_legacy_field_types() -> None:

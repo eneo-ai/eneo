@@ -16,19 +16,21 @@ FlowInputFieldProvenance: TypeAlias = Literal[
 def builder_input_source_values() -> list[str]:
     """Authorable input-source values for AI Builder tool schemas."""
 
-    from eneo.flows.enums import AIBuilderInputSource
+    from eneo.flows.enums import FlowAuthoringInputSource
 
-    return [item.value for item in AIBuilderInputSource]
+    return [item.value for item in FlowAuthoringInputSource]
 
 
 def builder_input_type_values() -> list[str]:
     """Authorable input-type values, filtered by builder-exposed Flow capability."""
 
-    from eneo.flows.enums import AIBuilderInputType
+    from eneo.flows.enums import FlowAuthoringInputType
 
     exposed_input_types = _builder_exposed_input_types()
     return [
-        item.value for item in AIBuilderInputType if item.value in exposed_input_types
+        item.value
+        for item in FlowAuthoringInputType
+        if item.value in exposed_input_types
     ]
 
 
@@ -48,9 +50,9 @@ def builder_output_type_values() -> list[str]:
 def builder_output_mode_values() -> list[str]:
     """Output modes AI Builder can author without raw backend config."""
 
-    from eneo.flows.enums import AIBuilderOutputMode
+    from eneo.flows.enums import FlowAuthoringOutputMode
 
-    return [item.value for item in AIBuilderOutputMode]
+    return [item.value for item in FlowAuthoringOutputMode]
 
 
 def builder_form_field_type_values() -> list[str]:

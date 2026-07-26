@@ -16,11 +16,11 @@ from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
-    StepOutputMode,
     StepTriple,
 )
 from eneo.flows.enums import (
-    AIBuilderInputType,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
@@ -75,7 +75,7 @@ def derive_architecture_commit_draft(
     return ArchitectureCommitDraft(
         tuples_chain=[
             StepTriple(
-                input_type=AIBuilderInputType(input_type.value),
+                input_type=FlowAuthoringInputType(input_type.value),
                 output_type=output_type.value,
                 output_mode=step_output_mode,
             )
@@ -219,21 +219,12 @@ def _primary_pattern_id(
     return None
 
 
-def _step_output_mode_value(output_mode: FlowOutputMode) -> StepOutputMode | None:
-    match output_mode:
-        case FlowOutputMode.PASS_THROUGH:
-            return "pass_through"
-        case FlowOutputMode.TRANSCRIBE_ONLY:
-            return "transcribe_only"
-        case FlowOutputMode.TEMPLATE_FILL:
-            return "template_fill"
-        case FlowOutputMode.RENDER_VERBATIM:
-            return "render_verbatim"
-        case FlowOutputMode.COMPOSE_TEXT | FlowOutputMode.HTTP_POST:
-            # Neither is an authored planner value: compose_text is the implicit
-            # default and http_post is server-injected, so the planner's
-            # vocabulary has no member for either.
-            return None
+def _step_output_mode_value(
+    output_mode: FlowOutputMode,
+) -> FlowAuthoringOutputMode | None:
+    if output_mode is FlowOutputMode.HTTP_POST:
+        return None
+    return FlowAuthoringOutputMode(output_mode.value)
 
 
 __all__ = [

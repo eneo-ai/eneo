@@ -30,7 +30,7 @@ from eneo.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
-from eneo.flows.enums import AIBuilderInputType
+from eneo.flows.enums import FlowAuthoringInputType, FlowAuthoringOutputMode
 
 _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
@@ -332,10 +332,14 @@ class TestResolvedSlotValidation:
 
 
 class TestStepTripleValidation:
-    def test_step_input_type_uses_canonical_ai_builder_enum(self) -> None:
-        assert StepTriple.model_fields["input_type"].annotation is AIBuilderInputType
+    def test_step_input_type_uses_canonical_flow_authoring_enum(self) -> None:
+        assert (
+            StepTriple.model_fields["input_type"].annotation is FlowAuthoringInputType
+        )
 
-    @pytest.mark.parametrize("input_type", [item.value for item in AIBuilderInputType])
+    @pytest.mark.parametrize(
+        "input_type", [item.value for item in FlowAuthoringInputType]
+    )
     def test_canonical_input_type_values_load_from_jsonb_payload(
         self,
         input_type: str,
@@ -357,6 +361,39 @@ class TestStepTripleValidation:
                     "input_type": "image",
                     "output_type": "text",
                     "output_mode": "pass_through",
+                }
+            )
+
+    def test_step_output_mode_uses_canonical_flow_authoring_enum(self) -> None:
+        assert (
+            StepTriple.model_fields["output_mode"].annotation is FlowAuthoringOutputMode
+        )
+
+    @pytest.mark.parametrize(
+        "output_mode", [item.value for item in FlowAuthoringOutputMode]
+    )
+    def test_canonical_output_modes_load_and_serialize_as_wire_values(
+        self,
+        output_mode: str,
+    ) -> None:
+        triple = StepTriple.model_validate(
+            {
+                "input_type": "text",
+                "output_type": "text",
+                "output_mode": output_mode,
+            }
+        )
+
+        assert triple.output_mode is FlowAuthoringOutputMode(output_mode)
+        assert triple.model_dump(mode="json")["output_mode"] == output_mode
+
+    def test_server_injected_http_post_output_mode_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            StepTriple.model_validate(
+                {
+                    "input_type": "text",
+                    "output_type": "text",
+                    "output_mode": "http_post",
                 }
             )
 
@@ -591,21 +628,6 @@ def test_fcm_version_has_one_home() -> None:
 
     assert planning_state_module.FCM_VERSION is CANONICAL
     assert PlanningState.empty().fcm_version == CANONICAL
-
-
-def test_step_output_mode_literal_matches_the_authoring_enum() -> None:
-    """One vocabulary home.
-
-    The Literal used to admit http_post, which the server injects and no writer
-    here can produce; a hand-edited value degraded silently to pass-through.
-    """
-    from typing import get_args
-
-    from eneo.flows.ai_builder.planning_state import StepOutputMode
-    from eneo.flows.enums import AIBuilderOutputMode
-
-    assert set(get_args(StepOutputMode)) == {mode.value for mode in AIBuilderOutputMode}
-    assert "http_post" not in get_args(StepOutputMode)
 
 
 def test_payload_cap_admits_a_state_within_the_limit() -> None:

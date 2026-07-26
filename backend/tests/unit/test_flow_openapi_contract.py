@@ -3053,6 +3053,38 @@ def test_openapi_flow_step_create_enum_values_match_contract(
         assert not missing, f"{field} missing enum values: {sorted(missing)}"
 
 
+def test_openapi_flow_authoring_components_use_flow_owned_names(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    expected_components = {
+        "FlowAuthoringInputSource",
+        "FlowAuthoringInputType",
+        "FlowAuthoringOutputMode",
+    }
+    legacy_components = {
+        "AIBuilderInputSource",
+        "AIBuilderInputType",
+        "AIBuilderOutputMode",
+    }
+
+    assert expected_components <= set(schemas)
+    assert legacy_components.isdisjoint(schemas)
+
+    step_spec_properties = schemas["StepSpec"]["properties"]
+    assert step_spec_properties["input_source"] == {
+        "$ref": "#/components/schemas/FlowAuthoringInputSource"
+    }
+    assert step_spec_properties["input_type"] == {
+        "$ref": "#/components/schemas/FlowAuthoringInputType",
+        "default": "text",
+    }
+    assert step_spec_properties["output_mode"] == {
+        "$ref": "#/components/schemas/FlowAuthoringOutputMode",
+        "default": "pass_through",
+    }
+
+
 def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(
     openapi_spec: dict,
 ) -> None:

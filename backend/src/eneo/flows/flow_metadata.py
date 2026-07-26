@@ -143,6 +143,17 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
             index=index,
             field_name=field_name,
         )
+    if is_step_alias_variable(field_name):
+        raise form_field_name_error(
+            message=(
+                f"Form field {index + 1} is named '{field_name}'. Names like step_1 "
+                "are reserved for Flow step aliases. Use a descriptive field name "
+                "instead."
+            ),
+            code="flow_form_field_name_step_alias",
+            index=index,
+            field_name=field_name,
+        )
 
 
 def parse_flow_form_schema(
@@ -533,17 +544,6 @@ def _parse_field_name(
                 field_name=stripped_field_name,
             )
         validate_form_field_runtime_name(index, stripped_field_name)
-        if is_step_alias_variable(normalized_name):
-            raise form_field_name_error(
-                message=(
-                    f"Form field {index + 1} is named '{stripped_field_name}'. Names like "
-                    "step_1 are reserved for flow steps. Use a descriptive field name "
-                    "such as 'ärendenummer' instead."
-                ),
-                code="flow_form_field_name_step_alias",
-                index=index,
-                field_name=stripped_field_name,
-            )
     seen_names.add(normalized_name)
     return stripped_field_name
 

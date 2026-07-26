@@ -176,7 +176,8 @@ def _architecture_block(planning_state: PlanningState) -> str:
     if commit is None:
         return "- No committed architecture is present. Create the safest valid plan."
     tuples = [
-        f"- {triple.input_type} -> {triple.output_type} ({triple.output_mode})"
+        f"- {triple.input_type.value} -> {triple.output_type.value} "
+        f"({triple.output_mode.value})"
         for triple in commit.tuples_chain
     ]
     return "\n".join(

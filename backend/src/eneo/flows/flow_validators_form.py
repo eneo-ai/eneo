@@ -10,7 +10,6 @@ from eneo.flows.domain.flow_step_validation import (
 )
 from eneo.flows.flow_metadata import (
     FlowFormSchemaParseMode,
-    form_field_name_error,
     parse_flow_form_schema,
     validate_form_field_runtime_name,
 )
@@ -50,17 +49,6 @@ def validate_variable_alias_collisions_for_step_graph(
         for index, field in enumerate(parsed_schema.fields):
             normalized = field.name.casefold()
             validate_form_field_runtime_name(index, field.name)
-            if is_step_alias_variable(normalized):
-                raise form_field_name_error(
-                    message=(
-                        f"Form field {index + 1} is named '{field.name}'. Names like "
-                        "step_1 are reserved for flow steps. Use a descriptive field name "
-                        "such as 'ärendenummer' instead."
-                    ),
-                    code="flow_form_field_name_step_alias",
-                    index=index,
-                    field_name=field.name,
-                )
             field_names[normalized] = field.name
 
     for step in steps:
