@@ -1,9 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from eneo.main.models import PaginatedResponse
+from eneo.main.models import NotProvided, PaginatedResponse
 from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
@@ -190,13 +190,9 @@ class SkillBindingReferenceInput(BaseModel):
 
 
 class AssistantSkillBindingInput(SkillBindingReferenceInput):
-    activation_mode: SkillActivationMode | None = None
-
-    @model_validator(mode="after")
-    def reject_explicit_null_mode(self) -> "AssistantSkillBindingInput":
-        if "activation_mode" in self.model_fields_set and self.activation_mode is None:
-            raise ValueError("activation_mode cannot be null")
-        return self
+    activation_mode: SkillActivationMode | NotProvided = Field(
+        default_factory=NotProvided
+    )
 
 
 class SkillBindingSummary(BaseModel):

@@ -17,6 +17,7 @@ from eneo.database.tables.users_table import users_roles_table
 from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
+    SkillActivationMode,
     SkillBindingIntent,
     SkillBindingReference,
     SkillExecutionBlockConflictError,
@@ -561,6 +562,136 @@ async def test_blocked_skill_rejects_new_and_changed_bindings_but_retains_exact_
             ],
         )
         assert updated.bindings[1].skill_revision_id == revision_two.id
+
+
+@pytest.mark.parametrize(
+    ("initial_mode", "requested_mode"),
+    [
+        (SkillActivationMode.ALWAYS, SkillActivationMode.ON_DEMAND),
+        (SkillActivationMode.ON_DEMAND, SkillActivationMode.ALWAYS),
+    ],
+)
+async def test_blocked_skill_rejects_retained_assistant_mode_change_until_unblocked(
+    initial_mode: SkillActivationMode,
+    requested_mode: SkillActivationMode,
+    db_container,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        organization = await _organization_space(
+            session,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert organization is not None
+        model = await completion_model_factory(
+            session,
+            f"blocked-mode-change-{initial_mode.value}",
+        )
+        target_space = await space_factory(
+            session,
+            f"Blocked {initial_mode.value} mode target",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=target_space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            f"Blocked {initial_mode.value} mode Assistant",
+            model.id,
+            space_id=target_space.id,
+        )
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug=f"blocked-mode-{initial_mode.value}-{uuid4().hex[:8]}",
+            display_name="Blocked mode guidance",
+            description="Approved guidance with a retained binding",
+            instructions="Use the approved guidance.",
+            content_digest="9" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=skill.current_revision.id,
+        )
+        reference = SkillBindingReference(
+            skill_id=skill.id,
+            skill_revision_id=skill.current_revision.id,
+        )
+        service = container.skill_service()
+        await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=reference,
+                    activation_mode=initial_mode,
+                )
+            ],
+        )
+        blocked = await repo.block_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            blocked_by_user_id=admin_user.id,
+            reason="Confirmed mode-change incident",
+        )
+        assert blocked is not None
+
+        unchanged = await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=reference,
+                    activation_mode=initial_mode,
+                )
+            ],
+        )
+        assert unchanged.bindings[0].activation_mode is initial_mode
+
+        with pytest.raises(BadRequestException, match="Blocked organisation Skills"):
+            await service.replace_assistant_bindings(
+                space_id=target_space.id,
+                assistant_id=assistant.id,
+                intents=[
+                    SkillBindingIntent(
+                        reference=reference,
+                        activation_mode=requested_mode,
+                    )
+                ],
+            )
+        persisted = await repo.list_assistant_bindings(assistant_id=assistant.id)
+        assert persisted[0].activation_mode is initial_mode
+
+        released = await repo.unblock_organization_skill(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_block_id=blocked.block.id,
+            unblocked_by_user_id=admin_user.id,
+            reason="Mode change reviewed and approved",
+        )
+        assert released is not None
+        changed = await service.replace_assistant_bindings(
+            space_id=target_space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=reference,
+                    activation_mode=requested_mode,
+                )
+            ],
+        )
+        assert changed.bindings[0].activation_mode is requested_mode
 
 
 async def test_blocked_app_run_hides_incident_reason_from_non_admin_runner(

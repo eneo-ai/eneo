@@ -1,3 +1,4 @@
+from eneo.main.models import is_provided
 from eneo.skills.domain.skill import (
     AssistantSkillConfigurationProjection,
     OrganizationSkillProjection,
@@ -65,7 +66,7 @@ def assistant_skill_binding_intents_from_input(
             ),
             activation_mode=(
                 binding.activation_mode
-                if "activation_mode" in binding.model_fields_set
+                if is_provided(binding.activation_mode)
                 else None
             ),
         )

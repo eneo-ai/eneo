@@ -9,7 +9,12 @@ from eneo.database.tables.skill_table import AssistantSkillBindings
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.database.tables.users_table import users_roles_table
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
+from eneo.skills.domain.skill import (
+    SkillActivationMode,
+    SkillBindingIntent,
+    SkillBindingReference,
+    SkillRuntimePolicy,
+)
 
 
 @pytest.fixture
@@ -150,6 +155,121 @@ async def test_assistant_mode_rejection_rolls_back_parent_and_bindings(
 
     assert response.status_code == 400, response.text
 
+    persisted_name, persisted_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert persisted_name == original_name
+    assert persisted_bindings == original_bindings
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_on_demand_revision_upgrade_rejection_rolls_back_parent_and_binding(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            "gpt-4o",
+            max_input_tokens=2_000,
+        )
+        model.supports_tool_calling = True
+        space = await space_factory(
+            session,
+            "Assistant Skill revision fit contract",
+            [model.id],
+        )
+        session.add(
+            SpacesUsers(
+                space_id=space.id,
+                user_id=admin_user.id,
+                role="admin",
+            )
+        )
+        assistant = await assistant_factory(
+            session,
+            "Original revision-fit Assistant",
+            model.id,
+            space_id=space.id,
+        )
+        repo = container.skill_repo()
+        await repo.update_runtime_policy(
+            tenant_id=admin_user.tenant_id,
+            policy=SkillRuntimePolicy(
+                selective_activation_enabled=True,
+                max_attached_skills=100,
+                context_share_percent=10,
+                max_activations_per_turn=10,
+            ),
+        )
+        skill = await repo.create(
+            space_id=space.id,
+            slug=f"revision-fit-{uuid4().hex[:8]}",
+            display_name="Revision fit Skill",
+            description="Use for revision-fit questions",
+            instructions="The initial body fits.",
+            content_digest="c" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        original_revision_id = skill.current_revision.id
+        await container.skill_service().replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=assistant.id,
+            intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=original_revision_id,
+                    ),
+                    activation_mode=SkillActivationMode.ON_DEMAND,
+                )
+            ],
+        )
+        revision_change = await repo.create_revision(
+            skill_id=skill.id,
+            display_name="Revision fit Skill",
+            description="Use for revision-fit questions",
+            instructions="oversized " * 20_000,
+            content_digest="d" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        assert revision_change is not None
+        oversized_revision_id = revision_change.revision.id
+        assistant_id = assistant.id
+        skill_id = skill.id
+
+    original_name, original_bindings = await _persisted_assistant_state(
+        db_container,
+        assistant_id=assistant_id,
+    )
+    assert original_name == "Original revision-fit Assistant"
+    assert len(original_bindings) == 1
+    assert original_bindings[0].skill_revision_id == original_revision_id
+    assert original_bindings[0].activation_mode == SkillActivationMode.ON_DEMAND.value
+
+    response = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "name": "Rejected revision-fit Assistant",
+            "skill_bindings": [
+                {
+                    "skill_id": str(skill_id),
+                    "skill_revision_id": str(oversized_revision_id),
+                }
+            ],
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
     persisted_name, persisted_bindings = await _persisted_assistant_state(
         db_container,
         assistant_id=assistant_id,

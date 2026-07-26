@@ -657,7 +657,69 @@ async def test_explicit_on_demand_change_rejects_runtime_fallbacks(
         await service._validate_attachments_fit(
             assistant,
             space=space,
-            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
+            on_demand_skill_ids_requiring_validation=frozenset({binding.skill_id}),
+        )
+
+    service._assert_persistent_baseline_fits.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("candidate_measurement", "message"),
+    [
+        (
+            SimpleNamespace(
+                tokens=1_001,
+                limit=1_000,
+                source=TokenCountSource.LITELLM,
+            ),
+            "An on-demand Skill exceeds the configured context allowance",
+        ),
+        (
+            SimpleNamespace(
+                tokens=10,
+                limit=1_000,
+                source=TokenCountSource.FALLBACK_ESTIMATE,
+            ),
+            "The selected completion model cannot measure an on-demand Skill exactly",
+        ),
+    ],
+    ids=("context-limit", "measurement-unavailable"),
+)
+async def test_explicit_on_demand_change_rejects_unloadable_candidate(
+    candidate_measurement,
+    message,
+    monkeypatch,
+):
+    initial_measurement = SimpleNamespace(
+        tokens=10,
+        limit=1_000,
+        source=TokenCountSource.LITELLM,
+    )
+    measurements = iter((initial_measurement, candidate_measurement))
+    monkeypatch.setattr(
+        "eneo.completion_models.domain.skill_activation.measure_skill_context",
+        lambda **_: next(measurements),
+    )
+    binding = _resolved_skill(
+        name="On demand",
+        position=0,
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    service = _service()
+    service._resolve_effective_config = AsyncMock(return_value=None)
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(binding,), blocked=())
+    )
+    service._assert_persistent_baseline_fits = AsyncMock()
+
+    with pytest.raises(BadRequestException, match=message):
+        await service._validate_attachments_fit(
+            assistant,
+            space=space,
+            on_demand_skill_ids_requiring_validation=frozenset({binding.skill_id}),
         )
 
     service._assert_persistent_baseline_fits.assert_not_awaited()
@@ -707,7 +769,7 @@ async def test_existing_on_demand_binding_remains_saveable_during_policy_drift(
     await service._validate_attachments_fit(
         assistant,
         space=space,
-        explicit_on_demand_skill_ids=frozenset(),
+        on_demand_skill_ids_requiring_validation=frozenset(),
     )
 
     service._assert_persistent_baseline_fits.assert_awaited_once()
@@ -737,34 +799,7 @@ async def test_explicit_on_demand_change_requires_an_effective_model():
         await service._validate_attachments_fit(
             assistant,
             space=space,
-            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
-        )
-
-
-@pytest.mark.asyncio
-async def test_explicit_on_demand_change_rejects_an_execution_blocked_skill():
-    binding = _resolved_skill(
-        name="Blocked",
-        position=0,
-        activation_mode=SkillActivationMode.ON_DEMAND,
-    )
-    assistant = _assistant_with_runtime_model()
-    space = MagicMock()
-    space.is_personal.return_value = False
-    service = _service()
-    service._resolve_effective_config = AsyncMock(return_value=None)
-    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
-        SkillRuntimeResolution(eligible=(), blocked=(binding,))
-    )
-
-    with pytest.raises(
-        BadRequestException,
-        match="Blocked organisation Skills cannot receive new or changed bindings",
-    ):
-        await service._validate_attachments_fit(
-            assistant,
-            space=space,
-            explicit_on_demand_skill_ids=frozenset({binding.skill_id}),
+            on_demand_skill_ids_requiring_validation=frozenset({binding.skill_id}),
         )
 
 

@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fastapi import Response
+from fastapi import FastAPI, Response
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.main.exceptions import NotFoundException
+from eneo.main.models import NotProvided
 from eneo.skills.application.skill_service import SkillService
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
@@ -31,6 +33,7 @@ from eneo.skills.domain.skill import (
 from eneo.skills.presentation import skill_models, skill_router
 from eneo.skills.presentation.skill_assembler import (
     SkillAssembler,
+    assistant_skill_binding_intents_from_input,
     skill_binding_audit_entries,
     skill_binding_references_from_input,
 )
@@ -616,8 +619,11 @@ def test_assistant_binding_input_distinguishes_omitted_and_explicit_modes():
         {**identity, "activation_mode": "on_demand"}
     )
 
-    assert omitted.activation_mode is None
+    assert isinstance(omitted.activation_mode, NotProvided)
     assert "activation_mode" not in omitted.model_fields_set
+    assert (
+        assistant_skill_binding_intents_from_input([omitted])[0].activation_mode is None
+    )
     assert explicit_always.activation_mode is SkillActivationMode.ALWAYS
     assert "activation_mode" in explicit_always.model_fields_set
     assert explicit_on_demand.activation_mode is SkillActivationMode.ON_DEMAND
@@ -634,7 +640,51 @@ def test_assistant_binding_input_rejects_explicit_null_mode():
             }
         )
 
-    assert exc_info.value.errors()[0]["loc"] == ()
+    assert all(
+        error["loc"] and error["loc"][0] == "activation_mode"
+        for error in exc_info.value.errors()
+    )
+
+
+def _assistant_binding_contract_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/binding")
+    def update_binding(
+        binding: skill_models.AssistantSkillBindingInput,
+    ) -> dict[str, bool]:
+        return {"accepted": True}
+
+    return app
+
+
+def test_assistant_binding_input_openapi_is_optional_and_non_nullable():
+    schema = _assistant_binding_contract_app().openapi()["components"]["schemas"][
+        "AssistantSkillBindingInput"
+    ]
+    activation_mode = schema["properties"]["activation_mode"]
+
+    assert "activation_mode" not in schema.get("required", [])
+    assert activation_mode["$ref"] == "#/components/schemas/SkillActivationMode"
+    assert "anyOf" not in activation_mode
+    assert "default" not in activation_mode
+
+
+def test_assistant_binding_input_http_rejects_null_at_field():
+    response = TestClient(_assistant_binding_contract_app()).post(
+        "/binding",
+        json={
+            "skill_id": str(uuid4()),
+            "skill_revision_id": str(uuid4()),
+            "activation_mode": None,
+        },
+    )
+
+    assert response.status_code == 422
+    assert all(
+        error["loc"][:2] == ["body", "activation_mode"]
+        for error in response.json()["detail"]
+    )
 
 
 def test_shared_binding_input_rejects_assistant_activation_mode():

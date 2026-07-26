@@ -625,10 +625,10 @@ async def test_same_space_skill_can_be_reused_by_multiple_parents():
     )
 
     assert first == AssistantSkillBindingReplacement(
-        bindings=(binding,), changed_to_on_demand_skill_ids=frozenset()
+        bindings=(binding,), on_demand_skill_ids_requiring_validation=frozenset()
     )
     assert second == AssistantSkillBindingReplacement(
-        bindings=(binding,), changed_to_on_demand_skill_ids=frozenset()
+        bindings=(binding,), on_demand_skill_ids_requiring_validation=frozenset()
     )
     assert repo.replace_assistant_bindings.await_count == 2
 
@@ -763,6 +763,76 @@ async def test_blocked_organization_skill_cannot_change_revision(owner: str):
                 organization_space_id=space.id,
                 references=[_binding_reference(changed)],
             )
+
+
+@pytest.mark.parametrize(
+    ("existing_mode", "requested_mode"),
+    [
+        (SkillActivationMode.ALWAYS, SkillActivationMode.ON_DEMAND),
+        (SkillActivationMode.ON_DEMAND, SkillActivationMode.ALWAYS),
+    ],
+)
+async def test_blocked_retained_assistant_binding_cannot_change_activation_mode(
+    existing_mode: SkillActivationMode,
+    requested_mode: SkillActivationMode,
+):
+    space = _space()
+    blocked = replace(
+        _binding(),
+        source=SkillBindingSource.ORGANIZATION,
+        activation_mode=existing_mode,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [blocked]
+    repo.resolve_bound_references_for_binding_update.return_value = [blocked]
+    repo.list_active_execution_blocks.return_value = {blocked.skill_id: MagicMock()}
+    service = _service(space=space, repo=repo)
+
+    with pytest.raises(
+        BadRequestException,
+        match="Blocked organisation Skills cannot receive new or changed bindings",
+    ):
+        await service.replace_assistant_bindings(
+            space_id=space.id,
+            assistant_id=space.assistant.id,
+            intents=[_binding_intent(blocked, activation_mode=requested_mode)],
+        )
+
+    repo.replace_assistant_bindings.assert_not_awaited()
+
+
+@pytest.mark.parametrize("existing_mode", list(SkillActivationMode))
+@pytest.mark.parametrize("explicit_mode", [False, True])
+async def test_blocked_retained_assistant_binding_accepts_unchanged_mode(
+    existing_mode: SkillActivationMode,
+    explicit_mode: bool,
+):
+    space = _space()
+    blocked = replace(
+        _binding(),
+        source=SkillBindingSource.ORGANIZATION,
+        activation_mode=existing_mode,
+    )
+    repo = AsyncMock()
+    repo.list_assistant_bindings.return_value = [blocked]
+    repo.resolve_bound_references_for_binding_update.return_value = [blocked]
+    repo.list_active_execution_blocks.return_value = {blocked.skill_id: MagicMock()}
+    service = _service(space=space, repo=repo)
+
+    replacement = await service.replace_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+        intents=[
+            _binding_intent(
+                blocked,
+                activation_mode=existing_mode if explicit_mode else None,
+            )
+        ],
+    )
+
+    assert replacement.bindings[0].activation_mode is existing_mode
+    persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
+    assert persisted[0].activation_mode is existing_mode
 
 
 @pytest.mark.parametrize("owner", ["assistant", "app", "governance"])
@@ -903,7 +973,7 @@ async def test_existing_unpublished_catalogue_binding_can_remain_on_resource():
     )
 
     assert result.bindings == (existing,)
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
     repo.resolve_bound_references_for_binding_update.assert_awaited_once_with(
         tenant_id=space.tenant_id,
         parent_space_id=space.id,
@@ -984,7 +1054,7 @@ async def test_existing_inactive_exact_revision_binding_can_be_reordered():
     )
 
     assert result.bindings == (inactive,)
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
     repo.replace_assistant_bindings.assert_awaited_once()
 
 
@@ -1408,7 +1478,7 @@ async def test_retained_assistant_binding_keeps_activation_mode_on_resave():
     )
 
     assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
     persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
     assert [binding.activation_mode for binding in persisted] == [
         SkillActivationMode.ON_DEMAND
@@ -1458,7 +1528,7 @@ async def test_new_binding_defaults_to_always_activation_mode():
     assert [binding.activation_mode for binding in result.bindings] == [
         SkillActivationMode.ALWAYS
     ]
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
 
 
 async def test_explicit_assistant_mode_only_change_is_persisted_and_reported():
@@ -1480,7 +1550,9 @@ async def test_explicit_assistant_mode_only_change_is_persisted_and_reported():
         ],
     )
 
-    assert result.changed_to_on_demand_skill_ids == frozenset({existing.skill_id})
+    assert result.on_demand_skill_ids_requiring_validation == frozenset(
+        {existing.skill_id}
+    )
     assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
     persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
     assert persisted[0].activation_mode is SkillActivationMode.ON_DEMAND
@@ -1522,7 +1594,9 @@ async def test_assistant_reorder_preserves_omitted_mode_and_applies_explicit_mod
         SkillActivationMode.ON_DEMAND,
         SkillActivationMode.ON_DEMAND,
     ]
-    assert result.changed_to_on_demand_skill_ids == frozenset({second.skill_id})
+    assert result.on_demand_skill_ids_requiring_validation == frozenset(
+        {second.skill_id}
+    )
 
 
 async def test_assistant_revision_upgrade_keeps_activation_mode():
@@ -1546,7 +1620,9 @@ async def test_assistant_revision_upgrade_keeps_activation_mode():
     assert [binding.activation_mode for binding in result.bindings] == [
         SkillActivationMode.ON_DEMAND
     ]
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset(
+        {existing.skill_id}
+    )
     persisted = repo.replace_assistant_bindings.await_args.kwargs["bindings"]
     assert [binding.activation_mode for binding in persisted] == [
         SkillActivationMode.ON_DEMAND
@@ -1578,7 +1654,7 @@ async def test_assistant_revision_upgrade_applies_explicit_mode_change():
 
     assert result.bindings[0].skill_revision_id == upgraded.skill_revision_id
     assert result.bindings[0].activation_mode is SkillActivationMode.ALWAYS
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
 
 
 async def test_echoing_existing_on_demand_mode_is_not_reported_as_a_change():
@@ -1601,7 +1677,7 @@ async def test_echoing_existing_on_demand_mode_is_not_reported_as_a_change():
     )
 
     assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
-    assert result.changed_to_on_demand_skill_ids == frozenset()
+    assert result.on_demand_skill_ids_requiring_validation == frozenset()
 
 
 async def test_new_on_demand_binding_is_reported_as_a_change():
@@ -1624,7 +1700,9 @@ async def test_new_on_demand_binding_is_reported_as_a_change():
     )
 
     assert result.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
-    assert result.changed_to_on_demand_skill_ids == frozenset({added.skill_id})
+    assert result.on_demand_skill_ids_requiring_validation == frozenset(
+        {added.skill_id}
+    )
 
 
 async def test_governance_revision_upgrade_keeps_activation_mode():

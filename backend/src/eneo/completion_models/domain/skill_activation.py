@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, cast
+from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
@@ -84,6 +85,16 @@ class SkillActivationSnapshot:
 class SkillActivationRejectionSnapshot:
     activation_key: str
     reason: SkillActivationRejectionReason
+
+
+@dataclass(frozen=True)
+class SkillActivationCandidateAssessment:
+    """Non-mutating fit result for one on-demand candidate."""
+
+    skill_id: UUID
+    activation_key: str
+    rejection_reason: SkillActivationRejectionReason | None
+    measurement: SkillContextMeasurement
 
 
 @dataclass(frozen=True)
@@ -315,6 +326,51 @@ class SkillActivationRuntime:
             ),
         )
 
+    def assess_on_demand_candidates(
+        self,
+        skill_ids: frozenset[UUID],
+    ) -> tuple[SkillActivationCandidateAssessment, ...]:
+        """Measure requested candidates against the current selective state.
+
+        The method reuses the exact runtime measurement path without mutating
+        activation state. Callers must handle plan-level fallback before asking
+        for candidate results; an ALWAYS_ONLY runtime has no activatable
+        candidates to assess. Unknown or blocked Skill ids are omitted because
+        binding resolution owns membership and governance validation.
+        """
+        if self._effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
+            return ()
+
+        assessments: list[SkillActivationCandidateAssessment] = []
+        for skill in self._skills:
+            if skill.initially_active or skill.binding.skill_id not in skill_ids:
+                continue
+            _, assessment = self._assess_candidate(skill)
+            assessments.append(assessment)
+        return tuple(assessments)
+
+    def _assess_candidate(
+        self,
+        skill: FrozenSkillInstruction,
+    ) -> tuple[str, SkillActivationCandidateAssessment]:
+        prompt, measurement = self._measure(self._active_skills(skill.activation_key))
+        rejection_reason: SkillActivationRejectionReason | None = None
+        if measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
+            rejection_reason = (
+                SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE
+            )
+        elif measurement.tokens > measurement.limit:
+            rejection_reason = SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED
+        return (
+            prompt,
+            SkillActivationCandidateAssessment(
+                skill_id=skill.binding.skill_id,
+                activation_key=skill.activation_key,
+                rejection_reason=rejection_reason,
+                measurement=measurement,
+            ),
+        )
+
     @staticmethod
     def _provider_unavailable() -> dict[str, bool]:
         return {"activated": False, "unavailable": True}
@@ -472,27 +528,11 @@ class SkillActivationRuntime:
                 )
                 continue
 
-            candidate_prompt, candidate_measurement = self._measure(
-                self._active_skills(key)
-            )
-            if candidate_measurement.source is TokenCountSource.FALLBACK_ESTIMATE:
+            candidate_prompt, assessment = self._assess_candidate(candidate)
+            if assessment.rejection_reason is not None:
                 self._reject(
                     activation_key=key,
-                    reason=(
-                        SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE
-                    ),
-                )
-                decisions.append(
-                    SkillActivationDecision(
-                        call_id=request.call_id,
-                        provider_payload=self._provider_unavailable(),
-                    )
-                )
-                continue
-            if candidate_measurement.tokens > candidate_measurement.limit:
-                self._reject(
-                    activation_key=key,
-                    reason=SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED,
+                    reason=assessment.rejection_reason,
                 )
                 decisions.append(
                     SkillActivationDecision(
@@ -505,7 +545,7 @@ class SkillActivationRuntime:
             self._active_keys.add(key)
             self._accepted.append(key)
             self.prompt = candidate_prompt
-            self._measurement = candidate_measurement
+            self._measurement = assessment.measurement
             accepted_any = True
             decisions.append(
                 SkillActivationDecision(

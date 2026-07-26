@@ -66,6 +66,7 @@ from eneo.skills.domain.skill import (
     AssistantSkillRuntimeProjection,
     SkillActivationEvidenceV1,
     SkillActivationFallbackReason,
+    SkillActivationRejectionReason,
     SkillBindingIntent,
     SkillComposition,
     SkillExecutionReference,
@@ -88,11 +89,7 @@ logger = get_logger(__name__)
 _ON_DEMAND_REJECTION_DEFAULT = (
     "On-demand Skills cannot be enabled for this configuration"
 )
-_ON_DEMAND_REJECTION_MESSAGES: dict[
-    SkillActivationFallbackReason | None,
-    str,
-] = {
-    None: _ON_DEMAND_REJECTION_DEFAULT,
+_ON_DEMAND_REJECTION_MESSAGES: dict[SkillActivationFallbackReason, str] = {
     SkillActivationFallbackReason.SELECTIVE_ACTIVATION_DISABLED: (
         "On-demand Skills are disabled by the organisation runtime policy"
     ),
@@ -104,6 +101,17 @@ _ON_DEMAND_REJECTION_MESSAGES: dict[
     ),
     SkillActivationFallbackReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
         "The selected completion model cannot measure the Skill catalogue exactly"
+    ),
+}
+_ON_DEMAND_CANDIDATE_REJECTION_MESSAGES: dict[
+    SkillActivationRejectionReason,
+    str,
+] = {
+    SkillActivationRejectionReason.CONTEXT_LIMIT_EXCEEDED: (
+        "An on-demand Skill exceeds the configured context allowance"
+    ),
+    SkillActivationRejectionReason.TOKEN_MEASUREMENT_UNAVAILABLE: (
+        "The selected completion model cannot measure an on-demand Skill exactly"
     ),
 }
 
@@ -547,7 +555,7 @@ class AssistantService:
         assistant: Assistant,
         *,
         space: "Space",
-        explicit_on_demand_skill_ids: frozenset[UUID] = frozenset(),
+        on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -575,17 +583,9 @@ class AssistantService:
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
         )
-        available_skill_ids = {
-            binding.binding.skill_id for binding in skill_plan.available
-        }
-        if not explicit_on_demand_skill_ids <= available_skill_ids:
-            raise BadRequestException(
-                "Blocked organisation Skills cannot receive new or changed bindings"
-            )
-
         model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
-            if explicit_on_demand_skill_ids:
+            if on_demand_skill_ids_requiring_validation:
                 raise BadRequestException(
                     "Choose a completion model before enabling on-demand Skills"
                 )
@@ -598,14 +598,37 @@ class AssistantService:
         )
         snapshot = runtime.snapshot()
         if (
-            explicit_on_demand_skill_ids
+            on_demand_skill_ids_requiring_validation
             and snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE
         ):
-            message = _ON_DEMAND_REJECTION_MESSAGES.get(
-                snapshot.fallback_reason,
-                _ON_DEMAND_REJECTION_DEFAULT,
+            message = (
+                _ON_DEMAND_REJECTION_MESSAGES.get(
+                    snapshot.fallback_reason,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+                if snapshot.fallback_reason is not None
+                else _ON_DEMAND_REJECTION_DEFAULT
             )
             raise BadRequestException(message)
+
+        assessments = runtime.assess_on_demand_candidates(
+            on_demand_skill_ids_requiring_validation
+        )
+        rejection = next(
+            (
+                assessment.rejection_reason
+                for assessment in assessments
+                if assessment.rejection_reason is not None
+            ),
+            None,
+        )
+        if rejection is not None:
+            raise BadRequestException(
+                _ON_DEMAND_CANDIDATE_REJECTION_MESSAGES.get(
+                    rejection,
+                    _ON_DEMAND_REJECTION_DEFAULT,
+                )
+            )
 
         await self._assert_persistent_baseline_fits(
             assistant=assistant,
@@ -1049,14 +1072,16 @@ class AssistantService:
             knowledge_changing=knowledge_changing,
         )
 
-        changed_to_on_demand_skill_ids: frozenset[UUID] = frozenset()
+        on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset()
         if skill_binding_intents is not None:
             replacement = await self.skill_service.replace_assistant_bindings(
                 space_id=assistant.space_id,
                 assistant_id=assistant_id,
                 intents=skill_binding_intents,
             )
-            changed_to_on_demand_skill_ids = replacement.changed_to_on_demand_skill_ids
+            on_demand_skill_ids_requiring_validation = (
+                replacement.on_demand_skill_ids_requiring_validation
+            )
 
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
@@ -1072,7 +1097,9 @@ class AssistantService:
             await self._validate_attachments_fit(
                 assistant,
                 space=space,
-                explicit_on_demand_skill_ids=changed_to_on_demand_skill_ids,
+                on_demand_skill_ids_requiring_validation=(
+                    on_demand_skill_ids_requiring_validation
+                ),
             )
 
         refreshed_space = await self.space_repo.update(space)

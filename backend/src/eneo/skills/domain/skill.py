@@ -648,7 +648,7 @@ class SkillBindingIntent:
 @dataclass(frozen=True)
 class AssistantSkillBindingReplacement:
     bindings: tuple[ResolvedSkillBinding, ...]
-    changed_to_on_demand_skill_ids: frozenset[UUID]
+    on_demand_skill_ids_requiring_validation: frozenset[UUID]
 
 
 @dataclass(frozen=True)

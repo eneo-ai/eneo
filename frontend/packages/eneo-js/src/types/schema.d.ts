@@ -9251,7 +9251,8 @@ export interface components {
        * Format: uuid
        */
       skill_revision_id: string;
-      activation_mode?: components["schemas"]["SkillActivationMode"] | null;
+      /** Activation Mode */
+      activation_mode?: components["schemas"]["SkillActivationMode"];
     };
     /** AssistantSkillBindingSummary */
     AssistantSkillBindingSummary: {

@@ -559,9 +559,20 @@ class SkillService:
         )
         # Resolution holds the Skill rows FOR SHARE, so this read observes a
         # concurrent execution block that acquired FOR UPDATE first.
+        existing_by_reference = {
+            self._binding_reference(binding): binding for binding in existing
+        }
+        requested_modes = requested_modes or {}
+        mode_changed_retained_references = [
+            reference
+            for reference in retained_by_reference
+            if reference.skill_id in requested_modes
+            and requested_modes[reference.skill_id]
+            is not existing_by_reference[reference].activation_mode
+        ]
         await self._reject_blocked_references(
             tenant_id=tenant_id,
-            references=new_references,
+            references=[*new_references, *mode_changed_retained_references],
         )
         return self._order_resolved_bindings(
             references=references,
@@ -690,14 +701,7 @@ class SkillService:
             for intent in intents
             if intent.activation_mode is not None
         }
-        explicitly_requested_on_demand_skill_ids = {
-            intent.reference.skill_id
-            for intent in intents
-            if intent.activation_mode is SkillActivationMode.ON_DEMAND
-        }
-        existing_modes = {
-            binding.skill_id: binding.activation_mode for binding in existing
-        }
+        existing_by_skill_id = {binding.skill_id: binding for binding in existing}
         tenant_id = self._tenant_id(space)
         resolved = await self._resolve_resource_references(
             space_id=space_id,
@@ -707,13 +711,15 @@ class SkillService:
             existing=existing,
             requested_modes=requested_modes,
         )
-        changed_to_on_demand_skill_ids = frozenset(
+        on_demand_skill_ids_requiring_validation = frozenset(
             binding.skill_id
             for binding in resolved
-            if binding.skill_id in explicitly_requested_on_demand_skill_ids
-            and binding.activation_mode is SkillActivationMode.ON_DEMAND
-            and existing_modes.get(binding.skill_id)
-            is not SkillActivationMode.ON_DEMAND
+            if binding.activation_mode is SkillActivationMode.ON_DEMAND
+            and (
+                (stored := existing_by_skill_id.get(binding.skill_id)) is None
+                or stored.skill_revision_id != binding.skill_revision_id
+                or stored.activation_mode is not SkillActivationMode.ON_DEMAND
+            )
         )
         await self.repo.replace_assistant_bindings(
             assistant_id=assistant_id,
@@ -723,7 +729,9 @@ class SkillService:
         )
         return AssistantSkillBindingReplacement(
             bindings=tuple(resolved),
-            changed_to_on_demand_skill_ids=changed_to_on_demand_skill_ids,
+            on_demand_skill_ids_requiring_validation=(
+                on_demand_skill_ids_requiring_validation
+            ),
         )
 
     async def list_app_bindings(

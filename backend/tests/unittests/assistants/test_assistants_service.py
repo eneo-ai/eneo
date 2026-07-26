@@ -111,7 +111,7 @@ def setup_fixture():
     service.skill_service.replace_assistant_bindings.return_value = (
         AssistantSkillBindingReplacement(
             bindings=(),
-            changed_to_on_demand_skill_ids=frozenset(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
         )
     )
 
@@ -309,7 +309,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         events.append("binding_replace")
         return AssistantSkillBindingReplacement(
             bindings=(),
-            changed_to_on_demand_skill_ids=frozenset(),
+            on_demand_skill_ids_requiring_validation=frozenset(),
         )
 
     async def validate_fit(*_, **__):
