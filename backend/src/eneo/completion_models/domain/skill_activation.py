@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, cast
 from uuid import UUID
@@ -362,18 +362,23 @@ class SkillActivationRuntime:
         Save-time preflight uses the same transcript mutation and token
         measurement as a real activation round. Each probe runs on a fork so
         neither the frozen turn state nor the caller's messages are changed.
+        Each selected on-demand candidate is measured exactly once.
         """
-        assessments = self.assess_on_demand_candidates(skill_ids)
+        if self._effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
+            return ()
+
         provider_assessments: list[SkillActivationCandidateAssessment] = []
-        for assessment in assessments:
+        for skill in self._skills:
+            if skill.initially_active or skill.binding.skill_id not in skill_ids:
+                continue
             staged = self._fork()
             staged_messages = [message.copy() for message in messages]
             staged.apply_provider_tool_calls(
                 calls=(
                     ProviderToolCall(
-                        call_id=f"preflight-{assessment.activation_key}",
+                        call_id=f"preflight-{skill.activation_key}",
                         name=SKILL_ACTIVATION_TOOL_NAME,
-                        arguments=json.dumps({"skill_key": assessment.activation_key}),
+                        arguments=json.dumps({"skill_key": skill.activation_key}),
                     ),
                 ),
                 messages=cast("list[dict[str, object]]", staged_messages),
@@ -387,14 +392,19 @@ class SkillActivationRuntime:
                 (
                     rejection.reason
                     for rejection in snapshot.rejected
-                    if rejection.activation_key == assessment.activation_key
+                    if rejection.activation_key == skill.activation_key
                 ),
                 None,
             )
             provider_assessments.append(
-                replace(
-                    assessment,
-                    prompt=staged.prompt,
+                SkillActivationCandidateAssessment(
+                    skill_id=skill.binding.skill_id,
+                    display_name=skill.display_name,
+                    activation_key=skill.activation_key,
+                    prompt=_compose_prompt(
+                        base_instructions=self._base_instructions,
+                        skills=self._active_skills(skill.activation_key),
+                    ),
                     rejection_reason=rejection_reason,
                     measurement=snapshot.measurement,
                 )

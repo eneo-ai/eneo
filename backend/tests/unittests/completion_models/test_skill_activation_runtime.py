@@ -18,7 +18,10 @@ from eneo.completion_models.domain.skill_activation import (
     SkillPromptOwnershipError,
     SkillTurnEffectiveMode,
 )
-from eneo.completion_models.domain.skill_context import SkillContextMeasurement
+from eneo.completion_models.domain.skill_context import (
+    SkillContextMeasurement,
+    measure_skill_context,
+)
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
     ResolvedSkillBinding,
@@ -483,13 +486,20 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
     snapshot_before = runtime.snapshot()
     messages_before = [message.copy() for message in messages]
 
-    with patch(
-        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
-        return_value=TokenCount(
-            tokens=provider_tokens,
-            source=TokenCountSource.LITELLM,
-        ),
-    ) as measure:
+    with (
+        patch(
+            "eneo.completion_models.domain.skill_activation.measure_skill_context",
+            wraps=measure_skill_context,
+        ) as measure_share,
+        patch(
+            "eneo.completion_models.domain.skill_activation."
+            "measure_provider_input_tokens",
+            return_value=TokenCount(
+                tokens=provider_tokens,
+                source=TokenCountSource.LITELLM,
+            ),
+        ) as measure,
+    ):
         assessments = runtime.assess_provider_payload_candidates(
             frozenset({candidate.binding.skill_id}),
             messages=messages,
@@ -497,6 +507,7 @@ def test_provider_candidate_assessment_is_exact_and_non_mutating(
         )
 
     assert len(assessments) == 1
+    assert measure_share.call_count == 1
     assert assessments[0].rejection_reason is expected_rejection
     assert measure.call_args.args[1] == provider_tools
     assert runtime.snapshot() == snapshot_before
