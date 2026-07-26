@@ -77,6 +77,8 @@ def _descriptor(content_id: UUID, key_suffix: str) -> ObjectStoreObjects:
     descriptor.content_id = content_id
     descriptor.storage_kind = StorageKind.OBJECT_STORE.value
     descriptor.object_key = f"v1/a2d539affef042aaa7f814376947be2c/{key_suffix}"
+    descriptor.verification_chunk_size_bytes = 1
+    descriptor.verification_chunk_sha256 = sha256(key_suffix.encode()).digest()
     return descriptor
 
 
@@ -88,7 +90,8 @@ def _captured_content(payload: bytes = b"x") -> CapturedContent:
         size_bytes=len(payload),
         declared_media_type="text/plain",
         verified_media_type="text/plain",
-        part_sha256=(digest,) if payload else (),
+        part_sha256=(digest,),
+        part_size_bytes=max(1, len(payload)),
     )
 
 

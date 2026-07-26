@@ -63,8 +63,11 @@ Inline bytes have a documented deployment ceiling and are verified against the
 control row before a full or single-range response. Object-store uploads compute
 the same canonical digest while streaming. S3 ETags, CRCs, and multipart
 composite checksums help with transport, but never replace it. Object-store
-reads verify and spool the full object before serving full or range bytes;
-memory use stays bounded and larger objects spill to temporary disk.
+full reads verify and spool the whole object. Range reads fetch and verify only
+the persisted upload chunks that cover the requested bytes before responding.
+This keeps seeks bounded to the requested interval plus at most two chunk
+edges. A range proves its covering chunks; a full read still checks the
+canonical full-object digest and can detect corruption elsewhere.
 
 Deletion starts with irreversible PostgreSQL intent. Holds and retention block
 hard deletion. A tombstone becomes purgeable only after its database-owned

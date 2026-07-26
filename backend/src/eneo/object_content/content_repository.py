@@ -27,6 +27,8 @@ from eneo.object_content.content import (
     StorageKind,
 )
 
+_SHA256_BYTES = 32
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedContent:
@@ -60,6 +62,8 @@ class ReadableContent:
 class ObjectStoreDescriptor:
     content_id: UUID
     object_key: str
+    verification_chunk_size_bytes: int
+    verification_chunk_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +99,8 @@ class ObjectContentRepository:
             descriptor.content_id = row.id
             descriptor.storage_kind = StorageKind.OBJECT_STORE.value
             descriptor.object_key = object_key
+            descriptor.verification_chunk_size_bytes = content.part_size_bytes
+            descriptor.verification_chunk_sha256 = b"".join(content.part_sha256)
             self._session.add(descriptor)
             await self._session.flush()
         return PreparedContent(
@@ -124,6 +130,8 @@ class ObjectContentRepository:
             descriptor.content_id = row.id
             descriptor.storage_kind = StorageKind.OBJECT_STORE.value
             descriptor.object_key = object_key
+            descriptor.verification_chunk_size_bytes = content.part_size_bytes
+            descriptor.verification_chunk_sha256 = b"".join(content.part_sha256)
             self._session.add(descriptor)
             await self._session.flush()
         else:
@@ -562,6 +570,8 @@ class ObjectContentRepository:
                     ObjectContents,
                     InlineContentPayloads.payload,
                     ObjectStoreObjects.object_key,
+                    ObjectStoreObjects.verification_chunk_size_bytes,
+                    func.octet_length(ObjectStoreObjects.verification_chunk_sha256),
                 )
                 .outerjoin(
                     InlineContentPayloads,
@@ -583,15 +593,30 @@ class ObjectContentRepository:
         ).all()
 
         sources: dict[UUID, ReadableContentSource] = {}
-        for row, inline_payload, object_key in rows:
+        for (
+            row,
+            inline_payload,
+            object_key,
+            verification_chunk_size_bytes,
+            verification_digest_bytes,
+        ) in rows:
             content = self._readable(row)
             if (
                 content.storage_kind is StorageKind.POSTGRES_INLINE
                 and inline_payload is None
             ):
                 raise ObjectContentStateError("Inline content payload is missing")
-            if content.storage_kind is StorageKind.OBJECT_STORE and object_key is None:
-                raise ObjectContentStateError("Object-store descriptor is missing")
+            if content.storage_kind is StorageKind.OBJECT_STORE and (
+                object_key is None
+                or verification_chunk_size_bytes is None
+                or verification_digest_bytes is None
+                or verification_chunk_size_bytes < 1
+                or verification_digest_bytes < _SHA256_BYTES
+                or verification_digest_bytes % _SHA256_BYTES != 0
+            ):
+                raise ObjectContentStateError(
+                    "Object-store verification descriptor is missing or invalid"
+                )
             sources[content.content_id] = ReadableContentSource(
                 content=content,
                 inline_payload=inline_payload,
@@ -599,8 +624,16 @@ class ObjectContentRepository:
                     ObjectStoreDescriptor(
                         content_id=content.content_id,
                         object_key=object_key,
+                        verification_chunk_size_bytes=verification_chunk_size_bytes,
+                        verification_chunk_count=(
+                            verification_digest_bytes // _SHA256_BYTES
+                        ),
                     )
-                    if object_key is not None
+                    if (
+                        object_key is not None
+                        and verification_chunk_size_bytes is not None
+                        and verification_digest_bytes is not None
+                    )
                     else None
                 ),
             )
@@ -609,6 +642,38 @@ class ObjectContentRepository:
         if sources.keys() != requested_ids:
             raise ObjectContentStateError("Object content is not available")
         return sources
+
+    async def get_object_store_verification_chunks(
+        self,
+        *,
+        content_id: UUID,
+        first_chunk_index: int,
+        chunk_count: int,
+    ) -> tuple[bytes, ...]:
+        """Read only the packed digest interval needed for one ranged response."""
+        if first_chunk_index < 0:
+            raise ValueError("first_chunk_index must not be negative")
+        if chunk_count < 1:
+            raise ValueError("chunk_count must be positive")
+
+        packed = await self._session.scalar(
+            select(
+                func.substring(
+                    ObjectStoreObjects.verification_chunk_sha256,
+                    (first_chunk_index * _SHA256_BYTES) + 1,
+                    chunk_count * _SHA256_BYTES,
+                )
+            ).where(ObjectStoreObjects.content_id == content_id)
+        )
+        expected_bytes = chunk_count * _SHA256_BYTES
+        if not isinstance(packed, bytes) or len(packed) != expected_bytes:
+            raise ObjectContentStateError(
+                "Object-store verification chunks are unavailable"
+            )
+        return tuple(
+            packed[offset : offset + _SHA256_BYTES]
+            for offset in range(0, expected_bytes, _SHA256_BYTES)
+        )
 
     async def get_available_by_id(self, content_id: UUID) -> ReadableContent:
         row = (

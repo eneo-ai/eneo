@@ -80,6 +80,8 @@ async def _add_pending_reference(
             content_id=content.id,
             storage_kind=StorageKind.OBJECT_STORE.value,
             object_key=f"visibility-test/{uuid4().hex}",
+            verification_chunk_size_bytes=len(payload),
+            verification_chunk_sha256=sha256(payload).digest(),
         )
     )
     session.add(

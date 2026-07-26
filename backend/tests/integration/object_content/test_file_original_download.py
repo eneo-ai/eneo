@@ -4,12 +4,15 @@ import base64
 import time
 from collections.abc import AsyncGenerator
 from hashlib import sha256
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from botocore.config import Config
+from botocore.session import get_session
 from sqlalchemy import select
 
 from eneo.authentication.signed_urls import (
@@ -36,7 +39,34 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.s3_object_store import S3ObjectStore
 from tests.integration.object_content.conftest import RealObjectStore
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+    from mypy_boto3_s3.type_defs import (
+        GetObjectOutputTypeDef,
+        GetObjectRequestTypeDef,
+    )
+
+
+class _RecordingRangeClient:
+    def __init__(self, delegate: S3Client) -> None:
+        self._delegate = delegate
+        self.requests: list[tuple[str | None, int]] = []
+
+    def get_object(self, **request: object) -> GetObjectOutputTypeDef:
+        result = self._delegate.get_object(**cast("GetObjectRequestTypeDef", request))
+        self.requests.append(
+            (
+                cast(str | None, request.get("Range")),
+                cast(int, result["ContentLength"]),
+            )
+        )
+        return result
+
+    def close(self) -> None:
+        self._delegate.close()
 
 
 async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
@@ -396,12 +426,12 @@ async def test_original_signed_url_enforces_short_lived_expiry(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_original_route_streams_the_same_contract_from_real_object_storage(
+async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
 ) -> None:
-    payload = b"exact remote original"
     settings = real_object_store.settings
+    payload = b"a" * settings.multipart_part_bytes + b"verified-range-tail"
     content_service = ObjectContentService(
         settings,
         object_content_database,
@@ -410,12 +440,13 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
     )
     prepared_id: UUID | None = None
     object_key: str | None = None
+    read_store: S3ObjectStore | None = None
 
     try:
         async with capture_content(
             _bytes_source(payload),
-            declared_media_type="application/pdf",
-            verified_media_type="application/pdf",
+            declared_media_type="audio/mpeg",
+            verified_media_type="audio/mpeg",
             maximum_size_bytes=len(payload),
             spool_memory_bytes=settings.spool_memory_bytes,
             multipart_part_bytes=settings.multipart_part_bytes,
@@ -427,9 +458,9 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
                 tenant_id = (await session.scalars(select(Tenants.id))).one()
                 user_id = (await session.scalars(select(Users.id))).one()
                 owner = Files(
-                    name=f"{uuid4().hex}.pdf",
-                    mimetype="application/pdf",
-                    file_type=FileType.TEXT.value,
+                    name=f"{uuid4().hex}.mp3",
+                    mimetype="audio/mpeg",
+                    file_type=FileType.AUDIO.value,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     parent_file_id=None,
@@ -470,11 +501,43 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
                 assert descriptor is not None
                 object_key = descriptor.object_key
 
-            checked_content_service = MagicMock(wraps=content_service)
+            raw_client = cast(
+                "S3Client",
+                get_session().create_client(
+                    "s3",
+                    endpoint_url=settings.endpoint_url,
+                    region_name=settings.region,
+                    aws_access_key_id=settings.access_key_id.get_secret_value(),
+                    aws_secret_access_key=(
+                        settings.secret_access_key.get_secret_value()
+                    ),
+                    verify=(
+                        str(settings.ca_bundle)
+                        if settings.ca_bundle is not None
+                        else True
+                    ),
+                    config=Config(
+                        signature_version="s3v4",
+                        s3={"addressing_style": settings.addressing_style},
+                    ),
+                ),
+            )
+            recording_client = _RecordingRangeClient(raw_client)
+            read_store = S3ObjectStore(
+                settings,
+                client=cast("S3Client", recording_client),
+            )
+            read_content_service = ObjectContentService(
+                settings,
+                object_content_database,
+                object_store_settings=settings,
+                object_store=read_store,
+            )
+            checked_content_service = MagicMock(wraps=read_content_service)
 
             def open_without_file_transaction(*args, **kwargs):
                 assert not session.in_transaction()
-                return content_service.open_content(*args, **kwargs)
+                return read_content_service.open_content(*args, **kwargs)
 
             checked_content_service.open_content.side_effect = (
                 open_without_file_transaction
@@ -500,7 +563,10 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
             response = await file_router.download_original_file_signed(
                 id=file_id,
                 token=token,
-                range=None,
+                range=(
+                    f"bytes={settings.multipart_part_bytes + 1}-"
+                    f"{settings.multipart_part_bytes + 5}"
+                ),
                 container=Container(),
             )
             body_parts: list[bytes] = []
@@ -510,12 +576,29 @@ async def test_original_route_streams_the_same_contract_from_real_object_storage
             body = b"".join(body_parts)
 
         digest = base64.b64encode(sha256(payload).digest()).decode("ascii")
-        assert response.status_code == 200
-        assert body == payload
-        assert response.headers["content-type"] == "application/pdf"
-        assert response.headers["content-length"] == str(len(payload))
+        assert response.status_code == 206
+        assert (
+            body
+            == payload[
+                settings.multipart_part_bytes + 1 : settings.multipart_part_bytes + 6
+            ]
+        )
+        assert response.headers["content-type"] == "audio/mpeg"
+        assert response.headers["content-length"] == "5"
+        assert response.headers["content-range"] == (
+            f"bytes {settings.multipart_part_bytes + 1}-"
+            f"{settings.multipart_part_bytes + 5}/{len(payload)}"
+        )
         assert response.headers["repr-digest"] == f"sha-256=:{digest}:"
+        assert recording_client.requests == [
+            (
+                f"bytes={settings.multipart_part_bytes}-{len(payload) - 1}",
+                len(payload) - settings.multipart_part_bytes,
+            )
+        ]
     finally:
+        if read_store is not None:
+            await read_store.close()
         if object_key is None and prepared_id is not None:
             async with (
                 object_content_database.session() as session,

@@ -20,6 +20,7 @@ def _captured(payload: bytes) -> CapturedContent:
         declared_media_type="application/octet-stream",
         verified_media_type="application/octet-stream",
         part_sha256=(sha256(payload).digest(),),
+        part_size_bytes=max(1, len(payload)),
     )
 
 

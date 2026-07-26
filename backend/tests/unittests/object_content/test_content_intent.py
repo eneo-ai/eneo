@@ -23,6 +23,7 @@ def _content() -> CapturedContent:
         declared_media_type="text/plain",
         verified_media_type="text/plain",
         part_sha256=(b"b" * 32,),
+        part_size_bytes=7,
     )
 
 

@@ -336,6 +336,11 @@ versioning and Object Lock disabled. Eneo currently deletes one opaque key and
 does not claim to purge retained historical object versions; snapshots and
 paired backups own recovery.
 
+Range reads reuse the verification chunks calculated during the original
+upload. Eneo stores each object's chunk size, so changing multipart tuning later
+does not invalidate older files. Full reads verify the canonical digest for the
+entire object; a range verifies only the chunks that cover that response.
+
   </Tabs.Tab>
 </Tabs>
 

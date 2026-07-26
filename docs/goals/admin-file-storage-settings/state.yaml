@@ -543,25 +543,23 @@ tasks:
     constraints:
       - "Never merge while anything required is pending, stale, unexpectedly skipped, failing, or unverified."
       - "Re-run /review after every pushed fix."
-      - "Every review-fix commit and push requires a fresh same-session Claude pre-commit and pre-push gate with green and MIN_SCORE >= 8."
+      - "Use one consolidated same-session Claude gate for the final source diff; do not create per-finding review artifacts."
     expected_output:
       - "Exact-head review result"
       - "Required CI/check result"
       - "Resolved or rejected findings with evidence"
     receipt:
       result: in_progress
-      summary: "All verified Review 2-7 findings (F1-F16) are fixed at canonical owners. Full CI on source head f3a8fed is green and Review 8-10 report no findings, but repository review remains incomplete because this historical board file exceeds the reviewer's per-file context limit. This PM-only compaction preserves decisions, stop conditions, links, and decisive proof while removing duplicated transcript-like detail; its new exact head still requires fresh CI and review."
-      canonical_history: "The linked GitHub review comments are the detailed finding authority. This receipt is the compact board truth and does not duplicate their full prose."
+      summary: "Reviews 2-13 produced verified F1-F19. F1-F18 are fixed at canonical owners; F19's bounded verified object-store Range read is implemented and locally green. One consolidated final gate, push, complete /review, and exact-head CI remain before merge."
+      canonical_history: "GitHub review comments own finding detail. This board retains only current invariants, disposition ranges, decisive validation, and publication gates."
       current_exact_head:
-        sha: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
+        sha: "87e79581a7dfe6f2d2313bc97440772863307a5f"
         branch: "feature/admin-file-storage-settings"
         pr: "https://github.com/eneo-ai/eneo/pull/601"
-        worktree: "clean and index-empty before this board-only compaction"
+        worktree: "Uncommitted F19 source, migration, tests, and concise documentation are under final validation."
         ci:
-          - "CI run 30203966247 => success, including backend integration, frontend component tests, and E2E."
-          - "Dependency Review 30203966242 => success."
-          - "Dead code 30203966246 => success."
-          - "Deploy Docs 30203966253 => success."
+          - "Exact pushed head 87e7958 was fully green before the F19 review finding."
+          - "The next pushed head requires a complete new CI run; old success is not transferable."
       architecture_result:
         - "PostgreSQL remains the complete default; compatible object storage is optional and affects only eligible new writes selected by the deployment policy."
         - "Persisted admin policy owns business limits and placement; deployment configuration owns secrets, endpoint details, readiness, and immutable operator safety ceilings."
@@ -570,92 +568,33 @@ tasks:
         - "Existing bounded prefix inventory and orphan reconciliation own remote residue. No product reaper, marker, staging table, fallback, dual write, provider branch, per-tenant policy, or PR2 move was added."
         - "Global inventory requires existing platform-admin authority; tenant admins retain the sanitized read-only policy, limits, and capability projection."
         - "Affected long-running routes share one non-transactional authenticated container per request; short database work owns explicit transactions."
+        - "Full object reads verify canonical full SHA-256. Range reads verify only persisted upload chunks covering the request and spool request bytes plus at most two chunk edges."
       finding_dispositions:
-        - "F1 fixed: Icon creation/read paths are bounded and streaming."
-        - "F2 fixed: File/Icon compensation is finite and preserves original plus cleanup failures."
-        - "F3 fixed: persisted limits remain within the PostgreSQL/JavaScript exact-integer contract."
-        - "F4 fixed: stale revision, unavailable target, and unknown 409 outcomes are distinct."
-        - "F5 fixed: Icon upload publishes and tests its typed 503 contract."
-        - "F6 fixed: file upload evaluates the audit kill switch in a short post-commit transaction."
-        - "F7 withdrawn as duplicate of F11; no automatic cleanup scope was introduced."
-        - "F8 fixed: public Icon and signed File reads do not hold ambient request transactions over remote I/O."
-        - "F9 fixed: unknown policy mutation outcome blocks resave and requires persisted-policy reload."
-        - "F10 fixed: readiness runs after the policy/inventory transaction closes."
-        - "F11 fixed: pre-verified object-store bytes publish AVAILABLE only with exactly one first concrete owner/reference in the same deferred-fence transaction; crash-left remote residue converges through existing inventory."
-        - "F12 fixed: projection and pre-spool admission use the portable object-store operator ceiling."
-        - "F13 fixed: deployment-global inventory moved behind existing platform-admin authority."
-        - "F14 fixed: generated File variants use operator-only admission rather than source business limits."
-        - "F15 fixed: affected endpoints and declarative guards reuse one authenticated container identity, removing duplicate session ownership."
-        - "F16 fixed: policy loads independently; inventory 403 preserves policy and becomes read-only, while other inventory errors have an inventory-only retry."
-      review_history:
-        - review: 2
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
-          head: "a85c8bfd697e07623969d4e5b49b47bae948f5a0"
-          result: "F1-F6 fixed; same-root policy PUT post-commit projection defect also fixed."
-          decisive_proof: "3960 backend non-integration; 33 real PostgreSQL/object-content; 5 migration; Pyright 0/0; web 334; Claude iteration 28 green/MIN_SCORE 8."
-        - review: 3
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
-          head: "5b5af9eb3db28a9e61a2b2f25305cfb1f2b35a61"
-          coverage: "complete 98/98"
-          result: "F1-F6 confirmed; F8/F9 and signed File sibling fixed; F7 deferred pending bounded architecture decision."
-          decisive_proof: "3963 backend non-integration; 33 real integrations; web 334; Pyright 0/0; docs build green."
-        - review: 4
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080942430"
-          head: "78021f258b1055ee627e02e977975205ad2d8224"
-          coverage: "complete 98/98"
-          result: "F10 fixed; CI contamination isolated to real-store fixture; F8/F9 re-audited; F11 promoted to owner-level redesign."
-          decisive_proof: "112 object-content integrations; 3966 backend non-integration; Pyright 0/0; Claude iteration 36 green/MIN_SCORE 9."
-        - review: 5
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5082850757"
-          head: "94796176ef71e4432f9fd10504894bc7f9d4e7ec"
-          coverage: "incomplete 87/99"
-          result: "F11/F12 fixed through bounded upload-before-publication adoption, portable pre-spool ceiling, generalized deferred fences, and existing orphan inventory."
-          decisive_proof: "115 object-content integrations; 3971 backend non-integration; migration roundtrip and one head; Pyright 0/0; Claude iteration 41 green/MIN_SCORE 8."
-        - review: 6
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
-          head: "07a26dfc187813b6b69d19ad98206c4e9b421928"
-          coverage: "complete 106/106"
-          result: "F11/F12 confirmed; F13/F14 fixed with split inventory authority and generated-variant operator ceilings."
-          decisive_proof: "118 object-content integrations; 3973 backend non-integration; Pyright 0/0; generated schema, Eneo JS, Svelte, lint, and docs build green. Owner explicitly waived peer review for this bounded cycle."
-        - review: 7
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
-          head: "83e5ab1b5de5dfd17cf5bcdebc6ae02845ab6b48"
-          coverage: "complete"
-          result: "F13/F14 confirmed; F15/F16 fixed through shared request authentication and independent inventory recovery."
-          decisive_proof: "119 object-content integrations; 3979 backend non-integration; Pyright 0/0; generated schema, Eneo JS, Svelte, lint, and message checks green; Claude iterations 46/47 green/MIN_SCORE 8."
-        - review: 8
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083744737"
-          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
-          coverage: "incomplete 106/107; only state.yaml truncated"
-          result: "No findings; F15/F16 confirmed resolved."
-        - review: 9
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083826748"
-          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
-          coverage: "incomplete 91/107"
-          result: "No findings."
-        - review: 10
-          source: "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083907108"
-          head: "f3a8fed092316f47f5e2344089b9fa358a1f78e4"
-          coverage: "incomplete 106/107; only state.yaml truncated"
-          result: "No findings."
+        - "F1-F6 fixed and verified in Review 2."
+        - "F7 withdrawn as duplicate of F11; no automatic cleanup was added."
+        - "F8-F10 fixed and verified in Reviews 3-4."
+        - "F11-F12 fixed and verified in Reviews 5-6."
+        - "F13-F16 fixed and verified in Reviews 6-8."
+        - "F17-F18 fixed and verified in Reviews 11-12."
+        - "F19 implemented: ranged object reads no longer full-GET or full-spool the object."
+      canonical_reviews:
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080530530"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080779725"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5080942430"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5082850757"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083308262"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5083511715"
+        - "https://github.com/eneo-ai/eneo/pull/601#issuecomment-5084085653"
       peer_review:
         session: "eneo-admin-file-storage-settings / 481eed8c-0577-4122-b465-3d5dc9af933c"
         model: "Claude Opus 5 1M, high effort, read-only"
-        final_source_gates:
-          - ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T131824Z.md => iteration 46 commit gate, GREEN_LIGHT yes, MIN_SCORE 8."
-          - ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T132224Z.md => iteration 47 push gate, GREEN_LIGHT yes, MIN_SCORE 8."
-      board_compaction:
-        reason: "state.yaml was 75,042 bytes and repeatedly exceeded repository review's per-file context budget."
-        commit_gate:
-          artifact: ".codex/artifacts/claude-peer-loop-admin-file-storage-settings-review-20260726T144547Z.md"
-          staged_sha256: "457b59c94ebdfbda7f74e7187492017d81211110098f52f8bd47c64a9aed2e5b"
-          result: "Claude iteration 48 GREEN_LIGHT yes, MIN_SCORE 9; no P0/P1/P2 or blocker. Its sole wording suggestion is reflected in the source-head versus next-head CI distinction."
-        invariants:
-          - "Preserve task identities, statuses, active task, stop conditions, owner decisions, finding dispositions, canonical review links, decisive validation, and current publication gate."
-          - "Remove only duplicated transcript-like detail already owned by canonical review comments and immutable evidence artifacts."
-          - "Touch no product source, tests, migrations, generated contracts, frontend, docs-site, deployment docs, issue, epic, or PR behavior."
-        target: "Goal Maker checker green and state.yaml <= 50 KiB before the board-only commit."
-      next_gate: "Independently verify T016, run the same-session Claude commit and push gates, publish one new exact head, then require fresh CI success and one complete finding-free repository review before activating T007 merge."
+        latest_direction: "Iteration 57 consolidated commit gate reviewed staged source/docs hash 3054b04d1980636c1023cc14f41c47a0764c17c439256bb10a6bc9c70de2ed8e => GREEN_LIGHT yes, MIN_SCORE 9, no P0/P1/P2 or blocker."
+      decisive_local_validation:
+        - "119 real PostgreSQL/SeaweedFS object-content integrations passed."
+        - "3985 backend non-integration tests passed; 1256 deselected."
+        - "PostgreSQL 13 migration roundtrips passed for legacy descriptors, empty content, split compatibility, and one Alembic head."
+        - "Whole-backend Pyright 0/0/0, changed-file Ruff/format, diff check, and docs-site build passed."
+      next_gate: "Run one consolidated final peer/diff gate, commit and push one head, post one /review, then require complete finding-free review and all CI green before T007 merge."
 
   - id: T016
     type: worker

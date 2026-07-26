@@ -32,6 +32,7 @@ async def test_capture_content_hashes_exact_stream_and_spools_owner_only() -> No
             hashlib.sha256(expected[5:10]).digest(),
             hashlib.sha256(expected[10:]).digest(),
         )
+        assert captured.part_size_bytes == 5
         assert captured.declared_media_type == "text/plain"
         assert captured.verified_media_type == "text/plain"
 
@@ -90,3 +91,22 @@ async def test_capture_offloads_spilled_file_io_from_the_event_loop(
         assert captured.file.read() == b"spilled-content"
 
     assert {"write", "seek", "close"} <= set(offloaded)
+
+
+@pytest.mark.asyncio
+async def test_empty_capture_has_one_verification_chunk() -> None:
+    async def source():
+        if False:
+            yield b""
+
+    async with capture_content(
+        source(),
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        maximum_size_bytes=1,
+        spool_memory_bytes=1,
+        multipart_part_bytes=8,
+    ) as captured:
+        assert captured.size_bytes == 0
+        assert captured.part_size_bytes == 8
+        assert captured.part_sha256 == (hashlib.sha256(b"").digest(),)

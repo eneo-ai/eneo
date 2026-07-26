@@ -221,6 +221,8 @@ async def _create_pending(
         descriptor.content_id = content.id
         descriptor.storage_kind = StorageKind.OBJECT_STORE.value
         descriptor.object_key = object_key
+        descriptor.verification_chunk_size_bytes = max(1, len(resolved_payload))
+        descriptor.verification_chunk_sha256 = digest
         session.add(descriptor)
         session.add(
             FileContentReferences(

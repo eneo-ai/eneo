@@ -29,6 +29,7 @@ from eneo.object_content.content import (
     StorageKind,
     capture_content,
     content_request_fingerprint,
+    verification_chunk_window,
 )
 from eneo.object_content.content_repository import (
     ObjectContentRepository,
@@ -629,14 +630,43 @@ class ObjectContentService:
                     )
                 _settings, store = self._require_object_store()
                 try:
+                    verification_chunk_sha256: tuple[bytes, ...] = ()
+                    descriptor = source.object_store_descriptor
+                    if byte_range is not None:
+                        window = verification_chunk_window(
+                            byte_range,
+                            chunk_size_bytes=(descriptor.verification_chunk_size_bytes),
+                            chunk_count=descriptor.verification_chunk_count,
+                        )
+                        async with self._database.session() as session, session.begin():
+                            verification_chunk_sha256 = await (
+                                ObjectContentRepository(session)
+                            ).get_object_store_verification_chunks(
+                                content_id=content.content_id,
+                                first_chunk_index=window.first_chunk_index,
+                                chunk_count=window.chunk_count,
+                            )
                     async with store.open_verified_read(
-                        source.object_store_descriptor.object_key,
+                        descriptor.object_key,
                         expected_sha256=content.sha256,
                         expected_size_bytes=content.size_bytes,
                         expected_media_type=content.media_type,
                         byte_range=byte_range,
+                        verification_chunk_size_bytes=(
+                            descriptor.verification_chunk_size_bytes
+                        ),
+                        verification_chunk_count=(descriptor.verification_chunk_count),
+                        verification_chunk_sha256=verification_chunk_sha256,
                     ) as opened:
                         yield opened
+                except (ValueError, ObjectContentStateError) as error:
+                    await self._mark_backend_failure(
+                        content.content_id,
+                        ContentFailureCode.BACKEND_CORRUPT,
+                    )
+                    raise ObjectContentIntegrityError(
+                        "Durable object verification metadata is invalid"
+                    ) from error
                 except ObjectStoreNotFoundError as error:
                     await self._mark_backend_failure(
                         content.content_id,

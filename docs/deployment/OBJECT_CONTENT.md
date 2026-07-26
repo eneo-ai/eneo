@@ -400,9 +400,14 @@ bounded (1-32) and should be raised only after measuring PostgreSQL and endpoint
 capacity. Size the backend/worker temporary volume for concurrent in-flight
 upload and verified-read spools: memory use stops at the configured threshold,
 while the remainder uses temporary disk until each upload or verified response
-finishes. A range read verifies and spools the full object before serving the
-requested interval, so size temporary disk for the largest permitted objects
-multiplied by measured peak read concurrency.
+finishes. Full reads verify and spool the full object. Range reads fetch and
+verify only the persisted upload chunks covering the requested interval before
+response headers are sent. Their transfer and temporary-disk cost is the
+requested interval plus at most two chunk edges; existing rows migrated as one
+whole-object chunk retain their previous full-verification cost. The chunk size
+is captured per object, so later multipart tuning cannot invalidate existing
+content. A range proves the chunks it covers; a full read still checks the
+canonical full-object SHA-256 and can detect corruption elsewhere.
 
 For PostgreSQL-inline content, monitor database size, WAL generation, backup
 duration, connection-pool pressure, and the documented inline admission

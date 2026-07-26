@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from hashlib import sha256
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -117,11 +118,12 @@ async def test_create_icon_returns_metadata_without_reading_captured_payload() -
     )
     captured = CapturedContent(
         file=ReadForbidden(b"captured"),
-        sha256=b"digest",
+        sha256=sha256(b"captured").digest(),
         size_bytes=8,
         declared_media_type="image/png",
         verified_media_type="image/png",
-        part_sha256=(),
+        part_sha256=(sha256(b"captured").digest(),),
+        part_size_bytes=8,
     )
 
     @asynccontextmanager
