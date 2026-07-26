@@ -13,6 +13,7 @@ import {
   mergeSkillCatalog,
   moveSkillBinding,
   removeSkillBinding,
+  setSkillActivationMode,
   upgradeSkillBinding
 } from "./skillBindings";
 import type { SkillBindingCandidate } from "./skillBindings";
@@ -192,6 +193,49 @@ describe("Skill binding draft state", () => {
         isActive: false
       })
     ).toBe(bindings);
+  });
+
+  test("preserves an Assistant activation mode when its revision is upgraded", () => {
+    const binding = {
+      skill_id: "skill-1",
+      skill_revision_id: "revision-1",
+      activation_mode: "on_demand" as const
+    };
+
+    expect(
+      upgradeSkillBinding([binding], 0, {
+        id: "skill-1",
+        attachableRevisionId: "revision-2",
+        isActive: true
+      })
+    ).toEqual([
+      {
+        skill_id: "skill-1",
+        skill_revision_id: "revision-2",
+        activation_mode: "on_demand"
+      }
+    ]);
+  });
+
+  test("sets one Assistant activation mode without changing order or revisions", () => {
+    const bindings = [
+      {
+        skill_id: "skill-1",
+        skill_revision_id: "revision-1",
+        activation_mode: "always" as const
+      },
+      {
+        skill_id: "skill-2",
+        skill_revision_id: "revision-2",
+        activation_mode: "on_demand" as const
+      }
+    ];
+
+    expect(setSkillActivationMode(bindings, "skill-1", "on_demand")).toEqual([
+      { ...bindings[0], activation_mode: "on_demand" },
+      bindings[1]
+    ]);
+    expect(setSkillActivationMode(bindings, "missing", "on_demand")).toBe(bindings);
   });
 
   test("shows the attachable revision metadata immediately after an organisation binding upgrade", () => {

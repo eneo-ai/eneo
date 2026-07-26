@@ -107,6 +107,140 @@ function makePublicSkill(id: string, displayName: string): SkillPublic {
 }
 
 describe("SkillBindingsEditor", () => {
+  test("shows Assistant activation modes and updates the selected draft mode", async () => {
+    const skill = makeSkill("activation");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "on_demand"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: null,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_always() }).click();
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_always());
+  });
+
+  test("allows on-demand activation when the saved runtime supports it", async () => {
+    const skill = makeSkill("selective-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: {
+        effective_model_id: "model-1",
+        effective_mode: "always_only",
+        fallback_reason: null,
+        skill_context_tokens: 80,
+        skill_context_token_limit: 800,
+        token_count_source: "litellm"
+      },
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    const activation = page.getByRole("button", {
+      name: m.skills_activation_mode_label({ name: skill.display_name })
+    });
+    await activation.click();
+    await page.getByRole("option", { name: m.skills_activation_mode_on_demand() }).click();
+
+    await expect.element(activation).toHaveTextContent(m.skills_activation_mode_on_demand());
+  });
+
+  test("keeps activation controls off non-Assistant Skill surfaces", async () => {
+    const skill = makeSkill("app");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [{ skill_id: skill.id, skill_revision_id: summary.skill_revision_id }],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .not.toBeInTheDocument();
+  });
+
+  test("prevents a new on-demand mode when the saved runtime cannot activate it", async () => {
+    const skill = makeSkill("disabled-runtime");
+    const summary = makeSummary(skill, 1, 0);
+
+    render(SkillBindingsEditor, {
+      bindings: [
+        {
+          skill_id: skill.id,
+          skill_revision_id: summary.skill_revision_id,
+          activation_mode: "always"
+        }
+      ],
+      initialCatalogPage: makePage([skill]),
+      bindingSummaries: [summary],
+      canEditBindings: true,
+      canCreateSkills: false,
+      supportsActivationModes: true,
+      skillRuntime: {
+        effective_model_id: "model-1",
+        effective_mode: "always_only",
+        fallback_reason: "selective_activation_disabled",
+        skill_context_tokens: 80,
+        skill_context_token_limit: 800,
+        token_count_source: "litellm"
+      },
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview
+    });
+
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.skills_activation_mode_label({ name: skill.display_name })
+        })
+      )
+      .toBeDisabled();
+    await expect
+      .element(page.getByText(m.skills_activation_runtime_disabled(), { exact: true }))
+      .toBeVisible();
+  });
+
   test("searches and loads more from the server-owned catalog", async () => {
     const first = makeSkill("first");
     const second = makeSkill("second");

@@ -1,10 +1,14 @@
 import type {
+  AssistantSkillBindingInput,
   PublishedSkillSummaryPublic,
+  SkillActivationMode,
   SkillBindingReferenceInput,
   SkillBindingSummary,
   SkillPublic,
   SkillSparse
 } from "@eneo/eneo-js";
+
+export type SkillBindingDraftReference = SkillBindingReferenceInput | AssistantSkillBindingInput;
 
 export type SkillBindingSource = "space" | "organization";
 export type SkillBindingCandidate =
@@ -28,7 +32,7 @@ export type SkillBindingRevisionMetadata = {
 };
 
 export type SkillBindingRow = {
-  reference: SkillBindingReferenceInput;
+  reference: SkillBindingDraftReference;
   summary: SkillBindingSummary | undefined;
   attachableRevisionId: string | undefined;
   attachableRevisionNumber: number | undefined;
@@ -44,7 +48,7 @@ export type SkillBindingRow = {
 
 export function getAvailableSkills(
   catalog: SkillBindingCandidate[],
-  bindings: SkillBindingReferenceInput[]
+  bindings: SkillBindingDraftReference[]
 ): SkillBindingCandidate[] {
   const boundSkillIds = new Set(bindings.map((binding) => binding.skill_id));
   return catalog.filter(
@@ -56,32 +60,34 @@ export function getAvailableSkills(
 }
 
 export function appendSkillRevisionBinding(
-  bindings: SkillBindingReferenceInput[],
-  skill: { id: string; revisionId: string }
-): SkillBindingReferenceInput[] {
+  bindings: SkillBindingDraftReference[],
+  skill: { id: string; revisionId: string },
+  activationMode?: SkillActivationMode
+): SkillBindingDraftReference[] {
   if (bindings.some((binding) => binding.skill_id === skill.id)) return bindings;
 
   return [
     ...bindings,
     {
       skill_id: skill.id,
-      skill_revision_id: skill.revisionId
+      skill_revision_id: skill.revisionId,
+      ...(activationMode === undefined ? {} : { activation_mode: activationMode })
     }
   ];
 }
 
 export function removeSkillBinding(
-  bindings: SkillBindingReferenceInput[],
+  bindings: SkillBindingDraftReference[],
   skillId: string
-): SkillBindingReferenceInput[] {
+): SkillBindingDraftReference[] {
   return bindings.filter((binding) => binding.skill_id !== skillId);
 }
 
 export function moveSkillBinding(
-  bindings: SkillBindingReferenceInput[],
+  bindings: SkillBindingDraftReference[],
   index: number,
   direction: "up" | "down"
-): SkillBindingReferenceInput[] {
+): SkillBindingDraftReference[] {
   const destination = direction === "up" ? index - 1 : index + 1;
   if (index < 0 || index >= bindings.length || destination < 0 || destination >= bindings.length) {
     return bindings;
@@ -93,14 +99,14 @@ export function moveSkillBinding(
 }
 
 export function upgradeSkillBinding(
-  bindings: SkillBindingReferenceInput[],
+  bindings: SkillBindingDraftReference[],
   index: number,
   skill: {
     id: string;
     attachableRevisionId: string;
     isActive: boolean;
   }
-): SkillBindingReferenceInput[] {
+): SkillBindingDraftReference[] {
   const binding = bindings[index];
   if (
     !binding ||
@@ -113,10 +119,23 @@ export function upgradeSkillBinding(
 
   const upgraded = bindings.slice();
   upgraded[index] = {
-    skill_id: binding.skill_id,
+    ...binding,
     skill_revision_id: skill.attachableRevisionId
   };
   return upgraded;
+}
+
+export function setSkillActivationMode(
+  bindings: SkillBindingDraftReference[],
+  skillId: string,
+  activationMode: SkillActivationMode
+): SkillBindingDraftReference[] {
+  const index = bindings.findIndex((binding) => binding.skill_id === skillId);
+  if (index === -1) return bindings;
+
+  const updated = bindings.slice();
+  updated[index] = { ...updated[index], activation_mode: activationMode };
+  return updated;
 }
 
 export function mergeSkillCatalog(
@@ -129,7 +148,7 @@ export function mergeSkillCatalog(
 }
 
 export function getSkillBindingRows(
-  bindings: SkillBindingReferenceInput[],
+  bindings: SkillBindingDraftReference[],
   summaries: SkillBindingSummary[],
   catalog: SkillBindingCandidate[],
   loadedRevisionMetadata: SkillBindingRevisionMetadata[] = []

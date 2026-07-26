@@ -134,6 +134,59 @@ export function initSettings(client) {
     },
 
     /**
+     * Get the tenant-owned Skill runtime policy and its editable bounds.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillRuntimePolicy>}
+     */
+    getSkillRuntimePolicy: async () => {
+      return await client.fetch("/api/v1/settings/skills/runtime-policy", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Replace the tenant-owned Skill runtime policy.
+     * @param {import('../types/resources').SkillRuntimePolicyUpdate} policy
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillRuntimePolicy>}
+     */
+    updateSkillRuntimePolicy: async (policy) => {
+      return await client.fetch("/api/v1/settings/skills/runtime-policy", {
+        method: "put",
+        requestBody: {
+          "application/json": {
+            selective_activation_enabled: policy.selective_activation_enabled,
+            max_attached_skills: policy.max_attached_skills,
+            context_share_percent: policy.context_share_percent,
+            max_activations_per_turn: policy.max_activations_per_turn
+          }
+        }
+      });
+    },
+
+    /**
+     * Reset the tenant-owned Skill runtime policy to platform defaults.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillRuntimePolicy>}
+     */
+    resetSkillRuntimePolicy: async () => {
+      return await client.fetch("/api/v1/settings/skills/runtime-policy/reset", {
+        method: "post"
+      });
+    },
+
+    /**
+     * Project the current context-share allowance onto accessible models.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').SkillRuntimeModelProjections>}
+     */
+    getSkillRuntimeModelProjections: async () => {
+      return await client.fetch("/api/v1/settings/skills/runtime-policy/model-projections", {
+        method: "get"
+      });
+    },
+
+    /**
      * Set whether model input/output prices are shown to regular users (org-wide).
      * @param {boolean} enabled Whether to show model pricing to users
      * @throws {EneoError}

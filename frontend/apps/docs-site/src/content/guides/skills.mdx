@@ -158,10 +158,18 @@ The Assistant API accepts **always** or **on demand** for each binding:
 - **On demand** advertises a compact descriptor and loads the exact pinned
   instructions only when a tool-capable model requests them.
 
-The web builder control arrives in the next UI slice. Apps and Personal Chat
-remain eager: their attached Skills enter every request in the configured order.
-Runtime evidence, rather than the adoption view, shows which Assistant Skills
-were eligible, requested, blocked, or included.
+The Assistant builder exposes this choice for each attached Skill. Apps and
+Personal Chat remain eager: their attached Skills enter every request in the
+configured order. Runtime evidence, rather than the adoption view, shows which
+Assistant Skills were eligible, requested, blocked, or included.
+
+Tenant admins manage the stored runtime limits in Admin settings. The API owns
+the editable ranges; the selected model window and fixed platform safety bounds
+still apply. On-demand loading falls back to **Always only** when organisation
+policy disables it, the model lacks tool calling, the catalogue exceeds its
+context allowance, or exact token measurement is unavailable. The builder then
+prevents new **On demand** selections but still lets an existing selection be
+changed back to **Always**.
 
 ## Scopes and permissions
 
@@ -297,13 +305,6 @@ inspect in the opt-in chat debug panel, including whether each Skill was always
 included or requested on demand and why a candidate was not loaded. Apps will
 remain eager until their execution contracts can preserve the same frozen-plan
 and audit guarantees.
-
-The tenant settings API owns the seeded total Skill-context share; its admin
-form arrives in the next UI slice. The selected model window and fixed platform
-safety bounds still apply. Eneo rejects an Assistant configuration when any
-affected on-demand Skill cannot fit after a binding, prompt, model, attachment,
-or MCP-tool change. Models without tool calling keep only **always** Skills and
-report that limitation in runtime evidence.
 
 Editable Space copies with explicit source updates come later. External
 Marketplace distribution remains a separate final phase.
