@@ -4365,6 +4365,7 @@
   "flow_error_typed_io_contract_violation": "The edited output does not match the step output contract. Fix the JSON shape and save again.",
   "flow_error_flow_llm_request_timeout": "The model request timed out, but provider work may still have completed. Check the run before retrying because a retry can duplicate provider work and spend.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime files were attached, but the step input does not reference them. Update the step to use step_input.* or remove the files.",
+  "flow_error_flow_mapped_provider_call_limit_exceeded": "The mapped step may exceed the organization's provider-call limit. Use fewer items or files, or ask an administrator to raise the limit.",
   "flow_error_flow_unsupported_output_mode": "This step uses an output mode the runtime cannot execute. Change the output mode and republish the flow.",
   "flow_error_flow_unsupported_output_type": "This step uses an output type the runtime cannot render. Choose a supported output type and republish the flow.",
   "flow_error_typed_io_validation_failed": "The step input or output did not pass validation. Open the step details, fix the input or configuration, and rerun.",

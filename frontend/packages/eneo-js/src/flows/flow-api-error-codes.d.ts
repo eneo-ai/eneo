@@ -68,6 +68,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   EVIDENCE_EXPORT_REASON_REQUIRED: "flow_evidence_export_reason_required";
   LLM_REQUEST_TIMEOUT: "flow_llm_request_timeout";
   RUNTIME_INPUT_NOT_CONSUMED: "flow_runtime_input_not_consumed";
+  MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: "flow_mapped_provider_call_limit_exceeded";
   UNSUPPORTED_OUTPUT_MODE: "flow_unsupported_output_mode";
   UNSUPPORTED_OUTPUT_TYPE: "flow_unsupported_output_type";
   TYPED_IO_CONTRACT_VIOLATION: "typed_io_contract_violation";
@@ -215,6 +216,7 @@ export type FlowApiErrorCode =
   | "flow_evidence_export_reason_required"
   | "flow_llm_request_timeout"
   | "flow_runtime_input_not_consumed"
+  | "flow_mapped_provider_call_limit_exceeded"
   | "flow_unsupported_output_mode"
   | "flow_unsupported_output_type"
   | "typed_io_contract_violation"

@@ -13794,6 +13794,7 @@ export interface components {
       | "flow_evidence_export_reason_required"
       | "flow_llm_request_timeout"
       | "flow_runtime_input_not_consumed"
+      | "flow_mapped_provider_call_limit_exceeded"
       | "flow_unsupported_output_mode"
       | "flow_unsupported_output_type"
       | "typed_io_contract_violation"
@@ -14468,7 +14469,7 @@ export interface components {
       version?: 1;
       /**
        * Max Provider Calls Per Mapped Step
-       * @description Maximum provider calls allowed for one mapped step attempt. Null means no tenant ceiling is configured and new mapped Builder authoring is blocked.
+       * @description Maximum provider calls allowed for one mapped step attempt, including one possible native-JSON fallback call. Null means no tenant ceiling is configured and new mapped Builder authoring is blocked.
        */
       max_provider_calls_per_mapped_step?: number | null;
       /**
@@ -14486,7 +14487,7 @@ export interface components {
     FlowMappedExecutionPolicyUpdate: {
       /**
        * Max Provider Calls Per Mapped Step
-       * @description Set a positive tenant provider-call ceiling, or send null to remove it.
+       * @description Set a positive tenant provider-call ceiling, including one possible native-JSON fallback call, or send null to remove it.
        */
       max_provider_calls_per_mapped_step?: number | null;
       /**
@@ -16469,6 +16470,7 @@ export interface components {
         | "flow_dispatch_failed"
         | "flow_input_contract_inapplicable"
         | "flow_llm_request_timeout"
+        | "flow_mapped_provider_call_limit_exceeded"
         | "flow_missing_principal"
         | "flow_review_expired"
         | "flow_review_open_active_conflict_invariant"
@@ -17951,6 +17953,7 @@ export interface components {
             | "flow_dispatch_failed"
             | "flow_input_contract_inapplicable"
             | "flow_llm_request_timeout"
+            | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"
@@ -18804,6 +18807,7 @@ export interface components {
             | "flow_dispatch_failed"
             | "flow_input_contract_inapplicable"
             | "flow_llm_request_timeout"
+            | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"
@@ -19730,6 +19734,7 @@ export interface components {
             | "flow_dispatch_failed"
             | "flow_input_contract_inapplicable"
             | "flow_llm_request_timeout"
+            | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_review_expired"
             | "flow_review_open_active_conflict_invariant"

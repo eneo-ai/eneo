@@ -757,6 +757,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Use a larger-context model, split the source document, or reduce the step input before rerun.",
         user_action="Use a smaller source, split the document, or ask a flow editor to choose a larger-context model.",
     ),
+    FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The mapped step may need more provider calls than the organization ceiling allows.",
+        consumer_action="Reduce mapped inputs or ask an administrator to raise the provider-call ceiling before rerun.",
+        user_action="Use fewer items or files, or ask an administrator to raise the limit.",
+    ),
     FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

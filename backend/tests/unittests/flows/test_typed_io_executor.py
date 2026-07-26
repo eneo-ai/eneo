@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 import eneo.flows.runtime.executor as executor_module
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
@@ -52,6 +53,7 @@ from eneo.flows.runtime.executor import (
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
@@ -214,11 +216,7 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
     assistant = MagicMock()
     assistant.mcp_servers = []
     assistant.get_prompt_text.return_value = ""
-    assistant.completion_model_kwargs = MagicMock()
-    assistant.completion_model_kwargs.model_copy.return_value = (
-        assistant.completion_model_kwargs
-    )
-    assistant.completion_model_kwargs.model_dump.return_value = {}
+    assistant.completion_model_kwargs = ModelKwargs()
     assistant.completion_model = SimpleNamespace(
         id=uuid4(),
         name="test",
@@ -1984,6 +1982,9 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     user,
 ):
     executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
     first_file_id = uuid4()
     second_file_id = uuid4()
     first_file = SimpleNamespace(
@@ -2083,10 +2084,20 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         },
     )
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
 
-    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     assert assistant.get_response.await_count == 2
+    assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
     questions = [
         call.kwargs["question"] for call in assistant.get_response.await_args_list
     ]
@@ -2119,6 +2130,80 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         str(second_file_id),
     ]
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_reserves_one_json_fallback_before_provider_dispatch(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: SimpleNamespace(
+            id=first_file_id,
+            text="Alpha document text",
+            name="alpha.pdf",
+            checksum="checksum-a",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+        second_file_id: SimpleNamespace(
+            id=second_file_id,
+            text="Beta document text",
+            name="beta.pdf",
+            checksum="checksum-b",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+    }
+
+    async def get_files_by_id(*, ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in ids]
+
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(side_effect=get_files_by_id)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"documents":[{"title":"Result"}]}'
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value
+    )
+    assert assistant.preview_response_context.await_count == 2
+    assistant.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2451,7 +2536,7 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
 async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch(user):
     executor, _, _, _ = _build_executor(user)
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=2,
+        max_provider_calls_per_mapped_step=3,
         max_estimated_input_tokens_per_mapped_step=10,
     )
     assistant = _mock_assistant_for_execute_step()
@@ -2508,6 +2593,121 @@ async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
     assert assistant.preview_response_context.await_count == 2
     assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_reserves_one_json_fallback_before_provider_dispatch(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"sections":[{"heading":"Result","body":"Done"}]}'
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}, {"title": "Two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value
+    )
+    assert assistant.preview_response_context.await_count == 2
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_uses_exact_call_count_when_json_mode_is_unsupported(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"sections":[{"heading":"Result","body":"Done"}]}'
+    )
+    assistant.completion_model_kwargs = ModelKwargs(
+        response_format={"type": "stored_provider_format"}
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}, {"title": "Two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={json_mode_cache_key(assistant): False},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert assistant.get_response.await_count == 2
+    assert all(
+        call.kwargs["model_kwargs"].response_format is None
+        for call in assistant.get_response.await_args_list
+    )
+    assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
+    assert output.model_parameters_json["per_item_call_count"] == 2
 
 
 @pytest.mark.asyncio

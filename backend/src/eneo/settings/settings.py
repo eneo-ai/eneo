@@ -448,8 +448,9 @@ class FlowMappedExecutionPolicyPublic(BaseModel):
         default=None,
         ge=1,
         description=(
-            "Maximum provider calls allowed for one mapped step attempt. Null means "
-            "no tenant ceiling is configured and new mapped Builder authoring is blocked."
+            "Maximum provider calls allowed for one mapped step attempt, including "
+            "one possible native-JSON fallback call. Null means no tenant ceiling is "
+            "configured and new mapped Builder authoring is blocked."
         ),
     )
     max_estimated_input_tokens_per_mapped_step: int | None = Field(
@@ -472,7 +473,8 @@ class FlowMappedExecutionPolicyUpdate(BaseModel):
         default=None,
         ge=1,
         description=(
-            "Set a positive tenant provider-call ceiling, or send null to remove it."
+            "Set a positive tenant provider-call ceiling, including one possible "
+            "native-JSON fallback call, or send null to remove it."
         ),
     )
     max_estimated_input_tokens_per_mapped_step: int | None = Field(

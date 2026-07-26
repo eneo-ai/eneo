@@ -27,8 +27,19 @@ def mapped_admission_payload(
     *,
     execution_mode: MappedExecutionMode,
     estimates: list[int],
+    native_json_fallback_possible: bool,
     policy: FlowMappedExecutionPolicy,
 ) -> MappedAdmissionProvenance:
+    provider_call_upper_bound = len(estimates) + int(native_json_fallback_possible)
+    call_ceiling = policy.max_provider_calls_per_mapped_step
+    if call_ceiling is not None and provider_call_upper_bound > call_ceiling:
+        raise TypedIOValidationException(
+            f"Mapped step may require up to {provider_call_upper_bound} provider "
+            f"calls, exceeding the organization ceiling of {call_ceiling} calls.",
+            code=FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value,
+        )
+    # This token policy measures logical mapped packages; the separate call
+    # ceiling reserves the capability-rejection fallback attempt.
     total = sum(estimates)
     ceiling = policy.max_estimated_input_tokens_per_mapped_step
     if ceiling is not None and total > ceiling:

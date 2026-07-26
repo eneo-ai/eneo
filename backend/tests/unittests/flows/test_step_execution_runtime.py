@@ -703,6 +703,77 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
 
 
 @pytest.mark.asyncio
+async def test_complete_step_execution_strips_known_unsupported_stored_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: False,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+    original_kwargs = ModelKwargs(
+        temperature=0.2,
+        response_format={"type": "stored_provider_format"},
+    )
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        litellm_model_name="anthropic/claude-test",
+        name="claude-test",
+        provider_type="anthropic",
+    )
+    assistant.completion_model_kwargs = original_kwargs
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(total_token_count=4, completion='{"ok": true}')
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
+        apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
+    )
+
+    output = await complete_step_execution(
+        step=step,
+        run=run,
+        state=state,
+        prepared=prepared,
+        deps=deps,
+    )
+
+    assistant.get_response.assert_awaited_once()
+    sent_kwargs = assistant.get_response.await_args.kwargs["model_kwargs"]
+    assert sent_kwargs.response_format is None
+    assert sent_kwargs.temperature == 0.2
+    assert state.json_mode_supported["anthropic:claude-test:none"] is False
+    assert output.structured_output == {"ok": True}
+
+
+@pytest.mark.asyncio
 async def test_completed_provider_call_receipt_is_recorded_before_postprocessing_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1407,7 +1478,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     run = _run()
     state = _state()
     step = _step(output_type="json")
-    original_kwargs = MagicMock(name="original_kwargs")
+    original_kwargs = ModelKwargs()
     assistant = MagicMock()
     assistant.completion_model = SimpleNamespace(
         id=None,
@@ -1456,7 +1527,6 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         deps=deps,
     )
 
-    assert assistant.completion_model_kwargs.model_copy.call_count == 0
     assert assistant.get_response.await_count == 1
     assert assistant.get_response.await_args.kwargs["model_kwargs"] is original_kwargs
     assert state.json_mode_supported["anthropic:claude-3-5-haiku:none"] is False

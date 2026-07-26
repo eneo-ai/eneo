@@ -30,6 +30,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     attach_typed_failure_context,
     complete_step_execution,
     preview_step_execution_context,
+    resolve_json_response_format_plan,
 )
 from eneo.flows.runtime.step_handlers.base import (
     PrepareAssistantStepFn,
@@ -133,6 +134,7 @@ async def execute_per_item_map(
         )
 
     estimates: list[int] = []
+    native_json_fallback_possible = False
     for item_number, input_item in enumerate(input_items, start=1):
         preview_step = await preview_assistant_step(
             step=per_call_step,
@@ -155,9 +157,17 @@ async def execute_per_item_map(
                 deps=preview_step.deps,
             )
         )
+        if len(estimates) == 1:
+            # The response-format plan is loop-invariant for this step.
+            native_json_fallback_possible = resolve_json_response_format_plan(
+                step=per_call_step,
+                assistant=preview_step.prepared.assistant,
+                state=state,
+            ).fallback_call_possible
     state.mapped_admission_by_step[step.step_id] = mapped_admission_payload(
         execution_mode="per_item",
         estimates=estimates,
+        native_json_fallback_possible=native_json_fallback_possible,
         policy=mapped_execution_policy,
     )
 

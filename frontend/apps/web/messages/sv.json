@@ -4365,6 +4365,7 @@
   "flow_error_typed_io_contract_violation": "Det ändrade resultatet matchar inte stegets utdatakontrakt. Rätta JSON-strukturen och spara igen.",
   "flow_error_flow_llm_request_timeout": "Modellanropet tog för lång tid, men leverantörsarbetet kan ändå ha slutförts. Kontrollera körningen innan du försöker igen eftersom det kan medföra dubbelt arbete och dubbla kostnader.",
   "flow_error_flow_runtime_input_not_consumed": "Runtime-filer kopplades till körningen, men stegets indata refererar inte till dem. Uppdatera steget så att det använder step_input.* eller ta bort filerna.",
+  "flow_error_flow_mapped_provider_call_limit_exceeded": "Det mappade steget kan överskrida organisationens gräns för provider-anrop. Använd färre objekt eller filer, eller be en administratör höja gränsen.",
   "flow_error_flow_unsupported_output_mode": "Steget använder ett utdataläge som runtime inte kan köra. Ändra utdataläget och publicera flödet igen.",
   "flow_error_flow_unsupported_output_type": "Steget använder en utdatatyp som runtime inte kan skapa. Välj en stödd utdatatyp och publicera flödet igen.",
   "flow_error_typed_io_validation_failed": "Stegets indata eller utdata klarade inte valideringen. Öppna stegdetaljerna, rätta indata eller konfigurationen och kör om.",

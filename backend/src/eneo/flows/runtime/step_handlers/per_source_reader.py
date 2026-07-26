@@ -31,6 +31,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     attach_typed_failure_context,
     complete_step_execution,
     preview_step_execution_context,
+    resolve_json_response_format_plan,
 )
 from eneo.flows.runtime.step_handlers.base import (
     ListStepInputFileIdsFn,
@@ -123,6 +124,7 @@ async def execute_per_source_reader(
         ),
     )
     estimates: list[int] = []
+    native_json_fallback_possible = False
     preview_file_ids: list[UUID | None] = list(file_ids) if file_ids else [None]
     for file_id in preview_file_ids:
         preview_step = await preview_assistant_step(
@@ -141,9 +143,17 @@ async def execute_per_source_reader(
                 deps=preview_step.deps,
             )
         )
+        if len(estimates) == 1:
+            # The response-format plan is loop-invariant for this step.
+            native_json_fallback_possible = resolve_json_response_format_plan(
+                step=per_call_step,
+                assistant=preview_step.prepared.assistant,
+                state=state,
+            ).fallback_call_possible
     state.mapped_admission_by_step[step.step_id] = mapped_admission_payload(
         execution_mode="per_source_reader",
         estimates=estimates,
+        native_json_fallback_possible=native_json_fallback_possible,
         policy=mapped_execution_policy,
     )
     if not file_ids:

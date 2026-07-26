@@ -325,6 +325,51 @@ def json_mode_cache_key(assistant: RuntimeAssistantProtocol) -> str:
     return f"{provider}:{name}:{mid}"
 
 
+@dataclass(frozen=True, slots=True)
+class JsonResponseFormatPlan:
+    native_json_object_attempted: bool
+    fallback_call_possible: bool
+    strip_stored_response_format: bool
+
+
+def resolve_json_response_format_plan(
+    *,
+    step: RuntimeStep,
+    assistant: RuntimeAssistantProtocol,
+    state: RunExecutionState,
+) -> JsonResponseFormatPlan:
+    requested = resolve_format_spec(
+        step.output_type
+    ).should_request_native_json_object_mode(step.output_contract)
+    if not requested:
+        # Other output modes preserve authored response-format kwargs and the
+        # existing no-fallback behavior.
+        return JsonResponseFormatPlan(
+            native_json_object_attempted=False,
+            fallback_call_possible=False,
+            strip_stored_response_format=False,
+        )
+
+    cache_key = json_mode_cache_key(assistant)
+    cached_support = state.json_mode_supported.get(cache_key)
+    if cached_support is None:
+        detected_support = detect_native_json_output_support(assistant)
+        if detected_support is not None:
+            state.json_mode_supported[cache_key] = detected_support
+            cached_support = detected_support
+    native_json_object_attempted = cached_support is not False
+    stored_response_format_present = (
+        assistant.completion_model_kwargs.response_format is not None
+    )
+    return JsonResponseFormatPlan(
+        native_json_object_attempted=native_json_object_attempted,
+        fallback_call_possible=native_json_object_attempted,
+        strip_stored_response_format=(
+            cached_support is False and stored_response_format_present
+        ),
+    )
+
+
 def attach_typed_failure_context(
     exc: TypedIOValidationException,
     *,
@@ -1294,43 +1339,44 @@ async def complete_step_execution(
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs
     cache_key = json_mode_cache_key(prepared.assistant)
-    native_json_object_requested = resolve_format_spec(
-        step.output_type
-    ).should_request_native_json_object_mode(step.output_contract)
-    if native_json_object_requested:
-        cached_json_mode_support = state.json_mode_supported.get(cache_key)
-        if cached_json_mode_support is None:
-            detected_json_mode_support = detect_native_json_output_support(
-                prepared.assistant
+    response_format_plan = resolve_json_response_format_plan(
+        step=step,
+        assistant=prepared.assistant,
+        state=state,
+    )
+    native_json_object_attempted = response_format_plan.native_json_object_attempted
+    if native_json_object_attempted:
+        try:
+            model_kwargs = prepared.assistant.completion_model_kwargs.model_copy(
+                update={"response_format": {"type": "json_object"}}
             )
-            if detected_json_mode_support is not None:
-                state.json_mode_supported[cache_key] = detected_json_mode_support
-                cached_json_mode_support = detected_json_mode_support
-        if cached_json_mode_support is not False:
-            try:
-                model_kwargs = prepared.assistant.completion_model_kwargs.model_copy(
-                    update={"response_format": {"type": "json_object"}}
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to enable native JSON mode for flow step execution.",
-                    extra={
-                        "run_id": str(run.id),
-                        "step_order": step.step_order,
-                        "cache_key": cache_key,
-                    },
-                    exc_info=True,
-                )
-                state.json_mode_supported[cache_key] = False
+        except Exception:
+            logger.warning(
+                "Failed to enable native JSON mode for flow step execution.",
+                extra={
+                    "run_id": str(run.id),
+                    "step_order": step.step_order,
+                    "cache_key": cache_key,
+                },
+                exc_info=True,
+            )
+            state.json_mode_supported[cache_key] = False
+            # The plan keeps fallback available because the original kwargs may
+            # still carry an authored response format.
+            native_json_object_attempted = False
+    elif response_format_plan.strip_stored_response_format:
+        model_kwargs = prepared.assistant.completion_model_kwargs.model_copy(
+            update={"response_format": None}
+        )
 
     if deps.logger is not None:
         deps.logger.info(
             "flow_executor.llm_call run_id=%s step_order=%d timeout=%s "
-            "native_json_object_requested=%s",
+            "native_json_object_attempted=%s",
             run.id,
             step.step_order,
             deps.llm_request_timeout_seconds,
-            native_json_object_requested,
+            native_json_object_attempted,
         )
     prompt_override = _completion_prompt_override(
         prepared=prepared,
@@ -1355,7 +1401,7 @@ async def complete_step_execution(
         )
     except ProviderCapabilityRejectedException as model_exc:
         if (
-            native_json_object_requested
+            response_format_plan.fallback_call_possible
             and model_exc.capability == "response_format"
             and model_exc.retry_without_capability_safe
         ):
